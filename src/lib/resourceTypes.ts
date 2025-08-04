@@ -30,6 +30,7 @@ export const RESOURCE_TYPES: Record<number, ResourceType> = {
   0x00000012: { id: 0x00000012, name: 'Navigation', description: 'AI navigation data', category: 'Data' },
   0x00000013: { id: 0x00000013, name: 'UI', description: 'User interface elements', category: 'Graphics' },
   0x00000014: { id: 0x00000014, name: 'Skybox', description: 'Sky/environment textures', category: 'Graphics' },
+  0x00010005: { id: 0x00010005, name: 'Vehicle List', description: 'List of available vehicles', category: 'Data' },
 };
 
 export function getResourceType(typeId: number): ResourceType {
