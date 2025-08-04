@@ -4,11 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Upload, Filter, Database, Cpu, HardDrive, Zap, FileText, AlertCircle } from "lucide-react";
+import { Search, Upload, Filter, Database, Cpu, HardDrive, Zap, FileText, AlertCircle, Car } from "lucide-react";
 import { toast } from "sonner";
 import { parseBundle, getPlatformName, getMemoryTypeName, getFlagNames, extractResourceSize, formatResourceId, type ParsedBundle, type ResourceEntry } from "@/lib/bundleParser";
 import { getResourceType, getResourceTypeColor } from "@/lib/resourceTypes";
 import { parseDebugData, findDebugResourceById, type DebugResource } from "@/lib/debugDataParser";
+import { parseVehicleList, type VehicleListEntry } from "@/lib/vehicleListParser";
 
 // Converted resource interface for UI display
 interface UIResource {
@@ -51,6 +52,7 @@ export const BundleManager = () => {
   const [loadedBundle, setLoadedBundle] = useState<ParsedBundle | null>(null);
   const [resources, setResources] = useState<UIResource[]>([]);
   const [debugResources, setDebugResources] = useState<DebugResource[]>([]);
+  const [vehicleList, setVehicleList] = useState<VehicleListEntry[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -114,9 +116,18 @@ export const BundleManager = () => {
       }
 
       // Convert resources to UI format
-      const uiResources = bundle.resources.map(resource => 
+      const uiResources = bundle.resources.map(resource =>
         convertResourceToUI(resource, bundle, debugData)
       );
+
+      // Parse vehicle list if present
+      const vehicleResource = bundle.resources.find(r => r.resourceTypeId === 0x00010005);
+      if (vehicleResource) {
+        const vehicles = parseVehicleList(arrayBuffer, vehicleResource);
+        setVehicleList(vehicles);
+      } else {
+        setVehicleList(null);
+      }
 
       setLoadedBundle(bundle);
       setResources(uiResources);
@@ -221,6 +232,26 @@ export const BundleManager = () => {
                       <div className="font-medium">{debugResources.length > 0 ? 'Available' : 'None'}</div>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {vehicleList && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Car className="w-5 h-5" />
+                    Vehicle List
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {vehicleList.map(v => (
+                      <li key={v.id} className="text-sm">
+                        {v.vehicleName || v.id}
+                      </li>
+                    ))}
+                  </ul>
                 </CardContent>
               </Card>
             )}
