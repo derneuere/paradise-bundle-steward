@@ -48,6 +48,7 @@ export enum Rank {
 }
 
 export enum AIEngineStream {
+  NONE = 0,
   AIROD_EX = 1,
   AI_CIVIC_EX = 2,
   AI_GT_ENG = 3,
@@ -80,21 +81,21 @@ export const VehicleGamePlayFlags = {
 } as const;
 
 export const CLASS_UNLOCK_STREAMS: Record<number, string> = {
-  0xBFA57004: 'SuperClassUnlock',
-  0xEF6F3448: 'MuscleClassUnlock',
-  0xD9917B81: 'F1ClassUnlock',
-  0xC9D8E2A3: 'TunerClassUnlock',
-  0x655484B3: 'HotRodClassUnlock',
-  0xE99AE3EB: 'RivalGen'
+  0x0470A5BF: 'SuperClassUnlock',
+  0x48346FEF: 'MuscleClassUnlock',
+  0x817B91D9: 'F1ClassUnlock',
+  0xA3E2D8C9: 'TunerClassUnlock',
+  0xB3845465: 'HotRodClassUnlock',
+  0xEBE39AE9: 'RivalGen'
 };
 
 export const AI_MUSIC_STREAMS: Record<number, string> = {
-  0x9D3C81A9: 'AI_Muscle_music1',
-  0xA7AE72CB: 'AI_Truck_music1',
-  0x4B944D28: 'AI_Tuner_muisc1',
-  0x09235CD9: 'AI_Sedan_music1',
-  0xE9901A8A: 'AI_Exotic_music1',
-  0xDD342AB1: 'AI_Super_muisc1'
+  0xA9813C9D: 'AI_Muscle_music1',
+  0xCB72AEA7: 'AI_Truck_music1',
+  0x284D944B: 'AI_Tuner_music1',
+  0xD95C2309: 'AI_Sedan_music1',
+  0x8A1A90E9: 'AI_Exotic_music1',
+  0xB12A34DD: 'AI_Super_music1'
 };
 
 export interface VehicleListEntryGamePlayData {
@@ -174,21 +175,13 @@ export function parseVehicleList(buffer: ArrayBuffer, resource: ResourceEntry): 
 
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
-  // The first 4 bytes contain the resource ID. The vehicle count follows
-  // immediately after, though some platform variants include a pointer
-  // before the count (64-bit layout).
-  let numVehicles = view.getUint32(4, true);
-
-  // If the value looks like a pointer rather than a count, read from the
-  // offset used by the 64-bit layout where the count is stored after the
-  // pointer.
-  if (numVehicles > 1000) {
-    numVehicles = view.getUint32(12, true);
-  }
+  // Header: [vehicle count][start offset][unknown1][unknown2]
+  const numVehicles = view.getUint32(0, true);
+  const entriesOffset = view.getUint32(4, true) || 0x10;
 
   const entries: VehicleListEntry[] = [];
   const entrySize = 0x108; // 264 bytes per entry
-  const offset = 0x10; // entries start after resource header
+  const offset = entriesOffset; // entries start after header
 
   for (let i = 0; i < numVehicles; i++) {
     const base = offset + i * entrySize;
