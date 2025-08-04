@@ -48,6 +48,7 @@ export enum Rank {
 }
 
 export enum AIEngineStream {
+  NONE = 0,
   AIROD_EX = 1,
   AI_CIVIC_EX = 2,
   AI_GT_ENG = 3,
@@ -80,21 +81,21 @@ export const VehicleGamePlayFlags = {
 } as const;
 
 export const CLASS_UNLOCK_STREAMS: Record<number, string> = {
-  0xBFA57004: 'SuperClassUnlock',
-  0xEF6F3448: 'MuscleClassUnlock',
-  0xD9917B81: 'F1ClassUnlock',
-  0xC9D8E2A3: 'TunerClassUnlock',
-  0x655484B3: 'HotRodClassUnlock',
-  0xE99AE3EB: 'RivalGen'
+  0x0470A5BF: 'SuperClassUnlock',
+  0x48346FEF: 'MuscleClassUnlock',
+  0x817B91D9: 'F1ClassUnlock',
+  0xA3E2D8C9: 'TunerClassUnlock',
+  0xB3845465: 'HotRodClassUnlock',
+  0xEBE39AE9: 'RivalGen'
 };
 
 export const AI_MUSIC_STREAMS: Record<number, string> = {
-  0x9D3C81A9: 'AI_Muscle_music1',
-  0xA7AE72CB: 'AI_Truck_music1',
-  0x4B944D28: 'AI_Tuner_muisc1',
-  0x09235CD9: 'AI_Sedan_music1',
-  0xE9901A8A: 'AI_Exotic_music1',
-  0xDD342AB1: 'AI_Super_muisc1'
+  0xA9813C9D: 'AI_Muscle_music1',
+  0xCB72AEA7: 'AI_Truck_music1',
+  0x284D944B: 'AI_Tuner_music1',
+  0xD95C2309: 'AI_Sedan_music1',
+  0x8A1A90E9: 'AI_Exotic_music1',
+  0xB12A34DD: 'AI_Super_music1'
 };
 
 export interface VehicleListEntryGamePlayData {
@@ -168,30 +169,53 @@ function getResourceData(buffer: ArrayBuffer, resource: ResourceEntry): Uint8Arr
   return new Uint8Array();
 }
 
-export function parseVehicleList(buffer: ArrayBuffer, resource: ResourceEntry): VehicleListEntry[] {
+export function parseVehicleList(
+  buffer: ArrayBuffer,
+  resource: ResourceEntry,
+  littleEndian = true
+): VehicleListEntry[] {
   const data = getResourceData(buffer, resource);
   if (data.byteLength === 0) return [];
 
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
-  // The first 4 bytes contain the resource ID. The vehicle count follows
-  // immediately after, though some platform variants include a pointer
-  // before the count (64-bit layout).
-  let numVehicles = view.getUint32(4, true);
+  // Header: [vehicle count][start offset][unknown1][unknown2]
+  let numVehicles = view.getUint32(0, littleEndian);
+  let entriesOffset = view.getUint32(4, littleEndian);
+  if (entriesOffset === 0) entriesOffset = 0x10;
 
-  // If the value looks like a pointer rather than a count, read from the
-  // offset used by the 64-bit layout where the count is stored after the
-  // pointer.
-  if (numVehicles > 1000) {
-    numVehicles = view.getUint32(12, true);
+  const entrySize = 0x108; // 264 bytes per entry
+  console.debug('Vehicle list header', {
+    numVehicles,
+    entriesOffset,
+    dataLength: data.byteLength
+  });
+
+  const maxCount = Math.floor((data.byteLength - entriesOffset) / entrySize);
+  if (numVehicles > maxCount) {
+    console.warn('Vehicle list entry count exceeds data length', {
+      numVehicles,
+      maxCount,
+      entriesOffset,
+      entrySize,
+      dataLength: data.byteLength
+    });
+    numVehicles = maxCount;
   }
 
   const entries: VehicleListEntry[] = [];
-  const entrySize = 0x108; // 264 bytes per entry
-  const offset = 0x10; // entries start after resource header
 
   for (let i = 0; i < numVehicles; i++) {
-    const base = offset + i * entrySize;
+    const base = entriesOffset + i * entrySize;
+    if (base + entrySize > data.byteLength) {
+      console.warn('Vehicle entry outside buffer bounds', {
+        index: i,
+        base,
+        entrySize,
+        dataLength: data.byteLength
+      });
+      break;
+    }
     const entryBytes = new Uint8Array(data.buffer, data.byteOffset + base, entrySize);
     const entryView = new DataView(data.buffer, data.byteOffset + base, entrySize);
 
@@ -204,38 +228,39 @@ export function parseVehicleList(buffer: ArrayBuffer, resource: ResourceEntry): 
     // Gameplay data
     const gamePlayView = new DataView(entryBytes.buffer, entryBytes.byteOffset + 0x90, 0x0C);
     const gamePlayData: VehicleListEntryGamePlayData = {
-      damageLimit: gamePlayView.getFloat32(0, true),
-      flags: gamePlayView.getUint32(4, true),
+      damageLimit: gamePlayView.getFloat32(0, littleEndian),
+      flags: gamePlayView.getUint32(4, littleEndian),
       boostBarLength: gamePlayView.getUint8(8),
       unlockRank: gamePlayView.getUint8(9) as Rank,
       boostCapacity: gamePlayView.getUint8(10),
       strengthStat: gamePlayView.getUint8(11)
     };
 
-    const attribCollectionKey = entryView.getBigUint64(0xA0, true);
+    const attribCollectionKey = entryView.getBigUint64(0xA0, littleEndian);
 
     // Audio data
     const audioBase = 0xA8;
-    const rivalUnlockHash = entryView.getUint32(audioBase + 0x20, true);
-    const musicHash = entryView.getUint32(audioBase + 0x38, true);
+    const rivalUnlockHash = entryView.getUint32(audioBase + 0x20, littleEndian);
+    const musicHash = entryView.getUint32(audioBase + 0x38, littleEndian);
     const audioData: VehicleListEntryAudioData = {
       exhaustName: decodeCgsId(entryBytes.subarray(audioBase, audioBase + 8)),
-      exhaustEntityKey: entryView.getBigUint64(audioBase + 0x8, true),
-      engineEntityKey: entryView.getBigUint64(audioBase + 0x10, true),
+      exhaustEntityKey: entryView.getBigUint64(audioBase + 0x8, littleEndian),
+      engineEntityKey: entryView.getBigUint64(audioBase + 0x10, littleEndian),
       engineName: decodeCgsId(entryBytes.subarray(audioBase + 0x18, audioBase + 0x20)),
-      rivalUnlockName: CLASS_UNLOCK_STREAMS[rivalUnlockHash] ?? `0x${rivalUnlockHash.toString(16).toUpperCase()}`,
-      wonCarVoiceOverKey: entryView.getBigUint64(audioBase + 0x28, true),
-      rivalReleasedVoiceOverKey: entryView.getBigUint64(audioBase + 0x30, true),
+      rivalUnlockName:
+        CLASS_UNLOCK_STREAMS[rivalUnlockHash] ?? `0x${rivalUnlockHash.toString(16).toUpperCase()}`,
+      wonCarVoiceOverKey: entryView.getBigUint64(audioBase + 0x28, littleEndian),
+      rivalReleasedVoiceOverKey: entryView.getBigUint64(audioBase + 0x30, littleEndian),
       aiMusicLoopContentSpec: AI_MUSIC_STREAMS[musicHash] ?? `0x${musicHash.toString(16).toUpperCase()}`,
       aiExhaustIndex: entryView.getUint8(audioBase + 0x3C) as AIEngineStream,
       aiExhaustIndex2ndPick: entryView.getUint8(audioBase + 0x3D) as AIEngineStream,
       aiExhaustIndex3rdPick: entryView.getUint8(audioBase + 0x3E) as AIEngineStream
     };
 
-    const category = entryView.getUint32(0xF8, true);
+    const category = entryView.getUint32(0xF8, littleEndian);
     const carTypeByte = entryView.getUint8(0xFC);
     const vehicleType = (carTypeByte >> 4) as VehicleType;
-    const boostType = (carTypeByte & 0x0F) as CarType;
+    const boostType = (carTypeByte & 0x0f) as CarType;
     const liveryType = entryView.getUint8(0xFD) as LiveryType;
     const topSpeedNormal = entryView.getUint8(0xFE);
     const topSpeedBoost = entryView.getUint8(0xFF);
