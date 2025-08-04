@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, Upload, Database, Cpu, HardDrive, Zap, FileText, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { parseBundle, getPlatformName, getMemoryTypeName, getFlagNames, extractResourceSize, formatResourceId, type ParsedBundle, type ResourceEntry } from "@/lib/bundleParser";
+import { parseBundle, getPlatformName, getMemoryTypeName, getFlagNames, extractResourceSize, formatResourceId, type ParsedBundle, type ResourceEntry, PLATFORMS } from "@/lib/bundleParser";
 import { RESOURCE_TYPES, getResourceType, getResourceTypeColor } from "@/lib/resourceTypes";
 import { parseDebugData, findDebugResourceById, type DebugResource } from "@/lib/debugDataParser";
 import { parseVehicleList, type VehicleListEntry } from "@/lib/vehicleListParser";
@@ -125,7 +125,8 @@ export const BundleManager = () => {
       if (vehicleType) {
         const vehicleResource = bundle.resources.find(r => r.resourceTypeId === vehicleType.id);
         if (vehicleResource) {
-          const vehicles = parseVehicleList(arrayBuffer, vehicleResource);
+          const littleEndian = bundle.header.platform !== PLATFORMS.PS3;
+          const vehicles = parseVehicleList(arrayBuffer, vehicleResource, littleEndian);
           setVehicleList(vehicles);
         } else {
           setVehicleList([]);
