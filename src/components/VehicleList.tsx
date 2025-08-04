@@ -21,7 +21,7 @@ export const VehicleList = ({ vehicles }: VehicleListProps) => {
         <ul className="grid grid-cols-2 md:grid-cols-3 gap-2">
           {vehicles.map((v) => (
             <li key={v.id} className="text-sm">
-              {v.vehicleName || v.id}
+              {v.vehicleName ? `${v.vehicleName} (${v.id})` : v.id}
             </li>
           ))}
         </ul>
