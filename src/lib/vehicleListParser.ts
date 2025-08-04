@@ -173,11 +173,17 @@ export function parseVehicleList(buffer: ArrayBuffer, resource: ResourceEntry): 
   if (data.byteLength === 0) return [];
 
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  let numVehicles = view.getUint32(0, true);
 
-  // Detect 64-bit layout where the first field is a pointer
+  // The first 4 bytes contain the resource ID. The vehicle count follows
+  // immediately after, though some platform variants include a pointer
+  // before the count (64-bit layout).
+  let numVehicles = view.getUint32(4, true);
+
+  // If the value looks like a pointer rather than a count, read from the
+  // offset used by the 64-bit layout where the count is stored after the
+  // pointer.
   if (numVehicles > 1000) {
-    numVehicles = view.getUint32(8, true);
+    numVehicles = view.getUint32(12, true);
   }
 
   const entries: VehicleListEntry[] = [];
