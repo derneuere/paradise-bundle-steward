@@ -1,4 +1,4 @@
-import { extractResourceSize, type ResourceEntry } from './bundleParser';
+import { extractResourceSize, parseBundle, type ResourceEntry } from './bundleParser';
 
 // Enumerations and flag definitions based on
 // https://burnout.wiki/wiki/Vehicle_List/Burnout_Paradise
@@ -174,8 +174,22 @@ export function parseVehicleList(
   resource: ResourceEntry,
   littleEndian = true
 ): VehicleListEntry[] {
-  const data = getResourceData(buffer, resource);
+  let data = getResourceData(buffer, resource);
   if (data.byteLength === 0) return [];
+
+  const magic = new TextDecoder().decode(data.subarray(0, 4));
+  if (magic === 'bnd2') {
+    const innerBuffer = data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength
+    );
+    const bundle = parseBundle(innerBuffer);
+    const innerResource =
+      bundle.resources.find(r => r.resourceTypeId === resource.resourceTypeId) ??
+      bundle.resources[0];
+    if (!innerResource) return [];
+    data = getResourceData(innerBuffer, innerResource);
+  }
 
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
