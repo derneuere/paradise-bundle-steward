@@ -3,12 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Upload, Filter, Database, Cpu, HardDrive, Zap, FileText, AlertCircle } from "lucide-react";
+import { Search, Upload, Database, Cpu, HardDrive, Zap, FileText, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { parseBundle, getPlatformName, getMemoryTypeName, getFlagNames, extractResourceSize, formatResourceId, type ParsedBundle, type ResourceEntry } from "@/lib/bundleParser";
-import { getResourceType, getResourceTypeColor } from "@/lib/resourceTypes";
+import { RESOURCE_TYPES, getResourceType, getResourceTypeColor } from "@/lib/resourceTypes";
 import { parseDebugData, findDebugResourceById, type DebugResource } from "@/lib/debugDataParser";
+import { parseVehicleList, type VehicleListEntry } from "@/lib/vehicleListParser";
+import { VehicleList } from "@/components/VehicleList";
 
 // Converted resource interface for UI display
 interface UIResource {
@@ -51,6 +52,7 @@ export const BundleManager = () => {
   const [loadedBundle, setLoadedBundle] = useState<ParsedBundle | null>(null);
   const [resources, setResources] = useState<UIResource[]>([]);
   const [debugResources, setDebugResources] = useState<DebugResource[]>([]);
+  const [vehicleList, setVehicleList] = useState<VehicleListEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -114,9 +116,23 @@ export const BundleManager = () => {
       }
 
       // Convert resources to UI format
-      const uiResources = bundle.resources.map(resource => 
+      const uiResources = bundle.resources.map(resource =>
         convertResourceToUI(resource, bundle, debugData)
       );
+
+      // Parse vehicle list if present
+      const vehicleType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Vehicle List');
+      if (vehicleType) {
+        const vehicleResource = bundle.resources.find(r => r.resourceTypeId === vehicleType.id);
+        if (vehicleResource) {
+          const vehicles = parseVehicleList(arrayBuffer, vehicleResource);
+          setVehicleList(vehicles);
+        } else {
+          setVehicleList([]);
+        }
+      } else {
+        setVehicleList([]);
+      }
 
       setLoadedBundle(bundle);
       setResources(uiResources);
@@ -223,6 +239,10 @@ export const BundleManager = () => {
                   </div>
                 </CardContent>
               </Card>
+            )}
+
+            {vehicleList.length > 0 && (
+              <VehicleList vehicles={vehicleList} />
             )}
 
             {!loadedBundle && (
