@@ -2,13 +2,14 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseBundle, formatResourceId, getPlatformName, getFlagNames } from '../lib/parsers/bundleParser';
+import type { ParsedBundle, ResourceEntry } from '../lib/core/types';
 
 // Test data path (relative to project root)
 const BUNDLE_PATH = join(process.cwd(), 'example', 'VEHICLELIST.BUNDLE');
 
 describe('Bundle Parser', () => {
   let bundleData: Buffer;
-  let parsedBundle: any;
+  let parsedBundle: ParsedBundle;
   
   beforeAll(() => {
     console.log('🧪 Bundle Parser Test Suite');
@@ -77,7 +78,7 @@ describe('Bundle Parser', () => {
     });
 
     it('should parse resource entries with valid IDs and types', () => {
-      parsedBundle.resources.forEach((resource: any, index: number) => {
+      parsedBundle.resources.forEach((resource: ResourceEntry, index: number) => {
         console.log(`🔍 Resource ${index}: ID=${formatResourceId(resource.resourceId)}, Type=0x${resource.resourceTypeId.toString(16).padStart(8, '0')}`);
         
         expect(resource.resourceId).toBeDefined();
@@ -88,7 +89,7 @@ describe('Bundle Parser', () => {
     });
 
     it('should find VehicleList resource', () => {
-      const vehicleListResource = parsedBundle.resources.find((r: any) => r.resourceTypeId === 0x10005);
+      const vehicleListResource = parsedBundle.resources.find((r: ResourceEntry) => r.resourceTypeId === 0x10005);
       
       expect(vehicleListResource).toBeDefined();
       expect(formatResourceId(vehicleListResource.resourceId)).toBe('0x000000001521E14B');
@@ -96,7 +97,7 @@ describe('Bundle Parser', () => {
     });
 
     it('should check for PlayerCarColours resource', () => {
-      const playerCarColoursResource = parsedBundle.resources.find((r: any) => r.resourceTypeId === 0x1001E);
+      const playerCarColoursResource = parsedBundle.resources.find((r: ResourceEntry) => r.resourceTypeId === 0x1001E);
       
       if (playerCarColoursResource) {
         console.log('✅ Found PlayerCarColours resource');
@@ -133,7 +134,7 @@ describe('Bundle Parser', () => {
     });
 
     it('should have correct resource structure', () => {
-      parsedBundle.resources.forEach((resource: any, index: number) => {
+      parsedBundle.resources.forEach((resource: ResourceEntry, index: number) => {
         expect(resource.resourceId).toBeTypeOf('bigint');
         expect(resource.resourceTypeId).toBeTypeOf('number');
         expect(Array.isArray(resource.diskOffsets)).toBe(true);

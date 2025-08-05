@@ -2,22 +2,23 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseBundle } from '../lib/parsers/bundleParser';
-import { parseVehicleList } from '../lib/parsers/vehicleListParser';
+import { parseVehicleList, type VehicleListEntry } from '../lib/parsers/vehicleListParser';
+import type { ParsedBundle, ResourceEntry } from '../lib/core/types';
 
 // Test data path (relative to project root)
 const BUNDLE_PATH = join(process.cwd(), 'example', 'VEHICLELIST.BUNDLE');
 
 describe('Vehicle List Parser', () => {
   let bundleData: Buffer;
-  let parsedBundle: any;
-  let vehicles: any[];
-  let vehicleListResource: any;
+  let parsedBundle: ParsedBundle;
+  let vehicles: VehicleListEntry[];
+  let vehicleListResource: ResourceEntry | undefined;
   
   beforeAll(() => {
     console.log('🧪 Vehicle List Parser Test Suite');
     bundleData = readFileSync(BUNDLE_PATH);
     parsedBundle = parseBundle(bundleData.buffer);
-    vehicleListResource = parsedBundle.resources.find((r: any) => r.resourceTypeId === 0x10005);
+    vehicleListResource = parsedBundle.resources.find((r: ResourceEntry) => r.resourceTypeId === 0x10005);
     
     if (vehicleListResource) {
       vehicles = parseVehicleList(bundleData.buffer, vehicleListResource, { littleEndian: true });

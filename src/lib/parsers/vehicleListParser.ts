@@ -1,7 +1,7 @@
 // Vehicle List Parser - Refactored to use core architecture
 // Handles parsing of Burnout Paradise vehicle list data with improved error handling
 
-import { BufferReader } from 'typed-binary';
+import { BufferReader, type Parsed } from 'typed-binary';
 import type { 
   ResourceEntry,
   ResourceContext,
@@ -11,7 +11,8 @@ import type {
   Rank,
   AIEngineStream,
   ParseOptions,
-  ProgressCallback
+  ProgressCallback,
+  ParsedBundle
 } from '../core/types';
 import { 
   VehicleListHeaderSchema,
@@ -115,7 +116,7 @@ export function parseVehicleList(
     reportProgress(progressCallback, 'parse', 0, 'Starting vehicle list parsing');
     
     const context: ResourceContext = { 
-      bundle: null as any, // Not needed for this parser
+      bundle: {} as ParsedBundle, // Not needed for this parser
       resource, 
       buffer 
     };
@@ -261,7 +262,7 @@ function parseVehicleListData(
 
 function parseVehicleEntries(
   reader: BufferReader,
-  header: any,
+  header: Parsed<typeof VehicleListHeaderSchema>,
   dataLength: number,
   littleEndian: boolean,
   progressCallback?: ProgressCallback
@@ -306,7 +307,7 @@ function parseVehicleEntries(
 // Vehicle Entry Processing
 // ============================================================================
 
-function processVehicleEntry(rawEntry: any, index: number): VehicleListEntry | null {
+function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>, index: number): VehicleListEntry | null {
   try {
     // Decode strings
     const id = decodeCgsId(rawEntry.idBytes);
@@ -464,13 +465,13 @@ function isValidVehicleEntry(entry: VehicleListEntry): boolean {
 
 function reportProgress(
   callback: ProgressCallback | undefined,
-  type: string,
+  type: 'parse' | 'write' | 'compress' | 'validate',
   progress: number,
   message: string
 ): void {
   if (callback) {
     callback({
-      type: type as any,
+      type,
       stage: message,
       progress,
       message

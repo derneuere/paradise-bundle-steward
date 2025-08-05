@@ -25,14 +25,14 @@ const originalConsoleDebug = console.debug;
 const originalConsoleLog = console.log;
 
 // Override console methods during tests to reduce noise
-console.debug = (...args: any[]) => {
+console.debug = (...args: unknown[]) => {
   if (process.env.VITEST_DEBUG) {
     originalConsoleDebug(...args);
   }
 };
 
 // Allow important logs to show
-console.log = (...args: any[]) => {
+console.log = (...args: unknown[]) => {
   if (process.env.VITEST_DEBUG || args.some(arg => 
     typeof arg === 'string' && (
       arg.includes('✅') || 

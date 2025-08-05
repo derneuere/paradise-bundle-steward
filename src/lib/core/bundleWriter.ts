@@ -20,6 +20,18 @@ import {
   createEmptyBundleHeader,
   SCHEMA_SIZES
 } from './schemas';
+
+// ============================================================================
+// Bundle Layout Type
+// ============================================================================
+
+type BundleLayout = {
+  resourceEntriesOffset: number;
+  resourceDataOffset: number;
+  debugDataOffset: number;
+  importEntriesOffset: number;
+  resourceDataSize: number;
+}
 import { 
   compressData, 
   packSizeAndAlignment, 
@@ -146,7 +158,7 @@ export class BundleBuilder {
    * Builds and returns the complete bundle as ArrayBuffer
    */
   async build(progressCallback?: ProgressCallback): Promise<ArrayBuffer> {
-    this.reportProgress(progressCallback, 'prepare', 0, 'Preparing bundle structure');
+    this.reportProgress(progressCallback, 'write', 0, 'Preparing bundle structure');
     
     // Validate bundle before writing
     this.validate();
@@ -226,7 +238,7 @@ export class BundleBuilder {
   // Writing Methods
   // ============================================================================
 
-  private writeHeader(writer: BufferWriter, layout: any): void {
+  private writeHeader(writer: BufferWriter, layout: BundleLayout): void {
     // Write magic
     const magicBytes = new TextEncoder().encode(this.header.magic);
     writer.writeBytes(magicBytes);
@@ -244,7 +256,7 @@ export class BundleBuilder {
     BundleHeaderSchema.write(writer, headerData);
   }
 
-  private writeResourceEntries(writer: BufferWriter, layout: any): void {
+  private writeResourceEntries(writer: BufferWriter, layout: BundleLayout): void {
     let currentDataOffset = layout.resourceDataOffset;
     let currentImportOffset = layout.importEntriesOffset;
     
@@ -288,7 +300,7 @@ export class BundleBuilder {
 
   private async writeResourceData(
     writer: BufferWriter, 
-    layout: any, 
+    layout: BundleLayout, 
     progressCallback?: ProgressCallback
   ): Promise<void> {
     let bytesWritten = 0;
@@ -315,7 +327,7 @@ export class BundleBuilder {
     }
   }
 
-  private writeDebugData(writer: BufferWriter, layout: any): void {
+  private writeDebugData(writer: BufferWriter, layout: BundleLayout): void {
     if (this.debugData) {
       const debugBytes = new TextEncoder().encode(this.debugData);
       writer.writeBytes(debugBytes);
@@ -361,13 +373,13 @@ export class BundleBuilder {
 
   private reportProgress(
     callback: ProgressCallback | undefined,
-    type: string,
+    type: 'parse' | 'write' | 'compress' | 'validate',
     progress: number,
     message: string
   ): void {
     if (callback) {
       callback({
-        type: type as any,
+        type,
         stage: message,
         progress,
         message

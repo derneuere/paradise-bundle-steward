@@ -1,22 +1,20 @@
 // Player Car Colours Parser - Refactored to use core architecture
 // Handles parsing of Burnout Paradise player car color palette data
 
-import { BufferReader } from 'typed-binary';
+import { BufferReader, type Parsed } from 'typed-binary';
 import type { 
   ResourceEntry,
   ResourceContext,
   PlayerCarColor,
   ParseOptions,
-  ProgressCallback
+  ProgressCallback,
+  ParsedBundle
 } from '../core/types';
 import { PaletteType } from '../core/types';
 import { 
   Vector4Schema,
-  PlayerCarColourPalette32Schema,
-  PlayerCarColourPalette64Schema,
   GlobalColourPalette32Schema,
   GlobalColourPalette64Schema,
-  u64ToBigInt
 } from '../core/schemas';
 import { 
   getResourceData,
@@ -24,7 +22,7 @@ import {
   decompressData 
 } from '../core/resourceManager';
 import { parseBundle } from './bundleParser';
-import { BundleError, ResourceNotFoundError, RESOURCE_TYPE_IDS } from '../core/types';
+import { BundleError, ResourceNotFoundError } from '../core/types';
 
 // ============================================================================
 // Player Car Colors Data Structures
@@ -75,7 +73,7 @@ export function parsePlayerCarColours(
     reportProgress(progressCallback, 'parse', 0, 'Starting player car colours parsing');
     
     const context: ResourceContext = { 
-      bundle: null as any, // Not needed for this parser
+      bundle: {} as ParsedBundle, // Not needed for this parser
       resource, 
       buffer 
     };
@@ -375,7 +373,7 @@ function extractColorsFromData(
   return colors;
 }
 
-function isValidColorVector(vector: any): boolean {
+function isValidColorVector(vector: Parsed<typeof Vector4Schema>): boolean {
   return (
     !isNaN(vector.red) && !isNaN(vector.green) && 
     !isNaN(vector.blue) && !isNaN(vector.alpha) &&
@@ -384,7 +382,7 @@ function isValidColorVector(vector: any): boolean {
   );
 }
 
-function vector4ToColor(vector: any): PlayerCarColor {
+function vector4ToColor(vector: Parsed<typeof Vector4Schema>): PlayerCarColor {
   const red = Math.max(0, Math.min(1, vector.red));
   const green = Math.max(0, Math.min(1, vector.green));  
   const blue = Math.max(0, Math.min(1, vector.blue));
@@ -491,13 +489,13 @@ function generateSamplePalettes(): PlayerCarColourPalette[] {
 
 function reportProgress(
   callback: ProgressCallback | undefined,
-  type: string,
+  type: 'parse' | 'write' | 'compress' | 'validate',
   progress: number,
   message: string
 ): void {
   if (callback) {
     callback({
-      type: type as any,
+      type,
       stage: message,
       progress,
       message

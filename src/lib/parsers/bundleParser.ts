@@ -281,13 +281,13 @@ export function formatResourceId(resourceId: bigint): string {
  */
 function reportProgress(
   callback: ProgressCallback | undefined,
-  type: string,
+  type: 'parse' | 'write' | 'compress' | 'validate',
   progress: number,
   message: string
 ): void {
   if (callback) {
     callback({
-      type: type as any,
+      type,
       stage: message,
       progress,
       message

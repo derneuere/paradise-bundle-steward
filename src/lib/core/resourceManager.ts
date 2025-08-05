@@ -6,7 +6,9 @@ import type {
   ResourceEntry, 
   ResourceData, 
   ResourceContext,
-  BundleError
+  BundleError,
+  BundleHeader,
+  ParsedBundle
 } from './types';
 import { 
   CompressionError,
@@ -207,7 +209,7 @@ export function validateResourceEntry(resource: ResourceEntry, bufferSize: numbe
 /**
  * Validates bundle header
  */
-export function validateBundleHeader(header: any): ValidationError[] {
+export function validateBundleHeader(header: BundleHeader): ValidationError[] {
   const errors: ValidationError[] = [];
 
   if (header.magic !== 'bnd2') {
@@ -279,7 +281,7 @@ export type BundleStats = {
   resourceTypes: Record<number, number>;
 }
 
-export function calculateBundleStats(bundle: any, buffer: ArrayBuffer): BundleStats {
+export function calculateBundleStats(bundle: ParsedBundle, buffer: ArrayBuffer): BundleStats {
   const stats: BundleStats = {
     totalResources: bundle.resources.length,
     compressedResources: 0,

@@ -4,14 +4,14 @@ import { join } from 'path';
 import { parseBundle } from '../lib/parsers/bundleParser';
 import { extractResourceSize } from '../lib/core/resourceManager';
 import { parsePlayerCarColours } from '../lib/parsers/playerCarColoursParser';
-import { testUtils } from './setup';
+import type { ParsedBundle } from '../lib/core/types';
 
 // Test data path (relative to project root)
 const BUNDLE_PATH = join(process.cwd(), 'example', 'VEHICLELIST.BUNDLE');
 
 describe('PlayerCarColours Parser', () => {
   let bundleData: Buffer;
-  let parsedBundle: any;
+  let parsedBundle: ParsedBundle;
   
   beforeAll(() => {
     // Load test data

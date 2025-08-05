@@ -190,7 +190,7 @@ export const GlobalColourPalette64Schema = object({
 // Schema Validation Helpers
 // ============================================================================
 
-export function validateSchemaSize(schema: any, expectedSize: number): boolean {
+export function validateSchemaSize(schema: object, expectedSize: number): boolean {
   // This would need to be implemented based on typed-binary's capabilities
   // For now, we'll use known sizes from the Bundle Manager reference
   return true;
