@@ -8,7 +8,7 @@ import { RESOURCE_TYPE_IDS } from './core/types';
 // Resource Type Interface
 // ============================================================================
 
-export interface ResourceType {
+export type ResourceType = {
   id: number;
   name: string;
   description: string;

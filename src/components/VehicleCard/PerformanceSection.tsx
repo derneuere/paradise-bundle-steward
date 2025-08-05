@@ -1,9 +1,9 @@
 import { Zap } from "lucide-react";
 import { StatBar } from './StatBar';
 import { ComponentStyles } from '@/lib/burnoutTheme';
-import type { VehicleListEntry } from '@/lib/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
 
-interface PerformanceSectionProps {
+type PerformanceSectionProps = {
   vehicle: VehicleListEntry;
 }
 

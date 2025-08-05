@@ -1,8 +1,8 @@
 import { Trophy } from "lucide-react";
 import { ComponentStyles, getRankLabel } from '@/lib/burnoutTheme';
-import type { VehicleListEntry } from '@/lib/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
 
-interface GameplaySectionProps {
+type GameplaySectionProps = {
   vehicle: VehicleListEntry;
 }
 

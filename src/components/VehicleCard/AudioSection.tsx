@@ -1,8 +1,8 @@
 import { Volume2 } from "lucide-react";
 import { ComponentStyles } from '@/lib/burnoutTheme';
-import type { VehicleListEntry } from '@/lib/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
 
-interface AudioSectionProps {
+type AudioSectionProps = {
   vehicle: VehicleListEntry;
 }
 

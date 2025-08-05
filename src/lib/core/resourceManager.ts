@@ -270,7 +270,7 @@ export function formatResourceId(resourceId: bigint): string {
 /**
  * Calculates bundle statistics
  */
-export interface BundleStats {
+export type BundleStats = {
   totalResources: number;
   compressedResources: number;
   totalSize: number;

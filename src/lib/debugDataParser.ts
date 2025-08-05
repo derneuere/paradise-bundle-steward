@@ -1,6 +1,6 @@
 // Parser for Bundle debug data (ResourceStringTable XML)
 
-export interface DebugResource {
+export type DebugResource = {
   id: string;
   name: string;
   typeName: string;

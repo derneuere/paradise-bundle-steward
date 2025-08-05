@@ -30,7 +30,7 @@ import { BundleError, ResourceNotFoundError, RESOURCE_TYPE_IDS } from '../core/t
 // Player Car Colors Data Structures
 // ============================================================================
 
-export interface PlayerCarColourPalette {
+export type PlayerCarColourPalette = {
   type: PaletteType;
   typeName: string;
   numColours: number;
@@ -38,7 +38,7 @@ export interface PlayerCarColourPalette {
   pearlColours: PlayerCarColor[];
 }
 
-export interface PlayerCarColours {
+export type PlayerCarColours = {
   palettes: PlayerCarColourPalette[];
   is64Bit: boolean;
   totalColors: number;

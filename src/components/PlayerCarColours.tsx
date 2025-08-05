@@ -1,13 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Palette, Sparkles } from "lucide-react";
-import type { PlayerCarColours, PlayerCarColourPalette, PlayerCarColor } from "@/lib/playerCarColoursParser";
+import type { PlayerCarColours, PlayerCarColourPalette, PlayerCarColor } from "@/lib/parsers/playerCarColoursParser";
 
-interface PlayerCarColoursProps {
+type PlayerCarColoursProps = {
   colours: PlayerCarColours;
 }
 
-interface ColorSwatchProps {
+type ColorSwatchProps = {
   color: PlayerCarColor;
   isPearl?: boolean;
 }
@@ -36,7 +36,7 @@ const ColorSwatch = ({ color, isPearl = false }: ColorSwatchProps) => {
   );
 };
 
-interface PaletteCardProps {
+type PaletteCardProps = {
   palette: PlayerCarColourPalette;
 }
 

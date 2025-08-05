@@ -1,8 +1,8 @@
 import { Settings } from "lucide-react";
 import { ComponentStyles } from '@/lib/burnoutTheme';
-import type { VehicleListEntry } from '@/lib/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
 
-interface TechnicalSectionProps {
+type TechnicalSectionProps = {
   vehicle: VehicleListEntry;
 }
 

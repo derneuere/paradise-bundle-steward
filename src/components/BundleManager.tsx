@@ -15,8 +15,8 @@ import { parsePlayerCarColours, type PlayerCarColours } from "@/lib/parsers/play
 import { VehicleList } from "@/components/VehicleList";
 import { PlayerCarColoursComponent } from "@/components/PlayerCarColours";
 
-// Converted resource interface for UI display
-interface UIResource {
+// Converted resource type for UI display
+type UIResource = {
   id: string;
   name: string;
   type: string;

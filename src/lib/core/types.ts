@@ -45,7 +45,7 @@ export const RESOURCE_TYPE_IDS = {
 // Base Bundle Types
 // ============================================================================
 
-export interface BundleHeader {
+export type BundleHeader = {
   magic: string;
   version: number;
   platform: number;
@@ -56,7 +56,7 @@ export interface BundleHeader {
   flags: number;
 }
 
-export interface ResourceEntry {
+export type ResourceEntry = {
   resourceId: bigint;
   importHash: bigint;
   uncompressedSizeAndAlignment: number[];
@@ -69,12 +69,12 @@ export interface ResourceEntry {
   streamIndex: number;
 }
 
-export interface ImportEntry {
+export type ImportEntry = {
   resourceId: bigint;
   offset: number;
 }
 
-export interface ParsedBundle {
+export type ParsedBundle = {
   header: BundleHeader;
   resources: ResourceEntry[];
   imports: ImportEntry[];
@@ -85,13 +85,13 @@ export interface ParsedBundle {
 // Resource Management Types
 // ============================================================================
 
-export interface ResourceData {
+export type ResourceData = {
   data: Uint8Array;
   isCompressed: boolean;
   originalSize?: number;
 }
 
-export interface ResourceContext {
+export type ResourceContext = {
   bundle: ParsedBundle;
   resource: ResourceEntry;
   buffer: ArrayBuffer;
@@ -157,7 +157,7 @@ export enum PaletteType {
   NUM_PALETTES = 5
 }
 
-export interface PlayerCarColor {
+export type PlayerCarColor = {
   red: number;
   green: number;
   blue: number;
@@ -204,14 +204,14 @@ export type Platform = typeof PLATFORMS[keyof typeof PLATFORMS];
 export type BundleFlag = typeof BUNDLE_FLAGS[keyof typeof BUNDLE_FLAGS];
 export type ResourceTypeId = typeof RESOURCE_TYPE_IDS[keyof typeof RESOURCE_TYPE_IDS];
 
-export interface ParseOptions {
+export type ParseOptions = {
   platform?: Platform;
   littleEndian?: boolean;
   strict?: boolean;
   validateChecksums?: boolean;
 }
 
-export interface WriteOptions {
+export type WriteOptions = {
   platform?: Platform;
   compress?: boolean;
   includeDebugData?: boolean;
@@ -222,7 +222,7 @@ export interface WriteOptions {
 // Event System Types (for progress tracking)
 // ============================================================================
 
-export interface ProgressEvent {
+export type ProgressEvent = {
   type: 'parse' | 'write' | 'compress' | 'validate';
   stage: string;
   progress: number; // 0-1

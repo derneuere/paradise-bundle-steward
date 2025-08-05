@@ -1,7 +1,7 @@
 import { VehicleCard } from "./VehicleCard";
-import type { VehicleListEntry } from "@/lib/vehicleListParser";
+import type { VehicleListEntry } from "@/lib/parsers/vehicleListParser";
 
-interface VehicleListProps {
+type VehicleListProps = {
   vehicles: VehicleListEntry[];
 }
 

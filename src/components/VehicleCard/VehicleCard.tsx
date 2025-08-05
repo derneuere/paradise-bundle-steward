@@ -1,15 +1,13 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { VehicleHeader } from './VehicleHeader';
 import { PerformanceSection } from './PerformanceSection';
 import { GameplaySection } from './GameplaySection';
 import { AppearanceSection } from './AppearanceSection';
 import { AudioSection } from './AudioSection';
 import { TechnicalSection } from './TechnicalSection';
-import { ComponentStyles } from '@/lib/burnoutTheme';
-import type { VehicleListEntry } from '@/lib/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
 
-interface VehicleCardProps {
+type VehicleCardProps = {
   vehicle: VehicleListEntry;
 }
 

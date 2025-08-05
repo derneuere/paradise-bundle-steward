@@ -17,9 +17,6 @@ import {
   VehicleListHeaderSchema,
   VehicleEntrySchema,
   u64ToBigInt,
-  cgsIdSchema,
-  string32Schema,
-  string64Schema
 } from '../core/schemas';
 import { 
   getResourceData,
@@ -27,13 +24,13 @@ import {
   decompressData 
 } from '../core/resourceManager';
 import { parseBundle } from './bundleParser';
-import { BundleError, ResourceNotFoundError, RESOURCE_TYPE_IDS } from '../core/types';
+import { BundleError, ResourceNotFoundError } from '../core/types';
 
 // ============================================================================
 // Vehicle List Data Structures
 // ============================================================================
 
-export interface VehicleListEntryGamePlayData {
+export type VehicleListEntryGamePlayData = {
   damageLimit: number;
   flags: number;
   boostBarLength: number;
@@ -42,7 +39,7 @@ export interface VehicleListEntryGamePlayData {
   strengthStat: number;
 }
 
-export interface VehicleListEntryAudioData {
+export type VehicleListEntryAudioData = {
   exhaustName: string;
   exhaustEntityKey: bigint;
   engineEntityKey: bigint;
@@ -56,7 +53,7 @@ export interface VehicleListEntryAudioData {
   aiExhaustIndex3rdPick: AIEngineStream;
 }
 
-export interface VehicleListEntry {
+export type VehicleListEntry = {
   id: string;
   parentId: string;
   vehicleName: string;
@@ -317,11 +314,6 @@ function processVehicleEntry(rawEntry: any, index: number): VehicleListEntry | n
     const wheelName = decodeString(rawEntry.wheelNameBytes);
     const vehicleName = decodeString(rawEntry.vehicleNameBytes);
     const manufacturer = decodeString(rawEntry.manufacturerBytes);
-
-    // Debug info for first few vehicles
-    if (index < 5) {
-      console.debug(`Vehicle ${index}: ID="${id}", Name="${vehicleName}", Manufacturer="${manufacturer}"`);
-    }
 
     // Process gameplay data
     const gamePlayData: VehicleListEntryGamePlayData = {

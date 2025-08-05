@@ -1,6 +1,6 @@
 import { getStatBarColor } from '@/lib/burnoutTheme';
 
-interface StatBarProps {
+type StatBarProps = {
   value: number;
   max?: number;
   label: string;
