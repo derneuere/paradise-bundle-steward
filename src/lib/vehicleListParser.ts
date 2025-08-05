@@ -1,4 +1,16 @@
 import { extractResourceSize, parseBundle, type ResourceEntry } from './bundleParser';
+import { 
+  object, 
+  arrayOf, 
+  string, 
+  u8, 
+  u16, 
+  u32, 
+  f32, 
+  BufferReader,
+  type Parsed
+} from 'typed-binary';
+import * as pako from 'pako';
 
 // Enumerations and flag definitions based on
 // https://burnout.wiki/wiki/Vehicle_List/Burnout_Paradise
@@ -98,6 +110,84 @@ export const AI_MUSIC_STREAMS: Record<number, string> = {
   0xB12A34DD: 'AI_Super_music1'
 };
 
+// Custom 64-bit integer schema (using two 32-bit values)
+const u64Schema = object({
+  low: u32,
+  high: u32
+});
+
+// Helper function to convert u64 object to bigint
+function u64ToBigInt(u64: Parsed<typeof u64Schema>): bigint {
+  return (BigInt(u64.high) << 32n) | BigInt(u64.low);
+}
+
+// 8-byte string schema (for CgsID)
+const cgsIdSchema = arrayOf(u8, 8);
+
+// 32-byte string schema  
+const string32Schema = arrayOf(u8, 32);
+
+// 64-byte string schema
+const string64Schema = arrayOf(u8, 64);
+
+// Vehicle List Header Schema (16 bytes)
+const VehicleListHeaderSchema = object({
+  numVehicles: u32,
+  startOffset: u32,
+  unknown1: u32,
+  unknown2: u32
+});
+
+// Gameplay data schema
+const GamePlayDataSchema = object({
+  damageLimit: f32,
+  flags: u32,
+  boostBarLength: u8,
+  unlockRank: u8, // Rank enum
+  boostCapacity: u8,
+  strengthStat: u8
+});
+
+// Audio data schema  
+const AudioDataSchema = object({
+  exhaustNameBytes: cgsIdSchema,
+  exhaustEntityKey: u64Schema,
+  engineEntityKey: u64Schema,
+  engineNameBytes: cgsIdSchema,
+  rivalUnlockHash: u32,
+  padding1: u32, // 4 bytes padding
+  wonCarVoiceOverKey: u64Schema,
+  rivalReleasedVoiceOverKey: u64Schema,
+  musicHash: u32,
+  aiExhaustIndex: u8,
+  aiExhaustIndex2ndPick: u8,
+  aiExhaustIndex3rdPick: u8,
+  padding2: u8 // 1 byte padding
+});
+
+// Vehicle entry schema (264 bytes / 0x108)
+const VehicleEntrySchema = object({
+  idBytes: cgsIdSchema,                    // 8 bytes
+  parentIdBytes: cgsIdSchema,              // 8 bytes  
+  wheelNameBytes: string32Schema,          // 32 bytes
+  vehicleNameBytes: string64Schema,        // 64 bytes
+  manufacturerBytes: string32Schema,       // 32 bytes
+  gamePlayData: GamePlayDataSchema,        // 16 bytes (144-159)
+  attribCollectionKey: u64Schema,          // 8 bytes (160-167)  
+  audioData: AudioDataSchema,              // 64 bytes (168-231)
+  unknown: arrayOf(u8, 16),                // 16 bytes padding (232-247)
+  category: u32,                           // 4 bytes (248-251)
+  carTypeByte: u8,                         // 1 byte (252)
+  liveryType: u8,                          // 1 byte (253)
+  topSpeedNormal: u8,                      // 1 byte (254)
+  topSpeedBoost: u8,                       // 1 byte (255)
+  topSpeedNormalGUIStat: u8,               // 1 byte (256)
+  topSpeedBoostGUIStat: u8,                // 1 byte (257)
+  colorIndex: u8,                          // 1 byte (258)
+  paletteIndex: u8,                        // 1 byte (259)
+  finalPadding: arrayOf(u8, 4)             // 4 bytes padding (260-263)
+});
+
 export interface VehicleListEntryGamePlayData {
   damageLimit: number;
   flags: number;
@@ -142,7 +232,7 @@ export interface VehicleListEntry {
   paletteIndex: number;
 }
 
-function decodeCgsId(bytes: Uint8Array): string {
+function decodeCgsId(bytes: number[]): string {
   let result = '';
   for (let i = 0; i < 8; i++) {
     const b = bytes[i];
@@ -152,10 +242,10 @@ function decodeCgsId(bytes: Uint8Array): string {
   return result;
 }
 
-function decodeString(bytes: Uint8Array): string {
-  let end = bytes.indexOf(0);
-  if (end === -1) end = bytes.length;
-  return new TextDecoder().decode(bytes.slice(0, end));
+function decodeString(bytes: number[]): string {
+  const end = bytes.indexOf(0);
+  const validBytes = end === -1 ? bytes : bytes.slice(0, end);
+  return new TextDecoder().decode(new Uint8Array(validBytes));
 }
 
 function getResourceData(buffer: ArrayBuffer, resource: ResourceEntry): Uint8Array {
@@ -169,6 +259,24 @@ function getResourceData(buffer: ArrayBuffer, resource: ResourceEntry): Uint8Arr
   return new Uint8Array();
 }
 
+function decompressData(compressedData: Uint8Array): Uint8Array {
+  try {
+    // Check for zlib header (0x78 followed by various second bytes)
+    if (compressedData.length >= 2 && compressedData[0] === 0x78) {
+      console.debug('Decompressing zlib data...');
+      const decompressed = pako.inflate(compressedData);
+      console.debug(`Decompression successful: ${compressedData.length} -> ${decompressed.length} bytes`);
+      return decompressed;
+    } else {
+      console.debug('Data does not appear to be zlib compressed');
+      return compressedData;
+    }
+  } catch (error) {
+    console.error('Decompression failed:', error);
+    throw new Error(`Failed to decompress vehicle list data: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export function parseVehicleList(
   buffer: ArrayBuffer,
   resource: ResourceEntry,
@@ -179,140 +287,205 @@ export function parseVehicleList(
 
   const magic = new TextDecoder().decode(data.subarray(0, 4));
   if (magic === 'bnd2') {
+    console.debug('Vehicle list is in nested bundle, extracting...');
     const innerBuffer = data.buffer.slice(
       data.byteOffset,
       data.byteOffset + data.byteLength
     );
     const bundle = parseBundle(innerBuffer);
-    const innerResource =
-      bundle.resources.find(r => r.resourceTypeId === resource.resourceTypeId) ??
-      bundle.resources[0];
-    if (!innerResource) return [];
-    data = getResourceData(innerBuffer, innerResource);
+    
+    // Find the VehicleList resource in the nested bundle
+    const innerResource = bundle.resources.find(r => r.resourceTypeId === resource.resourceTypeId);
+    if (!innerResource) {
+      console.warn('No VehicleList resource found in nested bundle');
+      return [];
+    }
+    
+    console.debug('Found inner VehicleList resource:', {
+      resourceId: innerResource.resourceId.toString(16),
+      diskOffsets: innerResource.diskOffsets,
+      sizes: innerResource.sizeAndAlignmentOnDisk.map(extractResourceSize)
+    });
+    
+    // The actual vehicle list data is in the bundle's data sections, not at the resource's disk offset
+    // Use the bundle header's resource data offsets to find the correct data
+    const dataOffsets = bundle.header.resourceDataOffsets;
+    console.debug('Bundle data section offsets:', dataOffsets.map(o => `0x${o.toString(16)}`));
+    
+    // Try each data section to find valid vehicle list data
+    let foundData = false;
+    for (let sectionIndex = 0; sectionIndex < dataOffsets.length; sectionIndex++) {
+      const sectionOffset = dataOffsets[sectionIndex];
+      if (sectionOffset === 0) continue;
+      
+      // The section offset is relative to the original buffer, not the nested buffer
+      // We need to calculate the absolute offset in the original buffer
+      const absoluteOffset = data.byteOffset + sectionOffset;
+      
+      if (absoluteOffset >= buffer.byteLength) {
+        console.warn(`Section ${sectionIndex} offset 0x${absoluteOffset.toString(16)} is beyond buffer`);
+        continue;
+      }
+      
+      // Extract data from this section - we don't know the exact size, so we'll read a reasonable amount
+      const maxSize = buffer.byteLength - absoluteOffset;
+      const sectionData = new Uint8Array(buffer, absoluteOffset, Math.min(maxSize, 100000)); // Max 100KB
+      
+      console.debug(`Trying data section ${sectionIndex} at offset 0x${absoluteOffset.toString(16)}, size=${sectionData.length}`);
+      
+      // Check if this looks like compressed vehicle list data
+      if (sectionData.length >= 2 && sectionData[0] === 0x78) {
+        console.debug('Found compressed data in section', sectionIndex);
+        data = sectionData;
+        foundData = true;
+        break;
+      }
+    }
+    
+    if (!foundData) {
+      console.error('Could not find valid vehicle list data in any bundle section');
+      return [];
+    }
   }
 
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  // Check if the data is compressed and decompress if needed
+  data = decompressData(data);
 
-  // Header: [vehicle count][start offset][unknown1][unknown2] 
-  const numVehicles = view.getUint32(0, !littleEndian); // Console is big endian
-  const startOffset = view.getUint32(4, !littleEndian);
-  const unknown1 = view.getUint32(8, !littleEndian);
-  const unknown2 = view.getUint32(12, !littleEndian);
+  const reader = new BufferReader(
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+    { endianness: littleEndian ? 'little' : 'big' }
+  );
 
+  // Parse header
+  const header = VehicleListHeaderSchema.read(reader);
+  
   console.debug('Vehicle list header', {
-    numVehicles,
-    startOffset,
-    unknown1,
-    unknown2,
+    numVehicles: header.numVehicles,
+    startOffset: header.startOffset,
+    unknown1: header.unknown1,
+    unknown2: header.unknown2,
     dataLength: data.byteLength,
     littleEndian
   });
 
+  // Validate header values - they should be reasonable
+  if (header.numVehicles > 1000 || header.numVehicles === 0) {
+    console.warn(`Suspicious vehicle count: ${header.numVehicles}, trying big-endian`);
+    
+    // Try parsing with opposite endianness
+    const readerBE = new BufferReader(
+      data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+      { endianness: littleEndian ? 'big' : 'little' }
+    );
+    
+    const headerBE = VehicleListHeaderSchema.read(readerBE);
+    console.debug('Vehicle list header (opposite endianness)', {
+      numVehicles: headerBE.numVehicles,
+      startOffset: headerBE.startOffset,
+      unknown1: headerBE.unknown1,
+      unknown2: headerBE.unknown2,
+      dataLength: data.byteLength,
+      littleEndian: !littleEndian
+    });
+    
+    if (headerBE.numVehicles > 0 && headerBE.numVehicles <= 1000) {
+      console.info('Using opposite endianness for vehicle list');
+      reader.seekTo(0);
+      return parseVehicleListWithReader(readerBE, headerBE, data.byteLength, !littleEndian);
+    } else {
+      console.error('Both endianness attempts failed, vehicle list may be corrupt');
+      
+      // Additional debug info
+      console.debug('First 32 bytes of data:', Array.from(data.subarray(0, 32)).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' '));
+      
+      return [];
+    }
+  }
+
+  return parseVehicleListWithReader(reader, header, data.byteLength, littleEndian);
+}
+
+function parseVehicleListWithReader(
+  reader: BufferReader,
+  header: Parsed<typeof VehicleListHeaderSchema>,
+  dataLength: number,
+  littleEndian: boolean
+): VehicleListEntry[] {
   // Each vehicle entry is 264 bytes (0x108)
   const entrySize = 0x108;
   
-  if (numVehicles * entrySize + 16 > data.byteLength) {
+  if (header.numVehicles * entrySize + 16 > dataLength) {
     console.warn('Vehicle list data appears corrupt or truncated');
     return [];
   }
 
   const entries: VehicleListEntry[] = [];
 
-  for (let i = 0; i < numVehicles; i++) {
-    const base = 16 + i * entrySize; // Start after 16-byte header
-    if (base + entrySize > data.byteLength) {
-      console.warn('Vehicle entry outside buffer bounds', {
-        index: i,
-        base,
-        entrySize,
-        dataLength: data.byteLength
+  for (let i = 0; i < header.numVehicles; i++) {
+    try {
+      const rawEntry = VehicleEntrySchema.read(reader);
+      
+      // Process the raw entry into typed data
+      const id = decodeCgsId(rawEntry.idBytes);
+      const parentId = decodeCgsId(rawEntry.parentIdBytes);
+      const wheelName = decodeString(rawEntry.wheelNameBytes);
+      const vehicleName = decodeString(rawEntry.vehicleNameBytes);
+      const manufacturer = decodeString(rawEntry.manufacturerBytes);
+
+      const gamePlayData: VehicleListEntryGamePlayData = {
+        damageLimit: rawEntry.gamePlayData.damageLimit,
+        flags: rawEntry.gamePlayData.flags,
+        boostBarLength: rawEntry.gamePlayData.boostBarLength,
+        unlockRank: rawEntry.gamePlayData.unlockRank as Rank,
+        boostCapacity: rawEntry.gamePlayData.boostCapacity,
+        strengthStat: rawEntry.gamePlayData.strengthStat
+      };
+
+      const attribCollectionKey = u64ToBigInt(rawEntry.attribCollectionKey);
+
+      const audioData: VehicleListEntryAudioData = {
+        exhaustName: decodeCgsId(rawEntry.audioData.exhaustNameBytes),
+        exhaustEntityKey: u64ToBigInt(rawEntry.audioData.exhaustEntityKey),
+        engineEntityKey: u64ToBigInt(rawEntry.audioData.engineEntityKey),
+        engineName: decodeCgsId(rawEntry.audioData.engineNameBytes),
+        rivalUnlockName: CLASS_UNLOCK_STREAMS[rawEntry.audioData.rivalUnlockHash] ?? 
+          `0x${rawEntry.audioData.rivalUnlockHash.toString(16).toUpperCase()}`,
+        wonCarVoiceOverKey: u64ToBigInt(rawEntry.audioData.wonCarVoiceOverKey),
+        rivalReleasedVoiceOverKey: u64ToBigInt(rawEntry.audioData.rivalReleasedVoiceOverKey),
+        aiMusicLoopContentSpec: AI_MUSIC_STREAMS[rawEntry.audioData.musicHash] ?? 
+          `0x${rawEntry.audioData.musicHash.toString(16).toUpperCase()}`,
+        aiExhaustIndex: rawEntry.audioData.aiExhaustIndex as AIEngineStream,
+        aiExhaustIndex2ndPick: rawEntry.audioData.aiExhaustIndex2ndPick as AIEngineStream,
+        aiExhaustIndex3rdPick: rawEntry.audioData.aiExhaustIndex3rdPick as AIEngineStream
+      };
+
+      const vehicleType = (rawEntry.carTypeByte >> 4) as VehicleType; // High nibble
+      const boostType = (rawEntry.carTypeByte & 0x0f) as CarType; // Low nibble
+
+      entries.push({
+        id,
+        parentId,
+        wheelName,
+        vehicleName,
+        manufacturer,
+        gamePlayData,
+        attribCollectionKey,
+        audioData,
+        category: rawEntry.category,
+        vehicleType,
+        boostType,
+        liveryType: rawEntry.liveryType as LiveryType,
+        topSpeedNormal: rawEntry.topSpeedNormal,
+        topSpeedBoost: rawEntry.topSpeedBoost,
+        topSpeedNormalGUIStat: rawEntry.topSpeedNormalGUIStat,
+        topSpeedBoostGUIStat: rawEntry.topSpeedBoostGUIStat,
+        colorIndex: rawEntry.colorIndex,
+        paletteIndex: rawEntry.paletteIndex
       });
+    } catch (error) {
+      console.error(`Error parsing vehicle entry ${i}:`, error);
       break;
     }
-    const entryBytes = new Uint8Array(data.buffer, data.byteOffset + base, entrySize);
-    const entryView = new DataView(data.buffer, data.byteOffset + base, entrySize);
-
-    // Based on the C# implementation: each entry starts with ID (8 bytes) + ParentID (8 bytes)
-    const id = decodeCgsId(entryBytes.subarray(0, 8));
-    const parentId = decodeCgsId(entryBytes.subarray(8, 16));
-    const wheelName = decodeString(entryBytes.subarray(16, 48)); // 32 bytes
-    const vehicleName = decodeString(entryBytes.subarray(48, 112)); // 64 bytes  
-    const manufacturer = decodeString(entryBytes.subarray(112, 144)); // 32 bytes
-
-    // Gameplay data starts at offset 144 (0x90)
-    const gamePlayData: VehicleListEntryGamePlayData = {
-      damageLimit: entryView.getFloat32(144, !littleEndian),
-      flags: entryView.getUint32(148, !littleEndian),
-      boostBarLength: entryView.getUint8(152),
-      unlockRank: entryView.getUint8(153) as Rank,
-      boostCapacity: entryView.getUint8(154),
-      strengthStat: entryView.getUint8(155)
-    };
-
-    // Padding at 156 (4 bytes)
-    const attribCollectionKey = entryView.getBigInt64(160, !littleEndian); // offset 160 (0xA0)
-
-    // Audio data starts at offset 168 (0xA8)
-    const audioBase = 168;
-    const exhaustNameBytes = entryBytes.subarray(audioBase, audioBase + 8);
-    const exhaustEntityKey = entryView.getBigInt64(audioBase + 8, !littleEndian);
-    const engineEntityKey = entryView.getBigInt64(audioBase + 16, !littleEndian);
-    const engineNameBytes = entryBytes.subarray(audioBase + 24, audioBase + 32);
-    const rivalUnlockHash = entryView.getUint32(audioBase + 32, !littleEndian);
-    const wonCarVoiceOverKey = entryView.getBigInt64(audioBase + 40, !littleEndian);
-    const rivalReleasedVoiceOverKey = entryView.getBigInt64(audioBase + 48, !littleEndian);
-    const musicHash = entryView.getUint32(audioBase + 56, !littleEndian);
-    const aiExhaustIndex = entryView.getUint8(audioBase + 60) as AIEngineStream;
-    const aiExhaustIndex2ndPick = entryView.getUint8(audioBase + 61) as AIEngineStream;
-    const aiExhaustIndex3rdPick = entryView.getUint8(audioBase + 62) as AIEngineStream;
-    
-    const audioData: VehicleListEntryAudioData = {
-      exhaustName: decodeCgsId(exhaustNameBytes),
-      exhaustEntityKey,
-      engineEntityKey,
-      engineName: decodeCgsId(engineNameBytes),
-      rivalUnlockName: CLASS_UNLOCK_STREAMS[rivalUnlockHash] ?? `0x${rivalUnlockHash.toString(16).toUpperCase()}`,
-      wonCarVoiceOverKey,
-      rivalReleasedVoiceOverKey,
-      aiMusicLoopContentSpec: AI_MUSIC_STREAMS[musicHash] ?? `0x${musicHash.toString(16).toUpperCase()}`,
-      aiExhaustIndex,
-      aiExhaustIndex2ndPick,
-      aiExhaustIndex3rdPick
-    };
-
-    // Skip Unknown fields at offsets 232-247 (16 bytes)
-    const category = entryView.getUint32(248, !littleEndian); // offset 248 (0xF8)
-    const carTypeByte = entryView.getUint8(252); // offset 252 (0xFC)
-    const vehicleType = (carTypeByte >> 4) as VehicleType; // High nibble
-    const boostType = (carTypeByte & 0x0f) as CarType; // Low nibble
-    const liveryType = entryView.getUint8(253) as LiveryType; // offset 253 (0xFD)
-    const topSpeedNormal = entryView.getUint8(254); // offset 254 (0xFE)
-    const topSpeedBoost = entryView.getUint8(255); // offset 255 (0xFF)
-    const topSpeedNormalGUIStat = entryView.getUint8(256); // offset 256 (0x100)
-    const topSpeedBoostGUIStat = entryView.getUint8(257); // offset 257 (0x101)
-    const colorIndex = entryView.getUint8(258); // offset 258 (0x102)
-    const paletteIndex = entryView.getUint8(259); // offset 259 (0x103)
-
-    entries.push({
-      id,
-      parentId,
-      wheelName,
-      vehicleName,
-      manufacturer,
-      gamePlayData,
-      attribCollectionKey,
-      audioData,
-      category,
-      vehicleType,
-      boostType,
-      liveryType,
-      topSpeedNormal,
-      topSpeedBoost,
-      topSpeedNormalGUIStat,
-      topSpeedBoostGUIStat,
-      colorIndex,
-      paletteIndex
-    });
   }
 
   return entries;

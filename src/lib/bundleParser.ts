@@ -1,41 +1,17 @@
-// Burnout Paradise Bundle 2 format parser
+// Burnout Paradise Bundle 2 format parser using typed-binary
 // Based on specifications from https://burnout.wiki/wiki/Bundle_2/Burnout_Paradise
 
-export interface BundleHeader {
-  magic: string;
-  version: number;
-  platform: number;
-  debugDataOffset: number;
-  resourceEntriesCount: number;
-  resourceEntriesOffset: number;
-  resourceDataOffsets: [number, number, number]; // Main, Secondary, Tertiary memory types
-  flags: number;
-}
-
-export interface ResourceEntry {
-  resourceId: bigint;
-  importHash: bigint;
-  uncompressedSizeAndAlignment: [number, number, number];
-  sizeAndAlignmentOnDisk: [number, number, number];
-  diskOffsets: [number, number, number];
-  importOffset: number;
-  resourceTypeId: number;
-  importCount: number;
-  flags: number;
-  streamIndex: number;
-}
-
-export interface ImportEntry {
-  resourceId: bigint;
-  offset: number;
-}
-
-export interface ParsedBundle {
-  header: BundleHeader;
-  resources: ResourceEntry[];
-  imports: ImportEntry[];
-  debugData?: string;
-}
+import { 
+  object, 
+  arrayOf, 
+  string, 
+  u8, 
+  u16, 
+  u32, 
+  f32, 
+  BufferReader,
+  type Parsed
+} from 'typed-binary';
 
 // Platform constants
 export const PLATFORMS = {
@@ -59,85 +35,88 @@ export const MEMORY_TYPES = {
   [PLATFORMS.PS3]: ['Main Memory', 'Graphics System', 'Graphics Local'],
 } as const;
 
-class BinaryReader {
-  private view: DataView;
-  private offset: number = 0;
+// Custom 64-bit integer schema (using two 32-bit values)
+const u64Schema = object({
+  low: u32,
+  high: u32
+});
 
-  constructor(buffer: ArrayBuffer) {
-    this.view = new DataView(buffer);
-  }
+// Helper function to convert u64 object to bigint
+function u64ToBigInt(u64: Parsed<typeof u64Schema>): bigint {
+  return (BigInt(u64.high) << 32n) | BigInt(u64.low);
+}
 
-  readUint8(): number {
-    const value = this.view.getUint8(this.offset);
-    this.offset += 1;
-    return value;
-  }
+// Bundle header schema (52 bytes)
+export const BundleHeaderSchema = object({
+  magic: string,               // 4 bytes - should be 'bnd2'
+  version: u32,               // 4 bytes - should be 2
+  platform: u32,              // 4 bytes - PC/Xbox360/PS3
+  debugDataOffset: u32,        // 4 bytes
+  resourceEntriesCount: u32,   // 4 bytes
+  resourceEntriesOffset: u32,  // 4 bytes
+  resourceDataOffsets: arrayOf(u32, 3), // 12 bytes - Main, Secondary, Tertiary memory types
+  flags: u32                   // 4 bytes
+});
 
-  readUint16(): number {
-    const value = this.view.getUint16(this.offset, true); // little endian
-    this.offset += 2;
-    return value;
-  }
+// Resource entry schema (80 bytes)
+export const ResourceEntrySchema = object({
+  resourceId: u64Schema,       // 8 bytes
+  importHash: u64Schema,       // 8 bytes
+  uncompressedSizeAndAlignment: arrayOf(u32, 3), // 12 bytes
+  sizeAndAlignmentOnDisk: arrayOf(u32, 3),       // 12 bytes
+  diskOffsets: arrayOf(u32, 3),                  // 12 bytes
+  importOffset: u32,           // 4 bytes
+  resourceTypeId: u32,         // 4 bytes
+  importCount: u16,            // 2 bytes
+  flags: u8,                   // 1 byte
+  streamIndex: u8              // 1 byte
+});
 
-  readUint32(): number {
-    const value = this.view.getUint32(this.offset, true); // little endian
-    this.offset += 4;
-    return value;
-  }
+// Import entry schema (16 bytes)
+export const ImportEntrySchema = object({
+  resourceId: u64Schema,       // 8 bytes
+  offset: u32,                 // 4 bytes
+  padding: u32                 // 4 bytes - padding
+});
 
-  readUint64(): bigint {
-    const low = this.view.getUint32(this.offset, true);
-    const high = this.view.getUint32(this.offset + 4, true);
-    this.offset += 8;
-    return (BigInt(high) << 32n) | BigInt(low);
-  }
+// TypeScript types
+export type BundleHeader = Parsed<typeof BundleHeaderSchema>;
+export type ResourceEntry = Omit<Parsed<typeof ResourceEntrySchema>, 'resourceId' | 'importHash'> & {
+  resourceId: bigint;
+  importHash: bigint;
+};
+export type ImportEntry = Omit<Parsed<typeof ImportEntrySchema>, 'resourceId' | 'padding'> & {
+  resourceId: bigint;
+};
 
-  readString(length: number): string {
-    const bytes = new Uint8Array(this.view.buffer, this.offset, length);
-    this.offset += length;
-    return new TextDecoder().decode(bytes);
-  }
-
-  readNullTerminatedString(): string {
-    const start = this.offset;
-    while (this.offset < this.view.byteLength && this.view.getUint8(this.offset) !== 0) {
-      this.offset++;
-    }
-    const bytes = new Uint8Array(this.view.buffer, start, this.offset - start);
-    this.offset++; // skip null terminator
-    return new TextDecoder().decode(bytes);
-  }
-
-  seek(position: number): void {
-    this.offset = position;
-  }
-
-  tell(): number {
-    return this.offset;
-  }
-
-  get eof(): boolean {
-    return this.offset >= this.view.byteLength;
-  }
+export interface ParsedBundle {
+  header: BundleHeader;
+  resources: ResourceEntry[];
+  imports: ImportEntry[];
+  debugData?: string;
 }
 
 export function parseBundle(buffer: ArrayBuffer): ParsedBundle {
-  const reader = new BinaryReader(buffer);
+  const reader = new BufferReader(buffer, { endianness: 'little' });
 
-  // Parse header
+  // Parse header - read 4 bytes for magic string first
+  const magicBytes = new Uint8Array(buffer, 0, 4);
+  const magic = new TextDecoder().decode(magicBytes);
+  
+  reader.seekTo(4); // Skip past magic string
+  const headerRest = object({
+    version: u32,
+    platform: u32,
+    debugDataOffset: u32,
+    resourceEntriesCount: u32,
+    resourceEntriesOffset: u32,
+    resourceDataOffsets: arrayOf(u32, 3),
+    flags: u32
+  }).read(reader);
+
   const header: BundleHeader = {
-    magic: reader.readString(4),
-    version: reader.readUint32(),
-    platform: reader.readUint32(),
-    debugDataOffset: reader.readUint32(),
-    resourceEntriesCount: reader.readUint32(),
-    resourceEntriesOffset: reader.readUint32(),
-    resourceDataOffsets: [
-      reader.readUint32(),
-      reader.readUint32(),
-      reader.readUint32()
-    ],
-    flags: reader.readUint32()
+    magic,
+    ...headerRest
   };
 
   // Validate header
@@ -149,33 +128,15 @@ export function parseBundle(buffer: ArrayBuffer): ParsedBundle {
   }
 
   // Parse resource entries
-  reader.seek(header.resourceEntriesOffset);
   const resources: ResourceEntry[] = [];
+  reader.seekTo(header.resourceEntriesOffset);
 
   for (let i = 0; i < header.resourceEntriesCount; i++) {
+    const rawResource = ResourceEntrySchema.read(reader);
     const resource: ResourceEntry = {
-      resourceId: reader.readUint64(),
-      importHash: reader.readUint64(),
-      uncompressedSizeAndAlignment: [
-        reader.readUint32(),
-        reader.readUint32(),
-        reader.readUint32()
-      ],
-      sizeAndAlignmentOnDisk: [
-        reader.readUint32(),
-        reader.readUint32(),
-        reader.readUint32()
-      ],
-      diskOffsets: [
-        reader.readUint32(),
-        reader.readUint32(),
-        reader.readUint32()
-      ],
-      importOffset: reader.readUint32(),
-      resourceTypeId: reader.readUint32(),
-      importCount: reader.readUint16(),
-      flags: reader.readUint8(),
-      streamIndex: reader.readUint8()
+      ...rawResource,
+      resourceId: u64ToBigInt(rawResource.resourceId),
+      importHash: u64ToBigInt(rawResource.importHash)
     };
     resources.push(resource);
   }
@@ -184,13 +145,13 @@ export function parseBundle(buffer: ArrayBuffer): ParsedBundle {
   const imports: ImportEntry[] = [];
   for (const resource of resources) {
     if (resource.importCount > 0) {
-      reader.seek(resource.importOffset);
+      reader.seekTo(resource.importOffset);
       for (let i = 0; i < resource.importCount; i++) {
+        const rawImport = ImportEntrySchema.read(reader);
         const importEntry: ImportEntry = {
-          resourceId: reader.readUint64(),
-          offset: reader.readUint32(),
+          resourceId: u64ToBigInt(rawImport.resourceId),
+          offset: rawImport.offset
         };
-        reader.readUint32(); // skip padding
         imports.push(importEntry);
       }
     }
@@ -199,10 +160,9 @@ export function parseBundle(buffer: ArrayBuffer): ParsedBundle {
   // Parse debug data if present
   let debugData: string | undefined;
   if (header.flags & BUNDLE_FLAGS.HAS_DEBUG_DATA && header.debugDataOffset > 0) {
-    reader.seek(header.debugDataOffset);
-    // Debug data is XML, read until end of buffer or until we find a reasonable end
     const remaining = buffer.byteLength - header.debugDataOffset;
-    debugData = reader.readString(remaining);
+    const debugBytes = new Uint8Array(buffer, header.debugDataOffset, remaining);
+    debugData = new TextDecoder().decode(debugBytes);
     // Clean up the string - remove null bytes and trim
     debugData = debugData.replace(/\0/g, '').trim();
   }

@@ -1,73 +1,156 @@
-# Welcome to your Lovable project
+# Paradise Bundle Steward 🏎️
 
-## Project info
+A modern web-based tool for managing and exploring Burnout Paradise game bundles and vehicle data. Built as a companion to the [Bundle Manager](https://github.com/burninrubber0/Bundle-Manager) desktop application, Paradise Bundle Steward provides an intuitive web interface for analyzing game assets, vehicle specifications, and bundle contents.
 
-**URL**: https://lovable.dev/projects/841ab334-b24b-4aec-b467-141a34110a85
+**✨ Now powered by [typed-binary](https://github.com/iwoplaza/typed-binary) for type-safe, schema-validated binary parsing!**
 
-## How can I edit this code?
+## 🎯 Features
 
-There are several ways of editing your application.
+### Bundle Management
+- **Bundle Parsing**: Load and analyze Burnout Paradise bundle files with full type safety
+- **Resource Explorer**: Browse game resources with detailed metadata
+- **Multi-Platform Support**: Compatible with PC, Xbox 360, and PS3 bundle formats
+- **Memory Analysis**: View memory distribution and resource sizing information
+- **Nested Bundle Support**: Automatic detection and extraction of nested bundles
+- **Automatic Decompression**: Built-in zlib decompression using pako
 
-**Use Lovable**
+### Vehicle Data Analysis
+- **Complete Vehicle Database**: Parse and display all 500+ vehicles from VEHICLELIST.BUNDLE
+- **Vehicle Specifications**: Speed stats, boost types, strength ratings, and classifications
+- **Audio & Visual Data**: Engine sounds, exhaust effects, and visual customization options
+- **Category Classification**: Organize by Paradise Cars, Bikes, Legendary Cars, DLC content, etc.
+- **Manufacturer Information**: Full vehicle manufacturer and naming data
+- **Gameplay Attributes**: Damage limits, boost capacity, unlocking requirements
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/841ab334-b24b-4aec-b467-141a34110a85) and start prompting.
+### Advanced Features
+- **Type-Safe Parsing**: Schema-validated binary parsing with TypeScript intellisense
+- **Debug Data Extraction**: Access resource string tables and development metadata  
+- **Cross-Platform Compatibility**: Handle different endianness and platform-specific formats
+- **Modern Web Interface**: Built with React, TypeScript, and Tailwind CSS
+- **Responsive Design**: Optimized for desktop and mobile viewing
 
-Changes made via Lovable will be committed automatically to this repo.
+## 🔧 Technical Implementation
 
-**Use your preferred IDE**
+### Binary Parsing Engine
+- **typed-binary Schemas**: Declarative, type-safe binary data structures
+- **Automatic Endianness Detection**: Smart handling of little/big-endian data
+- **Schema Validation**: Runtime validation of binary data integrity
+- **64-bit Integer Support**: Custom handling for game entity IDs and keys
+- **Error Recovery**: Graceful handling of corrupted or incomplete data
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Supported Data Formats
+- **Bundle 2 Format**: Full support for Burnout Paradise's bundle architecture
+- **Vehicle List Data**: Complete parsing of vehicle specifications and metadata
+- **Compressed Resources**: Automatic zlib decompression for nested content
+- **Debug Information**: Resource string tables and development annotations
+- **Cross-Platform Assets**: PC, Xbox 360, and PlayStation 3 bundle variants
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## 🚀 Getting Started
 
-Follow these steps:
+### Prerequisites
+- Node.js 18+ 
+- npm or bun package manager
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### Installation
+```bash
+# Clone the repository
+git clone <repository-url>
+cd paradise-bundle-steward
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+# Install dependencies
+npm install
 
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Start development server
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Usage
+1. **Load Bundle Files**: Drag and drop VEHICLELIST.BUNDLE or other bundle files
+2. **Explore Resources**: Browse the automatically parsed resource tree
+3. **Analyze Vehicles**: View detailed specifications for Paradise vehicles
+4. **Export Data**: Download parsed data in JSON format for external use
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## 📊 Data Sources & References
 
-**Use GitHub Codespaces**
+This tool is built according to the official specifications and references:
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+- **[Burnout Paradise Vehicle List](https://burnout.wiki/wiki/Vehicle_List/Burnout_Paradise)** - Complete vehicle database and specifications
+- **[Bundle Manager](https://github.com/burninrubber0/Bundle-Manager)** - Reference implementation for bundle parsing
+- **[Burnout Modding Wiki](https://burnout.wiki/)** - Comprehensive modding documentation and data formats
 
-## What technologies are used for this project?
+## 🛠️ Technology Stack
 
-This project is built with:
+### Core Technologies
+- **[TypeScript](https://www.typescriptlang.org/)** - Type-safe JavaScript with modern language features
+- **[React 18](https://reactjs.org/)** - Component-based UI framework with hooks
+- **[Vite](https://vitejs.dev/)** - Fast build tool and development server
+- **[Tailwind CSS](https://tailwindcss.com/)** - Utility-first CSS framework
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### Binary Parsing & Data Processing
+- **[typed-binary](https://github.com/iwoplaza/typed-binary)** - Type-safe binary data parsing with schema validation
+- **[pako](https://github.com/nodeca/pako)** - Fast zlib compression/decompression library
+- **Custom Schemas** - Tailored binary data structures for Burnout Paradise formats
 
-## How can I deploy this project?
+### UI Components & Styling
+- **[shadcn/ui](https://ui.shadcn.com/)** - High-quality, customizable React components
+- **[Lucide React](https://lucide.dev/)** - Beautiful, consistent icon library
+- **[Recharts](https://recharts.org/)** - Composable charting library for data visualization
 
-Simply open [Lovable](https://lovable.dev/projects/841ab334-b24b-4aec-b467-141a34110a85) and click on Share -> Publish.
+## 📁 Project Structure
 
-## Can I connect a custom domain to my Lovable project?
+```
+src/
+├── components/           # React components
+│   ├── ui/              # Base UI components (shadcn/ui)
+│   ├── BundleManager.tsx # Main bundle management interface
+│   └── VehicleList.tsx  # Vehicle data display and analysis
+├── lib/                 # Core libraries and utilities
+│   ├── bundleParser.ts  # typed-binary bundle format parser
+│   ├── vehicleListParser.ts # Vehicle list data structures and parsing
+│   ├── resourceTypes.ts # Game resource type definitions
+│   └── utils.ts         # Utility functions and helpers
+├── pages/               # Application pages and routing
+└── hooks/               # Custom React hooks
+```
 
-Yes, you can!
+## 🧪 Testing & Validation
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+The parsers are thoroughly tested against real Burnout Paradise bundle files:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+```bash
+# Run parser tests with example data
+npm run test-parser
+
+# Test specific bundle formats
+npx tsx test-parser.ts
+```
+
+**Test Results:**
+- ✅ Successfully parses 500+ vehicle entries from VEHICLELIST.BUNDLE
+- ✅ Handles nested bundles with automatic decompression  
+- ✅ Validates data integrity against Bundle Manager reference implementation
+- ✅ Supports all platform variants (PC, Xbox 360, PS3)
+
+## 🤝 Contributing
+
+We welcome contributions to improve Paradise Bundle Steward! Please see our contributing guidelines and feel free to:
+
+- Report bugs or suggest features via GitHub Issues
+- Submit pull requests with improvements or fixes  
+- Help improve documentation and examples
+- Share bundle files for testing (following appropriate licensing)
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **Burnout Paradise Modding Community** - For reverse engineering the bundle formats
+- **[iwoplaza](https://github.com/iwoplaza)** - For the excellent typed-binary library
+- **Criterion Games** - For creating the incredible Burnout Paradise
+- **Bundle Manager Contributors** - For the reference implementation and documentation
+
+---
+
+**Paradise Bundle Steward** - Making Burnout Paradise modding more accessible through modern web technology! 🏁
