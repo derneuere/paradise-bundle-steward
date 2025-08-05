@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:debug": "vitest --reporter=verbose"
+    "test:debug": "vitest --reporter=verbose",
+    "test:vehicle-writer": "vitest src/test/vehicleListWriter.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

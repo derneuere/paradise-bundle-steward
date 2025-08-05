@@ -89,15 +89,35 @@ export class BundleBuilder {
     resourceTypeId: number,
     data: Uint8Array,
     resourceId?: bigint,
-    compress: boolean = false
+    compress?: boolean,
+    isAlreadyCompressed?: boolean
   ): ResourceEntry {
     // Generate resource ID if not provided
     if (!resourceId) {
       resourceId = this.generateResourceId();
     }
 
-    // Compress data if requested
-    const finalData = compress ? compressData(data) : data;
+    // Handle compression logic
+    let finalData: Uint8Array;
+    let wasCompressed: boolean;
+    let originalSize: number;
+
+    if (isAlreadyCompressed) {
+      // Data is already compressed, use as-is
+      finalData = data;
+      wasCompressed = true;
+      originalSize = data.length; // We don't know the original uncompressed size
+    } else if (compress) {
+      // Compress the data now
+      finalData = compressData(data);
+      wasCompressed = true;
+      originalSize = data.length;
+    } else {
+      // Use data uncompressed
+      finalData = data;
+      wasCompressed = false;
+      originalSize = data.length;
+    }
     
     // Create resource entry
     const resource: ResourceEntry = {
@@ -109,17 +129,41 @@ export class BundleBuilder {
       importOffset: 0,
       resourceTypeId,
       importCount: 0,
-      flags: compress ? 1 : 0,
+      flags: wasCompressed ? 1 : 0,
       streamIndex: 0
     };
 
     // Set size and alignment for main memory (index 0)
     const alignment = this.calculateAlignment(finalData.length);
     resource.sizeAndAlignmentOnDisk[0] = packSizeAndAlignment(finalData.length, alignment);
-    resource.uncompressedSizeAndAlignment[0] = packSizeAndAlignment(data.length, alignment);
+    resource.uncompressedSizeAndAlignment[0] = packSizeAndAlignment(originalSize, alignment);
 
     this.resources.push(resource);
     this.resourceData.set(resourceId, finalData);
+
+    return resource;
+  }
+
+  /**
+   * Adds a pre-existing resource preserving its original metadata
+   */
+  addExistingResource(originalResource: ResourceEntry, data: Uint8Array): ResourceEntry {
+    // Create a copy of the original resource with updated data size
+    const resource: ResourceEntry = {
+      ...originalResource,
+      // Update disk size to match actual data length
+      sizeAndAlignmentOnDisk: [
+        packSizeAndAlignment(data.length, this.calculateAlignment(data.length)),
+        originalResource.sizeAndAlignmentOnDisk[1],
+        originalResource.sizeAndAlignmentOnDisk[2]
+      ],
+      // Reset offsets as they'll be calculated during build
+      diskOffsets: [0, 0, 0],
+      importOffset: 0
+    };
+
+    this.resources.push(resource);
+    this.resourceData.set(resource.resourceId, data);
 
     return resource;
   }
@@ -168,8 +212,9 @@ export class BundleBuilder {
     
     this.reportProgress(progressCallback, 'write', 0.1, 'Writing bundle header');
     
-    // Create buffer writer
-    const writer = new BufferWriter(layout.totalSize, { endianness: 'little' });
+    // Create buffer and writer
+    const buffer = new ArrayBuffer(layout.totalSize);
+    const writer = new BufferWriter(buffer, { endianness: 'little' });
     
     // Write header
     this.writeHeader(writer, layout);
@@ -196,7 +241,7 @@ export class BundleBuilder {
     
     this.reportProgress(progressCallback, 'write', 1.0, 'Bundle writing complete');
     
-    return writer.getBuffer();
+    return buffer;
   }
 
   // ============================================================================
@@ -213,12 +258,13 @@ export class BundleBuilder {
       resourceDataSize += this.alignSize(data.length, 16); // 16-byte alignment
     }
     
-    const debugDataSize = this.debugData ? this.debugData.length : 0;
+    const debugDataSize = this.debugData ? new TextEncoder().encode(this.debugData).length : 0;
     
     const resourceEntriesOffset = headerSize;
     const importEntriesOffset = resourceEntriesOffset + resourceEntriesSize;
     const resourceDataOffset = importEntriesOffset + importEntriesSize;
     const debugDataOffset = resourceDataOffset + resourceDataSize;
+    const totalSize = debugDataOffset + debugDataSize;
     
     return {
       headerSize,
@@ -230,7 +276,7 @@ export class BundleBuilder {
       importEntriesOffset,
       resourceDataOffset,
       debugDataOffset,
-      totalSize: debugDataOffset + debugDataSize
+      totalSize
     };
   }
 
@@ -241,7 +287,9 @@ export class BundleBuilder {
   private writeHeader(writer: BufferWriter, layout: BundleLayout): void {
     // Write magic
     const magicBytes = new TextEncoder().encode(this.header.magic);
-    writer.writeBytes(magicBytes);
+    for (const byte of magicBytes) {
+      writer.writeUint8(byte);
+    }
     
     // Update header with calculated offsets
     const headerData = {
@@ -308,14 +356,18 @@ export class BundleBuilder {
     
     for (const [resourceId, data] of this.resourceData.entries()) {
       // Write data
-      writer.writeBytes(data);
+      for (const byte of data) {
+        writer.writeUint8(byte);
+      }
       
       // Add padding for alignment
       const paddedSize = this.alignSize(data.length, 16);
       const paddingNeeded = paddedSize - data.length;
       if (paddingNeeded > 0) {
         const padding = new Uint8Array(paddingNeeded);
-        writer.writeBytes(padding);
+        for (const byte of padding) {
+          writer.writeUint8(byte);
+        }
       }
       
       bytesWritten += paddedSize;
@@ -330,7 +382,9 @@ export class BundleBuilder {
   private writeDebugData(writer: BufferWriter, layout: BundleLayout): void {
     if (this.debugData) {
       const debugBytes = new TextEncoder().encode(this.debugData);
-      writer.writeBytes(debugBytes);
+      for (const byte of debugBytes) {
+        writer.writeUint8(byte);
+      }
     }
   }
 
@@ -360,10 +414,14 @@ export class BundleBuilder {
     // Validate header
     errors.push(...validateBundleHeader(this.header));
     
-    // Validate resources
+    // Validate resources (but skip import offset validation since it's set during layout)
     for (const resource of this.resources) {
       const resourceErrors = validateResourceEntry(resource, Number.MAX_SAFE_INTEGER);
-      errors.push(...resourceErrors);
+      // Filter out import offset errors since they'll be set during writeResourceEntries
+      const filteredErrors = resourceErrors.filter(e => 
+        !e.message.includes('Resource has imports but no import offset')
+      );
+      errors.push(...filteredErrors);
     }
     
     if (errors.length > 0) {

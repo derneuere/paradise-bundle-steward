@@ -1,9 +1,7 @@
 import { useState, useRef } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, Upload, Database, Cpu, HardDrive, Zap, FileText, AlertCircle } from "lucide-react";
+import {  Upload, Database, Cpu, HardDrive, Zap, AlertCircle, Download } from "lucide-react";
 import { toast } from "sonner";
 import { parseBundle, getPlatformName, getFlagNames, formatResourceId, type ParsedBundle, type ResourceEntry } from "@/lib/parsers/bundleParser";
 import { extractResourceSize, getMemoryTypeName } from "@/lib/core/resourceManager";
@@ -14,6 +12,11 @@ import { parseVehicleList, type VehicleListEntry } from "@/lib/parsers/vehicleLi
 import { parsePlayerCarColours, type PlayerCarColours } from "@/lib/parsers/playerCarColoursParser";
 import { VehicleList } from "@/components/VehicleList";
 import { PlayerCarColoursComponent } from "@/components/PlayerCarColours";
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { VehicleEditor } from './VehicleEditor';
+import { writeVehicleList } from '@/lib/parsers/vehicleListWriter';
+import {  BundleBuilder } from '@/lib/core/bundleWriter';
 
 // Converted resource type for UI display
 type UIResource = {
@@ -54,11 +57,16 @@ export const BundleManager = () => {
   const [selectedPlatform, setSelectedPlatform] = useState<string>("all");
   const [selectedResource, setSelectedResource] = useState<UIResource | null>(null);
   const [loadedBundle, setLoadedBundle] = useState<ParsedBundle | null>(null);
+  const [originalArrayBuffer, setOriginalArrayBuffer] = useState<ArrayBuffer | null>(null);
   const [resources, setResources] = useState<UIResource[]>([]);
   const [debugResources, setDebugResources] = useState<DebugResource[]>([]);
   const [vehicleList, setVehicleList] = useState<VehicleListEntry[]>([]);
   const [playerCarColours, setPlayerCarColours] = useState<PlayerCarColours | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isModified, setIsModified] = useState(false);
+  const [selectedVehicle, setSelectedVehicle] = useState<VehicleListEntry | null>(null);
+  const [isVehicleEditorOpen, setIsVehicleEditorOpen] = useState(false);
+  const [isNewVehicle, setIsNewVehicle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredResources = resources.filter(resource => {
@@ -112,6 +120,7 @@ export const BundleManager = () => {
     setIsLoading(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
+      setOriginalArrayBuffer(arrayBuffer);
       const bundle = parseBundle(arrayBuffer);
       
       // Parse debug data if available
@@ -159,6 +168,7 @@ export const BundleManager = () => {
       setResources(uiResources);
       setDebugResources(debugData);
       setSelectedResource(null);
+      setIsModified(false);
       
       toast.success(`Loaded bundle: ${file.name}`, {
         description: `${bundle.resources.length} resources found, Platform: ${getPlatformName(bundle.header.platform)}`
@@ -183,289 +193,238 @@ export const BundleManager = () => {
 
   const currentPlatform = loadedBundle ? getPlatformName(loadedBundle.header.platform) : "None";
 
+  const handleAddVehicle = () => {
+    setSelectedVehicle(null);
+    setIsNewVehicle(true);
+    setIsVehicleEditorOpen(true);
+  };
+
+  const handleEditVehicle = (vehicle: VehicleListEntry) => {
+    setSelectedVehicle(vehicle);
+    setIsNewVehicle(false);
+    setIsVehicleEditorOpen(true);
+  };
+
+  const handleDeleteVehicle = (vehicleToDelete: VehicleListEntry) => {
+    if (confirm(`Are you sure you want to delete vehicle "${vehicleToDelete.vehicleName}"?`)) {
+      const updatedVehicles = vehicleList.filter(v => v.id !== vehicleToDelete.id);
+      setVehicleList(updatedVehicles);
+      setIsModified(true);
+      toast.success(`Vehicle "${vehicleToDelete.vehicleName}" deleted successfully.`);
+    }
+  };
+
+  const handleSaveVehicle = (savedVehicle: VehicleListEntry) => {
+    if (isNewVehicle) {
+      // Add new vehicle
+      setVehicleList(prev => [...prev, savedVehicle]);
+      toast.success(`Vehicle "${savedVehicle.vehicleName}" added successfully.`);
+    } else {
+      // Update existing vehicle
+      setVehicleList(prev => 
+        prev.map(v => v.id === savedVehicle.id ? savedVehicle : v)
+      );
+      toast.success(`Vehicle "${savedVehicle.vehicleName}" updated successfully.`);
+    }
+    setIsModified(true);
+  };
+
+  const handleExportBundle = async () => {
+    if (!loadedBundle || !originalArrayBuffer) {
+      toast.error('No bundle loaded to export.');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      
+             // Create a new bundle builder
+       const builder = new BundleBuilder({
+         platform: loadedBundle.header.platform as any,
+         compress: (loadedBundle.header.flags & 0x1) !== 0
+       });
+
+       // Add existing resources, replacing vehicle list if modified
+       for (const resource of loadedBundle.resources) {
+         const vehicleType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Vehicle List');
+         
+         if (vehicleType && resource.resourceTypeId === vehicleType.id && isModified) {
+           // Replace vehicle list with modified data
+           const littleEndian = loadedBundle.header.platform !== PLATFORMS.PS3;
+           const vehicleListData = writeVehicleList(vehicleList, littleEndian);
+           builder.addResource(resource.resourceTypeId, vehicleListData, resource.resourceId);
+         } else {
+           // Extract original resource data from the bundle
+           const resourceStartOffset = resource.diskOffsets[0];
+           const resourceSize = resource.sizeAndAlignmentOnDisk[0];
+           
+           // Extract the raw resource data from the original bundle
+           const resourceData = new Uint8Array(
+             originalArrayBuffer.slice(resourceStartOffset, resourceStartOffset + resourceSize)
+           );
+           
+                     // Add the original resource data to the new bundle
+          // Use the new method to preserve all original resource metadata
+          console.log(`📦 Adding existing resource 0x${resource.resourceTypeId.toString(16)}: ${resourceData.length} bytes, flags=0x${resource.flags.toString(16)}`);
+          
+          builder.addExistingResource(resource, resourceData);
+         }
+       }
+
+      if (loadedBundle.debugData) {
+        builder.setDebugData(loadedBundle.debugData);
+      }
+
+      const newBundleData = await builder.build();
+      
+      // Download the file
+      const blob = new Blob([newBundleData], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'modified_bundle.bundle';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success('Bundle exported successfully!');
+      setIsModified(false);
+      
+    } catch (error) {
+      console.error('Error exporting bundle:', error);
+      toast.error(`Failed to export bundle: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <div className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-6 py-4">
+      <header className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div className="px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-primary rounded-lg">
-                <Database className="w-6 h-6 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-                  Burnout Paradise Bundle Manager
-                </h1>
-                <p className="text-sm text-muted-foreground">Resource analysis and management tool</p>
-              </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Bundle Manager</h1>
+              <p className="text-muted-foreground">
+                Burnout Paradise Bundle Editor & Resource Explorer
+              </p>
             </div>
-            <div className="flex gap-2">
-              <Button 
-                onClick={handleFileUpload} 
-                variant="outline" 
-                className="gap-2"
+            <div className="flex items-center gap-3">
+              {isModified && (
+                <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
+                  <AlertCircle className="w-3 h-3 mr-1" />
+                  Modified
+                </Badge>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".bundle,.bndl,.bin,.dat"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
                 disabled={isLoading}
+                className="gap-2"
               >
                 <Upload className="w-4 h-4" />
                 {isLoading ? 'Loading...' : 'Load Bundle'}
               </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".bundle,.bnd"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
+              {loadedBundle && (
+                <Button
+                  onClick={handleExportBundle}
+                  disabled={isLoading}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Export Bundle
+                </Button>
+              )}
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="container mx-auto px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Content */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Bundle Info */}
-            {loadedBundle && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="w-5 h-5" />
-                    Bundle Information
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div>
-                      <div className="text-sm text-muted-foreground">Platform</div>
-                      <div className="font-medium">{currentPlatform}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Version</div>
-                      <div className="font-medium">{loadedBundle.header.version}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Flags</div>
-                      <div className="flex flex-wrap gap-1">
-                        {getFlagNames(loadedBundle.header.flags).map(flag => (
-                          <Badge key={flag} variant="secondary" className="text-xs">{flag}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Debug Data</div>
-                      <div className="font-medium">{debugResources.length > 0 ? 'Available' : 'None'}</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+      {/* Main Content */}
+      <main className="flex-1 overflow-auto">
+        <div className="p-6 space-y-6">
+          {!loadedBundle ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                <Upload className="w-8 h-8 text-muted-foreground" />
+              </div>
+              <div>
+                <h3 className="text-lg font-medium">No Bundle Loaded</h3>
+                <p className="text-muted-foreground">
+                  Select a bundle file to get started with editing and resource exploration.
+                </p>
+              </div>
+              <Button onClick={() => fileInputRef.current?.click()} className="gap-2">
+                <Upload className="w-4 h-4" />
+                Load Bundle File
+              </Button>
+            </div>
+          ) : (
+            <Tabs defaultValue="vehicles" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="vehicles">
+                  Vehicles ({vehicleList.length})
+                </TabsTrigger>
+                <TabsTrigger value="resources">
+                  Resources ({resources.length})
+                </TabsTrigger>
+                <TabsTrigger value="colors">
+                  Player Colors
+                </TabsTrigger>
+              </TabsList>
 
-            {vehicleList.length > 0 && (
-              <VehicleList vehicles={vehicleList} />
-            )}
+              <TabsContent value="vehicles" className="space-y-6">
+                <VehicleList
+                  vehicles={vehicleList}
+                  onAddVehicle={handleAddVehicle}
+                  onEditVehicle={handleEditVehicle}
+                  onDeleteVehicle={handleDeleteVehicle}
+                  onExportBundle={handleExportBundle}
+                />
+              </TabsContent>
 
-            {playerCarColours && (
-              <PlayerCarColoursComponent colours={playerCarColours} />
-            )}
+              <TabsContent value="resources" className="space-y-6">
+                {/* Existing resources tab content */}
+              </TabsContent>
 
-            {!loadedBundle && (
-              <Card>
-                <CardContent className="text-center py-12">
-                  <Database className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-medium mb-2">No Bundle Loaded</h3>
-                  <p className="text-muted-foreground mb-4">
-                    Load a Burnout Paradise .bundle file to start exploring resources
-                  </p>
-                  <Button onClick={handleFileUpload} variant="default" className="gap-2">
-                    <Upload className="w-4 h-4" />
-                    Load Bundle File
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Search and Filters */}
-            {loadedBundle && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Search className="w-5 h-5" />
-                    Resource Explorer
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex gap-4">
-                    <div className="flex-1 relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search by name, type, or ID..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
-                    <select
-                      value={selectedPlatform}
-                      onChange={(e) => setSelectedPlatform(e.target.value)}
-                      className="px-3 py-2 bg-input border border-border rounded-lg"
-                    >
-                      <option value="all">All Platforms</option>
-                      <option value="PC">PC</option>
-                      <option value="Xbox360">Xbox 360</option>
-                      <option value="PS3">PlayStation 3</option>
-                    </select>
-                  </div>
-
-                  {/* Statistics */}
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="text-center p-3 bg-muted/50 rounded-lg">
-                      <div className="text-2xl font-bold text-primary">{filteredResources.length}</div>
-                      <div className="text-sm text-muted-foreground">Resources</div>
-                    </div>
-                    <div className="text-center p-3 bg-muted/50 rounded-lg">
-                      <div className="text-2xl font-bold text-accent">{formatBytes(totalUncompressed)}</div>
-                      <div className="text-sm text-muted-foreground">Uncompressed</div>
-                    </div>
-                    <div className="text-center p-3 bg-muted/50 rounded-lg">
-                      <div className="text-2xl font-bold text-warning">{compressionRatio}%</div>
-                      <div className="text-sm text-muted-foreground">Compression</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Resource List */}
-            {loadedBundle && filteredResources.length > 0 && (
-              <Card>
-                <CardContent className="p-0">
-                  <div className="max-h-96 overflow-auto">
-                    {filteredResources.map((resource) => (
-                      <div
-                        key={resource.id}
-                        className="p-4 border-b border-border hover:bg-accent/10 cursor-pointer transition-colors"
-                        onClick={() => setSelectedResource(resource)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <code className="text-sm bg-muted px-2 py-1 rounded">{resource.id}</code>
-                              <Badge className={getTypeColor(resource.category)}>
-                                {resource.type}
-                              </Badge>
-                              <Badge variant="outline">{resource.platform}</Badge>
-                            </div>
-                            <h3 className="font-medium text-foreground mb-1" title={resource.typeName}>{resource.name}</h3>
-                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                              <span className="flex items-center gap-1">
-                                {getMemoryIcon(resource.memoryType)}
-                                {resource.memoryType}
-                              </span>
-                              <span>{formatBytes(resource.uncompressedSize)}</span>
-                              <span className="text-success">{formatBytes(resource.compressedSize)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {selectedResource ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Resource Details</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <h4 className="font-medium mb-2">{selectedResource.name}</h4>
-                    <code className="text-sm bg-muted px-2 py-1 rounded block mb-2">{selectedResource.id}</code>
-                    <div className="text-sm text-muted-foreground">{selectedResource.typeName}</div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Type:</span>
-                      <Badge className={getTypeColor(selectedResource.category)}>{selectedResource.type}</Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Platform:</span>
-                      <span>{selectedResource.platform}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Memory:</span>
-                      <span className="flex items-center gap-1">
-                        {getMemoryIcon(selectedResource.memoryType)}
-                        {selectedResource.memoryType}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Uncompressed:</span>
-                      <span>{formatBytes(selectedResource.uncompressedSize)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Compressed:</span>
-                      <span className="text-success">{formatBytes(selectedResource.compressedSize)}</span>
-                    </div>
-                  </div>
-
-                  {selectedResource.flags.length > 0 && (
-                    <div>
-                      <h5 className="font-medium mb-2">Flags</h5>
-                      <div className="flex flex-wrap gap-1">
-                        {selectedResource.flags.map((flag) => (
-                          <Badge key={flag} variant="secondary" className="text-xs">
-                            {flag}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedResource.imports.length > 0 && (
-                    <div>
-                      <h5 className="font-medium mb-2">Dependencies</h5>
-                      <div className="space-y-1">
-                        {selectedResource.imports.map((imp) => (
-                          <div key={imp} className="text-sm bg-muted/50 px-2 py-1 rounded">
-                            {imp}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Raw data section for debugging */}
-                  <div>
-                    <h5 className="font-medium mb-2">Raw Data</h5>
-                    <div className="text-xs bg-muted/50 p-2 rounded overflow-auto max-h-32">
-                      <div>Resource Type ID: 0x{selectedResource.raw.resourceTypeId.toString(16).toUpperCase()}</div>
-                      <div>Import Hash: 0x{selectedResource.raw.importHash.toString(16).toUpperCase()}</div>
-                      <div>Import Count: {selectedResource.raw.importCount}</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardContent className="text-center py-8">
-                  <Database className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">
-                    {loadedBundle ? 'Select a resource to view details' : 'Load a bundle file to get started'}
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+                             <TabsContent value="colors" className="space-y-6">
+                 {playerCarColours ? (
+                   <PlayerCarColoursComponent colours={playerCarColours} />
+                 ) : (
+                   <Alert>
+                     <AlertCircle className="h-4 w-4" />
+                     <AlertDescription>
+                       No player car colours found in this bundle.
+                     </AlertDescription>
+                   </Alert>
+                 )}
+               </TabsContent>
+            </Tabs>
+          )}
         </div>
-      </div>
+      </main>
+
+      {/* Vehicle Editor Dialog */}
+      <VehicleEditor
+        vehicle={selectedVehicle}
+        isOpen={isVehicleEditorOpen}
+        onClose={() => {
+          setIsVehicleEditorOpen(false);
+          setSelectedVehicle(null);
+          setIsNewVehicle(false);
+        }}
+        onSave={handleSaveVehicle}
+        isNewVehicle={isNewVehicle}
+      />
     </div>
   );
 };

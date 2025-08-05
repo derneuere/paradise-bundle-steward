@@ -323,7 +323,7 @@ function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>, index:
       boostBarLength: rawEntry.gamePlayData.boostBarLength,
       unlockRank: rawEntry.gamePlayData.unlockRank as Rank,
       boostCapacity: rawEntry.gamePlayData.boostCapacity,
-      strengthStat: Math.floor(rawEntry.gamePlayData.strengthStat / 2) // Correct strength calculation
+      strengthStat: rawEntry.gamePlayData.strengthStat // Use raw value for perfect round-trip
     };
 
     // Process audio data
@@ -347,9 +347,6 @@ function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>, index:
     const vehicleType = (rawEntry.vehicleAndBoostType >> 4) & 0xF as VehicleType;
     const boostType = rawEntry.vehicleAndBoostType & 0xF as CarType;
 
-    // Apply stat corrections based on wiki analysis
-    const correctedTopSpeedNormalGUIStat = Math.max(0, rawEntry.topSpeedNormalGUIStat - 1);
-    const correctedTopSpeedBoostGUIStat = Math.min(10, rawEntry.topSpeedBoostGUIStat + 1);
 
     return {
       id,
@@ -366,8 +363,8 @@ function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>, index:
       liveryType: rawEntry.liveryType as LiveryType,
       topSpeedNormal: rawEntry.topSpeedNormal,
       topSpeedBoost: rawEntry.topSpeedBoost,
-      topSpeedNormalGUIStat: correctedTopSpeedNormalGUIStat,
-      topSpeedBoostGUIStat: correctedTopSpeedBoostGUIStat,
+      topSpeedNormalGUIStat: rawEntry.topSpeedNormalGUIStat,
+      topSpeedBoostGUIStat: rawEntry.topSpeedBoostGUIStat,
       colorIndex: rawEntry.colorIndex,
       paletteIndex: rawEntry.paletteIndex
     };
