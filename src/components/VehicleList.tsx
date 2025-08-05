@@ -1,5 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Car } from "lucide-react";
+import { VehicleCard } from "./VehicleCard";
 import type { VehicleListEntry } from "@/lib/vehicleListParser";
 
 interface VehicleListProps {
@@ -7,33 +6,30 @@ interface VehicleListProps {
 }
 
 export const VehicleList = ({ vehicles }: VehicleListProps) => {
-  if (vehicles.length === 0) return null;
+  if (vehicles.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-12 text-muted-foreground">
+        <p>No vehicles found in the bundle.</p>
+      </div>
+    );
+  }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Car className="w-5 h-5" />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold tracking-tight">
           Vehicle List
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {vehicles.map((vehicle, index) => (
-            <div key={vehicle.id || index} className="p-3 border border-border rounded-lg bg-card/50">
-              <div className="font-mono text-sm text-primary">{vehicle.id || `Vehicle ${index + 1}`}</div>
-              <div className="font-semibold text-foreground">{vehicle.vehicleName || 'Unknown Vehicle'}</div>
-              {vehicle.manufacturer && (
-                <div className="text-sm text-muted-foreground">{vehicle.manufacturer}</div>
-              )}
-              <div className="text-xs text-muted-foreground mt-1">
-                Type: {vehicle.vehicleType === 0 ? 'Car' : vehicle.vehicleType === 1 ? 'Bike' : 'Plane'}
-                {vehicle.topSpeedNormal > 0 && ` • Speed: ${vehicle.topSpeedNormal}`}
-              </div>
-            </div>
-          ))}
+        </h2>
+        <div className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full">
+          {vehicles.length} vehicles
         </div>
-      </CardContent>
-    </Card>
+      </div>
+      
+      <div className="grid gap-6 grid-cols-2">
+        {vehicles.map((vehicle, index) => (
+          <VehicleCard key={`${vehicle.id}-${index}`} vehicle={vehicle} />
+        ))}
+      </div>
+    </div>
   );
 };

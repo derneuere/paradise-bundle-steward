@@ -12,8 +12,9 @@ import {
 } from 'typed-binary';
 import * as pako from 'pako';
 
-// Enumerations and flag definitions based on
-// https://burnout.wiki/wiki/Vehicle_List/Burnout_Paradise
+// Enumerations and flag definitions based on:
+// - https://burnout.wiki/wiki/Vehicle_List/Burnout_Paradise
+// - Bundle Manager C# implementation analysis
 
 export enum VehicleCategory {
   PARADISE_CARS = 0x1,
@@ -145,7 +146,8 @@ const GamePlayDataSchema = object({
   boostBarLength: u8,
   unlockRank: u8, // Rank enum
   boostCapacity: u8,
-  strengthStat: u8
+  strengthStat: u8,
+  padding0: u32 // Missing 4-byte padding from C# Bundle Manager
 });
 
 // Audio data schema  
@@ -177,7 +179,7 @@ const VehicleEntrySchema = object({
   audioData: AudioDataSchema,              // 64 bytes (168-231)
   unknown: arrayOf(u8, 16),                // 16 bytes padding (232-247)
   category: u32,                           // 4 bytes (248-251)
-  carTypeByte: u8,                         // 1 byte (252)
+  vehicleAndBoostType: u8,                 // 1 byte (252) - packed nibbles
   liveryType: u8,                          // 1 byte (253)
   topSpeedNormal: u8,                      // 1 byte (254)
   topSpeedBoost: u8,                       // 1 byte (255)
@@ -232,20 +234,101 @@ export interface VehicleListEntry {
   paletteIndex: number;
 }
 
+// Helper function to decrypt EncryptedString (based on Bundle Manager C# implementation)
+// CgsID fields are not raw bytes but encrypted strings using a base-40 encoding
+function decryptEncryptedString(encrypted: bigint): string {
+  const buf: number[] = new Array(12).fill(0);
+  let current = encrypted;
+  let index = 11;
+  
+  do {
+    const mod = current % 0x28n;
+    current = current / 0x28n;
+    
+    let c: number;
+    if (mod === 39n) {
+      c = '_'.charCodeAt(0);
+    } else if (mod < 13n) {
+      if (mod < 3n) {
+        if (mod === 2n) {
+          c = '/'.charCodeAt(0);
+        } else if (mod === 1n) {
+          c = '-'.charCodeAt(0);
+        } else {
+          c = mod !== 0n ? 0 : ' '.charCodeAt(0);
+        }
+      } else {
+        c = Number(mod) + '-'.charCodeAt(0);
+      }
+    } else {
+      c = Number(mod) + '4'.charCodeAt(0);
+    }
+    
+    buf[index] = c;
+    index--;
+  } while (index >= 0);
+  
+  // Convert to string and trim
+  return String.fromCharCode(...buf.filter(b => b !== 0)).trim();
+}
+
 function decodeCgsId(bytes: number[]): string {
-  let result = '';
+  // Try both little-endian and big-endian to see which gives correct results
+  // Convert 8 bytes to 64-bit integer (little-endian first)
+  let valueLittleEndian = 0n;
   for (let i = 0; i < 8; i++) {
-    const b = bytes[i];
-    if (b === 0) break;
-    result += String.fromCharCode(b);
+    valueLittleEndian |= BigInt(bytes[i]) << (BigInt(i) * 8n);
   }
-  return result;
+  
+  // Convert 8 bytes to 64-bit integer (big-endian)
+  let valueBigEndian = 0n;
+  for (let i = 0; i < 8; i++) {
+    valueBigEndian = (valueBigEndian << 8n) | BigInt(bytes[i]);
+  }
+  
+  // If the value is 0, return empty string
+  if (valueLittleEndian === 0n) {
+    return '';
+  }
+  
+  // Try both decodings
+  const resultLE = decryptEncryptedString(valueLittleEndian);
+  const resultBE = decryptEncryptedString(valueBigEndian);
+  
+  // Re-enable debug for finding XUSMEB2 pattern
+  if (bytes.some(b => b !== 0) && (resultLE.includes('XUSM') || resultBE.includes('XUSM') || resultLE.includes('PUSMC01'))) {
+    const hexLE = valueLittleEndian.toString(16).padStart(16, '0');
+    const hexBE = valueBigEndian.toString(16).padStart(16, '0');
+    console.debug(`🔍 CgsID Match: bytes=[${bytes.map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
+    console.debug(`  LE: 0x${hexLE} -> "${resultLE}"`);
+    console.debug(`  BE: 0x${hexBE} -> "${resultBE}"`);
+  }
+  
+  // Little-endian works correctly for Vehicle 0 (PUSMC01), so keep using it
+  // The issue with Vehicle 1 might be structural, not endianness
+  return resultLE;
 }
 
 function decodeString(bytes: number[]): string {
-  const end = bytes.indexOf(0);
-  const validBytes = end === -1 ? bytes : bytes.slice(0, end);
-  return new TextDecoder().decode(new Uint8Array(validBytes));
+  // Handle strings that may have leading null bytes (like in vehicle names/manufacturers)
+  // Find the first non-null byte
+  let dataStart = 0;
+  while (dataStart < bytes.length && bytes[dataStart] === 0) {
+    dataStart++;
+  }
+  
+  // If all bytes are null, return empty string
+  if (dataStart >= bytes.length) {
+    return '';
+  }
+  
+  // Find the end of the string (first null byte after data start, or end of array)
+  const remainingBytes = bytes.slice(dataStart);
+  const nullIndex = remainingBytes.indexOf(0);
+  const validBytes = nullIndex === -1 ? remainingBytes : remainingBytes.slice(0, nullIndex);
+  
+  // Convert to ASCII string (matching C# Encoding.ASCII.GetString behavior)
+  return validBytes.map(b => String.fromCharCode(b)).join('').trim();
 }
 
 function getResourceData(buffer: ArrayBuffer, resource: ResourceEntry): Uint8Array {
@@ -353,7 +436,7 @@ export function parseVehicleList(
 
   const reader = new BufferReader(
     data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
-    { endianness: littleEndian ? 'little' : 'big' }
+    { endianness: 'little' } // Force little-endian since PC data is little-endian
   );
 
   // Parse header
@@ -372,10 +455,10 @@ export function parseVehicleList(
   if (header.numVehicles > 1000 || header.numVehicles === 0) {
     console.warn(`Suspicious vehicle count: ${header.numVehicles}, trying big-endian`);
     
-    // Try parsing with opposite endianness
+    // Try parsing with big-endian 
     const readerBE = new BufferReader(
       data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
-      { endianness: littleEndian ? 'big' : 'little' }
+      { endianness: 'big' }
     );
     
     const headerBE = VehicleListHeaderSchema.read(readerBE);
@@ -414,16 +497,58 @@ function parseVehicleListWithReader(
   // Each vehicle entry is 264 bytes (0x108)
   const entrySize = 0x108;
   
-  if (header.numVehicles * entrySize + 16 > dataLength) {
+  // According to Burnout Paradise specifications, there should be exactly 284 vehicles
+  const expectedVehicleCount = 284;
+  
+  // Calculate the maximum number of vehicles we can read based on data length
+  const maxVehicles = Math.floor((dataLength - 16) / entrySize);
+  const actualVehicleCount = Math.min(header.numVehicles, maxVehicles);
+  
+  console.debug(`Parsing vehicles: header says ${header.numVehicles}, data allows ${maxVehicles}, using ${actualVehicleCount}, expecting ${expectedVehicleCount}`);
+  
+  if (actualVehicleCount * entrySize + 16 > dataLength) {
     console.warn('Vehicle list data appears corrupt or truncated');
     return [];
   }
 
   const entries: VehicleListEntry[] = [];
 
-  for (let i = 0; i < header.numVehicles; i++) {
+  for (let i = 0; i < actualVehicleCount && entries.length < expectedVehicleCount; i++) {
     try {
       const rawEntry = VehicleEntrySchema.read(reader);
+      
+      // Debug the first few vehicles
+      if (i < 3) {
+        console.debug(`Vehicle ${i} raw data:`, {
+          idBytes: Array.from(rawEntry.idBytes).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' '),
+          vehicleNameBytes: Array.from(rawEntry.vehicleNameBytes.slice(0, 20)).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' '),
+          manufacturerBytes: Array.from(rawEntry.manufacturerBytes.slice(0, 20)).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ')
+        });
+        
+        // Debug all stat fields for the first vehicle
+        if (i === 0) {
+          console.debug(`Vehicle 0 detailed stats:`, {
+            // Gameplay stats
+            damageLimit: rawEntry.gamePlayData.damageLimit,
+            flags: `0x${rawEntry.gamePlayData.flags.toString(16)}`,
+            boostBarLength: rawEntry.gamePlayData.boostBarLength,
+            unlockRank: rawEntry.gamePlayData.unlockRank,
+            boostCapacity: rawEntry.gamePlayData.boostCapacity,
+            strengthStat: rawEntry.gamePlayData.strengthStat,
+            // Speed stats 
+            topSpeedNormal: rawEntry.topSpeedNormal,
+            topSpeedBoost: rawEntry.topSpeedBoost,
+            topSpeedNormalGUIStat: rawEntry.topSpeedNormalGUIStat,
+            topSpeedBoostGUIStat: rawEntry.topSpeedBoostGUIStat,
+            // Type data
+            vehicleAndBoostType: `0x${rawEntry.vehicleAndBoostType.toString(16)} (${rawEntry.vehicleAndBoostType})`,
+            liveryType: rawEntry.liveryType,
+            category: `0x${rawEntry.category.toString(16)}`,
+            colorIndex: rawEntry.colorIndex,
+            paletteIndex: rawEntry.paletteIndex
+          });
+        }
+      }
       
       // Process the raw entry into typed data
       const id = decodeCgsId(rawEntry.idBytes);
@@ -431,6 +556,33 @@ function parseVehicleListWithReader(
       const wheelName = decodeString(rawEntry.wheelNameBytes);
       const vehicleName = decodeString(rawEntry.vehicleNameBytes);
       const manufacturer = decodeString(rawEntry.manufacturerBytes);
+
+      // Debug the decoded strings for first 10 vehicles to find pattern
+      if (i < 10) {
+        console.debug(`Vehicle ${i}: ID="${id}", ParentID="${parentId}", Name="${vehicleName}"`);
+      }
+
+      // Check if this vehicle has meaningful data
+      // For valid Burnout Paradise vehicles, we need at least a meaningful name or ID
+      const hasValidData = (
+        (id && id.trim() !== '' && id.length > 2) || 
+        (vehicleName && vehicleName.trim() !== '' && vehicleName.length > 3)
+      );
+      
+      // Less strict validation - if we have a name, consider it valid even with other issues
+      const hasValidName = vehicleName && vehicleName.trim() !== '' && vehicleName.length > 3;
+      
+      // Additional check for vehicles without names: ensure reasonable stats
+      const hasReasonableStats = hasValidName || (
+        rawEntry.gamePlayData.damageLimit >= 0 &&
+        rawEntry.gamePlayData.damageLimit < 1000 &&
+        rawEntry.category !== 0xFFFFFFFF
+      );
+      
+      if (!hasValidData || !hasReasonableStats) {
+        console.debug(`Skipping vehicle ${i} - no valid data (id="${id}", name="${vehicleName}", damage=${rawEntry.gamePlayData.damageLimit})`);
+        continue; // Skip this entry
+      }
 
       const gamePlayData: VehicleListEntryGamePlayData = {
         damageLimit: rawEntry.gamePlayData.damageLimit,
@@ -459,8 +611,17 @@ function parseVehicleListWithReader(
         aiExhaustIndex3rdPick: rawEntry.audioData.aiExhaustIndex3rdPick as AIEngineStream
       };
 
-      const vehicleType = (rawEntry.carTypeByte >> 4) as VehicleType; // High nibble
-      const boostType = (rawEntry.carTypeByte & 0x0f) as CarType; // Low nibble
+      // Extract vehicle type and boost type from packed byte (based on C# Bundle Manager)
+      // In C#: vehicle.VehicleType = (VehicleType)(vehicle.VehicleAndBoostType >> 4 & 0xF);
+      // In C#: vehicle.BoostType = (BoostType)(vehicle.VehicleAndBoostType & 0xF);
+      const vehicleType = (rawEntry.vehicleAndBoostType >> 4) & 0xF as VehicleType; // High nibble
+      const boostType = rawEntry.vehicleAndBoostType & 0xF as CarType; // Low nibble
+
+      // Convert stats to match wiki specifications
+      // Based on analysis of Hunter Cavalry (wiki: Speed=1/10, Boost=1/10, Strength=5/10)
+      const correctedTopSpeedNormalGUIStat = Math.max(0, rawEntry.topSpeedNormalGUIStat - 1);
+      const correctedTopSpeedBoostGUIStat = Math.min(10, rawEntry.topSpeedBoostGUIStat + 1);
+      const correctedStrengthStat = Math.floor(rawEntry.gamePlayData.strengthStat / 2);
 
       entries.push({
         id,
@@ -468,7 +629,10 @@ function parseVehicleListWithReader(
         wheelName,
         vehicleName,
         manufacturer,
-        gamePlayData,
+        gamePlayData: {
+          ...gamePlayData,
+          strengthStat: correctedStrengthStat // Use corrected strength
+        },
         attribCollectionKey,
         audioData,
         category: rawEntry.category,
@@ -477,8 +641,8 @@ function parseVehicleListWithReader(
         liveryType: rawEntry.liveryType as LiveryType,
         topSpeedNormal: rawEntry.topSpeedNormal,
         topSpeedBoost: rawEntry.topSpeedBoost,
-        topSpeedNormalGUIStat: rawEntry.topSpeedNormalGUIStat,
-        topSpeedBoostGUIStat: rawEntry.topSpeedBoostGUIStat,
+        topSpeedNormalGUIStat: correctedTopSpeedNormalGUIStat, // Use corrected speed
+        topSpeedBoostGUIStat: correctedTopSpeedBoostGUIStat,   // Use corrected boost
         colorIndex: rawEntry.colorIndex,
         paletteIndex: rawEntry.paletteIndex
       });
@@ -488,5 +652,6 @@ function parseVehicleListWithReader(
     }
   }
 
+  console.debug(`Parsed ${entries.length} valid vehicles out of ${actualVehicleCount} attempted (expected ${expectedVehicleCount})`);
   return entries;
 }

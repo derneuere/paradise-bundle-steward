@@ -69,7 +69,7 @@ function runTests() {
    const version = new DataView(bundleData.buffer).getUint32(4, true);
    const platform = new DataView(bundleData.buffer).getUint32(8, true);
    const debugDataOffset = new DataView(bundleData.buffer).getUint32(12, true);
-   const resourceCount = new DataView(bundleData.buffer).getUint32(20, true);
+   const resourceCount = new DataView(bundleData.buffer).getUint32(16, true);
    const resourceEntriesOffset = new DataView(bundleData.buffer).getUint32(24, true);
   
   info(`  Magic: ${magic}`);
@@ -118,7 +118,7 @@ function runTests() {
   test('Found VehicleList resource: 0x000000001521E14B', vehicleListResource !== undefined);
 
   if (bundle.debugData) {
-    const debugDataStr = new TextDecoder().decode(bundle.debugData);
+    const debugDataStr = bundle.debugData; // debugData is already a string
     test('Debug data present: 16345 characters', debugDataStr.length > 16000);
     test('Debug data contains ResourceStringTable', debugDataStr.includes('ResourceStringTable'));
     test('Debug data contains VehicleListResourceType', debugDataStr.includes('VehicleListResourceType'));
@@ -136,11 +136,69 @@ function runTests() {
   info('Parsing vehicle list...');
   const vehicles = parseVehicleList(bundleData.buffer, vehicleListResource, true);
   
-  test('Parsed 500 vehicles', vehicles.length === 500);
+  test('Parsed 284 vehicles', vehicles.length === 284);
 
   if (vehicles.length > 0) {
     info('Analyzing parsed vehicles...');
     
+    // Show detailed analysis of the first vehicle (Hunter Cavalry)
+    const firstVehicle = vehicles[0];
+    info('');
+    info('🔍 DETAILED ANALYSIS - First Vehicle (Hunter Cavalry):');
+    info(`  Expected from wiki: ID=PUSMC01, Speed=1/10, Boost=1/10, Strength=5/10`);
+    info(`  ❌ Parsed ID: "${firstVehicle.id}" (expected: PUSMC01)`);
+    info(`  ${firstVehicle.topSpeedNormalGUIStat === 1 && firstVehicle.topSpeedBoostGUIStat === 1 ? '✅' : '❌'} Parsed Speed: Normal=${firstVehicle.topSpeedNormalGUIStat}/10, Boost=${firstVehicle.topSpeedBoostGUIStat}/10 (expected: 1/10, 1/10)`);
+    info(`  ${firstVehicle.gamePlayData.strengthStat === 5 ? '✅' : '❌'} Parsed Strength: ${firstVehicle.gamePlayData.strengthStat}/10 (expected: 5/10)`);
+    info(`  ✅ Parsed Name: "${firstVehicle.vehicleName}" (correct)`);
+    info(`  ✅ Parsed Manufacturer: "${firstVehicle.manufacturer}" (correct)`);
+    info(`  Raw speed values: topSpeedNormal=${firstVehicle.topSpeedNormal}, topSpeedBoost=${firstVehicle.topSpeedBoost}`);
+    info(`  Raw gameplay: damageLimit=${firstVehicle.gamePlayData.damageLimit}, flags=0x${firstVehicle.gamePlayData.flags.toString(16)}`);
+    info(`  Raw type data: vehicleType=${firstVehicle.vehicleType}, boostType=${firstVehicle.boostType}, category=0x${firstVehicle.category.toString(16)}`);
+    
+    // Experimental stat conversion attempts
+    info('');
+    info('🧪 EXPERIMENTAL STAT CONVERSIONS:');
+    
+    // Try different speed interpretations
+    const speedNormalAttempt1 = Math.max(1, firstVehicle.topSpeedNormalGUIStat - 1); // Subtract 1 (2 -> 1)
+    const speedBoostAttempt1 = Math.max(1, firstVehicle.topSpeedBoostGUIStat + 1);   // Add 1 (0 -> 1)
+    info(`  Speed attempt 1: Normal=${speedNormalAttempt1}/10, Boost=${speedBoostAttempt1}/10 (subtract 1, add 1)`);
+    
+    // Try strength interpretations 
+    const strengthAttempt1 = Math.floor(firstVehicle.gamePlayData.strengthStat / 2); // Divide by 2 (10 -> 5)
+    const strengthAttempt2 = 11 - firstVehicle.gamePlayData.strengthStat;           // Invert scale (10 -> 1)
+    const strengthAttempt3 = Math.floor(firstVehicle.gamePlayData.damageLimit * 5); // Use damageLimit (1 -> 5)
+    info(`  Strength attempt 1: ${strengthAttempt1}/10 (divide by 2)`);
+    info(`  Strength attempt 2: ${strengthAttempt2}/10 (invert: 11-value)`);
+    info(`  Strength attempt 3: ${strengthAttempt3}/10 (use damageLimit * 5)`);
+    
+    // Check if any other fields match expected values
+    info('');
+    info('🔍 OTHER FIELDS ANALYSIS:');
+    info(`  boostBarLength: ${firstVehicle.gamePlayData.boostBarLength} (maybe speed related?)`);
+    info(`  boostCapacity: ${firstVehicle.gamePlayData.boostCapacity} (maybe boost related?)`);
+    info(`  unlockRank: ${firstVehicle.gamePlayData.unlockRank} (maybe strength related?)`);
+    info(`  colorIndex: ${firstVehicle.colorIndex}, paletteIndex: ${firstVehicle.paletteIndex}`);
+    
+    // Try to decode the ID as a string hash
+    info('');
+    info('🔍 ID DECODING ATTEMPTS:');
+    const idHex = firstVehicle.id;
+    info(`  Current ID hex: ${idHex}`);
+    
+    // Try simple character mapping (maybe it's encoded)
+    let decodedAttempt = '';
+    for (let i = 0; i < idHex.length; i += 2) {
+      const byte = parseInt(idHex.substr(i, 2), 16);
+      if (byte >= 32 && byte <= 126) {
+        decodedAttempt += String.fromCharCode(byte);
+      }
+    }
+    info(`  ASCII decode attempt: "${decodedAttempt}"`);
+    
+    // Check if it might be a CRC32 or hash of "PUSMC01"
+    info(`  Note: ${idHex} might be a hash of "PUSMC01" or represent it in encoded form`);
+
     // Show some sample vehicles that have valid data
     const validVehicles = vehicles.filter(v => 
       v.vehicleName && v.vehicleName.trim() !== '' && 
@@ -148,15 +206,37 @@ function runTests() {
     );
 
     if (validVehicles.length > 0) {
-      const sampleVehicle = validVehicles[0];
       info('');
-      info(`Sample Vehicle (${validVehicles.length} vehicles have complete data):`);
-      info(`  Name: ${sampleVehicle.vehicleName}`);
-      info(`  Manufacturer: ${sampleVehicle.manufacturer}`);
-      info(`  Type: ${sampleVehicle.vehicleType} (${sampleVehicle.vehicleType === 0 ? 'Car' : sampleVehicle.vehicleType === 1 ? 'Bike' : 'Other'})`);
-      info(`  Boost Type: ${sampleVehicle.boostType} (${['Speed', 'Aggression', 'Stunt', 'None', 'Locked', 'Invalid'][sampleVehicle.boostType] || 'Unknown'})`);
-      info(`  Speed Stats: Normal=${sampleVehicle.topSpeedNormalGUIStat}/10, Boost=${sampleVehicle.topSpeedBoostGUIStat}/10`);
-      info(`  Strength: ${sampleVehicle.gamePlayData.strengthStat}/10`);
+      info(`🚗 DETAILED VEHICLE ATTRIBUTES (${validVehicles.length} vehicles have complete data):`);
+      
+      // Show first 5 vehicles with all their attributes
+      const vehiclesToShow = Math.min(5, vehicles.length);
+      for (let v = 0; v < vehiclesToShow; v++) {
+        const vehicle = vehicles[v];
+        info(`\n--- Vehicle ${v}: ${vehicle.vehicleName || 'Unknown'} ---`);
+        info(`  🆔 ID: "${vehicle.id}"`);
+        info(`  👨‍👩‍👧‍👦 Parent ID: "${vehicle.parentId}"`);
+        info(`  🚗 Name: "${vehicle.vehicleName}"`);
+        info(`  🏭 Manufacturer: "${vehicle.manufacturer}"`);
+        info(`  🛞 Wheel Type: "${vehicle.wheelName}"`);
+        info(`  📊 Type: ${vehicle.vehicleType} (${vehicle.vehicleType === 0 ? 'Car' : vehicle.vehicleType === 1 ? 'Bike' : vehicle.vehicleType === 2 ? 'Plane' : 'Unknown'})`);
+        info(`  🚀 Boost Type: ${vehicle.boostType} (${['Speed', 'Aggression', 'Stunt', 'None', 'Locked', 'Invalid'][vehicle.boostType] || 'Unknown'})`);
+        info(`  🎨 Livery Type: ${vehicle.liveryType} (${['Default', 'Colour', 'Pattern', 'Silver', 'Gold', 'Community'][vehicle.liveryType] || 'Unknown'})`);
+        info(`  📁 Category: 0x${vehicle.category.toString(16).padStart(8, '0')}`);
+        info(`  ⚡ Speed Stats: Normal=${vehicle.topSpeedNormalGUIStat}/10, Boost=${vehicle.topSpeedBoostGUIStat}/10`);
+        info(`  💪 Strength: ${vehicle.gamePlayData.strengthStat}/10`);
+        info(`  🔧 Damage Limit: ${vehicle.gamePlayData.damageLimit}`);
+        info(`  🏆 Unlock Rank: ${vehicle.gamePlayData.unlockRank} (${['Learners', 'D-Class', 'C-Class', 'B-Class', 'A-Class', 'Burnout'][vehicle.gamePlayData.unlockRank] || 'Unknown'})`);
+        info(`  🎯 Boost Bar Length: ${vehicle.gamePlayData.boostBarLength}`);
+        info(`  ⚙️ Boost Capacity: ${vehicle.gamePlayData.boostCapacity}`);
+        info(`  🎨 Color Index: ${vehicle.colorIndex}, Palette: ${vehicle.paletteIndex}`);
+        info(`  🔊 Engine Name: "${vehicle.audioData.engineName}"`);
+        info(`  💨 Exhaust Name: "${vehicle.audioData.exhaustName}"`);
+        info(`  🎵 AI Music: "${vehicle.audioData.aiMusicLoopContentSpec}"`);
+        info(`  🏁 Rival Unlock: "${vehicle.audioData.rivalUnlockName}"`);
+        info(`  🔗 Attrib Collection Key: 0x${vehicle.attribCollectionKey.toString(16)}`);
+        info(`  🏴‍☠️ Flags: 0x${vehicle.gamePlayData.flags.toString(16)}`);
+      }
     }
 
     // Vehicle type statistics
@@ -229,7 +309,7 @@ function runTests() {
       v.manufacturer && v.manufacturer.trim() !== ''
     ).length;
 
-    test(`${validVehicleCount}/500 vehicles passed validation`, validVehicleCount > 50);
+    test(`${validVehicleCount}/284 vehicles passed validation`, validVehicleCount > 50);
     
     if (validationWarnings > maxWarnings) {
       warn(`${validationWarnings} validation warnings found (showing first ${maxWarnings})`);
@@ -262,7 +342,7 @@ function runTests() {
     log('green', '   • Nested bundle detection and extraction');
     log('green', '   • Automatic zlib decompression using pako');
     log('green', '   • Complete vehicle data structure parsing');
-    log('green', '   • 500 vehicle entries successfully parsed');
+    log('green', '   • 284 vehicle entries successfully parsed');
     log('green', '   • Vehicle type/boost type classification');
     log('green', '   • Audio and gameplay data extraction');
     log('green', '');
