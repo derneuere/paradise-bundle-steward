@@ -9,7 +9,9 @@ import { parseBundle, getPlatformName, getMemoryTypeName, getFlagNames, extractR
 import { RESOURCE_TYPES, getResourceType, getResourceTypeColor } from "@/lib/resourceTypes";
 import { parseDebugData, findDebugResourceById, type DebugResource } from "@/lib/debugDataParser";
 import { parseVehicleList, type VehicleListEntry } from "@/lib/vehicleListParser";
+import { parsePlayerCarColours, type PlayerCarColours } from "@/lib/playerCarColoursParser";
 import { VehicleList } from "@/components/VehicleList";
+import { PlayerCarColoursComponent } from "@/components/PlayerCarColours";
 
 // Converted resource interface for UI display
 interface UIResource {
@@ -53,6 +55,7 @@ export const BundleManager = () => {
   const [resources, setResources] = useState<UIResource[]>([]);
   const [debugResources, setDebugResources] = useState<DebugResource[]>([]);
   const [vehicleList, setVehicleList] = useState<VehicleListEntry[]>([]);
+  const [playerCarColours, setPlayerCarColours] = useState<PlayerCarColours | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -133,6 +136,21 @@ export const BundleManager = () => {
         }
       } else {
         setVehicleList([]);
+      }
+
+      // Parse player car colours if present
+      const colourType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Player Car Colours');
+      if (colourType) {
+        const colourResource = bundle.resources.find(r => r.resourceTypeId === colourType.id);
+        if (colourResource) {
+          const is64Bit = bundle.header.platform === PLATFORMS.PC; // Assume PC is 64-bit
+          const colours = parsePlayerCarColours(arrayBuffer, colourResource, is64Bit);
+          setPlayerCarColours(colours);
+        } else {
+          setPlayerCarColours(null);
+        }
+      } else {
+        setPlayerCarColours(null);
       }
 
       setLoadedBundle(bundle);
@@ -244,6 +262,10 @@ export const BundleManager = () => {
 
             {vehicleList.length > 0 && (
               <VehicleList vehicles={vehicleList} />
+            )}
+
+            {playerCarColours && (
+              <PlayerCarColoursComponent colours={playerCarColours} />
             )}
 
             {!loadedBundle && (

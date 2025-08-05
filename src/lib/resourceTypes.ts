@@ -31,6 +31,7 @@ export const RESOURCE_TYPES: Record<number, ResourceType> = {
   0x00000013: { id: 0x00000013, name: 'UI', description: 'User interface elements', category: 'Graphics' },
   0x00000014: { id: 0x00000014, name: 'Skybox', description: 'Sky/environment textures', category: 'Graphics' },
   0x00010005: { id: 0x00010005, name: 'Vehicle List', description: 'List of available vehicles', category: 'Data' },
+  0x0001001E: { id: 0x0001001E, name: 'Player Car Colours', description: 'Available player car color palettes', category: 'Graphics' },
 };
 
 export function getResourceType(typeId: number): ResourceType {
