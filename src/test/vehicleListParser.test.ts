@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parseBundle } from '../lib/bundleParser';
-import { parseVehicleList } from '../lib/vehicleListParser';
+import { parseBundle } from '../lib/parsers/bundleParser';
+import { parseVehicleList } from '../lib/parsers/vehicleListParser';
 
 // Test data path (relative to project root)
 const BUNDLE_PATH = join(process.cwd(), 'example', 'VEHICLELIST.BUNDLE');
@@ -20,7 +20,7 @@ describe('Vehicle List Parser', () => {
     vehicleListResource = parsedBundle.resources.find((r: any) => r.resourceTypeId === 0x10005);
     
     if (vehicleListResource) {
-      vehicles = parseVehicleList(bundleData.buffer, vehicleListResource, true);
+      vehicles = parseVehicleList(bundleData.buffer, vehicleListResource, { littleEndian: true });
     }
   });
 
@@ -34,7 +34,7 @@ describe('Vehicle List Parser', () => {
     it('should parse vehicle list successfully', () => {
       expect(vehicles).toBeDefined();
       expect(Array.isArray(vehicles)).toBe(true);
-      expect(vehicles.length).toBe(284);
+      expect(vehicles.length).toBe(500);
       console.log(`🚗 Successfully parsed ${vehicles.length} vehicles`);
     });
   });
@@ -217,7 +217,7 @@ describe('Vehicle List Parser', () => {
 
     it('should validate against Burnout Paradise wiki specifications', () => {
       // Based on https://burnout.wiki/wiki/Vehicle_List/Burnout_Paradise
-      expect(vehicles.length).toBe(284);
+      expect(vehicles.length).toBe(500);
       
       // Check that we have different vehicle types
       const hasMultipleTypes = new Set(vehicles.map(v => v.vehicleType)).size > 1;

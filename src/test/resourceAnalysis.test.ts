@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parseBundle, extractResourceSize } from '../lib/bundleParser';
+import { parseBundle } from '../lib/parsers/bundleParser';
+import { extractResourceSize } from '../lib/core/resourceManager';
 
 // Test data path (relative to project root)
 const BUNDLE_PATH = join(process.cwd(), 'example', 'VEHICLELIST.BUNDLE');
