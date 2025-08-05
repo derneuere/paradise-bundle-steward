@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parseBundle } from '../lib/bundleParser';
+import { parseBundle, extractResourceSize } from '../lib/bundleParser';
 import { parsePlayerCarColours } from '../lib/playerCarColoursParser';
 import { testUtils } from './setup';
 
@@ -44,6 +44,108 @@ describe('PlayerCarColours Parser', () => {
         console.log('✅ PlayerCarColours resource found!');
       } else {
         console.log('❌ PlayerCarColours resource not found in this bundle');
+      }
+    });
+  });
+
+  describe('PlayerCarColours Resource Analysis', () => {
+    it('should analyze PlayerCarColours resource structure if present', () => {
+      const playerCarColoursResource = parsedBundle.resources.find((r: any) => r.resourceTypeId === 0x1001E);
+      
+      if (!playerCarColoursResource) {
+        console.log('ℹ️ No PlayerCarColours resource found in this bundle - analyzing nested structure');
+        
+        // Check if it might be in a nested bundle (VehicleList resource)
+        const vehicleListResource = parsedBundle.resources.find((r: any) => r.resourceTypeId === 0x10005);
+        
+        if (vehicleListResource) {
+          console.log('🔍 Checking VehicleList resource for nested PlayerCarColours...');
+          
+          // Get the raw resource data
+          let resourceData: Uint8Array | null = null;
+          
+          for (let i = 0; i < 3; i++) {
+            const size = extractResourceSize(vehicleListResource.sizeAndAlignmentOnDisk[i]);
+            if (size > 0) {
+              const dataOffset = vehicleListResource.diskOffsets[i];
+              resourceData = new Uint8Array(bundleData.buffer, dataOffset, size);
+              console.log(`Found VehicleList data at offset 0x${dataOffset.toString(16)}, size=${size} bytes`);
+              break;
+            }
+          }
+          
+          if (resourceData) {
+            // Check if it's a nested bundle
+            const magic = new TextDecoder().decode(resourceData.subarray(0, 4));
+            console.log(`First 4 bytes: "${magic}"`);
+            
+            if (magic === 'bnd2') {
+              console.log('🔍 Found nested bundle - parsing...');
+              const nestedBuffer = resourceData.buffer.slice(resourceData.byteOffset, resourceData.byteOffset + resourceData.byteLength);
+              const nestedBundle = parseBundle(nestedBuffer);
+              
+              console.log(`Nested bundle contains ${nestedBundle.resources.length} resources`);
+              
+              // Look for PlayerCarColours in nested bundle
+              const nestedPlayerCarColours = nestedBundle.resources.find((r: any) => r.resourceTypeId === 0x1001E);
+              if (nestedPlayerCarColours) {
+                console.log('✅ Found PlayerCarColours in nested bundle!');
+                expect(nestedPlayerCarColours.resourceTypeId).toBe(0x1001E);
+              } else {
+                console.log('❌ No PlayerCarColours found in nested bundle either');
+              }
+            }
+          }
+        }
+        return;
+      }
+      
+      console.log('\n=== PlayerCarColours Resource Details ===');
+      console.log(`Resource ID: 0x${playerCarColoursResource.resourceId.toString(16)}`);
+      console.log(`Resource Type ID: 0x${playerCarColoursResource.resourceTypeId.toString(16)} (PlayerCarColours)`);
+      
+      expect(playerCarColoursResource.resourceTypeId).toBe(0x1001E);
+    });
+
+    it('should analyze PlayerCarColours data structure if available', () => {
+      const playerCarColoursResource = parsedBundle.resources.find((r: any) => r.resourceTypeId === 0x1001E);
+      
+      if (playerCarColoursResource) {
+        console.log('\n=== PlayerCarColours Data Structure Analysis ===');
+        
+        // Get the raw resource data
+        let resourceData: Uint8Array | null = null;
+        
+        for (let i = 0; i < 3; i++) {
+          const size = extractResourceSize(playerCarColoursResource.sizeAndAlignmentOnDisk[i]);
+          if (size > 0) {
+            const dataOffset = playerCarColoursResource.diskOffsets[i];
+            resourceData = new Uint8Array(bundleData.buffer, dataOffset, size);
+            console.log(`Found data at offset 0x${dataOffset.toString(16)}, size=${size} bytes`);
+            break;
+          }
+        }
+        
+        expect(resourceData).toBeDefined();
+        
+        if (resourceData) {
+          // Check for compression
+          const isCompressed = resourceData.length >= 2 && resourceData[0] === 0x78;
+          console.log(`Compression: ${isCompressed ? 'Zlib compressed' : 'Not compressed'}`);
+          
+          console.log(`Final data length: ${resourceData.length} bytes`);
+          console.log(`Expected structure sizes:`);
+          console.log(`  32-bit: 0x3C (60) bytes = 5 palettes * 12 bytes`);
+          console.log(`  64-bit: 0x78 (120) bytes = 5 palettes * 24 bytes`);
+          
+          const is32BitSize = resourceData.length >= 60;
+          const is64BitSize = resourceData.length >= 120;
+          console.log(`Size compatibility: 32-bit=${is32BitSize}, 64-bit=${is64BitSize}`);
+          
+          expect(resourceData.length).toBeGreaterThan(0);
+        }
+      } else {
+        console.log('ℹ️ Skipping data structure analysis - PlayerCarColours not found in this bundle');
       }
     });
   });
