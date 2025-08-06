@@ -2,6 +2,7 @@
 // Complements the vehicleListParser for round-trip editing
 
 import { BufferWriter } from 'typed-binary';
+import * as pako from 'pako';
 import type { 
   VehicleListEntry, 
   VehicleListEntryGamePlayData, 
@@ -82,7 +83,8 @@ const AI_MUSIC_STREAMS_REVERSE: Record<string, number> = {
  */
 export function writeVehicleList(
   vehicles: VehicleListEntry[], 
-  littleEndian: boolean = true
+  littleEndian: boolean = true,
+  compress: boolean = false
 ): Uint8Array {
   const totalSize = VEHICLE_LIST_HEADER_SIZE + (vehicles.length * VEHICLE_ENTRY_SIZE);
   const buffer = new ArrayBuffer(totalSize);
@@ -98,7 +100,14 @@ export function writeVehicleList(
     writeVehicleEntry(writer, vehicle);
   }
 
-  return new Uint8Array(buffer);
+  const uncompressedData = new Uint8Array(buffer);
+  
+  // Apply compression if requested
+  if (compress) {
+    return compressVehicleListData(uncompressedData);
+  }
+  
+  return uncompressedData;
 }
 
 /**
@@ -336,6 +345,18 @@ function writeU64(writer: BufferWriter, value: bigint): void {
   
   writer.writeUint32(low);
   writer.writeUint32(high);
+}
+
+/**
+ * Compresses vehicle list data using zlib
+ */
+function compressVehicleListData(data: Uint8Array): Uint8Array {
+  try {
+    return pako.deflate(data);
+  } catch (error) {
+    console.warn('Failed to compress vehicle list data:', error);
+    return data; // Return uncompressed data as fallback
+  }
 }
 
 /**

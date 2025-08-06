@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {  Upload, Database, Cpu, HardDrive, Zap, AlertCircle, Download } from "lucide-react";
+import { Upload, Database, Cpu, HardDrive, Zap, AlertCircle, Download, Search, Filter, File, Image, Volume2, Code } from "lucide-react";
 import { toast } from "sonner";
 import { parseBundle, getPlatformName, getFlagNames, formatResourceId, type ParsedBundle, type ResourceEntry } from "@/lib/parsers/bundleParser";
 import { extractResourceSize, getMemoryTypeName } from "@/lib/core/resourceManager";
@@ -14,9 +14,13 @@ import { VehicleList } from "@/components/VehicleList";
 import { PlayerCarColoursComponent } from "@/components/PlayerCarColours";
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { VehicleEditor } from './VehicleEditor';
 import { writeVehicleList } from '@/lib/parsers/vehicleListWriter';
-import {  BundleBuilder } from '@/lib/core/bundleWriter';
+import { writePlayerCarColours } from '@/lib/parsers/playerCarColoursWriter';
+import { BundleBuilder, createEntryBlock, type BundleEntry } from '@/lib/core/bundleWriter';
 
 // Converted resource type for UI display
 type UIResource = {
@@ -34,27 +38,10 @@ type UIResource = {
   raw: ResourceEntry;
 }
 
-const formatBytes = (bytes: number) => {
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  if (bytes === 0) return '0 B';
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
-};
-
-const getMemoryIcon = (type: string) => {
-  if (type.includes('Main')) return <Cpu className="w-4 h-4" />;
-  if (type.includes('Graphics')) return <Zap className="w-4 h-4" />;
-  if (type.includes('Physical') || type.includes('Disposable')) return <HardDrive className="w-4 h-4" />;
-  return <Database className="w-4 h-4" />;
-};
-
-const getTypeColor = (category: string) => {
-  return getResourceTypeColor(category as ResourceCategory);
-};
-
 export const BundleManager = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState<string>("all");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedResource, setSelectedResource] = useState<UIResource | null>(null);
   const [loadedBundle, setLoadedBundle] = useState<ParsedBundle | null>(null);
   const [originalArrayBuffer, setOriginalArrayBuffer] = useState<ArrayBuffer | null>(null);
@@ -75,7 +62,8 @@ export const BundleManager = () => {
                          resource.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          resource.typeName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPlatform = selectedPlatform === "all" || resource.platform === selectedPlatform;
-    return matchesSearch && matchesPlatform;
+    const matchesCategory = selectedCategory === "all" || resource.category === selectedCategory;
+    return matchesSearch && matchesPlatform && matchesCategory;
   });
 
   const convertResourceToUI = (resource: ResourceEntry, bundle: ParsedBundle, debugResources: DebugResource[]): UIResource => {
@@ -183,15 +171,40 @@ export const BundleManager = () => {
     }
   };
 
-  const handleFileUpload = () => {
-    fileInputRef.current?.click();
-  };
-
   const totalUncompressed = filteredResources.reduce((sum, r) => sum + r.uncompressedSize, 0);
   const totalCompressed = filteredResources.reduce((sum, r) => sum + r.compressedSize, 0);
   const compressionRatio = totalUncompressed > 0 ? (totalCompressed / totalUncompressed * 100).toFixed(1) : "0";
 
   const currentPlatform = loadedBundle ? getPlatformName(loadedBundle.header.platform) : "None";
+
+  // Resource utilities
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  };
+
+  const getCategoryIcon = (category: ResourceCategory) => {
+    switch (category) {
+      case 'Graphics': return Image;
+      case 'Audio': return Volume2;
+      case 'Data': return Database;
+      case 'Script': return Code;
+      default: return File;
+    }
+  };
+
+  const getUniqueCategories = () => {
+    const categories = new Set(resources.map(r => r.category));
+    return Array.from(categories).sort();
+  };
+
+  const getUniquePlatforms = () => {
+    const platforms = new Set(resources.map(r => r.platform));
+    return Array.from(platforms).sort();
+  };
 
   const handleAddVehicle = () => {
     setSelectedVehicle(null);
@@ -229,7 +242,7 @@ export const BundleManager = () => {
     setIsModified(true);
   };
 
-  const handleExportBundle = async () => {
+    const handleExportBundle = async () => {
     if (!loadedBundle || !originalArrayBuffer) {
       toast.error('No bundle loaded to export.');
       return;
@@ -238,44 +251,102 @@ export const BundleManager = () => {
     try {
       setIsLoading(true);
       
-             // Create a new bundle builder
-       const builder = new BundleBuilder({
-         platform: loadedBundle.header.platform as any,
-         compress: (loadedBundle.header.flags & 0x1) !== 0
-       });
-
-       // Add existing resources, replacing vehicle list if modified
-       for (const resource of loadedBundle.resources) {
-         const vehicleType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Vehicle List');
-         
-         if (vehicleType && resource.resourceTypeId === vehicleType.id && isModified) {
-           // Replace vehicle list with modified data
-           const littleEndian = loadedBundle.header.platform !== PLATFORMS.PS3;
-           const vehicleListData = writeVehicleList(vehicleList, littleEndian);
-           builder.addResource(resource.resourceTypeId, vehicleListData, resource.resourceId);
-         } else {
-           // Extract original resource data from the bundle
-           const resourceStartOffset = resource.diskOffsets[0];
-           const resourceSize = resource.sizeAndAlignmentOnDisk[0];
-           
-           // Extract the raw resource data from the original bundle
-           const resourceData = new Uint8Array(
-             originalArrayBuffer.slice(resourceStartOffset, resourceStartOffset + resourceSize)
-           );
-           
-                     // Add the original resource data to the new bundle
-          // Use the new method to preserve all original resource metadata
-          console.log(`📦 Adding existing resource 0x${resource.resourceTypeId.toString(16)}: ${resourceData.length} bytes, flags=0x${resource.flags.toString(16)}`);
-          
-          builder.addExistingResource(resource, resourceData);
-         }
-       }
-
+      // Use the same platform detection logic as loading
+      const platform = loadedBundle.header.platform;
+      const littleEndian = platform !== PLATFORMS.PS3;
+      const compress = (loadedBundle.header.flags & 0x1) !== 0;
+      
+      console.log(`🔧 Exporting bundle: platform=${platform}, littleEndian=${littleEndian}, compressed=${compress}`);
+      
+      // Create a new bundle builder with original bundle settings
+      const builder = new BundleBuilder({
+        platform: platform,
+        compress: compress,
+        includeDebugData: !!loadedBundle.debugData
+      });
+      
+      // Set resource string table if it exists
       if (loadedBundle.debugData) {
-        builder.setDebugData(loadedBundle.debugData);
+        builder.setResourceStringTable(loadedBundle.debugData);
       }
 
-      const newBundleData = await builder.build();
+      // Convert each resource to a BundleEntry and add to builder
+      for (const resource of loadedBundle.resources) {
+        const vehicleType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Vehicle List');
+        const colourType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Player Car Colours');
+        
+        // Get the actual resource data
+        let resourceData: Uint8Array;
+        
+        if (vehicleType && resource.resourceTypeId === vehicleType.id) {
+          // Replace vehicle list with modified data
+          console.log(`📝 Replacing vehicle list (${vehicleList.length} vehicles)`);
+          
+          // Check if original data was compressed
+          const absoluteResourceOffset = loadedBundle.header.resourceDataOffsets[0] + resource.diskOffsets[0];
+          const resourceSize = extractResourceSize(resource.sizeAndAlignmentOnDisk[0]);
+          const originalResourceData = new Uint8Array(
+            originalArrayBuffer.slice(absoluteResourceOffset, absoluteResourceOffset + resourceSize)
+          );
+          
+          const isDataLevelCompressed = originalResourceData.length >= 2 && originalResourceData[0] === 0x78;
+          resourceData = writeVehicleList(vehicleList, littleEndian, isDataLevelCompressed);
+          
+        } else if (colourType && resource.resourceTypeId === colourType.id && playerCarColours) {
+          // Replace player car colours with modified data
+          console.log(`🎨 Replacing player car colours (${playerCarColours.palettes.length} palettes)`);
+          
+          // Check if original data was compressed
+          const absoluteResourceOffset = loadedBundle.header.resourceDataOffsets[0] + resource.diskOffsets[0];
+          const resourceSize = extractResourceSize(resource.sizeAndAlignmentOnDisk[0]);
+          const originalResourceData = new Uint8Array(
+            originalArrayBuffer.slice(absoluteResourceOffset, absoluteResourceOffset + resourceSize)
+          );
+          
+          const isDataLevelCompressed = originalResourceData.length >= 2 && originalResourceData[0] === 0x78;
+          resourceData = writePlayerCarColours(playerCarColours, littleEndian, isDataLevelCompressed);
+          
+        } else {
+          // Keep existing resource unchanged
+          const absoluteResourceOffset = loadedBundle.header.resourceDataOffsets[0] + resource.diskOffsets[0];
+          const resourceSize = extractResourceSize(resource.sizeAndAlignmentOnDisk[0]);
+          
+          resourceData = new Uint8Array(
+            originalArrayBuffer.slice(absoluteResourceOffset, absoluteResourceOffset + resourceSize)
+          );
+          
+          console.log(`📦 Preserving existing resource 0x${resource.resourceTypeId.toString(16)}: ${resourceData.length} bytes`);
+        }
+        
+        // Create BundleEntry matching the new API
+        const bundleEntry: BundleEntry = {
+          id: resource.resourceId,
+          references: resource.importHash, // Use importHash as references
+          type: resource.resourceTypeId,
+          entryBlocks: [
+            // Main memory block (index 0)
+            createEntryBlock(resourceData, 16, false),
+            // Graphics memory block (index 1) - empty for most resources
+            createEntryBlock(null, 16, false),
+            // Other memory block (index 2) - empty for most resources  
+            createEntryBlock(null, 16, false)
+          ],
+          dependenciesListOffset: resource.importOffset,
+          dependencyCount: resource.importCount
+        };
+        
+        // Add the entry to the bundle
+        builder.addEntry(
+          bundleEntry.id,
+          bundleEntry.references,
+          bundleEntry.type,
+          bundleEntry.entryBlocks,
+          bundleEntry.dependenciesListOffset,
+          bundleEntry.dependencyCount
+        );
+      }
+
+      const newBundleData = await builder.write();
       
       // Download the file
       const blob = new Blob([newBundleData], { type: 'application/octet-stream' });
@@ -297,6 +368,87 @@ export const BundleManager = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // ResourceCard component
+  const ResourceCard = ({ resource }: { resource: UIResource }) => {
+    const IconComponent = getCategoryIcon(resource.category as ResourceCategory);
+    const categoryColor = getResourceTypeColor(resource.category as ResourceCategory);
+    
+    return (
+      <Card className="h-fit border rounded-lg hover:shadow-lg transition-all duration-200">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="p-2 rounded-lg bg-muted/50">
+                <IconComponent className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-medium text-sm truncate" title={resource.name}>
+                  {resource.name}
+                </h3>
+                <p className="text-xs text-muted-foreground truncate" title={resource.typeName}>
+                  {resource.typeName}
+                </p>
+              </div>
+            </div>
+            <Badge variant="outline" className={`text-xs shrink-0 ${categoryColor}`}>
+              {resource.category}
+            </Badge>
+          </div>
+          
+          <div className="space-y-2">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-muted-foreground">Resource ID:</span>
+              <code className="bg-muted px-1.5 py-0.5 rounded font-mono">
+                {resource.id}
+              </code>
+            </div>
+            
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-muted-foreground">Type:</span>
+              <code className="bg-muted px-1.5 py-0.5 rounded font-mono">
+                {resource.type}
+              </code>
+            </div>
+            
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-muted-foreground">Size:</span>
+              <div className="text-right">
+                <div>{formatFileSize(resource.uncompressedSize)}</div>
+                {resource.compressedSize !== resource.uncompressedSize && (
+                  <div className="text-muted-foreground">
+                    {formatFileSize(resource.compressedSize)} compressed
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {resource.memoryType && (
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-muted-foreground">Memory:</span>
+                <span className="bg-muted px-1.5 py-0.5 rounded text-xs">
+                  {resource.memoryType}
+                </span>
+              </div>
+            )}
+            
+            {resource.flags.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Flags:</span>
+                <div className="flex flex-wrap gap-1">
+                  {resource.flags.map((flag, index) => (
+                    <Badge key={index} variant="secondary" className="text-xs">
+                      {flag}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
   return (
@@ -393,7 +545,129 @@ export const BundleManager = () => {
               </TabsContent>
 
               <TabsContent value="resources" className="space-y-6">
-                {/* Existing resources tab content */}
+                {/* Resource search and filters */}
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-2xl font-bold tracking-tight">
+                      Bundle Resources
+                    </h2>
+                    <div className="flex items-center gap-4">
+                      <div className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full">
+                        {filteredResources.length} of {resources.length} resources
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Platform: {currentPlatform}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search resources by name, type, or ID..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                    
+                    <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                      <SelectTrigger className="w-[180px]">
+                        <Filter className="w-4 h-4 mr-2" />
+                        <SelectValue placeholder="All Categories" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Categories</SelectItem>
+                        {getUniqueCategories().map(category => (
+                          <SelectItem key={category} value={category}>
+                            {category}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    
+                    <Select value={selectedPlatform} onValueChange={setSelectedPlatform}>
+                      <SelectTrigger className="w-[160px]">
+                        <Cpu className="w-4 h-4 mr-2" />
+                        <SelectValue placeholder="All Platforms" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Platforms</SelectItem>
+                        {getUniquePlatforms().map(platform => (
+                          <SelectItem key={platform} value={platform}>
+                            {platform}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Resource summary statistics */}
+                {filteredResources.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium">Total Resources</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">{filteredResources.length}</div>
+                      </CardContent>
+                    </Card>
+                    
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium">Uncompressed Size</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">{formatFileSize(totalUncompressed)}</div>
+                      </CardContent>
+                    </Card>
+                    
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium">Compressed Size</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">{formatFileSize(totalCompressed)}</div>
+                      </CardContent>
+                    </Card>
+                    
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium">Compression Ratio</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">{compressionRatio}%</div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {/* Resource grid */}
+                {filteredResources.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground space-y-4">
+                    <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                      <Database className="w-8 h-8" />
+                    </div>
+                    <div className="text-center">
+                      <h3 className="text-lg font-medium">No Resources Found</h3>
+                      <p className="text-sm">
+                        {resources.length === 0 
+                          ? "This bundle doesn't contain any resources."
+                          : "Try adjusting your search or filter criteria."
+                        }
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                    {filteredResources.map((resource, index) => (
+                      <ResourceCard key={`${resource.id}-${index}`} resource={resource} />
+                    ))}
+                  </div>
+                )}
               </TabsContent>
 
                              <TabsContent value="colors" className="space-y-6">

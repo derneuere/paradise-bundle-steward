@@ -198,7 +198,7 @@ export function validateSchemaSize(schema: object, expectedSize: number): boolea
 
 // Known schema sizes for validation
 export const SCHEMA_SIZES = {
-  BundleHeader: 48, // 52 bytes total, but magic is handled separately (4 bytes)
+  BundleHeader: 48, // Total header size including 4-byte magic
   ResourceEntry: 80,
   ImportEntry: 16,
   VehicleListHeader: 16,
