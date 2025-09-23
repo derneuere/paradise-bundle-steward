@@ -14,10 +14,11 @@ import type {
   ProgressCallback,
   ParsedBundle
 } from '../core/types';
-import { 
+import {
   VehicleListHeaderSchema,
   VehicleEntrySchema,
   u64ToBigInt,
+  bytesToBigInt,
 } from '../core/schemas';
 import { 
   getResourceData,
@@ -41,10 +42,10 @@ export type VehicleListEntryGamePlayData = {
 }
 
 export type VehicleListEntryAudioData = {
-  exhaustName: string;
+  exhaustName: bigint; // Encrypted exhaust name
   exhaustEntityKey: bigint;
   engineEntityKey: bigint;
-  engineName: string;
+  engineName: bigint; // Encrypted engine name
   rivalUnlockName: string;
   wonCarVoiceOverKey: bigint;
   rivalReleasedVoiceOverKey: bigint;
@@ -55,8 +56,8 @@ export type VehicleListEntryAudioData = {
 }
 
 export type VehicleListEntry = {
-  id: string;
-  parentId: string;
+  id: bigint; // Encrypted CGS ID
+  parentId: bigint; // Encrypted parent CGS ID
   vehicleName: string;
   manufacturer: string;
   wheelName: string;
@@ -74,6 +75,12 @@ export type VehicleListEntry = {
   topSpeedBoostGUIStat: number;
   colorIndex: number;
   paletteIndex: number;
+}
+
+// Helper function to get decrypted ID for display
+export function getDecryptedId(encrypted: bigint): string {
+  if (encrypted === 0n) return '';
+  return decryptEncryptedString(encrypted);
 }
 
 export type ParsedVehicleList = {
@@ -374,9 +381,9 @@ function parseVehicleEntries(
 
 function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>, index: number): VehicleListEntry | null {
   try {
-    // Decode strings
-    const id = decodeCgsId(rawEntry.idBytes);
-    const parentId = decodeCgsId(rawEntry.parentIdBytes);
+    // Preserve encrypted CGS IDs as bigints (don't decrypt)
+    const id = bytesToBigInt(rawEntry.idBytes);
+    const parentId = bytesToBigInt(rawEntry.parentIdBytes);
     const wheelName = decodeString(rawEntry.wheelNameBytes);
     const vehicleName = decodeString(rawEntry.vehicleNameBytes);
     const manufacturer = decodeString(rawEntry.manufacturerBytes);
@@ -391,17 +398,17 @@ function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>, index:
       strengthStat: rawEntry.gamePlayData.strengthStat // Use raw value for perfect round-trip
     };
 
-    // Process audio data
+    // Process audio data - preserve encrypted names as bigints
     const audioData: VehicleListEntryAudioData = {
-      exhaustName: decodeCgsId(rawEntry.audioData.exhaustNameBytes),
+      exhaustName: bytesToBigInt(rawEntry.audioData.exhaustNameBytes),
       exhaustEntityKey: u64ToBigInt(rawEntry.audioData.exhaustEntityKey),
       engineEntityKey: u64ToBigInt(rawEntry.audioData.engineEntityKey),
-      engineName: decodeCgsId(rawEntry.audioData.engineNameBytes),
-      rivalUnlockName: CLASS_UNLOCK_STREAMS[rawEntry.audioData.rivalUnlockHash] ?? 
+      engineName: bytesToBigInt(rawEntry.audioData.engineNameBytes),
+      rivalUnlockName: CLASS_UNLOCK_STREAMS[rawEntry.audioData.rivalUnlockHash] ??
         `0x${rawEntry.audioData.rivalUnlockHash.toString(16).toUpperCase()}`,
       wonCarVoiceOverKey: u64ToBigInt(rawEntry.audioData.wonCarVoiceOverKey),
       rivalReleasedVoiceOverKey: u64ToBigInt(rawEntry.audioData.rivalReleasedVoiceOverKey),
-      aiMusicLoopContentSpec: AI_MUSIC_STREAMS[rawEntry.audioData.musicHash] ?? 
+      aiMusicLoopContentSpec: AI_MUSIC_STREAMS[rawEntry.audioData.musicHash] ??
         `0x${rawEntry.audioData.musicHash.toString(16).toUpperCase()}`,
       aiExhaustIndex: rawEntry.audioData.aiExhaustIndex as AIEngineStream,
       aiExhaustIndex2ndPick: rawEntry.audioData.aiExhaustIndex2ndPick as AIEngineStream,
@@ -434,7 +441,7 @@ function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>, index:
       colorIndex: rawEntry.colorIndex,
       paletteIndex: rawEntry.paletteIndex
     };
-    
+
   } catch (error) {
     console.warn(`Failed to process vehicle entry ${index}:`, error);
     return null;
@@ -513,8 +520,7 @@ function decodeString(bytes: number[]): string {
 
 function isValidVehicleEntry(entry: VehicleListEntry): boolean {
   return (
-    (entry.id && entry.id.trim() !== '' && entry.id.length > 2) || 
-    (entry.vehicleName && entry.vehicleName.trim() !== '' && entry.vehicleName.length > 3)
+    (entry.id !== 0n || (entry.vehicleName && entry.vehicleName.trim() !== '' && entry.vehicleName.length > 3))
   ) && (
     entry.gamePlayData.damageLimit >= 0 &&
     entry.gamePlayData.damageLimit < 1000 &&

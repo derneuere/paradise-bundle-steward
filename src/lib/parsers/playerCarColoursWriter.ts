@@ -52,14 +52,8 @@ export function writePlayerCarColours(
     writeColourPalette(writer, palette);
   }
 
-  const uncompressedData = new Uint8Array(buffer);
-  
-  // Apply compression if requested
-  if (compress) {
-    return compressPlayerCarColoursData(uncompressedData);
-  }
-  
-  return uncompressedData;
+  // Always return uncompressed data - compression is handled at the bundle level
+  return new Uint8Array(buffer);
 }
 
 /**
@@ -127,7 +121,7 @@ function writeU64(writer: BufferWriter, value: bigint): void {
 /**
  * Compresses player car colours data using zlib with maximum compression
  */
-function compressPlayerCarColoursData(data: Uint8Array): Uint8Array {
+export function compressPlayerCarColoursData(data: Uint8Array): Uint8Array {
   try {
     return pako.deflate(data, { level: 9 });
   } catch (error) {

@@ -19,8 +19,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { VehicleEditor } from './VehicleEditor';
-import { writeVehicleList } from '@/lib/parsers/vehicleListWriter';
-import { writePlayerCarColours } from '@/lib/parsers/playerCarColoursWriter';
+import { writeVehicleList, compressVehicleListData } from '@/lib/parsers/vehicleListWriter';
+import { writePlayerCarColours, compressPlayerCarColoursData } from '@/lib/parsers/playerCarColoursWriter';
 import { BundleBuilder, createResourceEntry } from '@/lib/core/bundleWriter';
 
 // Converted resource type for UI display
@@ -301,7 +301,8 @@ export const BundleManager = () => {
         
         // Get the actual resource data
         let resourceData: Uint8Array;
-        
+        let uncompressedData: Uint8Array | undefined;
+
         if (vehicleType && resource.resourceTypeId === vehicleType.id) {
           // Replace vehicle list with modified data
           console.log(`📝 Replacing vehicle list (${vehicleList.length} vehicles)`);
@@ -314,14 +315,21 @@ export const BundleManager = () => {
           };
           const { data: decompressedData } = getResourceData(resourceContext);
 
-          // Write the vehicle list data and compress it with the same settings as the original bundle
+          // Write the vehicle list data (always uncompressed)
           if (parsedVehicleList) {
-            resourceData = writeVehicleList(parsedVehicleList, littleEndian, compress);
+            uncompressedData = writeVehicleList(parsedVehicleList, littleEndian, false);
           } else {
             // Fallback if we don't have parsed data (shouldn't happen in normal operation)
-            resourceData = writeVehicleList({ vehicles: vehicleList, header: { unknown1: 0, unknown2: 0 } }, littleEndian, compress);
+            uncompressedData = writeVehicleList({ vehicles: vehicleList, header: { unknown1: 0, unknown2: 0 } }, littleEndian, false);
           }
-          
+
+          // Apply compression if needed
+          if (compress) {
+            resourceData = compressVehicleListData(uncompressedData);
+          } else {
+            resourceData = uncompressedData;
+          }
+
         } else if (colourType && resource.resourceTypeId === colourType.id && playerCarColours) {
           // Replace player car colours with modified data
           console.log(`🎨 Replacing player car colours (${playerCarColours.palettes.length} palettes)`);
@@ -334,9 +342,16 @@ export const BundleManager = () => {
           };
           const { data: decompressedData } = getResourceData(resourceContext);
 
-          // Write the player car colours data and compress it with the same settings as the original bundle
-          resourceData = writePlayerCarColours(playerCarColours, littleEndian, compress);
-          
+          // Write the player car colours data (always uncompressed)
+          uncompressedData = writePlayerCarColours(playerCarColours, littleEndian, false);
+
+          // Apply compression if needed
+          if (compress) {
+            resourceData = compressPlayerCarColoursData(uncompressedData);
+          } else {
+            resourceData = uncompressedData;
+          }
+
         } else {
           // Keep existing resource unchanged
           const absoluteResourceOffset = loadedBundle.header.resourceDataOffsets[0] + resource.diskOffsets[0];
@@ -365,7 +380,11 @@ export const BundleManager = () => {
 
         if (vehicleType && resource.resourceTypeId === vehicleType.id) {
           const alignment = extractAlignment(resource.uncompressedSizeAndAlignment[0]);
-          reserveUncompressedSizes[0] = packSizeAndAlignment(resourceData.length, alignment);
+          reserveUncompressedSizes[0] = packSizeAndAlignment(uncompressedData.length, alignment);
+          reserveCompressedSizes[0] = resourceData.length;
+        } else if (colourType && resource.resourceTypeId === colourType.id && playerCarColours) {
+          const alignment = extractAlignment(resource.uncompressedSizeAndAlignment[0]);
+          reserveUncompressedSizes[0] = packSizeAndAlignment(uncompressedData.length, alignment);
           reserveCompressedSizes[0] = resourceData.length;
         }
 

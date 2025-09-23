@@ -1,14 +1,15 @@
 import { Volume2 } from "lucide-react";
 import { ComponentStyles } from '@/lib/burnoutTheme';
 import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
+import { getDecryptedId } from '@/lib/parsers/vehicleListParser';
 
 type AudioSectionProps = {
   vehicle: VehicleListEntry;
 }
 
 export const AudioSection = ({ vehicle }: AudioSectionProps) => {
-  const hasAudioData = vehicle.audioData.engineName || vehicle.audioData.exhaustName || vehicle.audioData.aiMusicLoopContentSpec;
-  
+  const hasAudioData = vehicle.audioData.engineName !== 0n || vehicle.audioData.exhaustName !== 0n || vehicle.audioData.aiMusicLoopContentSpec;
+
   if (!hasAudioData) return null;
 
   return (
@@ -18,19 +19,19 @@ export const AudioSection = ({ vehicle }: AudioSectionProps) => {
         Audio
       </h4>
       <div className={ComponentStyles.details}>
-        {vehicle.audioData.engineName && (
+        {vehicle.audioData.engineName !== 0n && (
           <div>
             <span className={ComponentStyles.statLabel}>Engine:</span>
             <span className="ml-1 font-mono text-xs break-all">
-              {vehicle.audioData.engineName}
+              {getDecryptedId(vehicle.audioData.engineName)}
             </span>
           </div>
         )}
-        {vehicle.audioData.exhaustName && (
+        {vehicle.audioData.exhaustName !== 0n && (
           <div>
             <span className={ComponentStyles.statLabel}>Exhaust:</span>
             <span className="ml-1 font-mono text-xs break-all">
-              {vehicle.audioData.exhaustName}
+              {getDecryptedId(vehicle.audioData.exhaustName)}
             </span>
           </div>
         )}

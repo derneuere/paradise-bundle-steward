@@ -9,6 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
+import { getDecryptedId } from '@/lib/parsers/vehicleListParser';
+import { encryptStringToCgsId } from '@/lib/parsers/vehicleListWriter';
 import { Rank, VehicleType, CarType, LiveryType } from '@/lib/core/types';
 
 type VehicleEditorProps = {
@@ -78,8 +80,8 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
     } else if (isNewVehicle) {
       // Create a new vehicle with default values
       setEditedVehicle({
-        id: '',
-        parentId: '',
+        id: 0n,
+        parentId: 0n,
         wheelName: '',
         vehicleName: '',
         manufacturer: '',
@@ -93,10 +95,10 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
         },
         attribCollectionKey: 0n,
         audioData: {
-          exhaustName: '',
+          exhaustName: 0n,
           exhaustEntityKey: 0n,
           engineEntityKey: 0n,
-          engineName: '',
+          engineName: 0n,
           rivalUnlockName: '',
           wonCarVoiceOverKey: 0n,
           rivalReleasedVoiceOverKey: 0n,
@@ -201,22 +203,44 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="vehicleId">Vehicle ID</Label>
+                    <Label htmlFor="vehicleId">Vehicle ID (Hex)</Label>
                     <Input
                       id="vehicleId"
-                      value={editedVehicle.id}
-                      onChange={(e) => updateField('id', e.target.value)}
-                      placeholder="Enter vehicle ID"
+                      value={`0x${editedVehicle.id.toString(16).toUpperCase()}`}
+                      onChange={(e) => {
+                        const hex = e.target.value.replace('0x', '');
+                        try {
+                          const value = BigInt(`0x${hex}`);
+                          updateField('id', value);
+                        } catch (e) {
+                          // Invalid hex, ignore
+                        }
+                      }}
+                      placeholder="Enter vehicle ID as hex"
                     />
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Decrypted: {getDecryptedId(editedVehicle.id)}
+                    </div>
                   </div>
                   <div>
-                    <Label htmlFor="parentId">Parent ID</Label>
+                    <Label htmlFor="parentId">Parent ID (Hex)</Label>
                     <Input
                       id="parentId"
-                      value={editedVehicle.parentId}
-                      onChange={(e) => updateField('parentId', e.target.value)}
-                      placeholder="Enter parent ID"
+                      value={`0x${editedVehicle.parentId.toString(16).toUpperCase()}`}
+                      onChange={(e) => {
+                        const hex = e.target.value.replace('0x', '');
+                        try {
+                          const value = BigInt(`0x${hex}`);
+                          updateField('parentId', value);
+                        } catch (e) {
+                          // Invalid hex, ignore
+                        }
+                      }}
+                      placeholder="Enter parent ID as hex"
                     />
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Decrypted: {getDecryptedId(editedVehicle.parentId)}
+                    </div>
                   </div>
                 </div>
 
@@ -439,20 +463,42 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="exhaustName">Exhaust Name</Label>
+                    <Label htmlFor="exhaustName">Exhaust Name (Hex)</Label>
                     <Input
                       id="exhaustName"
-                      value={editedVehicle.audioData.exhaustName}
-                      onChange={(e) => updateField('audioData.exhaustName', e.target.value)}
+                      value={`0x${editedVehicle.audioData.exhaustName.toString(16).toUpperCase()}`}
+                      onChange={(e) => {
+                        const hex = e.target.value.replace('0x', '');
+                        try {
+                          const value = BigInt(`0x${hex}`);
+                          updateField('audioData.exhaustName', value);
+                        } catch (e) {
+                          // Invalid hex, ignore
+                        }
+                      }}
                     />
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Decrypted: {getDecryptedId(editedVehicle.audioData.exhaustName)}
+                    </div>
                   </div>
                   <div>
-                    <Label htmlFor="engineName">Engine Name</Label>
+                    <Label htmlFor="engineName">Engine Name (Hex)</Label>
                     <Input
                       id="engineName"
-                      value={editedVehicle.audioData.engineName}
-                      onChange={(e) => updateField('audioData.engineName', e.target.value)}
+                      value={`0x${editedVehicle.audioData.engineName.toString(16).toUpperCase()}`}
+                      onChange={(e) => {
+                        const hex = e.target.value.replace('0x', '');
+                        try {
+                          const value = BigInt(`0x${hex}`);
+                          updateField('audioData.engineName', value);
+                        } catch (e) {
+                          // Invalid hex, ignore
+                        }
+                      }}
                     />
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Decrypted: {getDecryptedId(editedVehicle.audioData.engineName)}
+                    </div>
                   </div>
                 </div>
 

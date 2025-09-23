@@ -101,14 +101,8 @@ export function writeVehicleList(
     writeVehicleEntry(writer, vehicle);
   }
 
-  const uncompressedData = new Uint8Array(buffer);
-  
-  // Apply compression if requested
-  if (compress) {
-    return compressVehicleListData(uncompressedData);
-  }
-  
-  return uncompressedData;
+  // Always return uncompressed data - compression is handled at the bundle level
+  return new Uint8Array(buffer);
 }
 
 /**
@@ -131,11 +125,11 @@ function writeVehicleListHeader(writer: BufferWriter, numVehicles: number, unkno
  * Writes a single vehicle entry
  */
 function writeVehicleEntry(writer: BufferWriter, vehicle: VehicleListEntry): void {
-  // Write vehicle ID (8 bytes)
-  writeCgsId(writer, vehicle.id);
-  
-  // Write parent ID (8 bytes)
-  writeCgsId(writer, vehicle.parentId);
+  // Write vehicle ID (8 bytes) - use preserved encrypted bigint
+  writeU64(writer, vehicle.id);
+
+  // Write parent ID (8 bytes) - use preserved encrypted bigint
+  writeU64(writer, vehicle.parentId);
   
   // Write wheel name (32 bytes)
   writeString32(writer, vehicle.wheelName);
@@ -203,17 +197,17 @@ function writeGamePlayData(writer: BufferWriter, data: VehicleListEntryGamePlayD
  * Writes audio data structure
  */
 function writeAudioData(writer: BufferWriter, data: VehicleListEntryAudioData): void {
-  // Exhaust name (8 bytes)
-  writeCgsId(writer, data.exhaustName);
-  
+  // Exhaust name (8 bytes) - use preserved encrypted bigint
+  writeU64(writer, data.exhaustName);
+
   // Exhaust entity key (8 bytes)
   writeU64(writer, data.exhaustEntityKey);
-  
+
   // Engine entity key (8 bytes)
   writeU64(writer, data.engineEntityKey);
-  
-  // Engine name (8 bytes)
-  writeCgsId(writer, data.engineName);
+
+  // Engine name (8 bytes) - use preserved encrypted bigint
+  writeU64(writer, data.engineName);
   
   // Rival unlock hash (4 bytes)
   const rivalUnlockHash = CLASS_UNLOCK_STREAMS_REVERSE[data.rivalUnlockName] || 
@@ -349,7 +343,7 @@ function writeU64(writer: BufferWriter, value: bigint): void {
 /**
  * Compresses vehicle list data using zlib with maximum compression
  */
-function compressVehicleListData(data: Uint8Array): Uint8Array {
+export function compressVehicleListData(data: Uint8Array): Uint8Array {
   try {
     return pako.deflate(data, { level: 9 });
   } catch (error) {
@@ -371,7 +365,7 @@ export function calculateVehicleListSize(vehicleCount: number): number {
 export function validateVehicleEntry(vehicle: VehicleListEntry): string[] {
   const errors: string[] = [];
 
-  if (!vehicle.id || vehicle.id.trim() === '') {
+  if (vehicle.id === 0n) {
     errors.push('Vehicle ID cannot be empty');
   }
 
