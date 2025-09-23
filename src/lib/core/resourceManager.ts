@@ -132,8 +132,29 @@ export function getResourceData(context: ResourceContext): ResourceData {
  * Detects if resource data contains a nested bundle
  */
 export function isNestedBundle(data: Uint8Array): boolean {
+  if (data.length < 8) {
+    return false; // Too small to be a bundle
+  }
+
   const magic = new TextDecoder().decode(data.subarray(0, 4));
-  return magic === 'bnd2';
+  if (magic !== 'bnd2') {
+    return false;
+  }
+
+  // Check version (should be 2 for Burnout Paradise bundles)
+  const version = new DataView(data.buffer, data.byteOffset + 4).getUint32(0, true);
+  if (version !== 2) {
+    return false;
+  }
+
+  // Check platform (should be 1 for PC, 2 for X360, 3 for PS3)
+  const platform = new DataView(data.buffer, data.byteOffset + 8).getUint32(0, true);
+  if (platform < 1 || platform > 3) {
+    return false;
+  }
+
+  console.debug(`isNestedBundle: Found valid bundle - magic: ${magic}, version: ${version}, platform: ${platform}, size: ${data.length}`);
+  return true;
 }
 
 /**

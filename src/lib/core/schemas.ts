@@ -213,6 +213,40 @@ export const SCHEMA_SIZES = {
 } as const;
 
 // ============================================================================
+// Bundle Writing Schemas
+// ============================================================================
+
+// Entry block schema for writing (matches the bundleWriter EntryBlock interface)
+export const EntryBlockWriteSchema = object({
+  compressed: u8,  // Convert boolean to byte
+  compressedSize: u32,
+  uncompressedSize: u32,
+  uncompressedAlignment: u32
+  // Note: data is handled separately as it can be large and variable
+});
+
+// Bundle entry schema for writing (matches bundleWriter BundleEntry interface)
+export const BundleEntryWriteSchema = object({
+  id: u64Schema,
+  references: u64Schema,
+  // entryBlocks handled separately
+  dependenciesListOffset: u32,
+  type: u32,
+  dependencyCount: u32
+});
+
+// Resource string table schema
+export const ResourceStringTableSchema = object({
+  content: string  // Null-terminated string
+});
+
+// Complete bundle structure schema for organized writing
+export const BundleWriteSchema = object({
+  header: BundleHeaderSchema,
+  // RST, entries, and data handled as separate write operations due to size
+});
+
+// ============================================================================
 // Writing Helper Functions
 // ============================================================================
 
@@ -243,5 +277,49 @@ export function createEmptyResourceEntry(): Omit<Parsed<typeof ResourceEntrySche
     importCount: 0,
     flags: 0,
     streamIndex: 0
+  };
+}
+
+// Convert bigint to schema format for writing
+export function bundleEntryToSchema(entry: {
+  id: bigint;
+  references: bigint;
+  dependenciesListOffset: number;
+  type: number;
+  dependencyCount: number;
+}): Parsed<typeof BundleEntryWriteSchema> {
+  return {
+    id: bigIntToU64(entry.id),
+    references: bigIntToU64(entry.references),
+    dependenciesListOffset: entry.dependenciesListOffset,
+    type: entry.type,
+    dependencyCount: entry.dependencyCount
+  };
+}
+
+// Convert resource entry to schema format
+export function resourceEntryToSchema(entry: {
+  resourceId: bigint;
+  importHash: bigint;
+  uncompressedSizeAndAlignment: number[];
+  sizeAndAlignmentOnDisk: number[];
+  diskOffsets: number[];
+  importOffset: number;
+  resourceTypeId: number;
+  importCount: number;
+  flags: number;
+  streamIndex: number;
+}): Parsed<typeof ResourceEntrySchema> {
+  return {
+    resourceId: bigIntToU64(entry.resourceId),
+    importHash: bigIntToU64(entry.importHash),
+    uncompressedSizeAndAlignment: entry.uncompressedSizeAndAlignment.slice(0, 3) as [number, number, number],
+    sizeAndAlignmentOnDisk: entry.sizeAndAlignmentOnDisk.slice(0, 3) as [number, number, number],
+    diskOffsets: entry.diskOffsets.slice(0, 3) as [number, number, number],
+    importOffset: entry.importOffset,
+    resourceTypeId: entry.resourceTypeId,
+    importCount: entry.importCount,
+    flags: entry.flags,
+    streamIndex: entry.streamIndex
   };
 } 

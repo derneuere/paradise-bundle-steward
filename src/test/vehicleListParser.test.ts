@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseBundle } from '../lib/parsers/bundleParser';
-import { parseVehicleList, type VehicleListEntry } from '../lib/parsers/vehicleListParser';
+import { parseVehicleList, type VehicleListEntry, type ParsedVehicleList } from '../lib/parsers/vehicleListParser';
+import { writeVehicleList } from '../lib/parsers/vehicleListWriter';
 import type { ParsedBundle, ResourceEntry } from '../lib/core/types';
 
 // Test data path (relative to project root)
@@ -11,17 +12,19 @@ const BUNDLE_PATH = join(process.cwd(), 'example', 'VEHICLELIST.BUNDLE');
 describe('Vehicle List Parser', () => {
   let bundleData: Buffer;
   let parsedBundle: ParsedBundle;
+  let parsedVehicleList: ParsedVehicleList;
   let vehicles: VehicleListEntry[];
   let vehicleListResource: ResourceEntry | undefined;
   
   beforeAll(() => {
     console.log('🧪 Vehicle List Parser Test Suite');
     bundleData = readFileSync(BUNDLE_PATH);
-    parsedBundle = parseBundle(bundleData.buffer);
+    parsedBundle = parseBundle(bundleData.buffer as ArrayBuffer);
     vehicleListResource = parsedBundle.resources.find((r: ResourceEntry) => r.resourceTypeId === 0x10005);
     
     if (vehicleListResource) {
-      vehicles = parseVehicleList(bundleData.buffer, vehicleListResource, { littleEndian: true });
+      parsedVehicleList = parseVehicleList(bundleData.buffer as ArrayBuffer, vehicleListResource, { littleEndian: true });
+      vehicles = parsedVehicleList.vehicles;
     }
   });
 
@@ -237,30 +240,91 @@ describe('Vehicle List Parser', () => {
     it('should experiment with stat conversion approaches', () => {
       if (vehicles.length > 0) {
         const firstVehicle = vehicles[0];
-        
+
         console.log('\n🧪 EXPERIMENTAL STAT CONVERSIONS:');
-        
+
         // Try different speed interpretations
         const speedNormalAttempt1 = Math.max(1, firstVehicle.topSpeedNormalGUIStat - 1);
         const speedBoostAttempt1 = Math.max(1, firstVehicle.topSpeedBoostGUIStat + 1);
         console.log(`  Speed attempt 1: Normal=${speedNormalAttempt1}/10, Boost=${speedBoostAttempt1}/10 (offset adjustment)`);
-        
-        // Try strength interpretations 
+
+        // Try strength interpretations
         const strengthAttempt1 = Math.floor(firstVehicle.gamePlayData.strengthStat / 2);
         const strengthAttempt2 = 11 - firstVehicle.gamePlayData.strengthStat;
         const strengthAttempt3 = Math.floor(firstVehicle.gamePlayData.damageLimit * 5);
         console.log(`  Strength attempt 1: ${strengthAttempt1}/10 (divide by 2)`);
         console.log(`  Strength attempt 2: ${strengthAttempt2}/10 (invert scale)`);
         console.log(`  Strength attempt 3: ${strengthAttempt3}/10 (use damageLimit * 5)`);
-        
+
         console.log('\n🔍 ID DECODING ATTEMPTS:');
         const idHex = firstVehicle.id;
         console.log(`  Current ID hex: ${idHex}`);
         console.log(`  Note: ${idHex} might be a hash of "PUSMC01" or represent it in encoded form`);
-        
+
         // This is exploratory, so we don't make hard assertions
         expect(idHex).toBeDefined();
       }
+    });
+  });
+
+  describe('Round-trip Testing', () => {
+    it('should write and re-read vehicle list without data loss', () => {
+      if (!vehicles || vehicles.length === 0) {
+        console.log('⚠️ Skipping round-trip test: no vehicles parsed');
+        return;
+      }
+
+      console.log('\n🔄 ROUND-TRIP TEST: Write then re-read vehicle list');
+
+      // Write the vehicle list back to binary
+      const writtenData = writeVehicleList(parsedVehicleList, true, false); // littleEndian, no compression
+      console.log(`📝 Wrote ${vehicles.length} vehicles to ${writtenData.length} bytes`);
+
+      // Create a fake resource entry for parsing
+      const fakeResource: ResourceEntry = {
+        resourceId: 123n,
+        importHash: 0n,
+        resourceTypeId: 0x10005,
+        uncompressedSizeAndAlignment: [writtenData.length, 0, 0],
+        sizeAndAlignmentOnDisk: [writtenData.length, 0, 0],
+        diskOffsets: [0, 0, 0],
+        importOffset: 0,
+        importCount: 0,
+        flags: 0,
+        streamIndex: 0
+      };
+
+      // Re-parse the written data
+      const reParsedVehicleList = parseVehicleList(writtenData.buffer as ArrayBuffer, fakeResource, { littleEndian: true });
+      const reParsedVehicles = reParsedVehicleList.vehicles;
+      console.log(`📖 Re-parsed ${reParsedVehicles.length} vehicles from written data`);
+
+      // Compare original vs re-parsed
+      expect(reParsedVehicles.length).toBe(vehicles.length);
+
+      // Compare first few vehicles in detail
+      const compareCount = Math.min(5, vehicles.length);
+      for (let i = 0; i < compareCount; i++) {
+        const original = vehicles[i];
+        const reparsed = reParsedVehicles[i];
+
+        console.log(`\n--- Round-trip comparison for vehicle ${i} ---`);
+        console.log(`  ID: "${original.id}" -> "${reparsed.id}"`);
+        console.log(`  Name: "${original.vehicleName}" -> "${reparsed.vehicleName}"`);
+        console.log(`  Manufacturer: "${original.manufacturer}" -> "${reparsed.manufacturer}"`);
+
+        // Check key fields match
+        expect(reparsed.id).toBe(original.id);
+        expect(reparsed.vehicleName).toBe(original.vehicleName);
+        expect(reparsed.manufacturer).toBe(original.manufacturer);
+        expect(reparsed.vehicleType).toBe(original.vehicleType);
+        expect(reparsed.boostType).toBe(original.boostType);
+        expect(reparsed.topSpeedNormalGUIStat).toBe(original.topSpeedNormalGUIStat);
+        expect(reparsed.topSpeedBoostGUIStat).toBe(original.topSpeedBoostGUIStat);
+        expect(reparsed.gamePlayData.strengthStat).toBe(original.gamePlayData.strengthStat);
+      }
+
+      console.log('✅ Round-trip test passed: data integrity maintained');
     });
   });
 }); 

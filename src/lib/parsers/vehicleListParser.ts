@@ -63,6 +63,7 @@ export type VehicleListEntry = {
   gamePlayData: VehicleListEntryGamePlayData;
   attribCollectionKey: bigint;
   audioData: VehicleListEntryAudioData;
+  unknownData: Uint8Array; // 16 bytes of unknown data
   category: number;
   vehicleType: VehicleType;
   boostType: CarType;
@@ -74,6 +75,14 @@ export type VehicleListEntry = {
   colorIndex: number;
   paletteIndex: number;
 }
+
+export type ParsedVehicleList = {
+  vehicles: VehicleListEntry[];
+  header: {
+    unknown1: number;
+    unknown2: number;
+  };
+};
 
 // ============================================================================
 // Constants and Mappings
@@ -111,7 +120,7 @@ export function parseVehicleList(
   resource: ResourceEntry,
   options: ParseOptions = {},
   progressCallback?: ProgressCallback
-): VehicleListEntry[] {
+): ParsedVehicleList {
   try {
     reportProgress(progressCallback, 'parse', 0, 'Starting vehicle list parsing');
     
@@ -133,9 +142,9 @@ export function parseVehicleList(
     
     // Parse with appropriate endianness
     const result = parseVehicleListData(data, options, progressCallback);
-    
-    reportProgress(progressCallback, 'parse', 1.0, `Parsed ${result.length} vehicles`);
-    
+
+    reportProgress(progressCallback, 'parse', 1.0, `Parsed ${result.vehicles.length} vehicles`);
+
     return result;
     
   } catch (error) {
@@ -159,48 +168,98 @@ function handleNestedBundle(
   originalBuffer: ArrayBuffer,
   resource: ResourceEntry
 ): Uint8Array {
+  console.debug(`handleNestedBundle: Checking data of size ${data.length} bytes, first 4 bytes: ${new TextDecoder().decode(data.subarray(0, 4))}`);
+
   if (!isNestedBundle(data)) {
+    console.debug('handleNestedBundle: Data is not a nested bundle, returning as-is');
     return data;
   }
 
   console.debug('Vehicle list is in nested bundle, extracting...');
-  
-  const innerBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-  const bundle = parseBundle(innerBuffer);
-  
-  // Find the VehicleList resource in the nested bundle
-  const innerResource = bundle.resources.find(r => r.resourceTypeId === resource.resourceTypeId);
-  if (!innerResource) {
-    throw new ResourceNotFoundError(resource.resourceTypeId);
-  }
 
-  console.debug('Found inner VehicleList resource:', {
-    resourceId: innerResource.resourceId.toString(16),
-    diskOffsets: innerResource.diskOffsets,
-    sizes: innerResource.sizeAndAlignmentOnDisk.map(s => s & 0x0FFFFFFF)
-  });
+  try {
+    const innerBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+    const bundle = parseBundle(innerBuffer);
 
-  // Extract data from bundle sections
-  const dataOffsets = bundle.header.resourceDataOffsets;
-  
-  for (let sectionIndex = 0; sectionIndex < dataOffsets.length; sectionIndex++) {
-    const sectionOffset = dataOffsets[sectionIndex];
-    if (sectionOffset === 0) continue;
-    
-    const absoluteOffset = data.byteOffset + sectionOffset;
-    if (absoluteOffset >= originalBuffer.byteLength) continue;
-    
-    const maxSize = originalBuffer.byteLength - absoluteOffset;
-    const sectionData = new Uint8Array(originalBuffer, absoluteOffset, Math.min(maxSize, 100000));
-    
-    // Check if this looks like compressed vehicle list data
-    if (sectionData.length >= 2 && sectionData[0] === 0x78) {
-      console.debug('Found compressed data in section', sectionIndex);
-      return sectionData;
+    // Find the VehicleList resource in the nested bundle
+    const innerResource = bundle.resources.find(r => r.resourceTypeId === resource.resourceTypeId);
+    if (!innerResource) {
+      throw new ResourceNotFoundError(resource.resourceTypeId);
     }
+
+    console.debug('Found inner VehicleList resource:', {
+      resourceId: innerResource.resourceId.toString(16),
+      diskOffsets: innerResource.diskOffsets,
+      sizes: innerResource.sizeAndAlignmentOnDisk.map(s => s & 0x0FFFFFFF)
+    });
+
+    // Extract data from bundle sections
+    const dataOffsets = bundle.header.resourceDataOffsets;
+    console.debug('Nested bundle dataOffsets:', dataOffsets);
+    console.debug('Inner resource diskOffsets:', innerResource.diskOffsets);
+
+    for (let sectionIndex = 0; sectionIndex < dataOffsets.length; sectionIndex++) {
+      const sectionOffset = dataOffsets[sectionIndex];
+      if (sectionOffset === 0) continue;
+
+      const absoluteOffset = data.byteOffset + sectionOffset;
+      if (absoluteOffset >= originalBuffer.byteLength) continue;
+
+      const maxSize = originalBuffer.byteLength - absoluteOffset;
+      const sectionData = new Uint8Array(originalBuffer, absoluteOffset, Math.min(maxSize, 100000));
+
+      console.debug(`Checking section ${sectionIndex}: offset=${sectionOffset}, absolute=${absoluteOffset}, size=${sectionData.length}, first byte=${sectionData[0]?.toString(16)}`);
+
+      // Check if this looks like compressed vehicle list data
+      if (sectionData.length >= 2 && sectionData[0] === 0x78) {
+        console.debug('Found compressed data in section', sectionIndex);
+        return sectionData;
+      }
+
+      // Check if this looks like uncompressed vehicle list data
+      // Vehicle list data starts with a 16-byte header: numVehicles(4), startOffset(4), unknown1(4), unknown2(4)
+      if (sectionData.length >= 16) {
+        const headerStart = sectionData.subarray(0, 4);
+        const numVehicles = new DataView(headerStart.buffer, headerStart.byteOffset).getUint32(0, true);
+        const startOffset = new DataView(sectionData.buffer, sectionData.byteOffset + 4).getUint32(0, true);
+
+        if (startOffset === 16) { // Header is always 16 bytes
+          console.debug(`Found uncompressed vehicle list data in section ${sectionIndex}: numVehicles=${numVehicles}`);
+          return sectionData;
+        }
+      }
+    }
+
+    // Also check if the resource data is at offset 0 (since inner resource has diskOffset 0)
+    console.debug('Checking if resource data is at offset 0...');
+    const resourceOffset = innerResource.diskOffsets[0];
+    if (resourceOffset === 0) {
+      const resourceData = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      console.debug(`Resource data at offset 0: size=${resourceData.length}, first byte=${resourceData[0]?.toString(16)}`);
+
+      // Check for compressed data
+      if (resourceData.length >= 2 && resourceData[0] === 0x78) {
+        console.debug('Found compressed data at resource offset 0');
+        return resourceData;
+      }
+
+      // Check for uncompressed vehicle list data
+      if (resourceData.length >= 16) {
+        const numVehicles = new DataView(resourceData.buffer, resourceData.byteOffset).getUint32(0, true);
+        const startOffset = new DataView(resourceData.buffer, resourceData.byteOffset + 4).getUint32(0, true);
+
+        if (startOffset === 16) {
+          console.debug(`Found uncompressed vehicle list data at resource offset 0: numVehicles=${numVehicles}`);
+          return resourceData;
+        }
+      }
+    }
+
+    throw new BundleError('Could not find valid vehicle list data in nested bundle');
+  } catch (error) {
+    console.warn('Failed to parse as nested bundle, treating as raw vehicle list data:', error);
+    return data; // Return original data if nested bundle parsing fails
   }
-  
-  throw new BundleError('Could not find valid vehicle list data in nested bundle');
 }
 
 // ============================================================================
@@ -211,7 +270,7 @@ function parseVehicleListData(
   data: Uint8Array,
   options: ParseOptions,
   progressCallback?: ProgressCallback
-): VehicleListEntry[] {
+): ParsedVehicleList {
   // Decompress if needed
   if (data.length >= 2 && data[0] === 0x78) {
     console.debug('Decompressing vehicle list data...');
@@ -235,7 +294,7 @@ function parseVehicleListData(
   });
 
   // Validate header
-  if (header.numVehicles > 1000 || header.numVehicles === 0) {
+  if (header.numVehicles > 5000 || header.numVehicles === 0) {
     console.warn(`Suspicious vehicle count: ${header.numVehicles}, trying opposite endianness`);
     
     const readerBE = new BufferReader(
@@ -245,7 +304,7 @@ function parseVehicleListData(
     
     const headerBE = VehicleListHeaderSchema.read(readerBE);
     
-    if (headerBE.numVehicles > 0 && headerBE.numVehicles <= 1000) {
+    if (headerBE.numVehicles > 0 && headerBE.numVehicles <= 5000) {
       console.info('Using opposite endianness for vehicle list');
       return parseVehicleEntries(readerBE, headerBE, data.byteLength, !options.littleEndian, progressCallback);
     } else {
@@ -266,7 +325,7 @@ function parseVehicleEntries(
   dataLength: number,
   littleEndian: boolean,
   progressCallback?: ProgressCallback
-): VehicleListEntry[] {
+): ParsedVehicleList {
   const maxVehicles = Math.floor((dataLength - 16) / VEHICLE_ENTRY_SIZE);
   const actualVehicleCount = Math.min(header.numVehicles, maxVehicles);
   
@@ -300,7 +359,13 @@ function parseVehicleEntries(
   }
 
   console.debug(`Parsed ${entries.length} valid vehicles out of ${actualVehicleCount} attempted`);
-  return entries;
+  return {
+    vehicles: entries,
+    header: {
+      unknown1: header.unknown1,
+      unknown2: header.unknown2
+    }
+  };
 }
 
 // ============================================================================
@@ -357,6 +422,7 @@ function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>, index:
       gamePlayData,
       attribCollectionKey: u64ToBigInt(rawEntry.attribCollectionKey),
       audioData,
+      unknownData: new Uint8Array(rawEntry.unknown),
       category: rawEntry.category,
       vehicleType,
       boostType,

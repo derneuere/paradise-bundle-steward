@@ -228,10 +228,26 @@ function parseDebugData(buffer: ArrayBuffer, header: BundleHeader): string | und
     }
 
     const debugBytes = new Uint8Array(buffer, header.debugDataOffset, remaining);
-    let debugData = new TextDecoder().decode(debugBytes);
     
-    // Clean up the string - remove null bytes and trim
-    debugData = debugData.replace(/\0/g, '').trim();
+    // Find the null terminator to determine actual length of XML string
+    let xmlLength = 0;
+    for (let i = 0; i < debugBytes.length; i++) {
+      if (debugBytes[i] === 0) {
+        xmlLength = i;
+        break;
+      }
+    }
+    
+    if (xmlLength === 0) {
+      console.warn('No null terminator found in debug data');
+      return undefined;
+    }
+    
+    // Only decode the XML portion (up to null terminator)
+    const xmlBytes = debugBytes.slice(0, xmlLength);
+    const debugData = new TextDecoder().decode(xmlBytes).trim();
+    
+    console.log(`Debug data: found ${xmlLength} bytes of XML, total buffer had ${remaining} bytes`);
     
     return debugData.length > 0 ? debugData : undefined;
     

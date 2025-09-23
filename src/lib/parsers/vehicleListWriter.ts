@@ -3,10 +3,11 @@
 
 import { BufferWriter } from 'typed-binary';
 import * as pako from 'pako';
-import type { 
-  VehicleListEntry, 
-  VehicleListEntryGamePlayData, 
-  VehicleListEntryAudioData
+import type {
+  VehicleListEntry,
+  VehicleListEntryGamePlayData,
+  VehicleListEntryAudioData,
+  ParsedVehicleList
 } from './vehicleListParser';
 import { 
   Rank,
@@ -82,21 +83,21 @@ const AI_MUSIC_STREAMS_REVERSE: Record<string, number> = {
  * Writes vehicle list data to binary format
  */
 export function writeVehicleList(
-  vehicles: VehicleListEntry[], 
+  vehicleList: ParsedVehicleList,
   littleEndian: boolean = true,
   compress: boolean = false
 ): Uint8Array {
-  const totalSize = VEHICLE_LIST_HEADER_SIZE + (vehicles.length * VEHICLE_ENTRY_SIZE);
+  const totalSize = VEHICLE_LIST_HEADER_SIZE + (vehicleList.vehicles.length * VEHICLE_ENTRY_SIZE);
   const buffer = new ArrayBuffer(totalSize);
-  const writer = new BufferWriter(buffer, { 
-    endianness: littleEndian ? 'little' : 'big' 
+  const writer = new BufferWriter(buffer, {
+    endianness: littleEndian ? 'little' : 'big'
   });
 
   // Write header
-  writeVehicleListHeader(writer, vehicles.length);
+  writeVehicleListHeader(writer, vehicleList.vehicles.length, vehicleList.header.unknown1, vehicleList.header.unknown2);
 
   // Write vehicle entries
-  for (const vehicle of vehicles) {
+  for (const vehicle of vehicleList.vehicles) {
     writeVehicleEntry(writer, vehicle);
   }
 
@@ -113,17 +114,17 @@ export function writeVehicleList(
 /**
  * Writes the vehicle list header
  */
-function writeVehicleListHeader(writer: BufferWriter, numVehicles: number): void {
+function writeVehicleListHeader(writer: BufferWriter, numVehicles: number, unknown1: number, unknown2: number): void {
   // Vehicle list header format (matches VehicleListHeaderSchema):
   // uint32 numVehicles
   // uint32 startOffset (16 for header size)
-  // uint32 unknown1 (padding)
-  // uint32 unknown2 (padding)
-  
+  // uint32 unknown1
+  // uint32 unknown2
+
   writer.writeUint32(numVehicles);
   writer.writeUint32(16); // startOffset - header is 16 bytes
-  writer.writeUint32(0);  // unknown1/padding
-  writer.writeUint32(0);  // unknown2/padding
+  writer.writeUint32(unknown1);
+  writer.writeUint32(unknown2);
 }
 
 /**
@@ -156,7 +157,7 @@ function writeVehicleEntry(writer: BufferWriter, vehicle: VehicleListEntry): voi
   
   // Write unknown data (16 bytes)
   for (let i = 0; i < 16; i++) {
-    writer.writeUint8(0);
+    writer.writeUint8(vehicle.unknownData[i] || 0);
   }
   
   // Write category (4 bytes)
@@ -273,7 +274,7 @@ function encryptStringToCgsId(str: string): bigint {
     
     let mod = 0;
     
-    // Map character to mod value (exact algorithm from C#)
+    // Map character to mod value (exact algorithm from C# EncryptedString.cs)
     if (c === 0x20) { // ' '
       mod = 0;
     } else if (c === 0x2D) { // '-'
@@ -282,16 +283,14 @@ function encryptStringToCgsId(str: string): bigint {
       mod = 2;
     } else if (c === 0x5F) { // '_'
       mod = 39;
-    } else if (c >= 0x2D && c < 0x34) { // '-' to '3'
+    } else if (c >= 0x2D && c <= 0x33) { // '-' (0x2D) to '3' (0x33)
       mod = c - 0x2D;
-    } else if (c >= 0x34 && c <= 0x39) { // '4' to '9'
-      mod = c - 0x34 + 7;
-    } else if (c >= 0x41 && c <= 0x5A) { // 'A' to 'Z'
-      mod = c - 0x34;
-    } else if (c >= 0x61 && c <= 0x7A) { // 'a' to 'z' - convert to uppercase
-      mod = (c - 0x20) - 0x34; // Convert to uppercase then map
+    } else if (c >= 0x34 && c <= 0x39) { // '4' (0x34) to '9' (0x39)
+      mod = c - 0x34 + 7; // This gives 7-12 for '4'-'9'
+    } else if (c >= 0x41 && c <= 0x5A) { // 'A' (0x41) to 'Z' (0x5A)
+      mod = c - 0x34; // This gives 13-38 for 'A'-'Z'
     } else {
-      // Default to 0 for other characters
+      // Default to 0 for other characters (including lowercase, which C# doesn't support)
       mod = 0;
     }
     
@@ -348,11 +347,11 @@ function writeU64(writer: BufferWriter, value: bigint): void {
 }
 
 /**
- * Compresses vehicle list data using zlib
+ * Compresses vehicle list data using zlib with maximum compression
  */
 function compressVehicleListData(data: Uint8Array): Uint8Array {
   try {
-    return pako.deflate(data);
+    return pako.deflate(data, { level: 9 });
   } catch (error) {
     console.warn('Failed to compress vehicle list data:', error);
     return data; // Return uncompressed data as fallback

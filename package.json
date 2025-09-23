@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:debug": "vitest --reporter=verbose"
+    "test:debug": "vitest --reporter=verbose",
+    "debug-bundle": "tsx src/debug-bundle-header.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

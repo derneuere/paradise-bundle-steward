@@ -125,11 +125,11 @@ function writeU64(writer: BufferWriter, value: bigint): void {
 }
 
 /**
- * Compresses player car colours data using zlib
+ * Compresses player car colours data using zlib with maximum compression
  */
 function compressPlayerCarColoursData(data: Uint8Array): Uint8Array {
   try {
-    return pako.deflate(data);
+    return pako.deflate(data, { level: 9 });
   } catch (error) {
     console.warn('Failed to compress player car colours data:', error);
     return data; // Return uncompressed data as fallback

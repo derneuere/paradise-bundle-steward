@@ -1,28 +1,48 @@
 // Bundle Writer - Constructs and writes Burnout Paradise bundle files
-// Rewritten to exactly match BundleArchive.cs behavior
+// Refactored to use typed-binary schemas for type safety and consistency
 
-import { BufferWriter } from 'typed-binary';
+import { BufferWriter, BufferReader } from 'typed-binary';
 import * as pako from 'pako';
+import {
+  BundleHeaderSchema,
+  ResourceEntrySchema,
+  ImportEntrySchema,
+  u64Schema,
+  bigIntToU64,
+  resourceEntryToSchema,
+  createEmptyBundleHeader
+} from './schemas';
+import type { Parsed } from 'typed-binary';
+import type { BundleHeader, ResourceEntry, ImportEntry } from './types';
+import { extractResourceSize } from '@/lib/core/resourceManager';
 
 // ============================================================================
 // Types and Interfaces
 // ============================================================================
 
-export interface BundleEntry {
+export interface BundleEntryData {
   id: bigint;
   references: bigint;
-  entryBlocks: EntryBlock[];
+  entryBlocks: EntryBlockData[];
   dependenciesListOffset: number;
   type: number;
   dependencyCount: number;
 }
 
-export interface EntryBlock {
+export interface EntryBlockData {
   compressed: boolean;
   compressedSize: number;
   uncompressedSize: number;
   uncompressedAlignment: number;
   data: Uint8Array | null;
+}
+
+// Schema-compatible types for writing
+export type BundleForWriting = {
+  header: BundleHeader;
+  resources: ResourceEntry[];
+  imports: ImportEntry[];
+  resourceStringTable?: string;
 }
 
 export interface WriteOptions {
@@ -65,41 +85,54 @@ export enum BundlePlatform {
 }
 
 // ============================================================================
-// Bundle Builder Class
+// Schema-Based Bundle Builder Class
 // ============================================================================
 
 export class BundleBuilder {
-  private version: number = 2;
-  private platform: BundlePlatform;
-  private flags: number;
-  private entries: BundleEntry[] = [];
-  private resourceStringTable?: string;
+  private bundle: BundleForWriting;
+  private options: WriteOptions;
+  private resourceData: Map<number, Uint8Array>;
 
   constructor(options: WriteOptions = {}) {
-    this.platform = options.platform || BundlePlatform.PC;
-    this.flags = this.calculateFlags(options);
+    this.options = options;
+    this.resourceData = new Map();
+
+    // Initialize bundle with basic structure first
+    this.bundle = {
+      header: {
+        magic: 'bnd2',
+        version: 2,
+        platform: options.platform || BundlePlatform.PC,
+        debugDataOffset: 0,
+        resourceEntriesCount: 0,
+        resourceEntriesOffset: 0,
+        resourceDataOffsets: [0, 0, 0],
+        flags: this.calculateInitialFlags(options)
+      },
+      resources: [],
+      imports: [],
+      resourceStringTable: undefined
+    };
   }
 
-  private calculateFlags(options: WriteOptions): number {
+  private calculateInitialFlags(options: WriteOptions): number {
     let flags = BundleFlags.UnusedFlag1 | BundleFlags.UnusedFlag2; // Always set
     
     if (options.compress) {
       flags |= BundleFlags.Compressed;
     }
     
-    if (options.includeDebugData && this.resourceStringTable) {
-      flags |= BundleFlags.HasResourceStringTable;
-    }
+    // Note: HasResourceStringTable flag will be set when RST is actually added
     
     return flags;
   }
 
   // ============================================================================
-  // Utility Functions (matching C# implementation)
+  // Utility Functions
   // ============================================================================
 
   private get isConsole(): boolean {
-    return this.platform === BundlePlatform.X360 || this.platform === BundlePlatform.PS3;
+    return this.bundle.header.platform === BundlePlatform.X360 || this.bundle.header.platform === BundlePlatform.PS3;
   }
 
   private bitScanReverse(mask: number): number {
@@ -107,11 +140,6 @@ export class BundleBuilder {
     let i: number;
     for (i = 31; (mask >> i) === 0 && i >= 0; i--);
     return i;
-  }
-
-  private compressData(data: Uint8Array): Uint8Array {
-    // Use zlib compression to match C# LibDeflate ZlibCompressor
-    return pako.deflate(data);
   }
 
   private alignPosition(position: number, alignment: number): number {
@@ -122,6 +150,7 @@ export class BundleBuilder {
   private writeAlignment(writer: BufferWriter, alignment: number, currentPos: number): number {
     const alignedPos = this.alignPosition(currentPos, alignment);
     const paddingNeeded = alignedPos - currentPos;
+    console.log(`Padding needed: ${paddingNeeded} bytes`);
     
     for (let i = 0; i < paddingNeeded; i++) {
       writer.writeUint8(0);
@@ -139,20 +168,65 @@ export class BundleBuilder {
   }
 
   // ============================================================================
-  // Entry Management
+  // Entry Management (Schema-Based)
   // ============================================================================
 
   /**
-   * Adds an entry to the bundle (exact C# API match)
+   * Adds a resource entry to the bundle using typed data
    */
-  addEntry(
+  addResourceEntry(entry: ResourceEntry): void {
+    this.bundle.resources.push(entry);
+    this.bundle.header.resourceEntriesCount = this.bundle.resources.length;
+  }
+
+  /**
+   * Adds multiple resource entries
+   */
+  addResourceEntries(entries: ResourceEntry[]): void {
+    this.bundle.resources.push(...entries);
+    this.bundle.header.resourceEntriesCount = this.bundle.resources.length;
+  }
+
+  /**
+   * Adds an import entry to the bundle
+   */
+  addImportEntry(entry: ImportEntry): void {
+    this.bundle.imports.push(entry);
+  }
+
+  /**
+   * Sets the resource string table
+   */
+  setResourceStringTable(rst: string): void {
+    this.bundle.resourceStringTable = rst;
+    this.bundle.header.flags |= BundleFlags.HasResourceStringTable;
+  }
+
+  /**
+   * Sets resource data for a specific resource index
+   */
+  setResourceData(resourceIndex: number, data: Uint8Array): void {
+    this.resourceData.set(resourceIndex, data);
+  }
+
+  /**
+   * Gets resource data for a specific resource index
+   */
+  private getResourceData(resourceIndex: number): Uint8Array | null {
+    return this.resourceData.get(resourceIndex) || null;
+  }
+
+  /**
+   * Creates a resource entry from legacy entry data (for compatibility)
+   */
+  createResourceEntryFromLegacyData(
     id: bigint,
     references: bigint,
     type: number,
-    entryBlocks: EntryBlock[],
+    entryBlocks: EntryBlockData[],
     dependenciesListOffset: number = 0,
     dependencyCount: number = 0
-  ): void {
+  ): ResourceEntry {
     // Ensure we have exactly 3 entry blocks
     while (entryBlocks.length < 3) {
       entryBlocks.push({
@@ -164,33 +238,47 @@ export class BundleBuilder {
       });
     }
 
-    this.entries.push({
-      id,
-      references,
-      entryBlocks: entryBlocks.slice(0, 3), // Only take first 3
-      dependenciesListOffset,
-      type,
-      dependencyCount
-    });
-  }
+    // Convert entry blocks to the format expected by ResourceEntry
+    const uncompressedSizeAndAlignment: number[] = [];
+    const sizeAndAlignmentOnDisk: number[] = [];
+    const diskOffsets: number[] = [0, 0, 0]; // Will be calculated during layout
 
-  /**
-   * Sets the resource string table
-   */
-  setResourceStringTable(rst: string): void {
-    this.resourceStringTable = rst;
-    this.flags |= BundleFlags.HasResourceStringTable;
+    for (let i = 0; i < 3; i++) {
+      const block = entryBlocks[i];
+      const alignmentBits = this.bitScanReverse(block.uncompressedAlignment);
+      const packedValue = block.uncompressedSize | (alignmentBits << 28);
+      uncompressedSizeAndAlignment.push(packedValue);
+      
+      const diskSize = block.data ? (this.options.compress ? 0 : block.data.length) : 0; // Will be calculated for compression
+      sizeAndAlignmentOnDisk.push(diskSize);
+    }
+
+    return {
+      resourceId: id,
+      importHash: references,
+      uncompressedSizeAndAlignment,
+      sizeAndAlignmentOnDisk,
+      diskOffsets,
+      importOffset: dependenciesListOffset,
+      resourceTypeId: type,
+      importCount: dependencyCount,
+      flags: 0,
+      streamIndex: 0
+    };
   }
 
   // ============================================================================
-  // Bundle Writing (exact match to C# BundleArchive.Write)
+  // Schema-Based Bundle Writing
   // ============================================================================
 
   /**
-   * Builds and returns the complete bundle as ArrayBuffer
+   * Builds and returns the complete bundle as ArrayBuffer using typed schemas
    */
   async write(progressCallback?: ProgressCallback): Promise<ArrayBuffer> {
-    this.reportProgress(progressCallback, 'write', 0, 'Starting bundle write');
+    this.reportProgress(progressCallback, 'write', 0, 'Starting schema-based bundle write');
+    
+    // Finalize header with calculated offsets
+    this.finalizeHeader();
     
     // Calculate buffer size and create writer
     const estimatedSize = this.calculateEstimatedSize();
@@ -199,370 +287,246 @@ export class BundleBuilder {
       endianness: this.isConsole ? 'big' : 'little' 
     });
 
-    this.reportProgress(progressCallback, 'write', 0.1, 'Writing bundle header');
+    this.reportProgress(progressCallback, 'write', 0.1, 'Writing bundle with schemas');
 
-    // Write exactly like C# BundleArchive.Write()
-    const actualSize = await this.writeBundle(writer, progressCallback);
+    // Write using typed-binary schemas
+    const actualSize = await this.writeWithSchemas(writer, buffer, progressCallback);
 
     // Trim buffer to actual size
     const finalBuffer = buffer.slice(0, actualSize);
     
-    this.reportProgress(progressCallback, 'write', 1.0, 'Bundle writing complete');
+    this.reportProgress(progressCallback, 'write', 1.0, 'Schema-based bundle writing complete');
     
     return finalBuffer;
   }
 
-  private async writeBundle(writer: BufferWriter, progressCallback?: ProgressCallback): Promise<number> {
-    // Since typed-binary BufferWriter doesn't have offset/seek, we need to 
-    // pre-calculate all offsets and write the complete structure in order
-    
-    this.reportProgress(progressCallback, 'write', 0.1, 'Pre-calculating layout');
-    
-    // Step 1: Pre-calculate the complete bundle layout
-    const layout = this.calculateBundleLayout();
-    
-    this.reportProgress(progressCallback, 'write', 0.2, 'Writing bundle header');
-    
-    // Step 2: Write header with pre-calculated offsets
-    this.writeHeader(writer, layout);
-    
-    this.reportProgress(progressCallback, 'write', 0.3, 'Writing resource string table');
-    
-    // Step 3: Write RST if present
-    if (this.flags & BundleFlags.HasResourceStringTable && this.resourceStringTable) {
-      this.writeCString(writer, this.resourceStringTable);
-      layout.currentPos = this.writeAlignment(writer, 16, layout.currentPos + this.calculateRSTSize());
+  /**
+   * Finalizes the header with calculated offsets and sizes
+   */
+  private finalizeHeader(): void {
+    let currentOffset = 48; // Header size (including magic)
+
+    // RST offset
+    if (this.bundle.resourceStringTable) {
+      this.bundle.header.debugDataOffset = currentOffset;
+      currentOffset += this.calculateRSTSize();
+      currentOffset = this.alignPosition(currentOffset, 16);
     }
-    
-    this.reportProgress(progressCallback, 'write', 0.5, 'Writing ID block');
-    
-    // Step 4: Write ID block
-    const compressedBlocks = await this.writeIdBlock(writer, layout, progressCallback);
-    
-    this.reportProgress(progressCallback, 'write', 0.7, 'Writing data blocks');
-    
-    // Step 5: Write data blocks
-    await this.writeDataBlocks(writer, layout, compressedBlocks, progressCallback);
-    
-    return layout.totalSize;
+
+    // Resource entries offset
+    this.bundle.header.resourceEntriesOffset = currentOffset;
+
+    // Calculate resource data offsets based on actual resource count
+    const resourceCount = this.bundle.resources.length;
+    const resourceDataOffsets: number[] = [0, 0, 0];
+
+    // Calculate data offset for each resource (after resource entries)
+    let dataStartOffset = currentOffset + (resourceCount * 80); // 80 bytes per resource entry
+
+    for (let i = 0; i < Math.min(resourceCount, 3); i++) {
+      const resource = this.bundle.resources[i];
+      // Get the uncompressed size of the resource data
+      const uncompressedSize = extractResourceSize(resource.uncompressedSizeAndAlignment[0]);
+      resourceDataOffsets[i] = dataStartOffset;
+      dataStartOffset += uncompressedSize;
+    }
+
+    this.bundle.header.resourceDataOffsets = resourceDataOffsets;
   }
 
-  // ============================================================================
-  // Bundle Layout Calculation
-  // ============================================================================
-
-  private calculateBundleLayout(): BundleLayout {
+  /**
+   * Schema-based writing method
+   */
+  private async writeWithSchemas(writer: BufferWriter, buffer: ArrayBuffer, progressCallback?: ProgressCallback): Promise<number> {
     let currentPos = 0;
     
-    // Header: magic(4) + version(4) + platform(4) + rstOffset(4) + entryCount(4) + idBlockOffset(4) + fileBlockOffsets(12) + flags(4) + padding
-    const headerSize = 44; // 4+4+4+4+4+4+12+4 = 40, then aligned to 16 = 48, but let's calculate exactly
-    currentPos = this.alignPosition(headerSize, 16);
+    this.reportProgress(progressCallback, 'write', 0.2, 'Writing header with schema');
     
-    // RST data
-    const rstSize = this.calculateRSTSize();
-    const rstOffset = currentPos;
-    currentPos += rstSize;
-    if (rstSize > 0) {
-      currentPos = this.alignPosition(currentPos, 16);
-    }
-    
-    // ID block
-    const idBlockOffset = currentPos;
-    const idBlockSize = this.entries.length * 64; // Each entry is 64 bytes in ID block
-    currentPos += idBlockSize;
-    
-    // Calculate data block sizes and offsets
-    const dataBlockOffsets = [0, 0, 0];
-    const dataBlockSizes = [0, 0, 0];
-    
-    for (let blockIndex = 0; blockIndex < 3; blockIndex++) {
-      dataBlockOffsets[blockIndex] = currentPos;
-      let blockSize = 0;
-      
-      for (let entryIndex = 0; entryIndex < this.entries.length; entryIndex++) {
-        const entry = this.entries[entryIndex];
-        const entryBlock = entry.entryBlocks[blockIndex];
-        
-        if (entryBlock.data) {
-          let dataSize = entryBlock.data.length;
-          if (this.flags & BundleFlags.Compressed) {
-            // Estimate compressed size (rough approximation)
-            dataSize = Math.ceil(dataSize * 0.7); // Conservative estimate
-          }
-          
-          blockSize += dataSize;
-          // Add alignment padding
-          const alignmentBytes = (blockIndex !== 0 && entryIndex !== this.entries.length - 1) ? 0x80 : 16;
-          blockSize = this.alignPosition(blockSize, alignmentBytes);
-        }
-      }
-      
-      dataBlockSizes[blockIndex] = blockSize;
-      currentPos += blockSize;
-      
-      // Align between blocks (not for last block)
-      if (blockIndex !== 2) {
-        currentPos = this.alignPosition(currentPos, 0x80);
-      }
-    }
-    
-    return {
-      headerSize,
-      rstOffset,
-      rstSize,
-      idBlockOffset,
-      idBlockSize,
-      dataBlockOffsets,
-      dataBlockSizes,
-      totalSize: currentPos,
-      currentPos: 0
-    };
-  }
-
-  private calculateRSTSize(): number {
-    if (this.resourceStringTable) {
-      return new TextEncoder().encode(this.resourceStringTable).length + 1; // +1 for null terminator
-    }
-    return 0;
-  }
-
-  // ============================================================================
-  // Writing Methods (rewritten for sequential writing)
-  // ============================================================================
-
-  private writeHeader(writer: BufferWriter, layout: BundleLayout): void {
-    // Write BND2 magic
+    try {
+      // Step 1: Write magic string manually (not part of schema)
     const magic = new TextEncoder().encode('bnd2');
     for (const byte of magic) {
       writer.writeUint8(byte);
     }
-
-    // Write version and platform
-    writer.writeInt32(this.version);
-    writer.writeInt32(this.platform);
-
-    // Write RST offset
-    writer.writeUint32(layout.rstOffset);
-
-    // Write entry count
-    writer.writeInt32(this.entries.length);
-
-    // Write ID block offset
-    writer.writeInt32(layout.idBlockOffset);
-
-    // Write file block offsets (3 blocks)
-    for (let i = 0; i < 3; i++) {
-      writer.writeUint32(layout.dataBlockOffsets[i]);
-    }
-
-    // Write flags
-    writer.writeInt32(this.flags);
-
-    // Align to 16 bytes
-    const currentHeaderSize = 44; // 4+4+4+4+4+4+12+4
-    layout.currentPos = this.writeAlignment(writer, 16, currentHeaderSize);
-  }
-
-  private async writeIdBlock(
-    writer: BufferWriter,
-    layout: BundleLayout,
-    progressCallback?: ProgressCallback
-  ): Promise<(Uint8Array | null)[][]> {
-    const compressedBlocks: (Uint8Array | null)[][] = [];
-    
-    // Pre-compress all blocks if needed
-    for (let i = 0; i < this.entries.length; i++) {
-      compressedBlocks[i] = [null, null, null];
-      const entry = this.entries[i];
+      currentPos += 4;
+      console.log(`After magic: ${currentPos} bytes`);
       
-      for (let j = 0; j < 3; j++) {
-        const entryBlock = entry.entryBlocks[j];
-        if (entryBlock.data && (this.flags & BundleFlags.Compressed)) {
-          compressedBlocks[i][j] = this.compressData(entryBlock.data);
-        }
-      }
-    }
-    
-    // Write ID block entries
-    for (let i = 0; i < this.entries.length; i++) {
-      const entry = this.entries[i];
+      // Step 2: Write header using schema
+      const headerData: Parsed<typeof BundleHeaderSchema> = {
+        version: this.bundle.header.version,
+        platform: this.bundle.header.platform,
+        debugDataOffset: this.bundle.header.debugDataOffset,
+        resourceEntriesCount: this.bundle.header.resourceEntriesCount,
+        resourceEntriesOffset: this.bundle.header.resourceEntriesOffset,
+        resourceDataOffsets: this.bundle.header.resourceDataOffsets.slice(0, 3) as [number, number, number],
+        flags: this.bundle.header.flags
+      };
+      BundleHeaderSchema.write(writer, headerData);
+      currentPos += 36; // Header schema size
+      console.log(`After header: ${currentPos} bytes`);
       
-      // Write entry ID and references
-      this.writeBigInt64(writer, entry.id);
-      this.writeBigInt64(writer, entry.references);
+      // Align after header
+      currentPos = this.writeAlignment(writer, 16, currentPos);
+      console.log(`After header alignment: ${currentPos} bytes`);
       
-      // Write uncompressed sizes with alignment (3 blocks)
-      for (let j = 0; j < 3; j++) {
-        const entryBlock = entry.entryBlocks[j];
-        let uncompressedSize = 0;
-        if (entryBlock.data !== null) {
-          uncompressedSize = entryBlock.data.length;
-        }
-        // Pack size with alignment in upper 4 bits (exact C# formula)
-        const alignmentBits = this.bitScanReverse(entryBlock.uncompressedAlignment);
-        const packedValue = uncompressedSize | (alignmentBits << 28);
-        writer.writeUint32(packedValue);
+      this.reportProgress(progressCallback, 'write', 0.3, 'Writing resource string table');
+      
+      // Step 3: Write RST if present
+      if (this.bundle.resourceStringTable) {
+        console.log(`Writing RST of length: ${this.bundle.resourceStringTable.length}`);
+        this.writeCString(writer, this.bundle.resourceStringTable);
+        currentPos += this.calculateRSTSize();
+        console.log(`After RST: ${currentPos} bytes`);
+        currentPos = this.writeAlignment(writer, 16, currentPos);
+        console.log(`After RST alignment: ${currentPos} bytes`);
       }
       
-      // Write compressed sizes (3 blocks)
-      for (let j = 0; j < 3; j++) {
-        const entryBlock = entry.entryBlocks[j];
-        if (entryBlock.data === null) {
-          writer.writeUint32(0);
-        } else {
-          if (this.flags & BundleFlags.Compressed) {
-            writer.writeUint32(compressedBlocks[i][j]!.length);
-          } else {
-            writer.writeUint32(entryBlock.data.length);
+      this.reportProgress(progressCallback, 'write', 0.5, 'Writing resource entries with schema');
+      
+      // Step 4: Write resource entries using schema
+      console.log(`Writing ${this.bundle.resources.length} resource entries`);
+      for (let i = 0; i < this.bundle.resources.length; i++) {
+        const resource = this.bundle.resources[i];
+        const resourceSchemaData = resourceEntryToSchema(resource);
+        ResourceEntrySchema.write(writer, resourceSchemaData);
+        
+        if (progressCallback && i % 100 === 0) {
+          const progress = 0.5 + (i / this.bundle.resources.length) * 0.2;
+          this.reportProgress(progressCallback, 'write', progress, `Writing resource ${i + 1}/${this.bundle.resources.length}`);
+        }
+      }
+      currentPos += this.bundle.resources.length * 80; // 80 bytes per resource entry
+      console.log(`After resources: ${currentPos} bytes`);
+      
+      this.reportProgress(progressCallback, 'write', 0.8, 'Writing import entries with schema');
+      
+      // Step 5: Write import entries using schema
+      console.log(`Writing ${this.bundle.imports.length} import entries`);
+      for (const importEntry of this.bundle.imports) {
+        const importSchemaData: Parsed<typeof ImportEntrySchema> = {
+          resourceId: bigIntToU64(importEntry.resourceId),
+          offset: importEntry.offset,
+          padding: 0
+        };
+        ImportEntrySchema.write(writer, importSchemaData);
+      }
+      currentPos += this.bundle.imports.length * 16; // 16 bytes per import entry
+      console.log(`After imports: ${currentPos} bytes`);
+      
+      // Step 6: Write resource data blocks
+      this.reportProgress(progressCallback, 'write', 0.85, 'Writing resource data blocks');
+
+      console.log(`About to write ${this.bundle.resources.length} resource data blocks`);
+      console.log(`Current position: ${currentPos}, Buffer size: ${buffer.byteLength}, Resources: ${this.bundle.resources.length}`);
+
+      // Write data for each resource
+      for (let i = 0; i < this.bundle.resources.length; i++) {
+        const resource = this.bundle.resources[i];
+        const resourceData = this.getResourceData(i);
+
+        console.log(`Resource ${i} - data size: ${resourceData ? resourceData.length : 0}, uncompressedSizeAndAlignment[0]: ${resource.uncompressedSizeAndAlignment[0]}`);
+
+        if (resourceData && resourceData.length > 0) {
+          // Check if we have enough space in the buffer
+          if (currentPos + resourceData.length > buffer.byteLength) {
+            console.error(`Buffer overflow! Current pos: ${currentPos}, Resource data size: ${resourceData.length}, Buffer size: ${buffer.byteLength}`);
+            throw new Error(`Buffer overflow: trying to write ${resourceData.length} bytes at position ${currentPos} in ${buffer.byteLength} byte buffer`);
           }
-        }
-      }
-      
-      // Write data offsets (calculated dynamically)
-      const dataOffsets = this.calculateDataOffsets(i, layout, compressedBlocks);
-      for (let j = 0; j < 3; j++) {
-        writer.writeUint32(dataOffsets[j]);
-      }
-      
-      // Write dependencies offset, type, and count
-      writer.writeInt32(entry.dependenciesListOffset);
-      writer.writeInt32(entry.type);
-      writer.writeInt16(entry.dependencyCount);
-      
-      // 2 bytes padding
-      writer.writeInt16(0);
-      
-      if (progressCallback && i % 100 === 0) {
-        const progress = 0.5 + (i / this.entries.length) * 0.2;
-        this.reportProgress(progressCallback, 'write', progress, `Writing entry ${i + 1}/${this.entries.length}`);
-      }
-    }
-    
-    return compressedBlocks;
-  }
 
-  private calculateDataOffsets(entryIndex: number, layout: BundleLayout, compressedBlocks: (Uint8Array | null)[][]): number[] {
-    const offsets = [0, 0, 0];
-    
-    for (let blockIndex = 0; blockIndex < 3; blockIndex++) {
-      let currentOffset = 0;
-      
-      // Calculate offset by summing sizes of all previous entries in this block
-      for (let i = 0; i < entryIndex; i++) {
-        const entry = this.entries[i];
-        const entryBlock = entry.entryBlocks[blockIndex];
-        
-        if (entryBlock.data) {
-          let dataSize: number;
-          if (this.flags & BundleFlags.Compressed && compressedBlocks[i][blockIndex]) {
-            dataSize = compressedBlocks[i][blockIndex]!.length;
-          } else {
-            dataSize = entryBlock.data.length;
-          }
-          
-          currentOffset += dataSize;
-          
-          // Add alignment padding
-          const alignmentBytes = (blockIndex !== 0 && i !== this.entries.length - 1) ? 0x80 : 16;
-          currentOffset = this.alignPosition(currentOffset, alignmentBytes);
-        }
-      }
-      
-      offsets[blockIndex] = currentOffset;
-    }
-    
-    return offsets;
-  }
-
-  private async writeDataBlocks(
-    writer: BufferWriter,
-    layout: BundleLayout,
-    compressedBlocks: (Uint8Array | null)[][],
-    progressCallback?: ProgressCallback
-  ): Promise<void> {
-    // Write 3 data blocks sequentially
-    for (let blockIndex = 0; blockIndex < 3; blockIndex++) {
-      
-      // Write data for each entry in this block
-      for (let entryIndex = 0; entryIndex < this.entries.length; entryIndex++) {
-        const entry = this.entries[entryIndex];
-        const entryBlock = entry.entryBlocks[blockIndex];
-        const compressed = !!(this.flags & BundleFlags.Compressed);
-        
-        let dataToWrite: Uint8Array | null = null;
-        
-        if (compressed && compressedBlocks[entryIndex][blockIndex]) {
-          dataToWrite = compressedBlocks[entryIndex][blockIndex];
-        } else if (entryBlock.data) {
-          dataToWrite = entryBlock.data;
-        }
-        
-        if (dataToWrite) {
-          // Write actual data
-          for (const byte of dataToWrite) {
+          // Write the resource data
+          for (const byte of resourceData) {
             writer.writeUint8(byte);
           }
-          
-          // Apply alignment (exact C# logic)
-          const alignmentBytes = (blockIndex !== 0 && entryIndex !== this.entries.length - 1) ? 0x80 : 16;
-          layout.currentPos = this.writeAlignment(writer, alignmentBytes, layout.currentPos + dataToWrite.length);
-        }
-        
-        if (progressCallback && entryIndex % 50 === 0) {
-          const blockProgress = blockIndex / 3;
-          const entryProgress = (entryIndex / this.entries.length) / 3;
-          const totalProgress = 0.7 + blockProgress + entryProgress;
-          this.reportProgress(progressCallback, 'write', totalProgress, 
-            `Writing block ${blockIndex + 1}/3, entry ${entryIndex + 1}/${this.entries.length}`);
+          currentPos += resourceData.length;
+
+          console.log(`Wrote resource ${i} data: ${resourceData.length} bytes`);
+
+          if (progressCallback && i % 50 === 0) {
+            const progress = 0.85 + (i / this.bundle.resources.length) * 0.15;
+            this.reportProgress(progressCallback, 'write', progress, `Writing resource data ${i + 1}/${this.bundle.resources.length}`);
+          }
         }
       }
+
+      this.reportProgress(progressCallback, 'write', 1.0, 'Schema-based writing complete');
+      console.log(`Final size: ${currentPos} bytes`);
+
+      return currentPos;
       
-      // Align block end (not for last block)
-      if (blockIndex !== 2) {
-        layout.currentPos = this.writeAlignment(writer, 0x80, layout.currentPos);
-      }
+    } catch (error) {
+      console.error(`Write error at position ${currentPos}:`, error);
+      console.error(`Error during buffer writing`);
+      throw error;
     }
   }
 
   // ============================================================================
-  // Helper Methods
+  // Size Calculation Helpers
   // ============================================================================
 
-  private writeBigInt64(writer: BufferWriter, value: bigint): void {
-    // Write as two 32-bit values (little/big endian aware)
-    const low = Number(value & 0xFFFFFFFFn);
-    const high = Number(value >> 32n);
-    
-    if (this.isConsole) {
-      writer.writeUint32(high);
-      writer.writeUint32(low);
-    } else {
-      writer.writeUint32(low);
-      writer.writeUint32(high);
+  private calculateRSTSize(): number {
+    if (this.bundle.resourceStringTable) {
+      return new TextEncoder().encode(this.bundle.resourceStringTable).length + 1; // +1 for null terminator
     }
+    return 0;
   }
 
   private calculateEstimatedSize(): number {
-    // Rough size calculation for buffer allocation
-    let size = 64; // Header
-    
-    if (this.resourceStringTable) {
-      size += this.resourceStringTable.length + 32;
+    let size = 0;
+
+    // Header: magic(4) + schema(36) = 40 bytes, aligned to 16 = 48 bytes
+    size = this.alignPosition(40, 16);
+
+    // Resource string table if present
+    if (this.bundle.resourceStringTable) {
+      const rstSize = this.calculateRSTSize();
+      console.log(`RST Debug - Length: ${this.bundle.resourceStringTable.length}, Calculated size: ${rstSize}`);
+      console.log(`RST Preview: "${this.bundle.resourceStringTable.substring(0, 100)}..."`);
+      size += rstSize;
+      size = this.alignPosition(size, 16); // RST gets aligned
     }
-    
-    // ID block
-    size += this.entries.length * 64; // Each entry is ~64 bytes
-    
-    // Data blocks
-    for (const entry of this.entries) {
-      for (const block of entry.entryBlocks) {
-        if (block.data) {
-          size += block.data.length + 128; // Extra space for compression and alignment
-        }
+
+    // Resource entries (80 bytes each, no alignment between entries)
+    console.log(`Resource entries debug: count=${this.bundle.resources.length}, size=${this.bundle.resources.length * 80}`);
+    size += this.bundle.resources.length * 80;
+
+    // Import entries (16 bytes each, no alignment between entries)
+    console.log(`Import entries debug: count=${this.bundle.imports.length}, size=${this.bundle.imports.length * 16}`);
+    size += this.bundle.imports.length * 16;
+
+    // Resource data blocks - calculate actual sizes
+    let totalResourceDataSize = 0;
+    for (let i = 0; i < this.bundle.resources.length; i++) {
+      const resource = this.bundle.resources[i];
+      const resourceData = this.getResourceData(i);
+      if (resourceData) {
+        totalResourceDataSize += resourceData.length;
+        console.log(`Resource ${i} data size: ${resourceData.length} bytes`);
+      } else {
+        // Fallback to uncompressed size if no data is set
+        const uncompressedSize = extractResourceSize(resource.uncompressedSizeAndAlignment[0]);
+        totalResourceDataSize += uncompressedSize;
+        console.log(`Resource ${i} fallback size: ${uncompressedSize} bytes`);
       }
     }
-    
-    return size * 2; // Double for safety
+    size += totalResourceDataSize;
+    console.log(`Total resource data size: ${totalResourceDataSize} bytes`);
+
+    // Larger safety margin to account for potential compression headers or other metadata
+    const safetyMargin = Math.max(1024, totalResourceDataSize * 0.1); // At least 1KB or 10% of resource data
+    size += safetyMargin;
+
+    console.log(`Estimated bundle size: ${size} bytes`);
+    console.log(`  Header: 40 -> ${this.alignPosition(40, 16)} bytes`);
+    if (this.bundle.resourceStringTable) {
+      console.log(`  RST: ${this.calculateRSTSize()} bytes (with alignment)`);
+    }
+    console.log(`  Resources: ${this.bundle.resources.length} × 80 = ${this.bundle.resources.length * 80} bytes`);
+    console.log(`  Imports: ${this.bundle.imports.length} × 16 = ${this.bundle.imports.length * 16} bytes`);
+    console.log(`  Resource data: ${totalResourceDataSize} bytes`);
+    console.log(`  Safety margin: ${safetyMargin} bytes`);
+
+    return size;
   }
 
   private reportProgress(
@@ -594,41 +558,72 @@ export function createBundleBuilder(options: WriteOptions = {}): BundleBuilder {
 }
 
 /**
- * Creates a bundle builder from existing entries (matching C# API)
+ * Creates a bundle builder from existing resource entries
  */
-export function createBundleFromEntries(
-  entries: BundleEntry[],
+export function createBundleFromResources(
+  resources: ResourceEntry[],
+  imports: ImportEntry[] = [],
   options: WriteOptions = {}
 ): BundleBuilder {
   const builder = new BundleBuilder(options);
+  builder.addResourceEntries(resources);
   
-  for (const entry of entries) {
-    builder.addEntry(
-      entry.id,
-      entry.references,
-      entry.type,
-      entry.entryBlocks,
-      entry.dependenciesListOffset,
-      entry.dependencyCount
-    );
+  for (const importEntry of imports) {
+    builder.addImportEntry(importEntry);
   }
   
   return builder;
 }
 
 /**
- * Helper to create an entry block
+ * Creates a bundle builder from a parsed bundle
  */
-export function createEntryBlock(
-  data: Uint8Array | null,
-  alignment: number = 16,
-  compressed: boolean = false
-): EntryBlock {
+export function createBundleFromParsed(
+  parsedBundle: { 
+    header: BundleHeader; 
+    resources: ResourceEntry[]; 
+    imports: ImportEntry[];
+    debugData?: string;
+  },
+  options: WriteOptions = {}
+): BundleBuilder {
+  const builder = new BundleBuilder(options);
+  builder.addResourceEntries(parsedBundle.resources);
+  
+  for (const importEntry of parsedBundle.imports) {
+    builder.addImportEntry(importEntry);
+  }
+  
+  if (parsedBundle.debugData) {
+    builder.setResourceStringTable(parsedBundle.debugData);
+  }
+  
+  return builder;
+}
+
+/**
+ * Helper to create a resource entry
+ */
+export function createResourceEntry(
+  resourceId: bigint,
+  resourceTypeId: number,
+  uncompressedSizes: number[] = [0, 0, 0],
+  diskSizes: number[] = [0, 0, 0],
+  diskOffsets: number[] = [0, 0, 0],
+  importHash: bigint = 0n,
+  importOffset: number = 0,
+  importCount: number = 0
+): ResourceEntry {
   return {
-    compressed,
-    compressedSize: data ? data.length : 0,
-    uncompressedSize: data ? data.length : 0,
-    uncompressedAlignment: alignment,
-    data
+    resourceId,
+    importHash,
+    uncompressedSizeAndAlignment: uncompressedSizes.slice(0, 3),
+    sizeAndAlignmentOnDisk: diskSizes.slice(0, 3),
+    diskOffsets: diskOffsets.slice(0, 3),
+    importOffset,
+    resourceTypeId,
+    importCount,
+    flags: 0,
+    streamIndex: 0
   };
 } 
