@@ -230,7 +230,11 @@ export const BundleManager = () => {
       if (parsedVehicleList) {
         setParsedVehicleList({
           ...parsedVehicleList,
-          vehicles: updatedVehicles
+          vehicles: updatedVehicles,
+          header: {
+            ...parsedVehicleList.header,
+            numVehicles: updatedVehicles.length
+          }
         });
       }
       setIsModified(true);
@@ -246,7 +250,11 @@ export const BundleManager = () => {
       if (parsedVehicleList) {
         setParsedVehicleList({
           ...parsedVehicleList,
-          vehicles: updatedVehicles
+          vehicles: updatedVehicles,
+          header: {
+            ...parsedVehicleList.header,
+            numVehicles: updatedVehicles.length
+          }
         });
       }
       toast.success(`Vehicle "${savedVehicle.vehicleName}" added successfully.`);
@@ -320,15 +328,12 @@ export const BundleManager = () => {
             uncompressedData = writeVehicleList(parsedVehicleList, littleEndian, false);
           } else {
             // Fallback if we don't have parsed data (shouldn't happen in normal operation)
-            uncompressedData = writeVehicleList({ vehicles: vehicleList, header: { unknown1: 0, unknown2: 0 } }, littleEndian, false);
+            uncompressedData = writeVehicleList({ vehicles: vehicleList, header: { numVehicles: vehicleList.length, startOffset: 16, unknown1: 0, unknown2: 0 } }, littleEndian, false);
           }
 
-          // Apply compression if needed
-          if (compress) {
-            resourceData = compressVehicleListData(uncompressedData);
-          } else {
-            resourceData = uncompressedData;
-          }
+          // Always compress vehicle list data (it's always compressed in the original bundles)
+          console.log(`🗜️ Compressing vehicle list data (${uncompressedData.length} bytes)`);
+          resourceData = compressVehicleListData(uncompressedData);
 
         } else if (colourType && resource.resourceTypeId === colourType.id && playerCarColours) {
           // Replace player car colours with modified data
@@ -345,12 +350,9 @@ export const BundleManager = () => {
           // Write the player car colours data (always uncompressed)
           uncompressedData = writePlayerCarColours(playerCarColours, littleEndian, false);
 
-          // Apply compression if needed
-          if (compress) {
-            resourceData = compressPlayerCarColoursData(uncompressedData);
-          } else {
-            resourceData = uncompressedData;
-          }
+          // Always compress player car colours data
+          console.log(`🗜️ Compressing player car colours data (${uncompressedData.length} bytes)`);
+          resourceData = compressPlayerCarColoursData(uncompressedData);
 
         } else {
           // Keep existing resource unchanged

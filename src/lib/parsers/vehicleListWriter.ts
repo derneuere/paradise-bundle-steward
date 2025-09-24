@@ -94,7 +94,7 @@ export function writeVehicleList(
   });
 
   // Write header
-  writeVehicleListHeader(writer, vehicleList.vehicles.length, vehicleList.header.unknown1, vehicleList.header.unknown2);
+  writeVehicleListHeader(writer, vehicleList.vehicles.length, 16, vehicleList.header.unknown1, vehicleList.header.unknown2);
 
   // Write vehicle entries
   for (const vehicle of vehicleList.vehicles) {
@@ -108,15 +108,15 @@ export function writeVehicleList(
 /**
  * Writes the vehicle list header
  */
-function writeVehicleListHeader(writer: BufferWriter, numVehicles: number, unknown1: number, unknown2: number): void {
+function writeVehicleListHeader(writer: BufferWriter, numVehicles: number, startOffset: number, unknown1: number, unknown2: number): void {
   // Vehicle list header format (matches VehicleListHeaderSchema):
   // uint32 numVehicles
-  // uint32 startOffset (16 for header size)
+  // uint32 startOffset
   // uint32 unknown1
   // uint32 unknown2
 
   writer.writeUint32(numVehicles);
-  writer.writeUint32(16); // startOffset - header is 16 bytes
+  writer.writeUint32(startOffset);
   writer.writeUint32(unknown1);
   writer.writeUint32(unknown2);
 }
@@ -345,7 +345,10 @@ function writeU64(writer: BufferWriter, value: bigint): void {
  */
 export function compressVehicleListData(data: Uint8Array): Uint8Array {
   try {
-    return pako.deflate(data, { level: 9 });
+    console.debug(`🗜️ Compressing vehicle list data: ${data.length} bytes at level 9`);
+    const compressed = pako.deflate(data, { level: 9 });
+    console.debug(`✅ Vehicle list compression complete: ${data.length} -> ${compressed.length} bytes (ratio: ${(compressed.length / data.length * 100).toFixed(1)}%)`);
+    return compressed;
   } catch (error) {
     console.warn('Failed to compress vehicle list data:', error);
     return data; // Return uncompressed data as fallback

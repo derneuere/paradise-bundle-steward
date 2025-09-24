@@ -77,11 +77,13 @@ export function isCompressed(data: Uint8Array): boolean {
 export function decompressData(compressedData: Uint8Array): Uint8Array {
   try {
     if (!isCompressed(compressedData)) {
+      console.debug(`📂 Data is not compressed: ${compressedData.length} bytes`);
       return compressedData;
     }
 
+    console.debug(`📖 Decompressing data: ${compressedData.length} bytes`);
     const decompressed = pako.inflate(compressedData);
-    console.debug(`Decompression: ${compressedData.length} -> ${decompressed.length} bytes`);
+    console.debug(`✅ Decompression complete: ${compressedData.length} -> ${decompressed.length} bytes (ratio: ${(decompressed.length / compressedData.length).toFixed(1)}x)`);
     return decompressed;
   } catch (error) {
     throw new CompressionError(
@@ -98,8 +100,9 @@ export function compressData(data: Uint8Array, level: number = 6): Uint8Array {
   try {
     // Clamp level to valid pako range (0-9)
     const validLevel = Math.max(0, Math.min(9, level)) as 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+    console.debug(`🗜️ Compressing data: ${data.length} bytes at level ${validLevel}`);
     const compressed = pako.deflate(data, { level: validLevel });
-    console.debug(`Compression: ${data.length} -> ${compressed.length} bytes (ratio: ${(compressed.length / data.length * 100).toFixed(1)}%)`);
+    console.debug(`✅ Compression complete: ${data.length} -> ${compressed.length} bytes (ratio: ${(compressed.length / data.length * 100).toFixed(1)}%)`);
     return compressed;
   } catch (error) {
     throw new CompressionError(

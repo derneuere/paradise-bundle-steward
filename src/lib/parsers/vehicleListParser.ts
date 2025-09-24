@@ -86,6 +86,8 @@ export function getDecryptedId(encrypted: bigint): string {
 export type ParsedVehicleList = {
   vehicles: VehicleListEntry[];
   header: {
+    numVehicles: number;
+    startOffset: number;
     unknown1: number;
     unknown2: number;
   };
@@ -369,6 +371,8 @@ function parseVehicleEntries(
   return {
     vehicles: entries,
     header: {
+      numVehicles: header.numVehicles,
+      startOffset: header.startOffset,
       unknown1: header.unknown1,
       unknown2: header.unknown2
     }

@@ -123,7 +123,10 @@ function writeU64(writer: BufferWriter, value: bigint): void {
  */
 export function compressPlayerCarColoursData(data: Uint8Array): Uint8Array {
   try {
-    return pako.deflate(data, { level: 9 });
+    console.debug(`🗜️ Compressing player car colours data: ${data.length} bytes at level 9`);
+    const compressed = pako.deflate(data, { level: 9 });
+    console.debug(`✅ Player car colours compression complete: ${data.length} -> ${compressed.length} bytes (ratio: ${(compressed.length / data.length * 100).toFixed(1)}%)`);
+    return compressed;
   } catch (error) {
     console.warn('Failed to compress player car colours data:', error);
     return data; // Return uncompressed data as fallback
