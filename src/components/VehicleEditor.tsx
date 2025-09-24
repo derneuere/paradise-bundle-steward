@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
 import { getDecryptedId } from '@/lib/parsers/vehicleListParser';
-import { encryptStringToCgsId } from '@/lib/parsers/vehicleListWriter';
 import { Rank, VehicleType, CarType, LiveryType } from '@/lib/core/types';
 
 type VehicleEditorProps = {

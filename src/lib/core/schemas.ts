@@ -16,6 +16,22 @@ import {
 // Core Schemas
 // ============================================================================
 
+// 4-byte fixed magic (e.g., "bnd2")
+export const Magic4Schema = arrayOf(u8, 4);
+
+export function magicBytesToString(bytes: Parsed<typeof Magic4Schema>): string {
+  const arr = Uint8Array.from(bytes);
+  return new TextDecoder().decode(arr);
+}
+
+export function stringToMagicBytes(magic: string): Parsed<typeof Magic4Schema> {
+  const out: number[] = [0, 0, 0, 0];
+  for (let i = 0; i < 4; i++) {
+    out[i] = i < magic.length ? magic.charCodeAt(i) & 0xFF : 0;
+  }
+  return out as Parsed<typeof Magic4Schema>;
+}
+
 // Custom 64-bit integer schema (using two 32-bit values)
 export const u64Schema = object({
   low: u32,
@@ -60,6 +76,18 @@ export const BundleHeaderSchema = object({
   resourceEntriesOffset: u32,  // 4 bytes
   resourceDataOffsets: arrayOf(u32, 3), // 12 bytes - Main, Secondary, Tertiary memory types
   flags: u32                   // 4 bytes
+});
+
+// Header schema including magic prefix for convenience
+export const BundleHeaderWithMagicSchema = object({
+  magic: Magic4Schema,         // 4 bytes, typically "bnd2"
+  version: u32,
+  platform: u32,
+  debugDataOffset: u32,
+  resourceEntriesCount: u32,
+  resourceEntriesOffset: u32,
+  resourceDataOffsets: arrayOf(u32, 3),
+  flags: u32
 });
 
 // ============================================================================
@@ -172,6 +200,9 @@ export const Vector4Schema = object({
   blue: f32,
   alpha: f32
 });
+
+// Alias: raw player color (RGBA float) as a schema
+export const PlayerCarColorSchema = Vector4Schema;
 
 // PlayerCarColourPalette schema for 32-bit architecture
 export const PlayerCarColourPalette32Schema = object({
@@ -335,3 +366,25 @@ export function resourceEntryToSchema(entry: {
     streamIndex: entry.streamIndex
   };
 } 
+
+// ============================================================================
+// Schema Factories for Fixed-Length Collections
+// ============================================================================
+
+// Fixed-length resource entries array
+export function makeResourceEntriesSchema(count: number) {
+  return arrayOf(ResourceEntrySchema, count);
+}
+
+// Fixed-length import entries array
+export function makeImportEntriesSchema(count: number) {
+  return arrayOf(ImportEntrySchema, count);
+}
+
+// Vehicle list with known count
+export function makeVehicleListSchema(count: number) {
+  return object({
+    header: VehicleListHeaderSchema,
+    entries: arrayOf(VehicleEntrySchema, count)
+  });
+}

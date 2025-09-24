@@ -19,7 +19,7 @@ export * from '../burnoutTheme';
 export * from '../resourceTypes';
 
 // Debug utilities
-export * from '../debugDataParser';
+export * from '../parsers/debugDataParser';
 
 // Original utils (tailwind merge)
 export { cn } from '../utils';

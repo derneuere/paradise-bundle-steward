@@ -12,7 +12,7 @@ import type {
 } from '../core/types';
 import { PaletteType } from '../core/types';
 import { 
-  Vector4Schema,
+  PlayerCarColorSchema,
   GlobalColourPalette32Schema,
   GlobalColourPalette64Schema,
 } from '../core/schemas';
@@ -122,7 +122,7 @@ function handleNestedBundle(
 
   console.debug('Player car colours is in nested bundle, extracting...');
   
-  const innerBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  const innerBuffer = (data.buffer as ArrayBuffer).slice(data.byteOffset, data.byteOffset + data.byteLength);
   const bundle = parseBundle(innerBuffer);
   
   // Find the PlayerCarColours resource in the nested bundle
@@ -205,7 +205,7 @@ function tryStructuredParsing(
 ): PlayerCarColours {
   try {
     const reader = new BufferReader(
-      data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+      (data.buffer as ArrayBuffer).slice(data.byteOffset, data.byteOffset + data.byteLength),
       { endianness: 'little' }
     );
 
@@ -290,7 +290,7 @@ function parseRawColorData(
     console.debug(`Testing ${endianness}-endian color parsing...`);
     
     const testReader = new BufferReader(
-      data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+      (data.buffer as ArrayBuffer).slice(data.byteOffset, data.byteOffset + data.byteLength),
       { endianness }
     );
     
@@ -299,7 +299,7 @@ function parseRawColorData(
     try {
       for (let i = 0; i < Math.min(50, maxPossibleColors); i++) {
         try {
-          const colorVector = Vector4Schema.read(testReader);
+          const colorVector = PlayerCarColorSchema.read(testReader);
           
           if (isValidColorVector(colorVector)) {
             const color = vector4ToColor(colorVector);
@@ -354,13 +354,13 @@ function extractColorsFromData(
   
   if (colorDataStart + (numColors * 16) <= data.byteLength) {
     const reader = new BufferReader(
-      data.buffer.slice(data.byteOffset + colorDataStart, data.byteOffset + colorDataStart + (numColors * 16)),
+      (data.buffer as ArrayBuffer).slice(data.byteOffset + colorDataStart, data.byteOffset + colorDataStart + (numColors * 16)),
       { endianness: 'little' }
     );
     
     for (let i = 0; i < numColors; i++) {
       try {
-        const colorVector = Vector4Schema.read(reader);
+        const colorVector = PlayerCarColorSchema.read(reader);
         if (isValidColorVector(colorVector)) {
           colors.push(vector4ToColor(colorVector));
         }
@@ -373,7 +373,7 @@ function extractColorsFromData(
   return colors;
 }
 
-function isValidColorVector(vector: Parsed<typeof Vector4Schema>): boolean {
+function isValidColorVector(vector: Parsed<typeof PlayerCarColorSchema>): boolean {
   return (
     !isNaN(vector.red) && !isNaN(vector.green) && 
     !isNaN(vector.blue) && !isNaN(vector.alpha) &&
@@ -382,7 +382,7 @@ function isValidColorVector(vector: Parsed<typeof Vector4Schema>): boolean {
   );
 }
 
-function vector4ToColor(vector: Parsed<typeof Vector4Schema>): PlayerCarColor {
+function vector4ToColor(vector: Parsed<typeof PlayerCarColorSchema>): PlayerCarColor {
   const red = Math.max(0, Math.min(1, vector.red));
   const green = Math.max(0, Math.min(1, vector.green));  
   const blue = Math.max(0, Math.min(1, vector.blue));

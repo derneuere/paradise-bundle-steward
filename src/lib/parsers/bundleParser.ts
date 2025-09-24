@@ -12,6 +12,8 @@ import type {
 } from '../core/types';
 import { 
   BundleHeaderSchema, 
+  BundleHeaderWithMagicSchema,
+  magicBytesToString,
   ResourceEntrySchema, 
   ImportEntrySchema,
   u64ToBigInt 
@@ -102,18 +104,20 @@ function parseHeader(
   buffer: ArrayBuffer, 
   options: ParseOptions
 ): BundleHeader {
-  // Parse magic string first
-  const magicBytes = new Uint8Array(buffer, 0, 4);
-  const magic = new TextDecoder().decode(magicBytes);
-  
-  reader.seekTo(4); // Skip past magic string
-  
-  // Parse rest of header
-  const headerRest = BundleHeaderSchema.read(reader);
-  
+  // Read header including magic via schema
+  reader.seekTo(0);
+  const headerFull = BundleHeaderWithMagicSchema.read(reader);
+  const magic = magicBytesToString(headerFull.magic);
+
   const header: BundleHeader = {
     magic,
-    ...headerRest
+    version: headerFull.version,
+    platform: headerFull.platform,
+    debugDataOffset: headerFull.debugDataOffset,
+    resourceEntriesCount: headerFull.resourceEntriesCount,
+    resourceEntriesOffset: headerFull.resourceEntriesOffset,
+    resourceDataOffsets: headerFull.resourceDataOffsets,
+    flags: headerFull.flags
   };
 
   // Validate header

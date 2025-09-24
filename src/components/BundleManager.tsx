@@ -8,7 +8,7 @@ import { extractAlignment, packSizeAndAlignment, extractResourceSize, getMemoryT
 import type { ResourceContext } from "@/lib/core/types";
 import { PLATFORMS } from "@/lib/core/types";
 import { RESOURCE_TYPES, getResourceType, getResourceTypeColor, type ResourceCategory } from "@/lib/resourceTypes";
-import { parseDebugData, findDebugResourceById, type DebugResource } from "@/lib/debugDataParser";
+import { parseDebugData, findDebugResourceById, type DebugResource } from "@/lib/parsers/debugDataParser";
 import { parseVehicleList, type VehicleListEntry, type ParsedVehicleList } from "@/lib/parsers/vehicleListParser";
 import { parsePlayerCarColours, type PlayerCarColours } from "@/lib/parsers/playerCarColoursParser";
 import { VehicleList } from "@/components/VehicleList";
@@ -19,8 +19,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { VehicleEditor } from './VehicleEditor';
-import { writeVehicleList, compressVehicleListData } from '@/lib/parsers/vehicleListWriter';
-import { writePlayerCarColours, compressPlayerCarColoursData } from '@/lib/parsers/playerCarColoursWriter';
 import { BundleBuilder, createResourceEntry } from '@/lib/core/bundleWriter';
 
 // Converted resource type for UI display
@@ -273,177 +271,7 @@ export const BundleManager = () => {
     setIsModified(true);
   };
 
-    const handleExportBundle = async () => {
-    if (!loadedBundle || !originalArrayBuffer) {
-      toast.error('No bundle loaded to export.');
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      
-      // Use the same platform detection logic as loading
-      const platform = loadedBundle.header.platform;
-      const littleEndian = platform !== PLATFORMS.PS3;
-      const compress = (loadedBundle.header.flags & 0x1) !== 0;
-      
-      console.log(`🔧 Exporting bundle: platform=${platform}, littleEndian=${littleEndian}, compressed=${compress}`);
-      
-      // Create a new bundle builder with original bundle settings
-      const builder = new BundleBuilder({
-        platform: platform,
-        compress: compress,
-        includeDebugData: !!loadedBundle.debugData
-      });
-      
-      // Set resource string table if it exists
-      if (loadedBundle.debugData) {
-        builder.setResourceStringTable(loadedBundle.debugData);
-      }
-
-      // Convert each resource to a BundleEntry and add to builder
-      for (let i = 0; i < loadedBundle.resources.length; i++) {
-        const resource = loadedBundle.resources[i];
-        const vehicleType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Vehicle List');
-        const colourType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Player Car Colours');
-        
-        // Get the actual resource data
-        let resourceData: Uint8Array;
-        let uncompressedData: Uint8Array | undefined;
-
-        if (vehicleType && resource.resourceTypeId === vehicleType.id) {
-          // Replace vehicle list with modified data
-          console.log(`📝 Replacing vehicle list (${vehicleList.length} vehicles)`);
-
-          // Get the decompressed resource data from the parsed bundle
-          const resourceContext: ResourceContext = {
-            bundle: loadedBundle,
-            resource,
-            buffer: originalArrayBuffer
-          };
-          const { data: decompressedData } = getResourceData(resourceContext);
-
-          // Write the vehicle list data (always uncompressed)
-          if (parsedVehicleList) {
-            uncompressedData = writeVehicleList(parsedVehicleList, littleEndian, false);
-          } else {
-            // Fallback if we don't have parsed data (shouldn't happen in normal operation)
-            uncompressedData = writeVehicleList({ vehicles: vehicleList, header: { numVehicles: vehicleList.length, startOffset: 16, unknown1: 0, unknown2: 0 } }, littleEndian, false);
-          }
-
-          // Always compress vehicle list data (it's always compressed in the original bundles)
-          console.log(`🗜️ Compressing vehicle list data (${uncompressedData.length} bytes)`);
-          resourceData = compressVehicleListData(uncompressedData);
-
-        } else if (colourType && resource.resourceTypeId === colourType.id && playerCarColours) {
-          // Replace player car colours with modified data
-          console.log(`🎨 Replacing player car colours (${playerCarColours.palettes.length} palettes)`);
-
-          // Get the decompressed resource data from the parsed bundle
-          const resourceContext: ResourceContext = {
-            bundle: loadedBundle,
-            resource,
-            buffer: originalArrayBuffer
-          };
-          const { data: decompressedData } = getResourceData(resourceContext);
-
-          // Write the player car colours data (always uncompressed)
-          uncompressedData = writePlayerCarColours(playerCarColours, littleEndian, false);
-
-          // Always compress player car colours data
-          console.log(`🗜️ Compressing player car colours data (${uncompressedData.length} bytes)`);
-          resourceData = compressPlayerCarColoursData(uncompressedData);
-
-        } else {
-          // Keep existing resource unchanged
-          const absoluteResourceOffset = loadedBundle.header.resourceDataOffsets[0] + resource.diskOffsets[0];
-          const resourceSize = extractResourceSize(resource.sizeAndAlignmentOnDisk[0]);
-
-          resourceData = new Uint8Array(
-            originalArrayBuffer.slice(absoluteResourceOffset, absoluteResourceOffset + resourceSize)
-          );
-
-          console.log(`📦 Preserving existing resource 0x${resource.resourceTypeId.toString(16)}: extracted ${resourceData.length} bytes, original size was ${resourceSize}`);
-          console.log(`📦 Resource offset: ${absoluteResourceOffset}, diskOffset: ${resource.diskOffsets[0]}`);
-        }
-
-        console.log(`🔍 Resource ${i} - uncompressed size from entry: ${resourceData.length}, sizeAndAlignmentOnDisk[0]: ${resource.sizeAndAlignmentOnDisk[0]}`);
-        
-        // Create BundleEntry matching the new API
-        const isCompressed = resource.sizeAndAlignmentOnDisk.some(size => extractResourceSize(size) > 0 && extractResourceSize(size) !== resourceData.length);
-
-        const originalCompressedSizes = resource.sizeAndAlignmentOnDisk.slice(0, 3);
-        const originalUncompressedSizes = resource.uncompressedSizeAndAlignment.slice(0, 3);
-        const diskOffsets = resource.diskOffsets.slice(0, 3);
-
-        const reserveCompressedSizes = resource.sizeAndAlignmentOnDisk.slice(0, 3);
-        const reserveUncompressedSizes = resource.uncompressedSizeAndAlignment.slice(0, 3);
-        const reserveDiskOffsets = resource.diskOffsets.slice(0, 3);
-
-        if (vehicleType && resource.resourceTypeId === vehicleType.id) {
-          const alignment = extractAlignment(resource.uncompressedSizeAndAlignment[0]);
-          reserveUncompressedSizes[0] = packSizeAndAlignment(uncompressedData.length, alignment);
-          reserveCompressedSizes[0] = resourceData.length;
-        } else if (colourType && resource.resourceTypeId === colourType.id && playerCarColours) {
-          const alignment = extractAlignment(resource.uncompressedSizeAndAlignment[0]);
-          reserveUncompressedSizes[0] = packSizeAndAlignment(uncompressedData.length, alignment);
-          reserveCompressedSizes[0] = resourceData.length;
-        }
-
-        const bundleEntry: ResourceEntry = {
-          resourceId: resource.resourceId,
-          importHash: resource.importHash,
-          resourceTypeId: resource.resourceTypeId,
-          uncompressedSizeAndAlignment: originalUncompressedSizes,
-          sizeAndAlignmentOnDisk: originalCompressedSizes,
-          diskOffsets,
-          importOffset: resource.importOffset,
-          importCount: resource.importCount,
-          flags: resource.flags,
-          streamIndex: resource.streamIndex
-        };
-        
-        // Add the entry to the bundle
-        builder.addResourceEntry(
-          createResourceEntry(
-            bundleEntry.resourceId,
-            bundleEntry.resourceTypeId,
-            bundleEntry.uncompressedSizeAndAlignment,
-            bundleEntry.sizeAndAlignmentOnDisk,
-            bundleEntry.diskOffsets,
-            bundleEntry.importHash,
-            bundleEntry.importOffset,
-            bundleEntry.importCount
-          )
-        );
-
-        // Store the resource data
-        builder.setResourceData(i, resourceData);
-      }
-
-      const newBundleData = await builder.write();
-      
-      // Download the file
-      const blob = new Blob([newBundleData], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'modified_bundle.bundle';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      toast.success('Bundle exported successfully!');
-      setIsModified(false);
-      
-    } catch (error) {
-      console.error('Error exporting bundle:', error);
-      toast.error(`Failed to export bundle: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const handleExportBundle = async () => { };
 
   // ResourceCard component
   const ResourceCard = ({ resource }: { resource: UIResource }) => {
