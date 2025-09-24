@@ -8,7 +8,7 @@ import {
   type Parsed
 } from 'typed-binary';
 import { BufferReader } from 'typed-binary';
-import { parseBundle } from './bundleParser';
+import { parseBundle } from './bundle';
 import { getResourceData, isNestedBundle, decompressData } from './resourceManager';
 import type {
   ResourceEntry,
@@ -17,8 +17,7 @@ import type {
   ParsedBundle,
   ProgressCallback
 } from './types';
-import { ResourceNotFoundError } from './types';
-import { BundleError } from './types';
+import { ResourceNotFoundError, BundleError } from './errors';
 
 // ============================================================================
 // Player Car Colors Schemas

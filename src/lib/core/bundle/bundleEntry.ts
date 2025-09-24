@@ -11,15 +11,15 @@ import {
 } from 'typed-binary';
 import { BufferReader } from 'typed-binary';
 import { BundleError } from '../errors';
-import { bigIntToU64, u64Schema } from './bundle';
+import { bigIntToU64, u64 } from '../u64';
 
 // ============================================================================
 // Resource Entry Schema (80 bytes)
 // ============================================================================
 
 export const ResourceEntrySchema = object({
-  resourceId: u64Schema,       // 8 bytes
-  importHash: u64Schema,       // 8 bytes
+  resourceId: u64,       // 8 bytes
+  importHash: u64,       // 8 bytes
   uncompressedSizeAndAlignment: arrayOf(u32, 3), // 12 bytes
   sizeAndAlignmentOnDisk: arrayOf(u32, 3),       // 12 bytes
   diskOffsets: arrayOf(u32, 3),                  // 12 bytes
@@ -35,7 +35,7 @@ export const ResourceEntrySchema = object({
 // ============================================================================
 
 export const ImportEntrySchema = object({
-  resourceId: u64Schema,       // 8 bytes
+  resourceId: u64,       // 8 bytes
   offset: u32,                 // 4 bytes
   padding: u32                 // 4 bytes - padding
 });

@@ -3,14 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Database, Cpu, HardDrive, Zap, AlertCircle, Download, Search, Filter, File, Image, Volume2, Code } from "lucide-react";
 import { toast } from "sonner";
-import { parseBundle, getPlatformName, getFlagNames, formatResourceId } from "@/lib/core/bundleParser";
-import { parseDebugDataFromXml, findDebugResourceById, type DebugResource } from "@/lib/core/debugData";
-import { parseVehicleList, type VehicleListEntry, type ParsedVehicleList } from "@/lib/core/vehicleList";
-import { parsePlayerCarColours, type PlayerCarColours } from "@/lib/core/playerCarColors";
+import { parseBundle, getPlatformName, getFlagNames, formatResourceId } from "@/lib/core/bundle";
+import { parseDebugDataFromXml, findDebugResourceById, type DebugResource } from "@/lib/core/bundle/debugData";
+import { parseBundleResources, type ParsedResources } from "@/lib/core/bundle";
+import { type VehicleListEntry, type ParsedVehicleList } from "@/lib/core/vehicleList";
+import { type PlayerCarColours } from "@/lib/core/playerCarColors";
 import { extractResourceSize, getMemoryTypeName } from "@/lib/core/resourceManager";
 import type { ResourceContext, ParsedBundle, ResourceEntry } from "@/lib/core/types";
-import { PLATFORMS } from "@/lib/core/types";
-import { RESOURCE_TYPES, getResourceType, getResourceTypeColor, type ResourceCategory } from "@/lib/resourceTypes";
+import { getResourceType, getResourceTypeColor, type ResourceCategory } from "@/lib/resourceTypes";
 import { VehicleList } from "@/components/VehicleList";
 import { PlayerCarColoursComponent } from "@/components/PlayerCarColours";
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -121,38 +121,11 @@ export const BundleManager = () => {
         convertResourceToUI(resource, bundle, debugData)
       );
  
-      // Parse vehicle list if present
-      const vehicleType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Vehicle List');
-      if (vehicleType) {
-        const vehicleResource = bundle.resources.find(r => r.resourceTypeId === vehicleType.id);
-        if (vehicleResource) {
-          const littleEndian = bundle.header.platform !== PLATFORMS.PS3;
-          const parsedVehicleData = parseVehicleList(arrayBuffer, vehicleResource, { littleEndian });
-          setParsedVehicleList(parsedVehicleData);
-          setVehicleList(parsedVehicleData.vehicles);
-        } else {
-          setParsedVehicleList(null);
-          setVehicleList([]);
-        }
-      } else {
-        setParsedVehicleList(null);
-        setVehicleList([]);
-      }
-
-      // Parse player car colours if present
-      const colourType = Object.values(RESOURCE_TYPES).find(rt => rt.name === 'Player Car Colours');
-      if (colourType) {
-        const colourResource = bundle.resources.find(r => r.resourceTypeId === colourType.id);
-        if (colourResource) {
-          const is64Bit = bundle.header.platform === PLATFORMS.PC; // Assume PC is 64-bit
-          const colours = parsePlayerCarColours(arrayBuffer, colourResource, is64Bit, { strict: false });
-          setPlayerCarColours(colours);
-        } else {
-          setPlayerCarColours(null);
-        }
-      } else {
-        setPlayerCarColours(null);
-      }
+      // Parse all known resource types
+      const parsedResources = parseBundleResources(arrayBuffer, bundle);
+      setParsedVehicleList(parsedResources.vehicleList || null);
+      setVehicleList(parsedResources.vehicleList?.vehicles || []);
+      setPlayerCarColours(parsedResources.playerCarColours || null);
 
       setLoadedBundle(bundle);
       setResources(uiResources);

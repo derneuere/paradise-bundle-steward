@@ -4,20 +4,24 @@ import { BufferReader } from 'typed-binary';
 import {
   parseResourceEntries,
   parseImportEntries
-} from './bundle/bundleEntry';
-import { parseHeader } from './bundle/bundleHeader';
+} from './bundleEntry';
+import { parseHeader } from './bundleHeader';
 import { parseDebugDataFromBuffer } from './debugData';
 import {
   ParsedBundle,
   ParseOptions,
   ProgressCallback,
-  BUNDLE_FLAGS
-} from './types';
-import { BundleError } from './types';
+  BUNDLE_FLAGS,
+  PLATFORMS
+} from '../types';
+import { BundleError } from '../errors';
 import {
   validateResourceEntry,
   calculateBundleStats
-} from './resourceManager';
+} from '../resourceManager';
+import { parseVehicleList, type ParsedVehicleList } from '../vehicleList';
+import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors';
+import { RESOURCE_TYPES } from '../../resourceTypes';
 
 // ============================================================================
 // Main Bundle Parser
@@ -131,4 +135,83 @@ function reportProgress(
   message?: string
 ) {
   callback?.({ type: type as 'parse' | 'write' | 'compress' | 'validate', stage: type, progress, message });
+}
+
+// ============================================================================
+// Resource-Specific Parsing
+// ============================================================================
+
+/**
+ * Result of parsing all known resource types from a bundle
+ */
+export type ParsedResources = {
+  vehicleList?: ParsedVehicleList;
+  playerCarColours?: PlayerCarColours;
+};
+
+/**
+ * Parses a specific resource type from bundle data
+ */
+function parseResourceType<T>(
+  buffer: ArrayBuffer,
+  bundle: ParsedBundle,
+  resourceName: string,
+  parseFn: (buffer: ArrayBuffer, resource: any, options: any) => T
+): T | null {
+  const resourceType = Object.values(RESOURCE_TYPES).find(rt => rt.name === resourceName);
+  if (!resourceType) return null;
+
+  const resource = bundle.resources.find(r => r.resourceTypeId === resourceType.id);
+  if (!resource) return null;
+
+  try {
+    let options: any = {};
+
+    // Set platform-specific options
+    if (resourceName === 'Vehicle List') {
+      options.littleEndian = bundle.header.platform !== PLATFORMS.PS3;
+    } else if (resourceName === 'Player Car Colours') {
+      options.is64Bit = bundle.header.platform === PLATFORMS.PC;
+      options.strict = false;
+    }
+
+    return parseFn(buffer, resource, options);
+  } catch (error) {
+    console.warn(`Failed to parse ${resourceName}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Parses all known resource types from a bundle
+ */
+export function parseBundleResources(
+  buffer: ArrayBuffer,
+  bundle: ParsedBundle
+): ParsedResources {
+  const resources: ParsedResources = {};
+
+  // Parse vehicle list
+  const vehicleList = parseResourceType(
+    buffer,
+    bundle,
+    'Vehicle List',
+    parseVehicleList
+  );
+  if (vehicleList) {
+    resources.vehicleList = vehicleList;
+  }
+
+  // Parse player car colours
+  const playerCarColours = parseResourceType(
+    buffer,
+    bundle,
+    'Player Car Colours',
+    parsePlayerCarColours
+  );
+  if (playerCarColours) {
+    resources.playerCarColours = playerCarColours;
+  }
+
+  return resources;
 }

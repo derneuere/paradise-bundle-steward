@@ -1,8 +1,8 @@
 // Debug data parsing for Burnout Paradise bundles
 // Handles ResourceStringTable XML parsing
 
-import { BundleHeader } from "./bundle/bundleHeader";
-import { BUNDLE_FLAGS } from "./types";
+import { BundleHeader } from "./bundleHeader";
+import { BUNDLE_FLAGS } from "../types";
 
 // ============================================================================
 // Debug Data Types

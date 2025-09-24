@@ -6,14 +6,13 @@ import type {
   ResourceEntry,
   ResourceData,
   ResourceContext,
-  BundleError,
   ParsedBundle
 } from './types';
-import type { BundleHeader } from './bundle/bundleHeader';
 import { 
   CompressionError,
-  ValidationError 
-} from './types';
+  ValidationError,
+} from './errors';
+
 
 // ============================================================================
 // Resource Data Extraction

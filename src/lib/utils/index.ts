@@ -3,11 +3,11 @@
 
 // Core utilities
 export * from '../core/types';
-export * from '../core/bundle/bundle';
-export * from '../core/bundleParser';
+export * from '../core/u64';
+export * from '../core/bundle';
 export * from '../core/vehicleList';
 export * from '../core/playerCarColors';
-export * from '../core/debugData';
+export * from '../core/bundle/debugData';
 export * from '../core/resourceManager';
 
 // Theme utilities (keeping separate for UI concerns)
@@ -30,7 +30,7 @@ export async function createBundleContext(
   buffer: ArrayBuffer,
   options?: import('../core/types').ParseOptions
 ) {
-  const { parseBundle } = await import('../core/bundleParser');
+  const { parseBundle } = await import('../core/bundle');
   const { parseVehicleList } = await import('../core/vehicleList');
   const { parsePlayerCarColours } = await import('../core/playerCarColors');
   const { findResourceByType } = await import('../core/resourceManager');

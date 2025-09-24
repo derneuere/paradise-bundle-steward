@@ -100,17 +100,6 @@ export type {
 export type { PaletteType, PlayerCarColor } from './playerCarColors';
 
 // ============================================================================
-// Error Types (re-exported from errors.ts)
-// ============================================================================
-
-export {
-  BundleError,
-  ResourceNotFoundError,
-  CompressionError,
-  ValidationError
-} from './errors';
-
-// ============================================================================
 // Utility Types
 // ============================================================================
 

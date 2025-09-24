@@ -11,29 +11,31 @@ import {
 } from 'typed-binary';
 import { BufferReader } from 'typed-binary';
 import * as pako from 'pako';
-import { parseBundle } from './bundleParser';
+import { parseBundle } from './bundle';
 import { getResourceData, isNestedBundle } from './resourceManager';
 import type {
   ResourceEntry,
   ResourceContext,
   ParsedBundle,
   ProgressCallback,
-  ResourceNotFoundError
 } from './types';
-import { BundleError } from './types';
+import { 
+  ResourceNotFoundError,
+  BundleError } from './errors';
+import { u64, u64ToBigInt, bigIntToU64 } from './u64';
 
 // ============================================================================
 // Vehicle List Schemas
 // ============================================================================
 
 // 8-byte string schema (for CgsID)
-export const cgsIdSchema = arrayOf(u8, 8);
+export const cgsId = u64;
 
 // 32-byte string schema
-export const string32Schema = arrayOf(u8, 32);
+export const string32 = arrayOf(u8, 32);
 
 // 64-byte string schema
-export const string64Schema = arrayOf(u8, 64);
+export const string64 = arrayOf(u8, 64);
 
 // Vehicle List Header Schema (16 bytes)
 export const VehicleListHeaderSchema = object({
@@ -56,10 +58,10 @@ export const GamePlayDataSchema = object({
 
 // Audio data schema
 export const AudioDataSchema = object({
-  exhaustNameBytes: cgsIdSchema,
+  exhaustNameBytes: cgsId,
   exhaustEntityKey: object({ low: u32, high: u32 }),
   engineEntityKey: object({ low: u32, high: u32 }),
-  engineNameBytes: cgsIdSchema,
+  engineNameBytes: cgsId,
   rivalUnlockHash: u32,
   padding1: u32,
   wonCarVoiceOverKey: object({ low: u32, high: u32 }),
@@ -73,11 +75,11 @@ export const AudioDataSchema = object({
 
 // Vehicle entry schema (264 bytes / 0x108)
 export const VehicleEntrySchema = object({
-  idBytes: cgsIdSchema,
-  parentIdBytes: cgsIdSchema,
-  wheelNameBytes: string32Schema,
-  vehicleNameBytes: string64Schema,
-  manufacturerBytes: string32Schema,
+  idBytes: cgsId,
+  parentIdBytes: cgsId,
+  wheelNameBytes: string32,
+  vehicleNameBytes: string64,
+  manufacturerBytes: string32,
   gamePlayData: GamePlayDataSchema,
   attribCollectionKey: object({ low: u32, high: u32 }),
   audioData: AudioDataSchema,
@@ -270,8 +272,8 @@ function decryptEncryptedString(encrypted: bigint): string {
 function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>): VehicleListEntry | null {
   try {
     // Preserve encrypted CGS IDs as bigints (don't decrypt)
-    const id = bytesToBigInt(rawEntry.idBytes);
-    const parentId = bytesToBigInt(rawEntry.parentIdBytes);
+    const id = u64ToBigInt(rawEntry.idBytes);
+    const parentId = u64ToBigInt(rawEntry.parentIdBytes);
     const wheelName = decodeString(rawEntry.wheelNameBytes);
     const vehicleName = decodeString(rawEntry.vehicleNameBytes);
     const manufacturer = decodeString(rawEntry.manufacturerBytes);
@@ -288,10 +290,10 @@ function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>): Vehic
 
     // Process audio data - preserve encrypted names as bigints
     const audioData: VehicleListEntryAudioData = {
-      exhaustName: bytesToBigInt(rawEntry.audioData.exhaustNameBytes),
+      exhaustName: u64ToBigInt(rawEntry.audioData.exhaustNameBytes),
       exhaustEntityKey: u64ToBigInt(rawEntry.audioData.exhaustEntityKey),
       engineEntityKey: u64ToBigInt(rawEntry.audioData.engineEntityKey),
-      engineName: bytesToBigInt(rawEntry.audioData.engineNameBytes),
+      engineName: u64ToBigInt(rawEntry.audioData.engineNameBytes),
       rivalUnlockName: CLASS_UNLOCK_STREAMS[rawEntry.audioData.rivalUnlockHash] ??
         `0x${rawEntry.audioData.rivalUnlockHash.toString(16).toUpperCase()}`,
       wonCarVoiceOverKey: u64ToBigInt(rawEntry.audioData.wonCarVoiceOverKey),
@@ -365,27 +367,6 @@ const AI_MUSIC_STREAMS: Record<number, string> = {
 const VEHICLE_ENTRY_SIZE = 0x108; // 264 bytes
 
 // ============================================================================
-// Helper Functions
-// ============================================================================
-
-// Helper function to convert u64 object to bigint
-function u64ToBigInt(u64: { low: number; high: number }): bigint {
-  return (BigInt(u64.high) << 32n) | BigInt(u64.low);
-}
-
-// Helper function to convert array of 8 bytes to bigint (little-endian)
-function bytesToBigInt(bytes: number[]): bigint {
-  if (bytes.length !== 8) {
-    throw new Error(`Expected 8 bytes, got ${bytes.length}`);
-  }
-  let value = 0n;
-  for (let i = 0; i < 8; i++) {
-    value |= BigInt(bytes[i]) << (BigInt(i) * 8n);
-  }
-  return value;
-}
-
-// ============================================================================
 // High-Level Parsing Functions
 // ============================================================================
 
@@ -431,7 +412,7 @@ export function parseVehicleList(
     throw new BundleError(
       `Failed to parse vehicle list: ${error instanceof Error ? error.message : String(error)}`,
       'VEHICLE_LIST_PARSE_ERROR',
-      { error, resourceId: resource.resourceId.toString(16) }
+      { error, resourceId: resource.resourceId.toString(16) as string }
     );
   }
 }
