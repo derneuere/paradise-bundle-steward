@@ -1,12 +1,12 @@
 // Burnout Paradise UI Theme and Labeling Utilities
 // Separated from parsing logic to maintain clean architecture
 
-import { 
-  CarType, 
-  VehicleType, 
-  LiveryType, 
-  Rank 
-} from './core/types';
+import {
+  CarType,
+  VehicleType,
+  LiveryType,
+  Rank
+} from './core/vehicleList';
 
 // ============================================================================
 // Official Burnout Paradise Color Scheme

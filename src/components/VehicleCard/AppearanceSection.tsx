@@ -1,6 +1,6 @@
 import { Palette } from "lucide-react";
 import { ComponentStyles, getLiveryTypeLabel } from '@/lib/burnoutTheme';
-import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/core/vehicleList';
 
 type AppearanceSectionProps = {
   vehicle: VehicleListEntry;

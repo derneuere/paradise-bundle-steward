@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { getBoostTypeColors, getBoostTypeLabel, getVehicleTypeLabel, BurnoutColors } from '@/lib/burnoutTheme';
-import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/core/vehicleList';
 
 type VehicleHeaderProps = {
   vehicle: VehicleListEntry;

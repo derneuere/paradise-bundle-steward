@@ -7,7 +7,7 @@ import { GameplaySection } from './GameplaySection';
 import { AppearanceSection } from './AppearanceSection';
 import { AudioSection } from './AudioSection';
 import { TechnicalSection } from './TechnicalSection';
-import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/core/vehicleList';
 
 type VehicleCardProps = {
   vehicle: VehicleListEntry;

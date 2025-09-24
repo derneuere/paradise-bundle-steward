@@ -3,14 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Database, Cpu, HardDrive, Zap, AlertCircle, Download, Search, Filter, File, Image, Volume2, Code } from "lucide-react";
 import { toast } from "sonner";
-import { parseBundle, getPlatformName, getFlagNames, formatResourceId, type ParsedBundle, type ResourceEntry } from "@/lib/parsers/bundleParser";
-import { extractAlignment, packSizeAndAlignment, extractResourceSize, getMemoryTypeName, getResourceData } from "@/lib/core/resourceManager";
-import type { ResourceContext } from "@/lib/core/types";
+import { parseBundle, getPlatformName, getFlagNames, formatResourceId } from "@/lib/core/bundleParser";
+import { parseDebugDataFromXml, findDebugResourceById, type DebugResource } from "@/lib/core/debugData";
+import { parseVehicleList, type VehicleListEntry, type ParsedVehicleList } from "@/lib/core/vehicleList";
+import { parsePlayerCarColours, type PlayerCarColours } from "@/lib/core/playerCarColors";
+import { extractResourceSize, getMemoryTypeName } from "@/lib/core/resourceManager";
+import type { ResourceContext, ParsedBundle, ResourceEntry } from "@/lib/core/types";
 import { PLATFORMS } from "@/lib/core/types";
 import { RESOURCE_TYPES, getResourceType, getResourceTypeColor, type ResourceCategory } from "@/lib/resourceTypes";
-import { parseDebugData, findDebugResourceById, type DebugResource } from "@/lib/parsers/debugDataParser";
-import { parseVehicleList, type VehicleListEntry, type ParsedVehicleList } from "@/lib/parsers/vehicleListParser";
-import { parsePlayerCarColours, type PlayerCarColours } from "@/lib/parsers/playerCarColoursParser";
 import { VehicleList } from "@/components/VehicleList";
 import { PlayerCarColoursComponent } from "@/components/PlayerCarColours";
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -19,7 +19,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { VehicleEditor } from './VehicleEditor';
-import { BundleBuilder, createResourceEntry } from '@/lib/core/bundleWriter';
 
 // Converted resource type for UI display
 type UIResource = {
@@ -68,7 +67,7 @@ export const BundleManager = () => {
 
   const convertResourceToUI = (resource: ResourceEntry, bundle: ParsedBundle, debugResources: DebugResource[]): UIResource => {
     const resourceType = getResourceType(resource.resourceTypeId);
-    const debugResource = findDebugResourceById(debugResources, formatResourceId(resource.resourceId));
+    const debugResource = findDebugResourceById(debugResources, formatResourceId(resource.resourceId.low, resource.resourceId.high));
     
     // Find primary memory type (first non-zero size)
     let memoryTypeIndex = 0;
@@ -86,8 +85,8 @@ export const BundleManager = () => {
     }
 
     return {
-      id: formatResourceId(resource.resourceId),
-      name: debugResource?.name || `Resource_${resource.resourceId.toString(16)}`,
+      id: formatResourceId(resource.resourceId.low, resource.resourceId.high),
+      name: debugResource?.name || `Resource_${resource.resourceId.low.toString(16)}`,
       type: resourceType.name,
       typeName: debugResource?.typeName || resourceType.description,
       category: resourceType.category,
@@ -114,7 +113,7 @@ export const BundleManager = () => {
       // Parse debug data if available
       let debugData: DebugResource[] = [];
       if (bundle.debugData) {
-        debugData = parseDebugData(bundle.debugData);
+        debugData = parseDebugDataFromXml(bundle.debugData);
       }
 
       // Convert resources to UI format

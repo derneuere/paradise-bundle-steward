@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Palette, Sparkles } from "lucide-react";
-import type { PlayerCarColours, PlayerCarColourPalette, PlayerCarColor } from "@/lib/parsers/playerCarColoursParser";
+import type { PlayerCarColours, PlayerCarColourPalette, PlayerCarColor } from "@/lib/core/playerCarColors";
 
 type PlayerCarColoursProps = {
   colours: PlayerCarColours;

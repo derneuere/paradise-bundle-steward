@@ -8,9 +8,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
-import { getDecryptedId } from '@/lib/parsers/vehicleListParser';
-import { Rank, VehicleType, CarType, LiveryType } from '@/lib/core/types';
+import type { VehicleListEntry } from '@/lib/core/vehicleList';
+import { getDecryptedId, Rank, VehicleType, CarType, LiveryType } from '@/lib/core/vehicleList';
 
 type VehicleEditorProps = {
   vehicle: VehicleListEntry | null;

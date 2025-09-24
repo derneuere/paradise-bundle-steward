@@ -1,7 +1,7 @@
 import { VehicleCard } from './VehicleCard/VehicleCard';
 import { Button } from '@/components/ui/button';
 import { Plus, Download } from 'lucide-react';
-import type { VehicleListEntry } from '@/lib/parsers/vehicleListParser';
+import type { VehicleListEntry } from '@/lib/core/vehicleList';
 
 type VehicleListProps = {
   vehicles: VehicleListEntry[];

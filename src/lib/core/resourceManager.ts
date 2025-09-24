@@ -2,14 +2,14 @@
 // Handles compression, decompression, validation, and data extraction
 
 import * as pako from 'pako';
-import type { 
-  ResourceEntry, 
-  ResourceData, 
+import type {
+  ResourceEntry,
+  ResourceData,
   ResourceContext,
   BundleError,
-  BundleHeader,
   ParsedBundle
 } from './types';
+import type { BundleHeader } from './bundle/bundleHeader';
 import { 
   CompressionError,
   ValidationError 
@@ -230,30 +230,6 @@ export function validateResourceEntry(resource: ResourceEntry, bufferSize: numbe
   return errors;
 }
 
-/**
- * Validates bundle header
- */
-export function validateBundleHeader(header: BundleHeader): ValidationError[] {
-  const errors: ValidationError[] = [];
-
-  if (header.magic !== 'bnd2') {
-    errors.push(new ValidationError(`Invalid bundle magic: ${header.magic}`));
-  }
-
-  if (header.version !== 2) {
-    errors.push(new ValidationError(`Unsupported bundle version: ${header.version}`));
-  }
-
-  if (![1, 2, 3].includes(header.platform)) {
-    errors.push(new ValidationError(`Invalid platform: ${header.platform}`));
-  }
-
-  if (header.resourceEntriesCount < 0 || header.resourceEntriesCount > 10000) {
-    errors.push(new ValidationError(`Suspicious resource count: ${header.resourceEntriesCount}`));
-  }
-
-  return errors;
-}
 
 // ============================================================================
 // Resource Utilities

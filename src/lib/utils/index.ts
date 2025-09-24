@@ -3,23 +3,18 @@
 
 // Core utilities
 export * from '../core/types';
-export * from '../core/schemas';
+export * from '../core/bundle/bundle';
+export * from '../core/bundleParser';
+export * from '../core/vehicleList';
+export * from '../core/playerCarColors';
+export * from '../core/debugData';
 export * from '../core/resourceManager';
-export * from '../core/bundleWriter';
-
-// Parsers
-export * from '../parsers/bundleParser';
-export * from '../parsers/vehicleListParser';
-export * from '../parsers/playerCarColoursParser';
 
 // Theme utilities (keeping separate for UI concerns)
 export * from '../burnoutTheme';
 
 // Resource type utilities
 export * from '../resourceTypes';
-
-// Debug utilities
-export * from '../parsers/debugDataParser';
 
 // Original utils (tailwind merge)
 export { cn } from '../utils';
@@ -35,14 +30,14 @@ export async function createBundleContext(
   buffer: ArrayBuffer,
   options?: import('../core/types').ParseOptions
 ) {
-  const { parseBundle } = await import('../parsers/bundleParser');
-  const { parseVehicleList } = await import('../parsers/vehicleListParser');
-  const { parsePlayerCarColours } = await import('../parsers/playerCarColoursParser');
+  const { parseBundle } = await import('../core/bundleParser');
+  const { parseVehicleList } = await import('../core/vehicleList');
+  const { parsePlayerCarColours } = await import('../core/playerCarColors');
   const { findResourceByType } = await import('../core/resourceManager');
   const { RESOURCE_TYPE_IDS } = await import('../core/types');
-  
+
   const bundle = parseBundle(buffer, options);
-  
+
   return {
     bundle,
     async getVehicleList() {
@@ -60,13 +55,13 @@ export async function createBundleContext(
  * Quick bundle analysis without full parsing
  */
 export function analyzeBundleQuick(buffer: ArrayBuffer) {
-  const { parseBundle, getPlatformName, getFlagNames } = require('../parsers/bundleParser');
+  const { parseBundle, getPlatformName, getFlagNames } = require('../core/bundleParser');
   const { calculateBundleStats } = require('../core/resourceManager');
-  
+
   try {
     const bundle = parseBundle(buffer, { strict: false });
     const stats = calculateBundleStats(bundle, buffer);
-    
+
     return {
       isValid: true,
       platform: getPlatformName(bundle.header.platform),
