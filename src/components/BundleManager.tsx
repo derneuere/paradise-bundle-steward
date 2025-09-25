@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Database, Cpu, HardDrive, Zap, AlertCircle, Download, Search, Filter, File, Image, Volume2, Code } from "lucide-react";
 import { toast } from "sonner";
-import { parseBundle, getPlatformName, getFlagNames, formatResourceId } from "@/lib/core/bundle";
+import { parseBundle, writeBundle, getPlatformName, getFlagNames, formatResourceId } from "@/lib/core/bundle";
 import { parseDebugDataFromXml, findDebugResourceById, type DebugResource } from "@/lib/core/bundle/debugData";
+import { u64ToBigInt } from "@/lib/core/u64";
 import { parseBundleResources, type ParsedResources } from "@/lib/core/bundle";
 import { type VehicleListEntry, type ParsedVehicleList } from "@/lib/core/vehicleList";
 import { type PlayerCarColours } from "@/lib/core/playerCarColors";
@@ -67,7 +68,7 @@ export const BundleManager = () => {
 
   const convertResourceToUI = (resource: ResourceEntry, bundle: ParsedBundle, debugResources: DebugResource[]): UIResource => {
     const resourceType = getResourceType(resource.resourceTypeId);
-    const debugResource = findDebugResourceById(debugResources, formatResourceId(resource.resourceId.low, resource.resourceId.high));
+    const debugResource = findDebugResourceById(debugResources, formatResourceId(u64ToBigInt(resource.resourceId)));
     
     // Find primary memory type (first non-zero size)
     let memoryTypeIndex = 0;
@@ -85,7 +86,7 @@ export const BundleManager = () => {
     }
 
     return {
-      id: formatResourceId(resource.resourceId.low, resource.resourceId.high),
+      id: formatResourceId(u64ToBigInt(resource.resourceId)),
       name: debugResource?.name || `Resource_${resource.resourceId.low.toString(16)}`,
       type: resourceType.name,
       typeName: debugResource?.typeName || resourceType.description,
@@ -243,7 +244,46 @@ export const BundleManager = () => {
     setIsModified(true);
   };
 
-  const handleExportBundle = async () => { };
+  const handleExportBundle = async () => {
+    if (!loadedBundle || !originalArrayBuffer) {
+      toast.error("No bundle loaded to export");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const outBuffer = writeBundle(
+        loadedBundle,
+        originalArrayBuffer,
+        { includeDebugData: true },
+        (e) => {
+          if (e.type === 'write') {
+            // Optional: could show a progress bar in future
+            console.debug(`[export] ${e.stage}: ${Math.round(e.progress * 100)}% - ${e.message ?? ''}`);
+          }
+        }
+      );
+
+      const blob = new Blob([outBuffer], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'bundle-modified.BUNDLE';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+
+      toast.success("Exported bundle", { description: `Size: ${(outBuffer.byteLength / 1024).toFixed(1)} KB` });
+    } catch (error) {
+      console.error('Error exporting bundle:', error);
+      toast.error("Failed to export bundle", {
+        description: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // ResourceCard component
   const ResourceCard = ({ resource }: { resource: UIResource }) => {

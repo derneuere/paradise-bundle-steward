@@ -10,6 +10,7 @@ import { parseDebugDataFromBuffer } from './debugData';
 import {
   ParsedBundle,
   ParseOptions,
+  WriteOptions,
   ProgressCallback,
   BUNDLE_FLAGS,
   PLATFORMS
@@ -24,8 +25,166 @@ import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors
 import { RESOURCE_TYPES } from '../../resourceTypes';
 
 // ============================================================================
+// Main Bundle Writer
+// ============================================================================
+
+/**
+ * Writes a Burnout Paradise Bundle 2 format buffer from a ParsedBundle.
+ * Note: This writer preserves the original data layout. It updates the header,
+ * resource entry table and optional debug data in-place relative to the
+ * original buffer. Resource/import data bytes are copied from the original
+ * buffer without relocation.
+ */
+export function writeBundle(
+  bundle: ParsedBundle,
+  originalBuffer: ArrayBuffer,
+  options: WriteOptions = {},
+  progressCallback?: ProgressCallback
+): ArrayBuffer {
+  try {
+    reportProgress(progressCallback, 'write', 0, 'Starting bundle write');
+
+    // Start with a byte-for-byte copy of the original buffer
+    const outBytes = new Uint8Array(originalBuffer.byteLength);
+    outBytes.set(new Uint8Array(originalBuffer));
+    const outBuffer = outBytes.buffer;
+    const isLittleEndian = bundle.header.platform !== PLATFORMS.PS3;
+    const dv = new DataView(outBuffer);
+
+    // ----------------------------------------------------------------------
+    // Write header at offset 0
+    // ----------------------------------------------------------------------
+    const headerOffset = 0;
+    const writeU32 = (offset: number, value: number) => dv.setUint32(offset, value >>> 0, isLittleEndian);
+
+    // magic 'bnd2'
+    const magicBytes = new TextEncoder().encode('bnd2');
+    outBytes.set(magicBytes, headerOffset);
+
+    // version
+    writeU32(headerOffset + 4, 2);
+
+    // platform
+    writeU32(headerOffset + 8, bundle.header.platform);
+
+    // Determine debug flag and offset
+    const includeDebug = options.includeDebugData !== false && !!bundle.debugData && bundle.header.debugDataOffset > 0;
+    let flags = bundle.header.flags >>> 0;
+    if (includeDebug) {
+      flags |= BUNDLE_FLAGS.HAS_DEBUG_DATA;
+    } else {
+      flags &= ~BUNDLE_FLAGS.HAS_DEBUG_DATA;
+    }
+
+    // debugDataOffset from header (preserve existing position)
+    writeU32(headerOffset + 12, includeDebug ? bundle.header.debugDataOffset : 0);
+
+    // resourceEntriesCount
+    writeU32(headerOffset + 16, bundle.resources.length);
+
+    // resourceEntriesOffset
+    writeU32(headerOffset + 20, bundle.header.resourceEntriesOffset);
+
+    // resourceDataOffsets (3 x u32)
+    const rdo = bundle.header.resourceDataOffsets || [0, 0, 0];
+    writeU32(headerOffset + 24, rdo[0] || 0);
+    writeU32(headerOffset + 28, rdo[1] || 0);
+    writeU32(headerOffset + 32, rdo[2] || 0);
+
+    // flags
+    writeU32(headerOffset + 36, flags);
+
+    reportProgress(progressCallback, 'write', 0.25, 'Header written');
+
+    // ----------------------------------------------------------------------
+    // Write resource entry table
+    // ----------------------------------------------------------------------
+
+    const entrySize = 64; // bytes per ResourceEntry
+    let tableOffset = bundle.header.resourceEntriesOffset;
+
+    const writeU16 = (offset: number, value: number) => dv.setUint16(offset, value & 0xFFFF, isLittleEndian);
+    const writeU8 = (offset: number, value: number) => dv.setUint8(offset, value & 0xFF);
+
+    for (let i = 0; i < bundle.resources.length; i++) {
+      const re = bundle.resources[i];
+      let off = tableOffset + i * entrySize;
+
+      // resourceId (u64 -> two u32: low, high)
+      writeU32(off + 0, re.resourceId.low);
+      writeU32(off + 4, re.resourceId.high);
+
+      // importHash (u64)
+      writeU32(off + 8, re.importHash.low);
+      writeU32(off + 12, re.importHash.high);
+
+      // uncompressedSizeAndAlignment [3]
+      writeU32(off + 16, re.uncompressedSizeAndAlignment[0]);
+      writeU32(off + 20, re.uncompressedSizeAndAlignment[1]);
+      writeU32(off + 24, re.uncompressedSizeAndAlignment[2]);
+
+      // sizeAndAlignmentOnDisk [3]
+      writeU32(off + 28, re.sizeAndAlignmentOnDisk[0]);
+      writeU32(off + 32, re.sizeAndAlignmentOnDisk[1]);
+      writeU32(off + 36, re.sizeAndAlignmentOnDisk[2]);
+
+      // diskOffsets [3]
+      writeU32(off + 40, re.diskOffsets[0]);
+      writeU32(off + 44, re.diskOffsets[1]);
+      writeU32(off + 48, re.diskOffsets[2]);
+
+      // importOffset
+      writeU32(off + 52, re.importOffset);
+
+      // resourceTypeId
+      writeU32(off + 56, re.resourceTypeId);
+
+      // importCount (u16)
+      writeU16(off + 60, re.importCount);
+
+      // flags (u8)
+      writeU8(off + 62, re.flags);
+
+      // streamIndex (u8)
+      writeU8(off + 63, re.streamIndex);
+
+    }
+
+    reportProgress(progressCallback, 'write', 0.7, 'Resource table written');
+
+    // ----------------------------------------------------------------------
+    // Write debug data if requested and space exists at header.debugDataOffset
+    // ----------------------------------------------------------------------
+    if (includeDebug && typeof bundle.debugData === 'string') {
+      const enc = new TextEncoder();
+      const bytes = enc.encode(bundle.debugData);
+      const start = bundle.header.debugDataOffset >>> 0;
+
+      // Safeguard: only write within buffer bounds
+      const maxWritable = outBytes.length - start;
+      const toWrite = Math.min(bytes.length, Math.max(0, maxWritable - 1)); // keep room for NUL
+      if (toWrite > 0 && start < outBytes.length) {
+        outBytes.set(bytes.subarray(0, toWrite), start);
+        outBytes[start + toWrite] = 0; // NUL terminate
+      }
+    }
+
+    reportProgress(progressCallback, 'write', 1.0, 'Bundle write complete');
+    return outBuffer;
+
+  } catch (error) {
+    throw new BundleError(
+      `Failed to write bundle: ${error instanceof Error ? error.message : String(error)}`,
+      'WRITE_ERROR',
+      { error }
+    );
+  }
+}
+
+// ============================================================================
 // Main Bundle Parser
 // ============================================================================
+
 
 /**
  * Parses a Burnout Paradise Bundle 2 format file
