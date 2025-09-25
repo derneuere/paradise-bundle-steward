@@ -2,6 +2,7 @@
 // This file centralizes all shared types and interfaces
 
 import type { Parsed } from 'typed-binary';
+import type { ParsedVehicleList, VehicleListEntry } from './vehicleList';
 
 // ============================================================================
 // Platform and Bundle Constants
@@ -119,6 +120,12 @@ export type WriteOptions = {
   compress?: boolean;
   includeDebugData?: boolean;
   optimizeForMemory?: boolean;
+  overrides?: {
+    vehicleList?: {
+      vehicles: VehicleListEntry[];
+      header?: ParsedVehicleList['header'];
+    };
+  };
 }
 
 // ============================================================================

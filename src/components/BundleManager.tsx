@@ -251,11 +251,21 @@ export const BundleManager = () => {
     }
 
     setIsLoading(true);
+    console.log(vehicleList);
+    console.log(parsedVehicleList);
     try {
       const outBuffer = writeBundle(
         loadedBundle,
         originalArrayBuffer,
-        { includeDebugData: true },
+        {
+          includeDebugData: true,
+          overrides: parsedVehicleList ? {
+            vehicleList: {
+              vehicles: vehicleList,
+              header: parsedVehicleList.header
+            }
+          } : undefined
+        },
         (e) => {
           if (e.type === 'write') {
             // Optional: could show a progress bar in future

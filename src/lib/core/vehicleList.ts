@@ -366,6 +366,32 @@ const AI_MUSIC_STREAMS: Record<number, string> = {
 
 const VEHICLE_ENTRY_SIZE = 0x108; // 264 bytes
 
+// Reverse maps to recover numeric hashes when writing
+const CLASS_UNLOCK_HASH_BY_NAME: Record<string, number> = (() => {
+  const r: Record<string, number> = {};
+  for (const [hash, name] of Object.entries(CLASS_UNLOCK_STREAMS)) {
+    r[name] = Number(hash);
+  }
+  return r;
+})();
+
+const AI_MUSIC_HASH_BY_NAME: Record<string, number> = (() => {
+  const r: Record<string, number> = {};
+  for (const [hash, name] of Object.entries(AI_MUSIC_STREAMS)) {
+    r[name] = Number(hash);
+  }
+  return r;
+})();
+
+function nameToHash(name: string | undefined, reverseMap: Record<string, number>): number {
+  if (!name) return 0;
+  const hexMatch = /^0x([0-9A-Fa-f]+)$/.exec(name);
+  if (hexMatch) {
+    return parseInt(hexMatch[1], 16) >>> 0;
+  }
+  return reverseMap[name] ?? 0;
+}
+
 // ============================================================================
 // High-Level Parsing Functions
 // ============================================================================
@@ -412,7 +438,7 @@ export function parseVehicleList(
     throw new BundleError(
       `Failed to parse vehicle list: ${error instanceof Error ? error.message : String(error)}`,
       'VEHICLE_LIST_PARSE_ERROR',
-      { error, resourceId: resource.resourceId.toString(16) as string }
+      { error, resourceId: '0x' + u64ToBigInt(resource.resourceId).toString(16).toUpperCase() }
     );
   }
 }
@@ -446,7 +472,7 @@ function handleNestedBundle(
     }
 
     console.debug('Found inner VehicleList resource:', {
-      resourceId: innerResource.resourceId.toString(16),
+      resourceId: '0x' + u64ToBigInt(innerResource.resourceId).toString(16).toUpperCase(),
       diskOffsets: innerResource.diskOffsets,
       sizes: innerResource.sizeAndAlignmentOnDisk.map(s => s & 0x0FFFFFFF)
     });
@@ -599,6 +625,117 @@ export function parseVehicleListData(
       unknown2: header.unknown2
     }
   };
+}
+
+// =========================================================================
+// Writing
+// =========================================================================
+
+function encodeFixedString(str: string, length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  const encoded = new TextEncoder().encode(str);
+  const toCopy = Math.min(encoded.length, length - 1);
+  bytes.set(encoded.subarray(0, toCopy));
+  // null-terminated by default due to zeroed buffer
+  return bytes;
+}
+
+/**
+* Serialize a vehicle list to bytes and compress (zlib/deflate), preserving field sizes.
+*/
+export function writeVehicleListData(list: ParsedVehicleList, littleEndian: boolean = true): Uint8Array {
+  const count = list.vehicles.length >>> 0;
+  const headerSize = 16;
+  const entrySize = 0x108;
+  const totalSize = headerSize + count * entrySize;
+  const out = new Uint8Array(totalSize);
+  const dv = new DataView(out.buffer);
+
+  // Header
+  dv.setUint32(0, count, littleEndian);
+  dv.setUint32(4, headerSize, littleEndian);
+  dv.setUint32(8, list.header?.unknown1 ?? 0, littleEndian);
+  dv.setUint32(12, list.header?.unknown2 ?? 0, littleEndian);
+
+  // Entries
+  let offset = headerSize;
+  for (const v of list.vehicles) {
+    // idBytes, parentIdBytes (u64 as two u32 LE)
+    dv.setUint32(offset + 0, Number(v.id & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 4, Number((v.id >> 32n) & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 8, Number(v.parentId & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 12, Number((v.parentId >> 32n) & 0xFFFFFFFFn), littleEndian);
+
+    // wheelNameBytes (32), vehicleNameBytes (64), manufacturerBytes (32)
+    out.set(encodeFixedString(v.wheelName, 32), offset + 16);
+    out.set(encodeFixedString(v.vehicleName, 64), offset + 48);
+    out.set(encodeFixedString(v.manufacturer, 32), offset + 112);
+
+    // gamePlayData (f32 + u32 + 4*u8 + u32 padding)
+    dv.setFloat32(offset + 144, v.gamePlayData.damageLimit, littleEndian);
+    dv.setUint32(offset + 148, v.gamePlayData.flags >>> 0, littleEndian);
+    out[offset + 152] = v.gamePlayData.boostBarLength & 0xFF;
+    out[offset + 153] = v.gamePlayData.unlockRank & 0xFF;
+    out[offset + 154] = v.gamePlayData.boostCapacity & 0xFF;
+    out[offset + 155] = v.gamePlayData.strengthStat & 0xFF;
+    dv.setUint32(offset + 156, 0, littleEndian); // padding0
+
+    // attribCollectionKey (u64 as two u32)
+    dv.setUint32(offset + 160, Number(v.attribCollectionKey & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 164, Number((v.attribCollectionKey >> 32n) & 0xFFFFFFFFn), littleEndian);
+
+    // audioData block
+    dv.setUint32(offset + 168, Number(v.audioData.exhaustName & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 172, Number((v.audioData.exhaustName >> 32n) & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 176, Number(v.audioData.exhaustEntityKey & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 180, Number((v.audioData.exhaustEntityKey >> 32n) & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 184, Number(v.audioData.engineEntityKey & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 188, Number((v.audioData.engineEntityKey >> 32n) & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 192, Number(v.audioData.engineName & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 196, Number((v.audioData.engineName >> 32n) & 0xFFFFFFFFn), littleEndian);
+
+    // For hashed string fields, try to recover numeric values from stored names
+    const rivalUnlockHash = nameToHash(v.audioData.rivalUnlockName, CLASS_UNLOCK_HASH_BY_NAME);
+    dv.setUint32(offset + 200, rivalUnlockHash >>> 0, littleEndian); // rivalUnlockHash
+    dv.setUint32(offset + 204, 0, littleEndian); // padding1
+
+    // wonCarVoiceOverKey, rivalReleasedVoiceOverKey
+    dv.setUint32(offset + 208, Number(v.audioData.wonCarVoiceOverKey & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 212, Number((v.audioData.wonCarVoiceOverKey >> 32n) & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 216, Number(v.audioData.rivalReleasedVoiceOverKey & 0xFFFFFFFFn), littleEndian);
+    dv.setUint32(offset + 220, Number((v.audioData.rivalReleasedVoiceOverKey >> 32n) & 0xFFFFFFFFn), littleEndian);
+
+    const musicHash = nameToHash(v.audioData.aiMusicLoopContentSpec, AI_MUSIC_HASH_BY_NAME);
+    dv.setUint32(offset + 224, musicHash >>> 0, littleEndian); // musicHash
+    out[offset + 228] = v.audioData.aiExhaustIndex & 0xFF;
+    out[offset + 229] = v.audioData.aiExhaustIndex2ndPick & 0xFF;
+    out[offset + 230] = v.audioData.aiExhaustIndex3rdPick & 0xFF;
+    out[offset + 231] = 0; // padding2
+
+    // unknown (16)
+    out.set(v.unknownData.subarray(0, 16), offset + 232);
+
+    // category, vehicleAndBoostType
+    const vehicleAndBoost = ((v.vehicleType & 0xF) << 4) | (v.boostType & 0xF);
+    dv.setUint32(offset + 248, v.category >>> 0, littleEndian);
+    out[offset + 252] = vehicleAndBoost & 0xFF;
+    out[offset + 253] = v.liveryType & 0xFF;
+    out[offset + 254] = v.topSpeedNormal & 0xFF;
+    out[offset + 255] = v.topSpeedBoost & 0xFF;
+    out[offset + 256] = v.topSpeedNormalGUIStat & 0xFF;
+    out[offset + 257] = v.topSpeedBoostGUIStat & 0xFF;
+    out[offset + 258] = v.colorIndex & 0xFF;
+    out[offset + 259] = v.paletteIndex & 0xFF;
+
+    // finalPadding (4)
+    dv.setUint32(offset + 260, 0, littleEndian);
+
+    offset += entrySize;
+  }
+  
+  // Compress with zlib/deflate to match how data is stored on disk
+  const compressed = pako.deflate(out, { level: 9, windowBits: 15 });
+  return compressed;
 }
 
 // ============================================================================

@@ -13,7 +13,8 @@ import {
   WriteOptions,
   ProgressCallback,
   BUNDLE_FLAGS,
-  PLATFORMS
+  PLATFORMS,
+  RESOURCE_TYPE_IDS
 } from '../types';
 import { BundleError } from '../errors';
 import {
@@ -21,6 +22,7 @@ import {
   calculateBundleStats
 } from '../resourceManager';
 import { parseVehicleList, type ParsedVehicleList } from '../vehicleList';
+import { writeVehicleListData } from '../vehicleList';
 import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors';
 import { RESOURCE_TYPES } from '../../resourceTypes';
 
@@ -43,8 +45,6 @@ export function writeBundle(
 ): ArrayBuffer {
   try {
     reportProgress(progressCallback, 'write', 0, 'Starting bundle write');
-
-    // Start with a byte-for-byte copy of the original buffer
     const outBytes = new Uint8Array(originalBuffer.byteLength);
     outBytes.set(new Uint8Array(originalBuffer));
     const outBuffer = outBytes.buffer;
@@ -151,6 +151,9 @@ export function writeBundle(
     }
 
     reportProgress(progressCallback, 'write', 0.7, 'Resource table written');
+    console.log(outBytes.length);
+
+
 
     // ----------------------------------------------------------------------
     // Write debug data if requested and space exists at header.debugDataOffset
@@ -166,6 +169,38 @@ export function writeBundle(
       if (toWrite > 0 && start < outBytes.length) {
         outBytes.set(bytes.subarray(0, toWrite), start);
         outBytes[start + toWrite] = 0; // NUL terminate
+      }
+    }
+
+    reportProgress(progressCallback, 'write', 0.9, 'Debug data written');
+
+    // TO-DO: This is based on the assumption that vehicle list is the first resource data offset
+    const vehicleListDataOffset = bundle.header.resourceDataOffsets[0];
+
+    // ----------------------------------------------------------------------
+    // If vehicle list overrides provided, write them in-place to resource data
+    // ----------------------------------------------------------------------
+    if (options.overrides?.vehicleList) {
+      const vehicleResource = bundle.resources.find(r => r.resourceTypeId === RESOURCE_TYPE_IDS.VEHICLE_LIST);
+      if (vehicleResource) {
+        console.log('Writing vehicle list overrides');
+        const little = bundle.header.platform !== PLATFORMS.PS3;
+        const vehicleBytes = writeVehicleListData({
+          vehicles: options.overrides.vehicleList.vehicles,
+          header: options.overrides.vehicleList.header ?? {
+            numVehicles: options.overrides.vehicleList.vehicles.length,
+            startOffset: 16,
+            unknown1: 0,
+            unknown2: 0
+          }
+        }, little);
+
+        console.log("original compressed size", 15860, "new compressed size", vehicleBytes.length);
+        console.log(`Writing vehicle list to offset ${vehicleListDataOffset} with size ${vehicleBytes.length}`);
+        console.log(outBytes.length);
+        // To-Do: Assumption that the list did not change size, so we can just write to the offset
+        outBytes.set(vehicleBytes, vehicleListDataOffset);
+      
       }
     }
 
