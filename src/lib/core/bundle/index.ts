@@ -25,6 +25,7 @@ import { parseVehicleList, type ParsedVehicleList } from '../vehicleList';
 import { writeVehicleListData } from '../vehicleList';
 import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors';
 import { RESOURCE_TYPES } from '../../resourceTypes';
+import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTakeDictionary';
 
 // ============================================================================
 // Main Bundle Writer
@@ -341,6 +342,7 @@ function reportProgress(
 export type ParsedResources = {
   vehicleList?: ParsedVehicleList;
   playerCarColours?: PlayerCarColours;
+  iceTakeDictionary?: ParsedIceTakeDictionary;
 };
 
 /**
@@ -367,6 +369,8 @@ function parseResourceType<T>(
     } else if (resourceName === 'Player Car Colours') {
       options.is64Bit = bundle.header.platform === PLATFORMS.PC;
       options.strict = false;
+    } else if (resourceName === 'ICE Dictionary') {
+      options.littleEndian = bundle.header.platform !== PLATFORMS.PS3;
     }
 
     return parseFn(buffer, resource, options);
@@ -405,6 +409,17 @@ export function parseBundleResources(
   );
   if (playerCarColours) {
     resources.playerCarColours = playerCarColours;
+  }
+
+  // Parse ICE Take Dictionary
+  const iceDict = parseResourceType(
+    buffer,
+    bundle,
+    'ICE Dictionary',
+    parseIceTakeDictionary
+  );
+  if (iceDict) {
+    resources.iceTakeDictionary = iceDict;
   }
 
   return resources;

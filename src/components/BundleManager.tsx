@@ -9,6 +9,7 @@ import { u64ToBigInt } from "@/lib/core/u64";
 import { parseBundleResources, type ParsedResources } from "@/lib/core/bundle";
 import { type VehicleListEntry, type ParsedVehicleList } from "@/lib/core/vehicleList";
 import { type PlayerCarColours } from "@/lib/core/playerCarColors";
+import type { ParsedIceTakeDictionary } from "@/lib/core/iceTakeDictionary";
 import { extractResourceSize, getMemoryTypeName } from "@/lib/core/resourceManager";
 import type { ResourceContext, ParsedBundle, ResourceEntry } from "@/lib/core/types";
 import { getResourceType, getResourceTypeColor, type ResourceCategory } from "@/lib/resourceTypes";
@@ -20,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { VehicleEditor } from './VehicleEditor';
+import { IceTakeDictionaryComponent } from '@/components/IceTakeDictionary';
 
 // Converted resource type for UI display
 type UIResource = {
@@ -49,6 +51,7 @@ export const BundleManager = () => {
   const [vehicleList, setVehicleList] = useState<VehicleListEntry[]>([]);
   const [parsedVehicleList, setParsedVehicleList] = useState<ParsedVehicleList | null>(null);
   const [playerCarColours, setPlayerCarColours] = useState<PlayerCarColours | null>(null);
+  const [iceDictionary, setIceDictionary] = useState<ParsedIceTakeDictionary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isModified, setIsModified] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleListEntry | null>(null);
@@ -127,6 +130,7 @@ export const BundleManager = () => {
       setParsedVehicleList(parsedResources.vehicleList || null);
       setVehicleList(parsedResources.vehicleList?.vehicles || []);
       setPlayerCarColours(parsedResources.playerCarColours || null);
+      setIceDictionary(parsedResources.iceTakeDictionary || null);
 
       setLoadedBundle(bundle);
       setResources(uiResources);
@@ -295,6 +299,8 @@ export const BundleManager = () => {
     }
   };
 
+  console.log(iceDictionary);
+
   // ResourceCard component
   const ResourceCard = ({ resource }: { resource: UIResource }) => {
     const IconComponent = getCategoryIcon(resource.category as ResourceCategory);
@@ -447,7 +453,7 @@ export const BundleManager = () => {
             </div>
           ) : (
             <Tabs defaultValue="vehicles" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-3 md:grid-cols-4">
                 <TabsTrigger value="vehicles">
                   Vehicles ({vehicleList.length})
                 </TabsTrigger>
@@ -457,6 +463,11 @@ export const BundleManager = () => {
                 <TabsTrigger value="colors">
                   Player Colors
                 </TabsTrigger>
+              {iceDictionary && (
+                <TabsTrigger value="ice">
+                  ICE Takes ({iceDictionary.totalTakes})
+                </TabsTrigger>
+              )}
               </TabsList>
 
               <TabsContent value="vehicles" className="space-y-6">
@@ -594,8 +605,7 @@ export const BundleManager = () => {
                   </div>
                 )}
               </TabsContent>
-
-                             <TabsContent value="colors" className="space-y-6">
+              <TabsContent value="colors" className="space-y-6">
                  {playerCarColours ? (
                    <PlayerCarColoursComponent colours={playerCarColours} />
                  ) : (
@@ -607,6 +617,12 @@ export const BundleManager = () => {
                    </Alert>
                  )}
                </TabsContent>
+
+              {iceDictionary && (
+                <TabsContent value="ice" className="space-y-6">
+                  <IceTakeDictionaryComponent dictionary={iceDictionary} />
+                </TabsContent>
+              )}
             </Tabs>
           )}
         </div>

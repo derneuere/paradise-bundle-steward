@@ -13,167 +13,32 @@ export type ResourceType = {
   name: string;
   description: string;
   category: ResourceCategory;
-  parser?: string; // Optional parser module name
-  writer?: string; // Optional writer module name
 }
 
-export type ResourceCategory = 'Graphics' | 'Audio' | 'Data' | 'Script' | 'Other';
+export type ResourceCategory = 'Graphics' | 'Audio' | 'Data' | 'Script' | 'Camera' | 'Other';
 
 // ============================================================================
 // Extended Resource Type Definitions
 // ============================================================================
 
 export const RESOURCE_TYPES: Record<number, ResourceType> = {
-  // Core Bundle Types
-  0x00000001: { 
-    id: 0x00000001, 
-    name: 'Registry', 
-    description: 'Configuration and registry data', 
-    category: 'Data' 
+  [RESOURCE_TYPE_IDS.ICE_TAKE_DICTIONARY]: {
+    id: RESOURCE_TYPE_IDS.ICE_TAKE_DICTIONARY,
+    name: 'ICE Dictionary',
+    description: 'The ICE (In-game Camera Editor) take dictionary stores the camera cuts for things such as race starts, Picture Paradise and Super Jumps. It is only found in CAMERAS.BUNDLE.',
+    category: 'Camera',
   },
-  
-  // Graphics Resources
-  0x00000002: { 
-    id: 0x00000002, 
-    name: 'Texture', 
-    description: 'Image texture data (DDS, etc.)', 
-    category: 'Graphics',
-    parser: 'textureParser',
-    writer: 'textureWriter'
-  },
-  0x00000003: { 
-    id: 0x00000003, 
-    name: 'Material', 
-    description: 'Material properties and shaders', 
-    category: 'Graphics' 
-  },
-  0x00000004: { 
-    id: 0x00000004, 
-    name: 'Mesh', 
-    description: '3D geometry and vertex data', 
-    category: 'Graphics' 
-  },
-  0x00000005: { 
-    id: 0x00000005, 
-    name: 'Animation', 
-    description: 'Animation sequences and keyframes', 
-    category: 'Graphics' 
-  },
-  0x00000008: { 
-    id: 0x00000008, 
-    name: 'Font', 
-    description: 'Font data and glyph information', 
-    category: 'Graphics' 
-  },
-  0x00000009: { 
-    id: 0x00000009, 
-    name: 'Shader', 
-    description: 'GPU shader programs (vertex/pixel)', 
-    category: 'Graphics' 
-  },
-  0x0000000A: { 
-    id: 0x0000000A, 
-    name: 'Model', 
-    description: 'Complete 3D models (vehicles/objects)', 
-    category: 'Graphics' 
-  },
-  0x00000010: { 
-    id: 0x00000010, 
-    name: 'Particle', 
-    description: 'Particle effects and systems', 
-    category: 'Graphics' 
-  },
-  0x00000011: { 
-    id: 0x00000011, 
-    name: 'Lighting', 
-    description: 'Lighting data and environment maps', 
-    category: 'Graphics' 
-  },
-  0x00000013: { 
-    id: 0x00000013, 
-    name: 'UI', 
-    description: 'User interface elements and layouts', 
-    category: 'Graphics' 
-  },
-  0x00000014: { 
-    id: 0x00000014, 
-    name: 'Skybox', 
-    description: 'Sky and environment textures', 
-    category: 'Graphics' 
-  },
-
-  // Audio Resources
-  0x00000006: { 
-    id: 0x00000006, 
-    name: 'Audio', 
-    description: 'Sound effects, music, and voice audio', 
-    category: 'Audio',
-    parser: 'audioParser',
-    writer: 'audioWriter'
-  },
-
-  // Script Resources
-  0x00000007: { 
-    id: 0x00000007, 
-    name: 'Script', 
-    description: 'Game logic scripts and bytecode', 
-    category: 'Script' 
-  },
-
-  // Data Resources
-  0x0000000B: { 
-    id: 0x0000000B, 
-    name: 'Physics', 
-    description: 'Physics properties and constraints', 
-    category: 'Data' 
-  },
-  0x0000000C: { 
-    id: 0x0000000C, 
-    name: 'Collision', 
-    description: 'Collision mesh and bounds data', 
-    category: 'Data' 
-  },
-  0x0000000D: { 
-    id: 0x0000000D, 
-    name: 'Localization', 
-    description: 'Localized text and language data', 
-    category: 'Data' 
-  },
-  0x0000000E: { 
-    id: 0x0000000E, 
-    name: 'Track', 
-    description: 'Race track and road network data', 
-    category: 'Data' 
-  },
-  0x0000000F: { 
-    id: 0x0000000F, 
-    name: 'Vehicle', 
-    description: 'Individual vehicle configuration', 
-    category: 'Data' 
-  },
-  0x00000012: { 
-    id: 0x00000012, 
-    name: 'Navigation', 
-    description: 'AI navigation and pathfinding data', 
-    category: 'Data' 
-  },
-
-  // Burnout Paradise Specific Resources
   [RESOURCE_TYPE_IDS.VEHICLE_LIST]: { 
     id: RESOURCE_TYPE_IDS.VEHICLE_LIST, 
     name: 'Vehicle List', 
     description: 'Complete list of all available vehicles with stats and properties', 
     category: 'Data',
-    parser: 'vehicleListParser',
-    writer: 'vehicleListWriter'
   },
   [RESOURCE_TYPE_IDS.PLAYER_CAR_COLOURS]: { 
     id: RESOURCE_TYPE_IDS.PLAYER_CAR_COLOURS, 
     name: 'Player Car Colours', 
     description: 'Available player car color palettes and paint options', 
     category: 'Graphics',
-    parser: 'playerCarColoursParser',
-    writer: 'playerCarColoursWriter'
   },
 };
 

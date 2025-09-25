@@ -30,16 +30,10 @@ export const MEMORY_TYPES = {
 // ============================================================================
 // Resource Type Constants
 // ============================================================================
-
 export const RESOURCE_TYPE_IDS = {
   VEHICLE_LIST: 0x10005,
   PLAYER_CAR_COLOURS: 0x1001E,
-  TEXTURE: 0x00000002,
-  MATERIAL: 0x00000003,
-  MESH: 0x00000004,
-  ANIMATION: 0x00000005,
-  AUDIO: 0x00000006,
-  SCRIPT: 0x00000007,
+  ICE_TAKE_DICTIONARY: 0x41,
 } as const;
 
 // ============================================================================
