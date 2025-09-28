@@ -22,7 +22,7 @@ import type {
 import { 
   ResourceNotFoundError,
   BundleError } from './errors';
-import { u64, u64ToBigInt, bigIntToU64 } from './u64';
+import { u64, u64ToBigInt } from './u64';
 
 // ============================================================================
 // Vehicle List Schemas
@@ -750,3 +750,5 @@ function reportProgress(
 ) {
   callback?.({ type: type as 'parse' | 'write' | 'compress' | 'validate', stage: type, progress, message });
 }
+
+

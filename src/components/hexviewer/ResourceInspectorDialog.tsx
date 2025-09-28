@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { RESOURCE_TYPE_IDS } from '@/lib/core/types';
 import type { InspectedResource } from './types';
 import { HexTable } from './HexTable';
+import { getSchemaFields } from './utils.ts';
+import { VehicleEntrySchema } from '@/lib/core/vehicleList';
 
 export type ResourceInspectorDialogProps = {
   inspected: InspectedResource | null;
@@ -33,54 +35,12 @@ const schemaRegistry: Record<number, {
       const maxVehicles = Math.floor((data.length - headerSize) / 0x108);
       return Math.min(numVehicles, maxVehicles);
     },
-    // Field list derived from typed-binary VehicleEntrySchema layout (see src/lib/core/vehicleList.ts)
-    fields: [
-      { key: 'idBytes', name: 'id (u64)', offset: 0, size: 8 },
-      { key: 'parentIdBytes', name: 'parentId (u64)', offset: 8, size: 8 },
-      { key: 'wheelNameBytes', name: 'wheelName (32 chars)', offset: 16, size: 32 },
-      { key: 'vehicleNameBytes', name: 'vehicleName (64 chars)', offset: 48, size: 64 },
-      { key: 'manufacturerBytes', name: 'manufacturer (32 chars)', offset: 112, size: 32 },
-      { key: 'gamePlay.damageLimit', name: 'gamePlay.damageLimit (f32)', offset: 144, size: 4 },
-      { key: 'gamePlay.flags', name: 'gamePlay.flags (u32)', offset: 148, size: 4 },
-      { key: 'gamePlay.boostBarLength', name: 'gamePlay.boostBarLength (u8)', offset: 152, size: 1 },
-      { key: 'gamePlay.unlockRank', name: 'gamePlay.unlockRank (u8)', offset: 153, size: 1 },
-      { key: 'gamePlay.boostCapacity', name: 'gamePlay.boostCapacity (u8)', offset: 154, size: 1 },
-      { key: 'gamePlay.strengthStat', name: 'gamePlay.strengthStat (u8)', offset: 155, size: 1 },
-      { key: 'gamePlay.padding0', name: 'gamePlay.padding0 (u32)', offset: 156, size: 4 },
-      { key: 'attribCollectionKey', name: 'attribCollectionKey (u64)', offset: 160, size: 8 },
-      { key: 'audio.exhaustName', name: 'audio.exhaustName (u64)', offset: 168, size: 8 },
-      { key: 'audio.exhaustEntityKey', name: 'audio.exhaustEntityKey (u64)', offset: 176, size: 8 },
-      { key: 'audio.engineEntityKey', name: 'audio.engineEntityKey (u64)', offset: 184, size: 8 },
-      { key: 'audio.engineName', name: 'audio.engineName (u64)', offset: 192, size: 8 },
-      { key: 'audio.rivalUnlockHash', name: 'audio.rivalUnlockHash (u32)', offset: 200, size: 4 },
-      { key: 'audio.padding1', name: 'audio.padding1 (u32)', offset: 204, size: 4 },
-      { key: 'audio.wonCarVoiceOverKey', name: 'audio.wonCarVoiceOverKey (u64)', offset: 208, size: 8 },
-      { key: 'audio.rivalReleasedVoiceOverKey', name: 'audio.rivalReleasedVoiceOverKey (u64)', offset: 216, size: 8 },
-      { key: 'audio.musicHash', name: 'audio.musicHash (u32)', offset: 224, size: 4 },
-      { key: 'audio.aiExhaustIndex', name: 'audio.aiExhaustIndex (u8)', offset: 228, size: 1 },
-      { key: 'audio.aiExhaustIndex2ndPick', name: 'audio.aiExhaustIndex2ndPick (u8)', offset: 229, size: 1 },
-      { key: 'audio.aiExhaustIndex3rdPick', name: 'audio.aiExhaustIndex3rdPick (u8)', offset: 230, size: 1 },
-      { key: 'audio.padding2', name: 'audio.padding2 (u8)', offset: 231, size: 1 },
-      { key: 'unknown16', name: 'unknown (16 bytes)', offset: 232, size: 16 },
-      { key: 'category', name: 'category (u32)', offset: 248, size: 4 },
-      { key: 'vehicleAndBoostType', name: 'vehicleAndBoostType (u8)', offset: 252, size: 1 },
-      { key: 'liveryType', name: 'liveryType (u8)', offset: 253, size: 1 },
-      { key: 'topSpeedNormal', name: 'topSpeedNormal (u8)', offset: 254, size: 1 },
-      { key: 'topSpeedBoost', name: 'topSpeedBoost (u8)', offset: 255, size: 1 },
-      { key: 'topSpeedNormalGUIStat', name: 'topSpeedNormalGUIStat (u8)', offset: 256, size: 1 },
-      { key: 'topSpeedBoostGUIStat', name: 'topSpeedBoostGUIStat (u8)', offset: 257, size: 1 },
-      { key: 'colorIndex', name: 'colorIndex (u8)', offset: 258, size: 1 },
-      { key: 'paletteIndex', name: 'paletteIndex (u8)', offset: 259, size: 1 },
-      { key: 'finalPadding', name: 'finalPadding (u32)', offset: 260, size: 4 },
-    ]
+    fields: getSchemaFields(VehicleEntrySchema)
   }
 };
 
-const ROW_HEIGHT = 30;
-const OVERSCAN = 20;
 
 export const ResourceInspectorDialog: React.FC<ResourceInspectorDialogProps> = ({ inspected, onOpenChange, bytesPerRow }) => {
-  const [selectedEntry, setSelectedEntry] = useState(0);
   const [selectedFieldKey, setSelectedFieldKey] = useState<string | null>(null);
 
   const schema = useMemo(() => inspected ? schemaRegistry[inspected.resource.resourceTypeId] : undefined, [inspected]);
@@ -155,17 +115,6 @@ export const ResourceInspectorDialog: React.FC<ResourceInspectorDialogProps> = (
               <Card>
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-end gap-4 flex-wrap">
-                    <div className="space-y-1">
-                      <Label>Entry</Label>
-                      <Select value={String(selectedEntry)} onValueChange={(v) => setSelectedEntry(parseInt(v))}>
-                        <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {Array.from({ length: headerInfo.count }).map((_, i) => (
-                            <SelectItem key={i} value={String(i)}>{schema.label} {i}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
                     <div className="text-xs text-muted-foreground">Header {headerInfo.headerSize} bytes • Entry size {schema.entrySize} bytes • {headerInfo.count} entries</div>
                     <div className="text-xs text-muted-foreground">Selected field highlights across all entries</div>
                   </div>
