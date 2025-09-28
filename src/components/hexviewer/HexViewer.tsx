@@ -4,22 +4,22 @@ import { getResourceType, type ResourceCategory } from '@/lib/resourceTypes';
 import { RESOURCE_TYPE_IDS } from '@/lib/core/types';
 import { extractResourceSize, getResourceData, isCompressed, decompressData } from '@/lib/core/resourceManager';
 import type { HexViewerProps, HexSection, CoverageSegment, InspectedResource } from './types';
-import { shadesForCategory, formatAscii } from './utils';
-import { CoverageBar } from './CoverageBar';
-import { Controls } from './Controls';
-import { SectionList } from './SectionList';
+import { shadesForCategory, formatAscii } from './utils.ts';
+import { CoverageBar } from './CoverageBar.tsx';
+import { Controls } from './Controls.tsx';
+import { SectionList } from './SectionList.tsx';
 import { HexTable } from './HexTable';
 import { Card, CardContent } from '@/components/ui/card';
-import { ResourceInspectorDialog } from './ResourceInspectorDialog';
+import { useNavigate } from 'react-router-dom';
 
 const BYTES_PER_ROW = 16;
 
 export const HexViewer: React.FC<HexViewerProps> = ({ originalData, bundle, isModified, resources }) => {
-  const [currentOffset, setCurrentOffset] = useState(0);
+  const navigate = useNavigate();
   const [bytesPerRow, setBytesPerRow] = useState(BYTES_PER_ROW);
   const [searchOffset, setSearchOffset] = useState('');
   const [selectedSection, setSelectedSection] = useState<string>('all');
-  const [inspected, setInspected] = useState<InspectedResource | null>(null);
+  
 
   const sections = useMemo<HexSection[]>(() => {
     if (!bundle || !originalData) return [];
@@ -143,7 +143,6 @@ export const HexViewer: React.FC<HexViewerProps> = ({ originalData, bundle, isMo
     const targetOffset = Math.max(0, rowIndex) * bytesPerRow;
     const el = typeof document !== 'undefined' ? document.getElementById(`row-${targetOffset}`) : null;
     if (el && 'scrollIntoView' in el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    setCurrentOffset(Math.max(0, rowIndex));
   }, [bytesPerRow]);
 
   const handleSearchOffset = useCallback(() => {
@@ -164,50 +163,10 @@ export const HexViewer: React.FC<HexViewerProps> = ({ originalData, bundle, isMo
 
   const openInspector = useCallback((section: HexSection) => {
     if (!bundle || !originalData || section.kind !== 'resource' || !section.resource) return;
-    try {
-      let bytes: Uint8Array | null = null;
-      if (typeof section.blockIndex === 'number') {
-        const b = section.blockIndex;
-        const base = bundle.header.resourceDataOffsets[b] >>> 0;
-        const rel = section.resource.diskOffsets[b] >>> 0;
-        const start = base + rel;
-        const packed = section.resource.sizeAndAlignmentOnDisk[b];
-        const size = extractResourceSize(packed);
-        if (start < originalData.byteLength && size > 0) {
-          const max = Math.min(size, originalData.byteLength - start);
-          bytes = new Uint8Array(originalData, start, max);
-        }
-      }
-      if (!bytes) {
-        const ctx = { bundle, resource: section.resource, buffer: originalData } as const;
-        bytes = getResourceData(ctx).data;
-      }
-      const data = isCompressed(bytes) ? decompressData(bytes) : bytes;
-      const typeLabel = getResourceType(section.resource.resourceTypeId).name;
-      const overlays: { name: string; start: number; end: number; color: string }[] = [];
-      if (section.resource.resourceTypeId === RESOURCE_TYPE_IDS.VEHICLE_LIST) {
-        const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-        const headerSize = 16;
-        const numVehicles = data.length >= 4 ? dv.getUint32(0, true) : 0;
-        const entrySize = 0x108;
-        overlays.push({ name: 'Header', start: 0, end: Math.min(headerSize, data.length), color: 'bg-amber-500' });
-        let offset = headerSize;
-        for (let i = 0; i < Math.min(numVehicles, 2000); i++) {
-          const s = offset + i * entrySize;
-          const e = Math.min(s + entrySize, data.length);
-          if (s >= data.length) break;
-          overlays.push({ name: `Vehicle ${i}`, start: s, end: e, color: i % 2 === 0 ? 'bg-amber-600' : 'bg-amber-700' });
-        }
-      } else if (section.resource.resourceTypeId === RESOURCE_TYPE_IDS.PLAYER_CAR_COLOURS) {
-        const is64 = data.length >= 0x78;
-        const headerSize = is64 ? 120 : 60;
-        overlays.push({ name: 'Global Palette Header', start: 0, end: Math.min(headerSize, data.length), color: 'bg-teal-500' });
-        if (headerSize < data.length) overlays.push({ name: 'Color Data', start: headerSize, end: data.length, color: 'bg-teal-700' });
-      }
-      setInspected({ resource: section.resource, typeLabel, data, overlays });
-    } catch (e) {
-      console.warn('Failed to open inspector:', e);
-    }
+    const qp = new URLSearchParams();
+    qp.set('resourceIndex', String(bundle.resources.indexOf(section.resource)));
+    if (typeof section.blockIndex === 'number') qp.set('blockIndex', String(section.blockIndex));
+    navigate(`/inspect?${qp.toString()}`);
   }, [bundle, originalData]);
 
   if (!data || !bundle) {
@@ -255,7 +214,7 @@ export const HexViewer: React.FC<HexViewerProps> = ({ originalData, bundle, isMo
 
       <HexTable rows={visibleRows} />
 
-      <ResourceInspectorDialog inspected={inspected} onOpenChange={(open) => !open && setInspected(null)} bytesPerRow={bytesPerRow} />
+      {/* Inspector now routes to /inspect */}
     </div>
   );
 };

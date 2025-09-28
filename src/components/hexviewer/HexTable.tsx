@@ -61,7 +61,7 @@ export const HexTable: React.FC<HexTableProps> = (props) => {
         <div ref={viewportRef} className={`${heightClass} overflow-auto`} onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}>
           <div className="font-mono text-sm" style={{ height: totalRows * ROW_HEIGHT }}>
             <div className="flex mb-2 pb-2 border-b sticky top-0 bg-background px-4">
-              <div className="w-20 text-muted-foreground">Offset</div>
+              <div className="w-20 text-muted-foreground">Offset</div>              
               <div className="flex-1 text-muted-foreground">Hex Bytes</div>
               <div className="w-48 text-muted-foreground">Decoded</div>
               <div className="w-48 text-muted-foreground">ASCII</div>
@@ -74,7 +74,7 @@ export const HexTable: React.FC<HexTableProps> = (props) => {
                   items.push(
                     <div key={row.offset} id={`row-${row.offset}`} className="flex hover:bg-muted/50 items-center px-4" style={{ height: ROW_HEIGHT }}>
                       <div className="w-20 text-muted-foreground pr-4">{row.offset.toString(16).toUpperCase().padStart(8, '0')}</div>
-                      <div className="flex-1 flex gap-1">
+                      <div className="flex gap-1 flex-shrink-0">
                         {(() => {
                           const nodes: JSX.Element[] = [];
                           const groups = row.groups?.slice().sort((a, b) => a.colStart - b.colStart) ?? [];
@@ -124,23 +124,18 @@ export const HexTable: React.FC<HexTableProps> = (props) => {
                           ? row.decodedItems.map(it => `${it.label ? it.label + ': ' : ''}${it.value}`).join(' • ')
                           : (row.decoded || '');
                         return (
-                          <div className="w-48 pl-4 font-mono text-muted-foreground overflow-hidden" title={title}>
+                          <div className="flex-1 min-w-0 pl-4 font-mono text-muted-foreground overflow-none whitespace-nowrap" title={title}>
                             {row.decodedItems && row.decodedItems.length > 0 ? (
-                              <div className="flex items-center gap-1 whitespace-nowrap overflow-hidden">
-                                {row.decodedItems.slice(0, 2).map((it, idx) => (
-                                  <span key={idx} className="inline-flex items-center max-w-[8rem] rounded border border-border bg-secondary/60 px-1.5 py-0.5 text-[10px] leading-none text-foreground">
-                                    {it.label ? <span className="mr-1 text-muted-foreground">{it.label}:</span> : null}
-                                    <span className="truncate">{it.value}</span>
+                              <div className="inline-flex items-start gap-1 whitespace-nowrap">
+                                {row.decodedItems.map((it, idx) => (
+                                  <span key={idx} className="inline-flex flex-col items-start rounded border border-border bg-secondary/60 px-1.5 py-1 text-foreground">
+                                    {it.label ? <span className="text-[10px] text-muted-foreground leading-none">{it.label}</span> : null}
+                                    <span className="text-[11px] leading-none">{it.value}</span>
                                   </span>
                                 ))}
-                                {row.decodedItems.length > 2 && (
-                                  <span className="inline-flex items-center rounded border border-border bg-secondary/60 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
-                                    +{row.decodedItems.length - 2}
-                                  </span>
-                                )}
                               </div>
                             ) : (
-                              <div className="truncate">{row.decoded}</div>
+                              <div className="whitespace-nowrap">{row.decoded}</div>
                             )}
                           </div>
                         );

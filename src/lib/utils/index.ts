@@ -8,7 +8,26 @@ export * from '../core/bundle';
 export * from '../core/vehicleList';
 export * from '../core/playerCarColors';
 export * from '../core/bundle/debugData';
-export * from '../core/resourceManager';
+// Avoid re-export conflicts with named utilities also imported locally
+export {
+  extractResourceData,
+  extractResourceSize,
+  extractAlignment,
+  packSizeAndAlignment,
+  isCompressed,
+  decompressData,
+  compressData,
+  getResourceData,
+  isNestedBundle,
+  extractFromNestedBundle,
+  validateResourceEntry,
+  findResourceByType,
+  findResourcesByType,
+  getMemoryTypeName,
+  calculateBundleStats
+} from '../core/resourceManager';
+import { parseBundle, getPlatformName, getFlagNames } from '../core/bundle';
+import { calculateBundleStats } from '../core/resourceManager';
 
 // Theme utilities (keeping separate for UI concerns)
 export * from '../burnoutTheme';
@@ -55,8 +74,7 @@ export async function createBundleContext(
  * Quick bundle analysis without full parsing
  */
 export function analyzeBundleQuick(buffer: ArrayBuffer) {
-  const { parseBundle, getPlatformName, getFlagNames } = require('../core/bundleParser');
-  const { calculateBundleStats } = require('../core/resourceManager');
+  // Uses ESM imports to be compatible with the browser environment
 
   try {
     const bundle = parseBundle(buffer, { strict: false });

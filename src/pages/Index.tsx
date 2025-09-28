@@ -1,7 +1,7 @@
-import { BundleManager } from "@/components/BundleManager";
+import { Navigate } from "react-router-dom";
 
 const Index = () => {
-  return <BundleManager />;
+  return <Navigate to="/resources" replace />;
 };
 
 export default Index;
