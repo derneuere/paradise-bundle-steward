@@ -49,12 +49,6 @@ export const VehicleList = ({
                 Add Vehicle
               </Button>
             )}
-            {onExportBundle && (
-              <Button onClick={onExportBundle} size="sm" variant="outline" className="gap-2">
-                <Download className="h-4 w-4" />
-                Export Bundle
-              </Button>
-            )}
           </div>
         </div>
       </div>

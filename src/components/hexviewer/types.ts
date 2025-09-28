@@ -47,6 +47,21 @@ export type HexRow = {
   offset: number;
   hexBytes: Array<{ byte: number; offset: number; section: string; color: string }>;
   ascii: string;
+  // Optional visual grouping metadata within this row (column indices are 0-based, end exclusive)
+  groups?: Array<{
+    kind: 'entry' | 'field' | 'header';
+    colStart: number;
+    colEnd: number;
+    title?: string;
+    classes: string;
+  }>;
+  // Optional decoded summary for this row (e.g., selected field value)
+  decoded?: string;
+  // Optional: multiple decoded items for this row, each with an optional label
+  decodedItems?: Array<{ label?: string; value: string }>;
+  // Optional info string (name • type • value) for middle column, and where to click
+  info?: string;
+  clickOffset?: number;
 };
 
 export type InspectedResource = {
