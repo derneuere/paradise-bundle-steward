@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { VehicleEditor } from './VehicleEditor';
 import { IceTakeDictionaryComponent } from '@/components/IceTakeDictionary';
+import { HexViewer } from '@/components/hexviewer/HexViewer';
 
 // Converted resource type for UI display
 type UIResource = {
@@ -453,7 +454,7 @@ export const BundleManager = () => {
             </div>
           ) : (
             <Tabs defaultValue="vehicles" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 md:grid-cols-4">
+            <TabsList className="grid w-full grid-cols-4 md:grid-cols-5">
                 <TabsTrigger value="vehicles">
                   Vehicles ({vehicleList.length})
                 </TabsTrigger>
@@ -468,6 +469,9 @@ export const BundleManager = () => {
                   ICE Takes ({iceDictionary.totalTakes})
                 </TabsTrigger>
               )}
+                <TabsTrigger value="hex">
+                  Hex View
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="vehicles" className="space-y-6">
@@ -623,6 +627,14 @@ export const BundleManager = () => {
                   <IceTakeDictionaryComponent dictionary={iceDictionary} />
                 </TabsContent>
               )}
+              <TabsContent value="hex" className="space-y-6">
+                <HexViewer
+                  originalData={originalArrayBuffer}
+                  bundle={loadedBundle}
+                  isModified={isModified}
+                  resources={resources}
+                />
+              </TabsContent>
             </Tabs>
           )}
         </div>
