@@ -132,7 +132,7 @@ export const ResourceInspectorDialog: React.FC<ResourceInspectorDialogProps> = (
       const off = rowStart + i;
       const isSelected = !!selectedFieldMask && selectedFieldMask[off] === 1;
       const isOverlay = !!overlayMask && overlayMask[off] === 1;
-      const color = isSelected ? 'bg-fuchsia-600 text-white'
+      const color = isSelected ? 'bg-fuchsia-600 text-white border border-border'
         : (isOverlay ? 'bg-secondary text-secondary-foreground border border-border'
         : 'bg-muted text-foreground border border-border');
       return { byte: b, offset: off, section: '', color };
