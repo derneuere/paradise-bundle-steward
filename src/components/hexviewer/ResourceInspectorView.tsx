@@ -7,6 +7,7 @@ import type { InspectedResource } from './types';
 import { HexTable } from './HexTable';
 import { getSchemaFields } from './utils.ts';
 import { VehicleEntrySchema } from '@/lib/core/vehicleList';
+import { ICETakeHeader32Schema, ICETakeHeader64Schema, parseIceTakeDictionaryData } from '@/lib/core/iceTakeDictionary';
 import type { HexRow } from './types';
 
 export type ResourceInspectorViewProps = {
@@ -14,24 +15,44 @@ export type ResourceInspectorViewProps = {
   bytesPerRow: number;
 };
 
-const schemaRegistry: Record<number, {
+type SchemaField = { key: string; name: string; offset: number; size: number };
+
+type SchemaProvider = {
   label: string;
   headerSizeFromData: (data: Uint8Array) => number;
-  entrySize: number;
-  countFromData: (data: Uint8Array, headerSize: number) => number;
-  fields: Array<{ key: string; name: string; offset: number; size: number }>;
-}> = {
+  entrySizeFromData: (data: Uint8Array, headerSize: number) => number;
+  countFromData: (data: Uint8Array, headerSize: number, entrySize: number) => number;
+  fieldsFromData: (data: Uint8Array) => SchemaField[];
+};
+
+const schemaRegistry: Record<number, SchemaProvider> = {
   [RESOURCE_TYPE_IDS.VEHICLE_LIST]: {
     label: 'VehicleListEntry',
     headerSizeFromData: (data) => new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(4, true) >>> 0,
-    entrySize: 0x108,
-    countFromData: (data, headerSize) => {
+    entrySizeFromData: () => 0x108,
+    countFromData: (data, headerSize, entrySize) => {
       const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
       const numVehicles = dv.getUint32(0, true) >>> 0;
-      const maxVehicles = Math.floor((data.length - headerSize) / 0x108);
+      const maxVehicles = Math.floor((data.length - headerSize) / entrySize);
       return Math.min(numVehicles, maxVehicles);
     },
-    fields: getSchemaFields(VehicleEntrySchema)
+    fieldsFromData: () => getSchemaFields(VehicleEntrySchema)
+  },
+  [RESOURCE_TYPE_IDS.ICE_TAKE_DICTIONARY]: {
+    label: 'ICETakeHeader',
+    headerSizeFromData: () => 0,
+    entrySizeFromData: (data) => {
+      const parsed = parseIceTakeDictionaryData(data);
+      return parsed.is64Bit ? 0x6C : 0x64;
+    },
+    countFromData: (data) => {
+      const parsed = parseIceTakeDictionaryData(data);
+      return parsed.totalTakes;
+    },
+    fieldsFromData: (data) => {
+      const parsed = parseIceTakeDictionaryData(data);
+      return getSchemaFields(parsed.is64Bit ? ICETakeHeader64Schema : ICETakeHeader32Schema);
+    }
   }
 };
 
@@ -43,44 +64,36 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
   const headerInfo = useMemo(() => {
     if (!inspected || !schema) return null;
     const headerSize = schema.headerSizeFromData(inspected.data);
-    const count = schema.countFromData(inspected.data, headerSize);
-    return { headerSize, count };
+    const entrySize = schema.entrySizeFromData(inspected.data, headerSize);
+    const count = schema.countFromData(inspected.data, headerSize, entrySize);
+    return { headerSize, count, entrySize };
+  }, [inspected, schema]);
+
+  const fieldsForSchema = useMemo(() => {
+    if (!inspected || !schema) return [] as SchemaField[];
+    return schema.fieldsFromData(inspected.data);
   }, [inspected, schema]);
 
   const selectedFieldMask = useMemo(() => {
     if (!inspected || !schema || !headerInfo || !selectedFieldKey) return null as Uint8Array | null;
     const mask = new Uint8Array(inspected.data.length);
-    const field = schema.fields.find(f => f.key === selectedFieldKey);
+    const field = fieldsForSchema.find(f => f.key === selectedFieldKey);
     if (!field) return mask;
-    const { headerSize, count } = headerInfo;
-    const entrySize = schema.entrySize;
+    const { headerSize, count, entrySize } = headerInfo;
     for (let i = 0; i < count; i++) {
       const s = headerSize + i * entrySize + field.offset;
       const e = Math.min(s + field.size, mask.length);
       if (e > s) mask.fill(1, s, e);
     }
     return mask;
-  }, [inspected, schema, headerInfo, selectedFieldKey]);
+  }, [inspected, schema, headerInfo, selectedFieldKey, fieldsForSchema]);
 
-  const overlayMask = useMemo(() => {
-    if (!inspected) return null as Uint8Array | null;
-    const mask = new Uint8Array(inspected.data.length);
-    for (const ov of inspected.overlays) {
-      const s = Math.max(0, ov.start);
-      const e = Math.min(inspected.data.length, ov.end);
-      if (e > s) mask.fill(1, s, e);
-    }
-    return mask;
-  }, [inspected]);
-
-  const fieldsForSchema = schema?.fields ?? [];
   const totalRows = useMemo(() => inspected ? Math.ceil(inspected.data.length / bytesPerRow) : 0, [inspected, bytesPerRow]);
 
   const entryMask = useMemo(() => {
     if (!inspected || !schema || !headerInfo) return null as Uint8Array | null;
     const mask = new Uint8Array(inspected.data.length);
-    const { headerSize, count } = headerInfo;
-    const entrySize = schema.entrySize;
+    const { headerSize, count, entrySize } = headerInfo;
     for (let i = 0; i < count; i++) {
       const s = headerSize + i * entrySize;
       const e = Math.min(s + entrySize, mask.length);
@@ -123,10 +136,9 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
   const tooltipForOffset = useMemo(() => {
     if (!inspected || !schema || !headerInfo || !selectedFieldKey) return null as (string | null)[] | null;
     const tips = new Array<string | null>(inspected.data.length).fill(null);
-    const field = schema.fields.find(f => f.key === selectedFieldKey);
+    const field = fieldsForSchema.find(f => f.key === selectedFieldKey);
     if (!field) return tips;
-    const { headerSize, count } = headerInfo;
-    const entrySize = schema.entrySize;
+    const { headerSize, count, entrySize } = headerInfo;
     for (let i = 0; i < count; i++) {
       const s = headerSize + i * entrySize + field.offset;
       const e = Math.min(s + field.size, inspected.data.length);
@@ -137,7 +149,7 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
       tips.fill(label, s, e);
     }
     return tips;
-  }, [inspected, schema, headerInfo, selectedFieldKey, decodePreview]);
+  }, [inspected, schema, headerInfo, selectedFieldKey, decodePreview, fieldsForSchema]);
 
   const getRow = (rowIndex: number): HexRow => {
     if (!inspected) return { offset: 0, hexBytes: [], ascii: '' };
@@ -170,8 +182,7 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
     const groups: NonNullable<HexRow['groups']> = [];
     if (schema && headerInfo) {
       const rowEnd = rowStart + rowData.length;
-      const { headerSize, count } = headerInfo;
-      const entrySize = schema.entrySize;
+      const { headerSize, count, entrySize } = headerInfo;
 
       if (rowStart < headerSize) {
         const s = 0;
@@ -225,7 +236,7 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
         <Card>
           <CardContent className="p-4 space-y-3">
             <div className="flex items-end gap-4 flex-wrap">
-              <div className="text-xs text-muted-foreground">Header {headerInfo.headerSize} bytes • Entry size {schema.entrySize} bytes • {headerInfo.count} entries</div>
+              <div className="text-xs text-muted-foreground">Header {headerInfo.headerSize} bytes • Entry size {headerInfo.entrySize} bytes • {headerInfo.count} entries</div>
               <div className="text-xs text-muted-foreground">Selected field highlights across all entries</div>
             </div>
 
@@ -256,14 +267,13 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
           const row = getRow(i);
           if (inspected && schema && headerInfo) {
             const items: NonNullable<HexRow['decodedItems']> = [];
-            const { headerSize, count } = headerInfo;
-            const entrySize = schema.entrySize;
+            const { headerSize, count, entrySize } = headerInfo;
             const rowStart = row.offset;
             const rowEnd = rowStart + Math.min(row.hexBytes.length, bytesPerRow);
 
             // Only render one card per entry group, and only for the selected field (if any)
             if (selectedFieldKey) {
-              const selectedField = schema.fields.find(f => f.key === selectedFieldKey);
+              const selectedField = fieldsForSchema.find(f => f.key === selectedFieldKey);
               if (selectedField) {
                 for (let idx = 0; idx < count; idx++) {
                   const fs = headerSize + idx * entrySize + selectedField.offset;
@@ -289,14 +299,13 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
         heightClass="h-[70vh]"
         onClickByte={(offset) => {
           if (!schema || !headerInfo) return;
-          const { headerSize, count } = headerInfo;
-          const entrySize = schema.entrySize;
+          const { headerSize, count, entrySize } = headerInfo;
           if (offset < headerSize) { setSelectedFieldKey(null); return; }
           const rel = offset - headerSize;
           const within = rel % entrySize;
           const entryIndex = Math.floor(rel / entrySize);
           if (entryIndex < 0 || entryIndex >= count) return;
-          const f = schema.fields.find(f => within >= f.offset && within < f.offset + f.size);
+          const f = fieldsForSchema.find(f => within >= f.offset && within < f.offset + f.size);
           if (f) setSelectedFieldKey(f.key);
         }}
       />
