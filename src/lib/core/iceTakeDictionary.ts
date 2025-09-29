@@ -236,10 +236,7 @@ export function parseIceTakeDictionary(
 
 		// Try both endianness and both 32/64-bit layouts; pick best
 		const candidates = [
-			{ list: scanHeaders(data, true, 'little'), is64: true, end: 'little' as const },
-			{ list: scanHeaders(data, false, 'little'), is64: false, end: 'little' as const },
 			{ list: scanHeaders(data, true, 'big'), is64: true, end: 'big' as const },
-			{ list: scanHeaders(data, false, 'big'), is64: false, end: 'big' as const }
 		];
 		candidates.sort((a, b) => b.list.length - a.list.length);
 		const best = candidates[0];
@@ -321,16 +318,12 @@ function handleNestedBundle(
 
 export function parseIceTakeDictionaryData(
 	data: Uint8Array,
-	is64BitHint?: boolean
 ): ParsedIceTakeDictionary {
 	if (data.length >= 2 && data[0] === 0x78) {
 		data = decompressData(data);
 	}
 	const candidates = [
-		{ list: scanHeaders(data, true, 'little'), is64: true },
-		{ list: scanHeaders(data, false, 'little'), is64: false },
 		{ list: scanHeaders(data, true, 'big'), is64: true },
-		{ list: scanHeaders(data, false, 'big'), is64: false }
 	];
 	candidates.sort((a, b) => b.list.length - a.list.length);
 	const best = candidates[0];
