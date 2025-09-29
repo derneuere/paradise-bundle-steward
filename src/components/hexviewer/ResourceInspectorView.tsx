@@ -23,6 +23,7 @@ type SchemaProvider = {
   entrySizeFromData: (data: Uint8Array, headerSize: number) => number;
   countFromData: (data: Uint8Array, headerSize: number, entrySize: number) => number;
   fieldsFromData: (data: Uint8Array) => SchemaField[];
+  entryOffsetsFromData?: (data: Uint8Array, headerSize: number, entrySize: number) => number[];
 };
 
 const schemaRegistry: Record<number, SchemaProvider> = {
@@ -49,6 +50,10 @@ const schemaRegistry: Record<number, SchemaProvider> = {
       const parsed = parseIceTakeDictionaryData(data);
       return parsed.totalTakes;
     },
+    entryOffsetsFromData: (data) => {
+      const parsed = parseIceTakeDictionaryData(data);
+      return parsed.takes.map(t => t.offset >>> 0).sort((a, b) => a - b);
+    },
     fieldsFromData: (data) => {
       const parsed = parseIceTakeDictionaryData(data);
       return getSchemaFields(parsed.is64Bit ? ICETakeHeader64Schema : ICETakeHeader32Schema);
@@ -66,7 +71,10 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
     const headerSize = schema.headerSizeFromData(inspected.data);
     const entrySize = schema.entrySizeFromData(inspected.data, headerSize);
     const count = schema.countFromData(inspected.data, headerSize, entrySize);
-    return { headerSize, count, entrySize };
+    const entryOffsets = schema.entryOffsetsFromData
+      ? schema.entryOffsetsFromData(inspected.data, headerSize, entrySize)
+      : Array.from({ length: count }, (_, i) => headerSize + i * entrySize);
+    return { headerSize, count, entrySize, entryOffsets };
   }, [inspected, schema]);
 
   const fieldsForSchema = useMemo(() => {
@@ -79,9 +87,9 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
     const mask = new Uint8Array(inspected.data.length);
     const field = fieldsForSchema.find(f => f.key === selectedFieldKey);
     if (!field) return mask;
-    const { headerSize, count, entrySize } = headerInfo;
-    for (let i = 0; i < count; i++) {
-      const s = headerSize + i * entrySize + field.offset;
+    const { entryOffsets, entrySize } = headerInfo as NonNullable<typeof headerInfo> & { entryOffsets: number[] };
+    for (let i = 0; i < entryOffsets.length; i++) {
+      const s = entryOffsets[i] + field.offset;
       const e = Math.min(s + field.size, mask.length);
       if (e > s) mask.fill(1, s, e);
     }
@@ -93,9 +101,9 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
   const entryMask = useMemo(() => {
     if (!inspected || !schema || !headerInfo) return null as Uint8Array | null;
     const mask = new Uint8Array(inspected.data.length);
-    const { headerSize, count, entrySize } = headerInfo;
-    for (let i = 0; i < count; i++) {
-      const s = headerSize + i * entrySize;
+    const { entryOffsets, entrySize } = headerInfo as NonNullable<typeof headerInfo> & { entryOffsets: number[] };
+    for (let i = 0; i < entryOffsets.length; i++) {
+      const s = entryOffsets[i];
       const e = Math.min(s + entrySize, mask.length);
       if (e > s) mask.fill(1, s, e);
     }
@@ -138,9 +146,9 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
     const tips = new Array<string | null>(inspected.data.length).fill(null);
     const field = fieldsForSchema.find(f => f.key === selectedFieldKey);
     if (!field) return tips;
-    const { headerSize, count, entrySize } = headerInfo;
-    for (let i = 0; i < count; i++) {
-      const s = headerSize + i * entrySize + field.offset;
+    const { entryOffsets, entrySize } = headerInfo as NonNullable<typeof headerInfo> & { entryOffsets: number[] };
+    for (let i = 0; i < entryOffsets.length; i++) {
+      const s = entryOffsets[i] + field.offset;
       const e = Math.min(s + field.size, inspected.data.length);
       if (e <= s) continue;
       const view = inspected.data.subarray(s, e);
@@ -182,7 +190,8 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
     const groups: NonNullable<HexRow['groups']> = [];
     if (schema && headerInfo) {
       const rowEnd = rowStart + rowData.length;
-      const { headerSize, count, entrySize } = headerInfo;
+      const { headerSize, entrySize } = headerInfo;
+      const entryOffsets = (headerInfo as any).entryOffsets as number[] | undefined;
 
       if (rowStart < headerSize) {
         const s = 0;
@@ -201,8 +210,9 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
         }
       }
 
-      for (let i = 0; i < count; i++) {
-        const es = headerSize + i * entrySize;
+      const iter = entryOffsets ?? Array.from({ length: (headerInfo?.count ?? 0) }, (_, i) => headerSize + i * entrySize);
+      for (let i = 0; i < iter.length; i++) {
+        const es = iter[i];
         const ee = es + entrySize;
         if (rowStart < ee && rowEnd > es) {
           const sAbs = Math.max(rowStart, es);
@@ -218,7 +228,7 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
           if (bottomOpen) cls.push('-mb-px');
           if (!topOpen) { cls.push('rounded-tl-md', 'rounded-tr-md'); }
           if (!bottomOpen) { cls.push('rounded-bl-md', 'rounded-br-md'); }
-          groups.push({ kind: 'entry', colStart, colEnd, title: `Entry ${i} [0x${es.toString(16).toUpperCase()}..0x${(ee-1).toString(16).toUpperCase()}]`, classes: cls.join(' ') });
+            groups.push({ kind: 'entry', colStart, colEnd, title: `Entry ${i} [0x${es.toString(16).toUpperCase()}..0x${(ee-1).toString(16).toUpperCase()}]`, classes: cls.join(' ') });
         }
       }
     }
@@ -267,7 +277,8 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
           const row = getRow(i);
           if (inspected && schema && headerInfo) {
             const items: NonNullable<HexRow['decodedItems']> = [];
-            const { headerSize, count, entrySize } = headerInfo;
+            const { entrySize } = headerInfo;
+            const entryOffsets = (headerInfo as any).entryOffsets as number[] | undefined;
             const rowStart = row.offset;
             const rowEnd = rowStart + Math.min(row.hexBytes.length, bytesPerRow);
 
@@ -275,8 +286,9 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
             if (selectedFieldKey) {
               const selectedField = fieldsForSchema.find(f => f.key === selectedFieldKey);
               if (selectedField) {
-                for (let idx = 0; idx < count; idx++) {
-                  const fs = headerSize + idx * entrySize + selectedField.offset;
+                const iter = entryOffsets ?? [];
+                for (let idx = 0; idx < iter.length; idx++) {
+                  const fs = iter[idx] + selectedField.offset;
                   const fe = fs + selectedField.size;
                   if (rowStart < fe && rowEnd > fs) {
                     const view = inspected.data.subarray(fs, Math.min(fe, inspected.data.length));
@@ -299,14 +311,20 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
         heightClass="h-[70vh]"
         onClickByte={(offset) => {
           if (!schema || !headerInfo) return;
-          const { headerSize, count, entrySize } = headerInfo;
-          if (offset < headerSize) { setSelectedFieldKey(null); return; }
-          const rel = offset - headerSize;
-          const within = rel % entrySize;
-          const entryIndex = Math.floor(rel / entrySize);
-          if (entryIndex < 0 || entryIndex >= count) return;
-          const f = fieldsForSchema.find(f => within >= f.offset && within < f.offset + f.size);
-          if (f) setSelectedFieldKey(f.key);
+          const { entrySize } = headerInfo;
+          const entryOffsets = (headerInfo as any).entryOffsets as number[] | undefined;
+          if (!entryOffsets || entryOffsets.length === 0) return;
+          for (let idx = 0; idx < entryOffsets.length; idx++) {
+            const es = entryOffsets[idx];
+            const ee = es + entrySize;
+            if (offset >= es && offset < ee) {
+              const within = offset - es;
+              const f = fieldsForSchema.find(f => within >= f.offset && within < f.offset + f.size);
+              if (f) setSelectedFieldKey(f.key);
+              return;
+            }
+          }
+          setSelectedFieldKey(null);
         }}
       />
     </div>
