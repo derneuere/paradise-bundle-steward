@@ -12,6 +12,7 @@ type StaticProps = {
   rows: HexRow[];
   heightClass?: string;
   onClickByte?: (offset: number) => void;
+  scrollToRowIndex?: number | null;
 };
 
 type LazyProps = {
@@ -19,6 +20,7 @@ type LazyProps = {
   getRow: (rowIndex: number) => HexRow;
   heightClass?: string;
   onClickByte?: (offset: number) => void;
+  scrollToRowIndex?: number | null;
 };
 
 type HexTableProps = StaticProps | LazyProps;
@@ -27,6 +29,7 @@ export const HexTable: React.FC<HexTableProps> = (props) => {
   const isStatic = (props as StaticProps).rows !== undefined;
   const heightClass = props.heightClass ?? 'h-[70vh]';
   const onClickByte = (props as any).onClickByte as ((offset: number) => void) | undefined;
+  const scrollToRowIndex = (props as any).scrollToRowIndex as number | null | undefined;
 
   const totalRows = isStatic
     ? (props as StaticProps).rows.length
@@ -46,6 +49,18 @@ export const HexTable: React.FC<HexTableProps> = (props) => {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Programmatic scrolling when a target row index is provided
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    if (typeof scrollToRowIndex === 'number' && !Number.isNaN(scrollToRowIndex)) {
+      const target = Math.max(0, Math.floor(scrollToRowIndex));
+      const centerOffset = Math.max(0, (viewportHeight - ROW_HEIGHT) / 2);
+      const top = Math.max(0, target * ROW_HEIGHT - centerOffset);
+      el.scrollTo({ top, behavior: 'smooth' });
+    }
+  }, [scrollToRowIndex, viewportHeight]);
 
   const startRow = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const endRow = Math.min(totalRows, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN);

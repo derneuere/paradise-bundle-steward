@@ -206,6 +206,8 @@ export const IceTakeDictionaryComponent = ({ dictionary }: { dictionary: ParsedI
                   <Badge variant="secondary" className="text-xs">{dictionary.is64Bit ? '64-bit' : '32-bit'}</Badge>
                   <Badge variant="secondary" className="text-xs">Len {selected.lengthSeconds.toFixed(3)}s</Badge>
                   <Badge variant="secondary" className="text-xs">GUID {selected.guid}</Badge>
+                  <Badge variant="secondary" className="text-xs">Allocated {selected.allocated}</Badge>
+                  <Badge variant="secondary" className="text-xs">Offset {selected.offset}</Badge>
                   <Badge variant="secondary" className="text-xs">Total Keys {totalKeys(selected)}</Badge>
                 </div>
 

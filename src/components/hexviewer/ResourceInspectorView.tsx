@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { RESOURCE_TYPE_IDS } from '@/lib/core/types';
 import type { InspectedResource } from './types';
 import { HexTable } from './HexTable';
@@ -63,6 +64,8 @@ const schemaRegistry: Record<number, SchemaProvider> = {
 
 export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ inspected, bytesPerRow }) => {
   const [selectedFieldKey, setSelectedFieldKey] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [activeMatchIndex, setActiveMatchIndex] = useState<number>(-1);
 
   const schema = useMemo(() => inspected ? schemaRegistry[inspected.resource.resourceTypeId] : undefined, [inspected]);
 
@@ -119,6 +122,96 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
     return mask;
   }, [inspected, schema, headerInfo]);
 
+  // ================================
+  // Search (hex bytes)
+  // ================================
+  const parsedSearchBytes = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!q) return null as Uint8Array | null;
+    // Accept forms like "DE AD BE EF" or "deadbeef" or with commas/0x prefixes
+    const cleaned = q.replace(/0x/gi, '').replace(/[^0-9a-fA-F]/g, '');
+    if (cleaned.length < 2) return null;
+    const evenLen = cleaned.length - (cleaned.length % 2);
+    if (evenLen < 2) return null;
+    const out = new Uint8Array(evenLen / 2);
+    for (let i = 0; i < evenLen; i += 2) {
+      const byteStr = cleaned.slice(i, i + 2);
+      const v = Number.parseInt(byteStr, 16);
+      if (Number.isNaN(v)) return null;
+      out[i >> 1] = v & 0xFF;
+    }
+    return out;
+  }, [searchQuery]);
+
+  const searchMatchStarts = useMemo(() => {
+    if (!inspected || !parsedSearchBytes || parsedSearchBytes.length === 0) return [] as number[];
+    const hay = inspected.data;
+    const needle = parsedSearchBytes;
+    const starts: number[] = [];
+    // Simple forward scan
+    outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+      for (let j = 0; j < needle.length; j++) {
+        if (hay[i + j] !== needle[j]) continue outer;
+      }
+      starts.push(i);
+    }
+    return starts;
+  }, [inspected, parsedSearchBytes]);
+
+  const searchMask = useMemo(() => {
+    if (!inspected || !parsedSearchBytes || parsedSearchBytes.length === 0 || searchMatchStarts.length === 0) return null as Uint8Array | null;
+    const mask = new Uint8Array(inspected.data.length);
+    const sz = parsedSearchBytes.length;
+    for (const s of searchMatchStarts) {
+      const e = Math.min(s + sz, mask.length);
+      if (e > s) mask.fill(1, s, e);
+    }
+    return mask;
+  }, [inspected, parsedSearchBytes, searchMatchStarts]);
+
+  const activeMatchMask = useMemo(() => {
+    if (!inspected || !parsedSearchBytes || parsedSearchBytes.length === 0) return null as Uint8Array | null;
+    if (activeMatchIndex < 0 || activeMatchIndex >= searchMatchStarts.length) return null as Uint8Array | null;
+    const mask = new Uint8Array(inspected.data.length);
+    const s = searchMatchStarts[activeMatchIndex];
+    const e = Math.min(s + parsedSearchBytes.length, mask.length);
+    if (e > s) mask.fill(1, s, e);
+    return mask;
+  }, [inspected, parsedSearchBytes, activeMatchIndex, searchMatchStarts]);
+
+  const scrollTargetRow = useMemo(() => {
+    if (!parsedSearchBytes || activeMatchIndex < 0 || activeMatchIndex >= searchMatchStarts.length) return null as number | null;
+    const s = searchMatchStarts[activeMatchIndex];
+    return Math.floor(s / Math.max(1, bytesPerRow));
+  }, [parsedSearchBytes, activeMatchIndex, searchMatchStarts, bytesPerRow]);
+
+  // Keep active match index valid when query or matches change
+  React.useEffect(() => {
+    if (!parsedSearchBytes || searchMatchStarts.length === 0) {
+      setActiveMatchIndex(-1);
+      return;
+    }
+    setActiveMatchIndex((prev) => (prev >= 0 && prev < searchMatchStarts.length ? prev : 0));
+  }, [parsedSearchBytes, searchMatchStarts.length]);
+
+  const goPrev = React.useCallback(() => {
+    if (!parsedSearchBytes || searchMatchStarts.length === 0) return;
+    setActiveMatchIndex((prev) => {
+      const n = searchMatchStarts.length;
+      if (prev < 0) return 0;
+      return (prev - 1 + n) % n;
+    });
+  }, [parsedSearchBytes, searchMatchStarts.length]);
+
+  const goNext = React.useCallback(() => {
+    if (!parsedSearchBytes || searchMatchStarts.length === 0) return;
+    setActiveMatchIndex((prev) => {
+      const n = searchMatchStarts.length;
+      if (prev < 0) return 0;
+      return (prev + 1) % n;
+    });
+  }, [parsedSearchBytes, searchMatchStarts.length]);
+
   const decodePreview = useMemo(() => {
     function toHex(bytes: Uint8Array): string { return Array.from(bytes).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' '); }
     function toAscii(bytes: Uint8Array): string { const str = Array.from(bytes).map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join(''); return str.replace(/\.+$/, ''); }
@@ -168,6 +261,8 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
       const inField = !!selectedFieldMask && selectedFieldMask[off] === 1;
       const inEntry = !!entryMask && entryMask[off] === 1;
       const inHeader = !!headerMask && headerMask[off] === 1;
+      const inSearch = !!searchMask && searchMask[off] === 1;
+      const inActive = !!activeMatchMask && activeMatchMask[off] === 1;
       const prevOff = off - 1;
       const nextOff = off + 1;
       const fieldStart = inField && (!selectedFieldMask || prevOff < 0 || selectedFieldMask[prevOff] !== 1);
@@ -181,6 +276,8 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
       if (entryEnd) color += ' border-r-2 border-amber-500 rounded-r-sm';
       if (fieldStart) color += ' ring-2 ring-fuchsia-500 ring-offset-0';
       if (fieldEnd && !fieldStart) color += ' ring-2 ring-fuchsia-500 ring-offset-0';
+      if (inSearch) color += ' bg-emerald-500/20';
+      if (inActive) color += ' ring-2 ring-emerald-500 ring-offset-0';
 
       const section = tooltipForOffset?.[off] ?? '';
       return { byte: b, offset: off, section, color };
@@ -241,6 +338,44 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
   return (
     <div className="space-y-3">
       <div className="text-sm text-muted-foreground">Size: {inspected.data.length.toLocaleString()} bytes</div>
+
+      {/* Search Controls */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 flex-1 min-w-[260px]">
+              <Label className="text-xs text-muted-foreground">Search</Label>
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Hex bytes (e.g. DE AD BE EF or deadbeef)"
+                className="font-mono"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    goNext();
+                  }
+                }}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={goPrev} disabled={!parsedSearchBytes || searchMatchStarts.length === 0}>
+                Prev
+              </Button>
+              <Button variant="outline" size="sm" onClick={goNext} disabled={!parsedSearchBytes || searchMatchStarts.length === 0}>
+                Next
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSearchQuery('')} disabled={searchQuery.length === 0}>Clear</Button>
+            </div>
+            <div className="ml-auto text-xs text-muted-foreground">
+              {parsedSearchBytes && searchMatchStarts.length > 0
+                ? `Match ${activeMatchIndex + 1} of ${searchMatchStarts.length}`
+                : searchQuery
+                  ? 'No matches'
+                  : 'Enter bytes to search'}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {schema && headerInfo && (
         <Card>
@@ -309,6 +444,7 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
           return row;
         }}
         heightClass="h-[70vh]"
+        scrollToRowIndex={scrollTargetRow}
         onClickByte={(offset) => {
           if (!schema || !headerInfo) return;
           const { entrySize } = headerInfo;

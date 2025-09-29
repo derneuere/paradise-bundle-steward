@@ -236,9 +236,23 @@ export function parseIceTakeDictionary(
 
 		// Try both endianness and both 32/64-bit layouts; pick best
 		const candidates = [
+			{ list: scanHeaders(data, false, 'little'), is64: false, end: 'little' as const },
+			{ list: scanHeaders(data, false, 'big'), is64: false, end: 'big' as const },
+			{ list: scanHeaders(data, true, 'little'), is64: true, end: 'little' as const },
 			{ list: scanHeaders(data, true, 'big'), is64: true, end: 'big' as const },
 		];
-		candidates.sort((a, b) => b.list.length - a.list.length);
+		// Sort by number of detected entries; tie-breaker prefers caller endianness hint if provided
+		candidates.sort((a, b) => {
+			const byCount = b.list.length - a.list.length;
+			if (byCount !== 0) return byCount;
+			if (options && typeof options.littleEndian === 'boolean') {
+				const prefer = options.littleEndian ? 'little' : 'big';
+				const bPref = b.end === prefer ? 1 : 0;
+				const aPref = a.end === prefer ? 1 : 0;
+				return bPref - aPref;
+			}
+			return 0;
+		});
 		const best = candidates[0];
 
 		const picks = best.list;
@@ -323,6 +337,9 @@ export function parseIceTakeDictionaryData(
 		data = decompressData(data);
 	}
 	const candidates = [
+		{ list: scanHeaders(data, false, 'little'), is64: false },
+		{ list: scanHeaders(data, false, 'big'), is64: false },
+		{ list: scanHeaders(data, true, 'little'), is64: true },
 		{ list: scanHeaders(data, true, 'big'), is64: true },
 	];
 	candidates.sort((a, b) => b.list.length - a.list.length);
