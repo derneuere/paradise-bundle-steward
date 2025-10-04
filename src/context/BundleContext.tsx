@@ -11,6 +11,7 @@ import type { ParsedResources } from '@/lib/core/bundle';
 import type { VehicleListEntry, ParsedVehicleList } from '@/lib/core/vehicleList';
 import type { PlayerCarColours } from '@/lib/core/playerCarColors';
 import type { ParsedIceTakeDictionary } from '@/lib/core/iceTakeDictionary';
+import type { ParsedTriggerData } from '@/lib/core/triggerData';
 
 export type UIResource = {
   id: string;
@@ -41,6 +42,8 @@ type BundleContextValue = {
   setParsedVehicleList: (v: ParsedVehicleList | null) => void;
   playerCarColours: PlayerCarColours | null;
   iceDictionary: ParsedIceTakeDictionary | null;
+  triggerData: ParsedTriggerData | null;
+  setTriggerData: (data: ParsedTriggerData | null) => void;
   loadBundleFromFile: (file: File) => Promise<void>;
   exportBundle: () => Promise<void>;
 };
@@ -58,7 +61,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
   const [parsedVehicleList, setParsedVehicleList] = useState<ParsedVehicleList | null>(null);
   const [playerCarColours, setPlayerCarColours] = useState<PlayerCarColours | null>(null);
   const [iceDictionary, setIceDictionary] = useState<ParsedIceTakeDictionary | null>(null);
-
+  const [triggerData, setTriggerData] = useState<ParsedTriggerData | null>(null);
   const convertResourceToUI = useMemo(() => {
     return (resource: any, bundle: ParsedBundle, debugResources: DebugResource[]): UIResource => {
       const resourceType = getResourceType(resource.resourceTypeId);
@@ -114,7 +117,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
       setVehicleList(parsedResources.vehicleList?.vehicles || []);
       setPlayerCarColours(parsedResources.playerCarColours || null);
       setIceDictionary(parsedResources.iceTakeDictionary || null);
-
+      setTriggerData(parsedResources.triggerData || null);
       setLoadedBundle(bundle);
       setResources(uiResources);
       setDebugResources(debugData);
@@ -183,6 +186,8 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     setParsedVehicleList,
     playerCarColours,
     iceDictionary,
+    triggerData,
+    setTriggerData,
     loadBundleFromFile,
     exportBundle
   };

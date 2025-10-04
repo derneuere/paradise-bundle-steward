@@ -14,6 +14,7 @@ import ColorsPage from "./pages/ColorsPage";
 import IcePage from "./pages/IcePage";
 import VehicleEditorPage from "./pages/VehicleEditorPage";
 import ResourceInspectorPage from "./pages/ResourceInspectorPage";
+import TriggerDataPage from "./pages/TriggerDataPage";
 
 const queryClient = new QueryClient();
 
@@ -34,6 +35,7 @@ const App = () => (
               <Route path="/colors" element={<ColorsPage />} />
               <Route path="/ice" element={<IcePage />} />
               <Route path="/inspect" element={<ResourceInspectorPage />} />
+              <Route path="/triggers" element={<TriggerDataPage />} />
             </Route>
             {/* Legacy index route kept if needed */}
             <Route path="/legacy" element={<Index />} />

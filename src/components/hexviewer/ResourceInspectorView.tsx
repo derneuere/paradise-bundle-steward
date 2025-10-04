@@ -6,9 +6,11 @@ import { Input } from '@/components/ui/input';
 import { RESOURCE_TYPE_IDS } from '@/lib/core/types';
 import type { InspectedResource } from './types';
 import { HexTable } from './HexTable';
-import { getSchemaFields } from './utils.ts';
+import { getSchemaFields, getSchemaSize } from './utils.ts';
 import { VehicleEntrySchema } from '@/lib/core/vehicleList';
+import { TriggerDataHeaderSchema, TriggerRegionBaseSchema, LandmarkHeaderSchema, GenericRegionHeaderSchema, BlackspotHeaderSchema, VFXBoxRegionHeaderSchema } from '@/lib/core/triggerData';
 import { ICETakeHeader32Schema, ICETakeHeader64Schema, parseIceTakeDictionaryData } from '@/lib/core/iceTakeDictionary';
+import { BufferReader } from 'typed-binary';
 import type { HexRow } from './types';
 
 export type ResourceInspectorViewProps = {
@@ -25,6 +27,14 @@ type SchemaProvider = {
   countFromData: (data: Uint8Array, headerSize: number, entrySize: number) => number;
   fieldsFromData: (data: Uint8Array) => SchemaField[];
   entryOffsetsFromData?: (data: Uint8Array, headerSize: number, entrySize: number) => number[];
+  variants?: Array<{
+    key: string;
+    label: string;
+    entrySizeFromData: (data: Uint8Array, headerSize: number) => number;
+    countFromData: (data: Uint8Array, headerSize: number, entrySize: number) => number;
+    fieldsFromData: (data: Uint8Array) => SchemaField[];
+    entryOffsetsFromData: (data: Uint8Array, headerSize: number, entrySize: number) => number[];
+  }>;
 };
 
 const schemaRegistry: Record<number, SchemaProvider> = {
@@ -59,31 +69,189 @@ const schemaRegistry: Record<number, SchemaProvider> = {
       const parsed = parseIceTakeDictionaryData(data);
       return getSchemaFields(parsed.is64Bit ? ICETakeHeader64Schema : ICETakeHeader32Schema);
     }
+  },
+  [RESOURCE_TYPE_IDS.TRIGGER_DATA]: {
+    label: 'TriggerData',
+    headerSizeFromData: (_data) => getSchemaSize(TriggerDataHeaderSchema),
+    entrySizeFromData: (_data, _headerSize) => getSchemaSize(TriggerRegionBaseSchema),
+    countFromData: (data, headerSize, _entrySize) => {
+      const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+      const hdr = TriggerDataHeaderSchema.read(reader) as any;
+      return (hdr.miLandmarkCount|0) + (hdr.miGenericRegionCount|0) + (hdr.miBlackspotCount|0) + (hdr.miVFXBoxRegionCount|0);
+    },
+    entryOffsetsFromData: (data, headerSize, _entrySize) => {
+      const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+      const hdr = TriggerDataHeaderSchema.read(reader) as any;
+      const table = hdr.TriggerRegionOffset >>> 0;
+      const count = (hdr.miRegionCount|0);
+      const arr: number[] = [];
+      if (table === 0 || count <= 0) return arr;
+      const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      for (let i = 0; i < count; i++) {
+        const ptrPos = table + i * 4;
+        if (ptrPos + 4 > data.length) break;
+        const entryOff = dv.getUint32(ptrPos, true) >>> 0;
+        if (entryOff < data.length) arr.push(entryOff);
+      }
+      return arr.sort((a, b) => a - b);
+    },
+    fieldsFromData: (_data) => getSchemaFields(TriggerRegionBaseSchema),
+    variants: [
+      {
+        key: 'consolidated',
+        label: 'TriggerRegions (table)',
+        entrySizeFromData: (_data, _headerSize) => getSchemaSize(TriggerRegionBaseSchema),
+        countFromData: (data, _headerSize, _entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          return (hdr.miRegionCount|0);
+        },
+        fieldsFromData: (_data) => getSchemaFields(TriggerRegionBaseSchema),
+        entryOffsetsFromData: (data, _headerSize, _entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          const table = hdr.TriggerRegionOffset >>> 0;
+          const count = (hdr.miRegionCount|0);
+          const arr: number[] = [];
+          if (table === 0 || count <= 0) return arr;
+          const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+          for (let i = 0; i < count; i++) {
+            const ptrPos = table + i * 4;
+            if (ptrPos + 4 > data.length) break;
+            const entryOff = dv.getUint32(ptrPos, true) >>> 0;
+            if (entryOff < data.length) arr.push(entryOff);
+          }
+          return arr.sort((a, b) => a - b);
+        }
+      },
+      {
+        key: 'landmark',
+        label: 'Landmark',
+        entrySizeFromData: (_data, _headerSize) => getSchemaSize(LandmarkHeaderSchema),
+        countFromData: (data, _headerSize, _entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          return (hdr.miLandmarkCount|0);
+        },
+        fieldsFromData: (_data) => getSchemaFields(LandmarkHeaderSchema),
+        entryOffsetsFromData: (data, _headerSize, entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          const base = hdr.LandmarkTriggersOffset >>> 0;
+          const count = (hdr.miLandmarkCount|0);
+          const out: number[] = [];
+          for (let i = 0; i < count; i++) {
+            const off = base + i * entrySize;
+            if (off + entrySize <= data.length) out.push(off);
+          }
+          return out;
+        }
+      },
+      {
+        key: 'generic',
+        label: 'GenericRegion',
+        entrySizeFromData: (_data, _headerSize) => getSchemaSize(GenericRegionHeaderSchema),
+        countFromData: (data, _headerSize, _entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          return (hdr.miGenericRegionCount|0);
+        },
+        fieldsFromData: (_data) => getSchemaFields(GenericRegionHeaderSchema),
+        entryOffsetsFromData: (data, _headerSize, entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          const base = hdr.GenericRegionsOffset >>> 0;
+          const count = (hdr.miGenericRegionCount|0);
+          const out: number[] = [];
+          for (let i = 0; i < count; i++) {
+            const off = base + i * entrySize;
+            if (off + entrySize <= data.length) out.push(off);
+          }
+          return out;
+        }
+      },
+      {
+        key: 'blackspot',
+        label: 'Blackspot',
+        entrySizeFromData: (_data, _headerSize) => getSchemaSize(BlackspotHeaderSchema),
+        countFromData: (data, _headerSize, _entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          return (hdr.miBlackspotCount|0);
+        },
+        fieldsFromData: (_data) => getSchemaFields(BlackspotHeaderSchema),
+        entryOffsetsFromData: (data, _headerSize, entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          const base = hdr.BlackspotOffset >>> 0;
+          const count = (hdr.miBlackspotCount|0);
+          const out: number[] = [];
+          for (let i = 0; i < count; i++) {
+            const off = base + i * entrySize;
+            if (off + entrySize <= data.length) out.push(off);
+          }
+          return out;
+        }
+      },
+      {
+        key: 'vfx',
+        label: 'VFXBoxRegion',
+        entrySizeFromData: (_data, _headerSize) => getSchemaSize(VFXBoxRegionHeaderSchema),
+        countFromData: (data, _headerSize, _entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          return (hdr.miVFXBoxRegionCount|0);
+        },
+        fieldsFromData: (_data) => getSchemaFields(VFXBoxRegionHeaderSchema),
+        entryOffsetsFromData: (data, _headerSize, entrySize) => {
+          const reader = new BufferReader(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { endianness: 'little' });
+          const hdr = TriggerDataHeaderSchema.read(reader) as any;
+          const base = hdr.VFXBoxRegionOffset >>> 0;
+          const count = (hdr.miVFXBoxRegionCount|0);
+          const out: number[] = [];
+          for (let i = 0; i < count; i++) {
+            const off = base + i * entrySize;
+            if (off + entrySize <= data.length) out.push(off);
+          }
+          return out;
+        }
+      }
+    ]
   }
 };
 
 export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ inspected, bytesPerRow }) => {
   const [selectedFieldKey, setSelectedFieldKey] = useState<string | null>(null);
+  const [selectedVariantKey, setSelectedVariantKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeMatchIndex, setActiveMatchIndex] = useState<number>(-1);
 
   const schema = useMemo(() => inspected ? schemaRegistry[inspected.resource.resourceTypeId] : undefined, [inspected]);
 
+  const activeProvider = useMemo(() => {
+    if (!schema) return null;
+    const variants = schema.variants ?? [];
+    if (!inspected || variants.length === 0) return schema;
+    const key = selectedVariantKey ?? variants[0].key;
+    const v = variants.find(v => v.key === key) ?? variants[0];
+    return { ...schema, ...v } as SchemaProvider;
+  }, [schema, inspected, selectedVariantKey]);
+
   const headerInfo = useMemo(() => {
-    if (!inspected || !schema) return null;
+    if (!inspected || !schema || !activeProvider) return null;
     const headerSize = schema.headerSizeFromData(inspected.data);
-    const entrySize = schema.entrySizeFromData(inspected.data, headerSize);
-    const count = schema.countFromData(inspected.data, headerSize, entrySize);
-    const entryOffsets = schema.entryOffsetsFromData
-      ? schema.entryOffsetsFromData(inspected.data, headerSize, entrySize)
+    const entrySize = activeProvider.entrySizeFromData(inspected.data, headerSize);
+    const count = activeProvider.countFromData(inspected.data, headerSize, entrySize);
+    const entryOffsets = activeProvider.entryOffsetsFromData
+      ? activeProvider.entryOffsetsFromData(inspected.data, headerSize, entrySize)
       : Array.from({ length: count }, (_, i) => headerSize + i * entrySize);
     return { headerSize, count, entrySize, entryOffsets };
-  }, [inspected, schema]);
+  }, [inspected, schema, activeProvider]);
 
   const fieldsForSchema = useMemo(() => {
-    if (!inspected || !schema) return [] as SchemaField[];
-    return schema.fieldsFromData(inspected.data);
-  }, [inspected, schema]);
+    if (!inspected || !activeProvider) return [] as SchemaField[];
+    return activeProvider.fieldsFromData(inspected.data);
+  }, [inspected, activeProvider]);
 
   const selectedFieldMask = useMemo(() => {
     if (!inspected || !schema || !headerInfo || !selectedFieldKey) return null as Uint8Array | null;
@@ -382,6 +550,23 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
           <CardContent className="p-4 space-y-3">
             <div className="flex items-end gap-4 flex-wrap">
               <div className="text-xs text-muted-foreground">Header {headerInfo.headerSize} bytes • Entry size {headerInfo.entrySize} bytes • {headerInfo.count} entries</div>
+              {schema.variants && schema.variants.length > 0 && (
+                <div className="ml-auto flex items-center gap-2">
+                  <Label className="text-xs text-muted-foreground">Data type</Label>
+                  <div className="flex gap-1 flex-wrap">
+                    {schema.variants.map(v => (
+                      <Button
+                        key={v.key}
+                        size="sm"
+                        variant={(selectedVariantKey ?? schema.variants?.[0]?.key) === v.key ? 'secondary' : 'outline'}
+                        onClick={() => setSelectedVariantKey(v.key)}
+                      >
+                        {v.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="text-xs text-muted-foreground">Selected field highlights across all entries</div>
             </div>
 

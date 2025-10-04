@@ -1,5 +1,6 @@
 import type { ResourceCategory } from '@/lib/resourceTypes';
-import type { AnySchema, MaxValue } from 'typed-binary';
+import type { AnySchema } from 'typed-binary';
+import { MaxValue } from 'typed-binary';
 
 export const formatHex = (byte: number): string => {
   return byte.toString(16).toUpperCase().padStart(2, '0');
@@ -124,4 +125,9 @@ export function getSchemaFields(schema: AnySchema): SchemaField[] {
   const fields: SchemaField[] = [];
   collectFields(schema as any, 0, '', fields);
   return fields;
+}
+
+// Expose schema size computation for callers that need total struct size in bytes
+export function getSchemaSize(schema: AnySchema): number {
+  return sizeOfSchema(schema as any);
 }

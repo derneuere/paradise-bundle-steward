@@ -26,6 +26,7 @@ import { writeVehicleListData } from '../vehicleList';
 import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors';
 import { RESOURCE_TYPES } from '../../resourceTypes';
 import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTakeDictionary';
+import { type ParsedTriggerData, parseTriggerData } from '../triggerData';
 
 // ============================================================================
 // Main Bundle Writer
@@ -343,6 +344,7 @@ export type ParsedResources = {
   vehicleList?: ParsedVehicleList;
   playerCarColours?: PlayerCarColours;
   iceTakeDictionary?: ParsedIceTakeDictionary;
+  triggerData?: ParsedTriggerData;
 };
 
 /**
@@ -420,6 +422,17 @@ export function parseBundleResources(
   );
   if (iceDict) {
     resources.iceTakeDictionary = iceDict;
+  }
+
+  // Parse Trigger Data
+  const triggerData = parseResourceType(
+    buffer,
+    bundle,
+    'Trigger Data',
+    parseTriggerData, 
+  );
+  if (triggerData) {
+    resources.triggerData = triggerData;
   }
 
   return resources;

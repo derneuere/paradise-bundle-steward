@@ -108,6 +108,11 @@ const ResourcesPage = () => {
               Edit ICE Takes
             </NavLink>
           )}
+          {resource.type === 'Trigger Data' && (
+            <NavLink to="/triggers" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
+              Edit Triggers
+            </NavLink>
+          )}
         </CardContent>
       </Card>
     );
