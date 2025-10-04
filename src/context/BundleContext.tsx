@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { parseBundle, parseBundleResources, writeBundle, getPlatformName, getFlagNames, formatResourceId } from '@/lib/core/bundle';
+import { parseBundle, parseBundleResources, writeBundleFresh, getPlatformName, getFlagNames, formatResourceId } from '@/lib/core/bundle';
 import { u64ToBigInt } from '@/lib/core/u64';
 import { getResourceType } from '@/lib/resourceTypes';
 import { extractResourceSize, getMemoryTypeName } from '@/lib/core/resourceManager';
@@ -140,7 +140,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
     try {
-      const outBuffer = writeBundle(
+      const outBuffer = writeBundleFresh(
         loadedBundle,
         originalArrayBuffer,
         {

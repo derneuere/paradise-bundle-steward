@@ -27,262 +27,294 @@ import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors
 import { RESOURCE_TYPES } from '../../resourceTypes';
 import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTakeDictionary';
 import { type ParsedTriggerData, parseTriggerData, writeTriggerDataData } from '../triggerData';
-import { extractResourceSize, isCompressed, compressData } from '../resourceManager';
+import { extractResourceSize, extractAlignment, packSizeAndAlignment, isCompressed, compressData } from '../resourceManager';
 
 // ============================================================================
 // Main Bundle Writer
 // ============================================================================
 
+
+// ==========================================================================
+// Fresh Bundle Writer (repack layout)
+// ==========================================================================
+
 /**
- * Writes a Burnout Paradise Bundle 2 format buffer from a ParsedBundle.
- * Note: This writer preserves the original data layout. It updates the header,
- * resource entry table and optional debug data in-place relative to the
- * original buffer. Resource/import data bytes are copied from the original
- * buffer without relocation.
+ * Writes a new bundle buffer from scratch, repacking resources sequentially.
+ * This does NOT preserve the original layout or reserved sizes. Offsets and
+ * sizes are recalculated and all resource/import data are relocated.
  */
-export function writeBundle(
+export function writeBundleFresh(
   bundle: ParsedBundle,
   originalBuffer: ArrayBuffer,
   options: WriteOptions = {},
   progressCallback?: ProgressCallback
 ): ArrayBuffer {
-  try {
-    reportProgress(progressCallback, 'write', 0, 'Starting bundle write');
-    const outBytes = new Uint8Array(originalBuffer.byteLength);
-    outBytes.set(new Uint8Array(originalBuffer));
-    const outBuffer = outBytes.buffer;
-    const isLittleEndian = bundle.header.platform !== PLATFORMS.PS3;
-    const dv = new DataView(outBuffer);
+  reportProgress(progressCallback, 'write', 0, 'Starting fresh bundle write');
 
-    // ----------------------------------------------------------------------
-    // Write header at offset 0
-    // ----------------------------------------------------------------------
-    const headerOffset = 0;
-    const writeU32 = (offset: number, value: number) => dv.setUint32(offset, value >>> 0, isLittleEndian);
+  const isLittleEndian = bundle.header.platform !== PLATFORMS.PS3;
 
-    // magic 'bnd2'
-    const magicBytes = new TextEncoder().encode('bnd2');
-    outBytes.set(magicBytes, headerOffset);
-
-    // version
-    writeU32(headerOffset + 4, 2);
-
-    // platform
-    writeU32(headerOffset + 8, bundle.header.platform);
-
-    // Determine debug flag and offset
-    const includeDebug = options.includeDebugData !== false && !!bundle.debugData && bundle.header.debugDataOffset > 0;
-    let flags = bundle.header.flags >>> 0;
-    if (includeDebug) {
-      flags |= BUNDLE_FLAGS.HAS_DEBUG_DATA;
-    } else {
-      flags &= ~BUNDLE_FLAGS.HAS_DEBUG_DATA;
-    }
-
-    // debugDataOffset from header (preserve existing position)
-    writeU32(headerOffset + 12, includeDebug ? bundle.header.debugDataOffset : 0);
-
-    // resourceEntriesCount
-    writeU32(headerOffset + 16, bundle.resources.length);
-
-    // resourceEntriesOffset
-    writeU32(headerOffset + 20, bundle.header.resourceEntriesOffset);
-
-    // resourceDataOffsets (3 x u32)
-    const rdo = bundle.header.resourceDataOffsets || [0, 0, 0];
-    writeU32(headerOffset + 24, rdo[0] || 0);
-    writeU32(headerOffset + 28, rdo[1] || 0);
-    writeU32(headerOffset + 32, rdo[2] || 0);
-
-    // flags
-    writeU32(headerOffset + 36, flags);
-
-    reportProgress(progressCallback, 'write', 0.25, 'Header written');
-
-    // ----------------------------------------------------------------------
-    // Write resource entry table
-    // ----------------------------------------------------------------------
-
-    const entrySize = 64; // bytes per ResourceEntry
-    let tableOffset = bundle.header.resourceEntriesOffset;
-
-    const writeU16 = (offset: number, value: number) => dv.setUint16(offset, value & 0xFFFF, isLittleEndian);
-    const writeU8 = (offset: number, value: number) => dv.setUint8(offset, value & 0xFF);
-
-    for (let i = 0; i < bundle.resources.length; i++) {
-      const re = bundle.resources[i];
-      let off = tableOffset + i * entrySize;
-
-      // resourceId (u64 -> two u32: low, high)
-      writeU32(off + 0, re.resourceId.low);
-      writeU32(off + 4, re.resourceId.high);
-
-      // importHash (u64)
-      writeU32(off + 8, re.importHash.low);
-      writeU32(off + 12, re.importHash.high);
-
-      // uncompressedSizeAndAlignment [3]
-      writeU32(off + 16, re.uncompressedSizeAndAlignment[0]);
-      writeU32(off + 20, re.uncompressedSizeAndAlignment[1]);
-      writeU32(off + 24, re.uncompressedSizeAndAlignment[2]);
-
-      // sizeAndAlignmentOnDisk [3]
-      writeU32(off + 28, re.sizeAndAlignmentOnDisk[0]);
-      writeU32(off + 32, re.sizeAndAlignmentOnDisk[1]);
-      writeU32(off + 36, re.sizeAndAlignmentOnDisk[2]);
-
-      // diskOffsets [3]
-      writeU32(off + 40, re.diskOffsets[0]);
-      writeU32(off + 44, re.diskOffsets[1]);
-      writeU32(off + 48, re.diskOffsets[2]);
-
-      // importOffset
-      writeU32(off + 52, re.importOffset);
-
-      // resourceTypeId
-      writeU32(off + 56, re.resourceTypeId);
-
-      // importCount (u16)
-      writeU16(off + 60, re.importCount);
-
-      // flags (u8)
-      writeU8(off + 62, re.flags);
-
-      // streamIndex (u8)
-      writeU8(off + 63, re.streamIndex);
-
-    }
-
-    reportProgress(progressCallback, 'write', 0.7, 'Resource table written');
-    console.log(outBytes.length);
-
-
-
-    // ----------------------------------------------------------------------
-    // Write debug data if requested and space exists at header.debugDataOffset
-    // ----------------------------------------------------------------------
-    if (includeDebug && typeof bundle.debugData === 'string') {
-      const enc = new TextEncoder();
-      const bytes = enc.encode(bundle.debugData);
-      const start = bundle.header.debugDataOffset >>> 0;
-
-      // Safeguard: only write within buffer bounds
-      const maxWritable = outBytes.length - start;
-      const toWrite = Math.min(bytes.length, Math.max(0, maxWritable - 1)); // keep room for NUL
-      if (toWrite > 0 && start < outBytes.length) {
-        outBytes.set(bytes.subarray(0, toWrite), start);
-        outBytes[start + toWrite] = 0; // NUL terminate
-      }
-    }
-
-    reportProgress(progressCallback, 'write', 0.9, 'Debug data written');
-
-    // TO-DO: This is based on the assumption that vehicle list is the first resource data offset
-    const vehicleListDataOffset = bundle.header.resourceDataOffsets[0];
-
-    // ----------------------------------------------------------------------
-    // Generic resource override writing (by type id)
-    // ----------------------------------------------------------------------
-    const little = bundle.header.platform !== PLATFORMS.PS3;
-
-    type Encoder = (value: unknown) => Uint8Array;
-    const encoders: Record<number, Encoder> = {
-      [RESOURCE_TYPE_IDS.VEHICLE_LIST]: (value: unknown) => {
-        const v = value as { vehicles: ParsedVehicleList['vehicles']; header?: ParsedVehicleList['header'] };
-        return writeVehicleListData({
-          vehicles: v.vehicles,
-          header: v.header ?? {
-            numVehicles: v.vehicles.length,
-            startOffset: 16,
-            unknown1: 0,
-            unknown2: 0
-          }
-        }, little);
-      },
-      [RESOURCE_TYPE_IDS.TRIGGER_DATA]: (value: unknown) => {
-        return writeTriggerDataData(value as ParsedTriggerData, little);
-      }
-    };
-
-    // Normalize overrides into a single map keyed by resource type id
-    const overrideMap: Record<number, Uint8Array | unknown> = { };
-    if (options.overrides?.vehicleList) {
-      overrideMap[RESOURCE_TYPE_IDS.VEHICLE_LIST] = options.overrides.vehicleList;
-    }
-    if (options.overrides?.triggerData) {
-      overrideMap[RESOURCE_TYPE_IDS.TRIGGER_DATA] = options.overrides.triggerData;
-    }
-    if (options.overrides?.resources) {
-      Object.assign(overrideMap, options.overrides.resources);
-    }
-
-    const typeIds = Object.keys(overrideMap).map(k => Number(k)).filter(k => Number.isFinite(k));
-
-    for (const typeId of typeIds) {
-      const resource = bundle.resources.find(r => r.resourceTypeId === typeId);
-      if (!resource) continue;
-
-      // Compute absolute write span from header resourceDataOffsets + relative diskOffsets
-      let start = 0;
-      let maxSize = 0;
-      let blockIndex = -1;
-      for (let i = 0; i < 3; i++) {
-        const size = extractResourceSize(resource.sizeAndAlignmentOnDisk[i]);
-        if (size > 0) {
-          const base = bundle.header.resourceDataOffsets[i] >>> 0;
-          const rel = resource.diskOffsets[i] >>> 0;
-          start = (base + rel) >>> 0;
-          maxSize = size >>> 0;
-          blockIndex = i;
-          break;
+  // Normalize overrides into a single map keyed by resource type id
+  type Encoder = (value: unknown) => Uint8Array;
+  const little = isLittleEndian;
+  const encoders: Record<number, Encoder> = {
+    [RESOURCE_TYPE_IDS.VEHICLE_LIST]: (value: unknown) => {
+      const v = value as { vehicles: ParsedVehicleList['vehicles']; header?: ParsedVehicleList['header'] };
+      return writeVehicleListData({
+        vehicles: v.vehicles,
+        header: v.header ?? {
+          numVehicles: v.vehicles.length,
+          startOffset: 16,
+          unknown1: 0,
+          unknown2: 0
         }
-      }
-      if (blockIndex < 0 || maxSize <= 0) continue;
-      if (start + maxSize > outBytes.length) {
-        throw new BundleError(`Resource write out of bounds for type ${typeId}`, 'WRITE_ERROR', { start, maxSize, bufferSize: outBytes.length });
-      }
+      }, little);
+    },
+    [RESOURCE_TYPE_IDS.TRIGGER_DATA]: (value: unknown) => {
+      return writeTriggerDataData(value as ParsedTriggerData, little);
+    }
+  };
 
-      const rawOriginal = new Uint8Array(originalBuffer, start, maxSize);
-      const wasCompressed = isCompressed(rawOriginal);
+  const overrideMap: Record<number, Uint8Array | unknown> = { };
+  if (options.overrides?.vehicleList) {
+    overrideMap[RESOURCE_TYPE_IDS.VEHICLE_LIST] = options.overrides.vehicleList;
+  }
+  if (options.overrides?.triggerData) {
+    overrideMap[RESOURCE_TYPE_IDS.TRIGGER_DATA] = options.overrides.triggerData;
+  }
+  if (options.overrides?.resources) {
+    Object.assign(overrideMap, options.overrides.resources);
+  }
 
-      const value = overrideMap[typeId];
-      let newData: Uint8Array;
-      if (value instanceof Uint8Array) {
-        newData = value;
-      } else if (encoders[typeId]) {
-        newData = encoders[typeId](value);
-      } else {
-        console.warn(`No encoder registered for resource type ${typeId}; skipping override.`);
-        continue;
-      }
+  type Segment = {
+    resourceIndex: number;
+    blockIndex: number; // 0..2
+    alignment: number;
+    bytes: Uint8Array; // compressed or raw, exactly what will be written
+    uncompSize?: number; // uncompressed size when we know it (for overrides)
+  };
 
-      const bytesToWrite = wasCompressed ? compressData(newData) : newData;
+  const segmentsByBlock: Segment[][] = [[], [], []];
 
-      if (bytesToWrite.length > maxSize) {
-        throw new BundleError(
-          `Encoded data (${bytesToWrite.length} bytes) exceeds reserved size (${maxSize}) for resource type ${typeId}`,
-          'WRITE_ERROR',
-          { typeId, encoded: bytesToWrite.length, reserved: maxSize }
-        );
-      }
+  // Prepare resource data segments (apply overrides and preserve compression state)
+  for (let ri = 0; ri < bundle.resources.length; ri++) {
+    const resource = bundle.resources[ri];
 
-      outBytes.set(bytesToWrite, start);
-      // Zero-fill remaining space for cleanliness
-      if (bytesToWrite.length < maxSize) {
-        outBytes.fill(0, start + bytesToWrite.length, start + maxSize);
-      }
+    // Determine the primary block (first with non-zero size)
+    let primaryBlock = -1;
+    for (let bi = 0; bi < 3; bi++) {
+      if (extractResourceSize(resource.sizeAndAlignmentOnDisk[bi]) > 0) { primaryBlock = bi; break; }
     }
 
-    reportProgress(progressCallback, 'write', 1.0, 'Bundle write complete');
-    return outBuffer;
+    for (let bi = 0; bi < 3; bi++) {
+      const size = extractResourceSize(resource.sizeAndAlignmentOnDisk[bi]);
+      if (size <= 0) continue;
 
-  } catch (error) {
-    throw new BundleError(
-      `Failed to write bundle: ${error instanceof Error ? error.message : String(error)}`,
-      'WRITE_ERROR',
-      { error }
-    );
+      const base = bundle.header.resourceDataOffsets[bi] >>> 0;
+      const rel = resource.diskOffsets[bi] >>> 0;
+      const start = (base + rel) >>> 0;
+      const rawOriginal = new Uint8Array(originalBuffer, start, size);
+      const wasCompressed = isCompressed(rawOriginal);
+      const align = extractAlignment(resource.sizeAndAlignmentOnDisk[bi]);
+
+      let finalBytes: Uint8Array;
+      let uncompressedSize: number | undefined;
+
+      // Apply override only to primary block for the resource (matches in-place writer behavior)
+      if (bi === primaryBlock && Object.prototype.hasOwnProperty.call(overrideMap, resource.resourceTypeId)) {
+        const overrideValue = overrideMap[resource.resourceTypeId];
+        let newUncompressed: Uint8Array;
+        if (overrideValue instanceof Uint8Array) {
+          newUncompressed = overrideValue;
+        } else if (encoders[resource.resourceTypeId]) {
+          newUncompressed = encoders[resource.resourceTypeId](overrideValue);
+        } else {
+          // No encoder: fallback to original bytes
+          newUncompressed = wasCompressed ? rawOriginal : rawOriginal.slice();
+        }
+        finalBytes = wasCompressed ? compressData(newUncompressed) : newUncompressed;
+        uncompressedSize = newUncompressed.length;
+      } else {
+        // No override for this block: keep original bytes exactly
+        finalBytes = rawOriginal;
+      }
+
+      segmentsByBlock[bi].push({ resourceIndex: ri, blockIndex: bi, alignment: align, bytes: finalBytes, uncompSize: uncompressedSize });
+    }
   }
+
+  reportProgress(progressCallback, 'write', 0.2, 'Prepared resource segments');
+
+  // Layout calculation
+  const HEADER_SIZE = 40; // as per BundleHeader schema
+  const ENTRY_SIZE = 64;  // ResourceEntry write size
+
+  const resourceCount = bundle.resources.length;
+  const headerOffset = 0;
+  const tableOffset = ((HEADER_SIZE + 15) >>> 4) << 4; // align 16
+  let cursor = tableOffset + resourceCount * ENTRY_SIZE;
+  cursor = ((cursor + 15) >>> 4) << 4; // align 16 before first data block
+
+  const resourceDataOffsets: [number, number, number] = [0, 0, 0];
+  const newDiskOffsets: number[][] = bundle.resources.map(() => [0, 0, 0]);
+  const newSizeAndAlignOnDisk: number[][] = bundle.resources.map((r) => r.sizeAndAlignmentOnDisk.slice(0, 3) as [number, number, number]);
+  const newUncompSizeAndAlign: number[][] = bundle.resources.map((r) => r.uncompressedSizeAndAlignment.slice(0, 3) as [number, number, number]);
+
+  // We will assemble writes after we know total size
+  type WritePlan = { offset: number; bytes: Uint8Array };
+  const writePlans: WritePlan[] = [];
+
+  // Pack each block sequentially
+  for (let bi = 0; bi < 3; bi++) {
+    const blockSegments = segmentsByBlock[bi];
+    if (blockSegments.length === 0) { resourceDataOffsets[bi] = 0; continue; }
+
+    // Set base for this memory block
+    resourceDataOffsets[bi] = cursor >>> 0;
+
+    for (const seg of blockSegments) {
+      // Align cursor for this segment
+      const mask = seg.alignment - 1;
+      cursor = (cursor + mask) & ~mask;
+
+      const absolute = cursor >>> 0;
+      const relative = (absolute - resourceDataOffsets[bi]) >>> 0;
+
+      newDiskOffsets[seg.resourceIndex][bi] = relative;
+      newSizeAndAlignOnDisk[seg.resourceIndex][bi] = packSizeAndAlignment(seg.bytes.length >>> 0, seg.alignment);
+      if (seg.uncompSize != null) {
+        newUncompSizeAndAlign[seg.resourceIndex][bi] = packSizeAndAlignment(seg.uncompSize >>> 0, seg.alignment);
+      }
+
+      writePlans.push({ offset: absolute, bytes: seg.bytes });
+      cursor += seg.bytes.length;
+    }
+
+    // Add minimal alignment between blocks
+    cursor = ((cursor + 15) >>> 4) << 4;
+  }
+
+  reportProgress(progressCallback, 'write', 0.5, 'Packed resource data');
+
+  // Pack import tables (copy as-is)
+  const newImportOffsets: number[] = bundle.resources.map(() => 0);
+  const importWritePlans: WritePlan[] = [];
+
+  // Align before import region
+  cursor = ((cursor + 15) >>> 4) << 4;
+  for (let ri = 0; ri < bundle.resources.length; ri++) {
+    const resource = bundle.resources[ri];
+    if (resource.importCount > 0) {
+      const bytesLen = resource.importCount * 16; // ImportEntrySchema size
+      const src = new Uint8Array(originalBuffer, resource.importOffset >>> 0, bytesLen);
+      // align 16 for each table
+      cursor = ((cursor + 15) >>> 4) << 4;
+      newImportOffsets[ri] = cursor >>> 0;
+      importWritePlans.push({ offset: cursor >>> 0, bytes: src });
+      cursor += bytesLen;
+    }
+  }
+
+  reportProgress(progressCallback, 'write', 0.65, 'Copied import tables');
+
+  // Optional debug data
+  let debugDataOffset = 0;
+  if (options.includeDebugData !== false && typeof bundle.debugData === 'string' && bundle.debugData.length > 0) {
+    const enc = new TextEncoder();
+    const bytes = enc.encode(bundle.debugData);
+    // Align to 4 for text
+    cursor = (cursor + 3) & ~3;
+    debugDataOffset = cursor >>> 0;
+    // Include NUL terminator
+    writePlans.push({ offset: debugDataOffset, bytes });
+    // NUL will be written manually later
+    cursor += bytes.length + 1;
+  }
+
+  // Allocate final buffer
+  const totalSize = cursor >>> 0;
+  const outBytes = new Uint8Array(totalSize);
+  const dv = new DataView(outBytes.buffer);
+
+  // Write header
+  const writeU32 = (off: number, val: number) => dv.setUint32(off, val >>> 0, isLittleEndian);
+  outBytes.set(new TextEncoder().encode('bnd2'), headerOffset);
+  writeU32(headerOffset + 4, 2); // version
+  writeU32(headerOffset + 8, bundle.header.platform);
+  writeU32(headerOffset + 12, debugDataOffset);
+  writeU32(headerOffset + 16, resourceCount);
+  writeU32(headerOffset + 20, tableOffset);
+  writeU32(headerOffset + 24, resourceDataOffsets[0] || 0);
+  writeU32(headerOffset + 28, resourceDataOffsets[1] || 0);
+  writeU32(headerOffset + 32, resourceDataOffsets[2] || 0);
+  // flags: preserve HAS_DEBUG_DATA if applicable, clear otherwise; keep other flags
+  let flags = bundle.header.flags >>> 0;
+  if (debugDataOffset > 0) {
+    flags |= BUNDLE_FLAGS.HAS_DEBUG_DATA;
+  } else {
+    flags &= ~BUNDLE_FLAGS.HAS_DEBUG_DATA;
+  }
+  writeU32(headerOffset + 36, flags);
+
+  // Write resource entry table with updated offsets/sizes/imports
+  const writeU16 = (off: number, val: number) => dv.setUint16(off, val & 0xFFFF, isLittleEndian);
+  const writeU8  = (off: number, val: number) => dv.setUint8(off, val & 0xFF);
+  for (let i = 0; i < resourceCount; i++) {
+    const re = bundle.resources[i];
+    const off = tableOffset + i * ENTRY_SIZE;
+
+    // resourceId (u64 -> two u32: low, high)
+    writeU32(off + 0, re.resourceId.low);
+    writeU32(off + 4, re.resourceId.high);
+    // importHash (u64)
+    writeU32(off + 8, re.importHash.low);
+    writeU32(off + 12, re.importHash.high);
+
+    // uncompressedSizeAndAlignment [3]
+    writeU32(off + 16, newUncompSizeAndAlign[i][0]);
+    writeU32(off + 20, newUncompSizeAndAlign[i][1]);
+    writeU32(off + 24, newUncompSizeAndAlign[i][2]);
+
+    // sizeAndAlignmentOnDisk [3]
+    writeU32(off + 28, newSizeAndAlignOnDisk[i][0]);
+    writeU32(off + 32, newSizeAndAlignOnDisk[i][1]);
+    writeU32(off + 36, newSizeAndAlignOnDisk[i][2]);
+
+    // diskOffsets [3]
+    writeU32(off + 40, newDiskOffsets[i][0]);
+    writeU32(off + 44, newDiskOffsets[i][1]);
+    writeU32(off + 48, newDiskOffsets[i][2]);
+
+    // importOffset
+    writeU32(off + 52, newImportOffsets[i] || 0);
+
+    // resourceTypeId
+    writeU32(off + 56, re.resourceTypeId);
+
+    // importCount (u16)
+    writeU16(off + 60, re.importCount);
+    // flags (u8)
+    writeU8(off + 62, re.flags);
+    // streamIndex (u8)
+    writeU8(off + 63, re.streamIndex);
+  }
+
+  reportProgress(progressCallback, 'write', 0.85, 'Wrote header and resource table');
+
+  // Write resource bytes
+  for (const plan of writePlans) {
+    outBytes.set(plan.bytes, plan.offset);
+  }
+  // NUL terminate debug data if present
+  if (debugDataOffset > 0) {
+    outBytes[debugDataOffset + (new TextEncoder().encode(bundle.debugData as string)).length] = 0;
+  }
+  // Write import tables
+  for (const plan of importWritePlans) {
+    outBytes.set(plan.bytes, plan.offset);
+  }
+
+  reportProgress(progressCallback, 'write', 1.0, 'Fresh bundle write complete');
+  return outBytes.buffer;
 }
 
 // ============================================================================

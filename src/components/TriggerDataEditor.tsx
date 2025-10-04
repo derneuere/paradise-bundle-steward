@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useLayoutEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,7 +25,308 @@ function numberField<T extends object>(obj: T, path: (keyof any)[], value: numbe
   return next as T;
 }
 
+// Hoisted component to avoid remounts on parent re-render
+const LandmarksListComp: React.FC<{
+  data: ParsedTriggerData;
+  onChange: (next: ParsedTriggerData) => void;
+  duplicateRegionIndexSet: Set<number>;
+  ensureUniqueRegionIndex: (value: number, exclude: { kind: 'landmark'|'generic'|'blackspot'|'vfx'; index: number }) => number;
+  scrollPosRef: React.MutableRefObject<{ landmarks: number; generic: number; blackspots: number; vfx: number }>;
+}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex, scrollPosRef }) => {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: data.landmarks.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 96,
+    overscan: 12,
+    getItemKey: (index) => index,
+  });
+  const items = rowVirtualizer.getVirtualItems();
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (el) el.scrollTop = scrollPosRef.current.landmarks;
+  }, [items.length, data.landmarks, scrollPosRef]);
+  return (
+    <div ref={parentRef} className="h-[60vh] overflow-auto pr-2" onScroll={e => { scrollPosRef.current.landmarks = e.currentTarget.scrollTop; }}>
+      {data.landmarks.length === 0 ? (
+        <div className="text-sm text-muted-foreground p-4">No landmarks</div>
+      ) : null}
+      <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+        {items.map(vi => {
+          const i = vi.index;
+          const lm = data.landmarks[i];
+          return (
+            <div
+              key={vi.key}
+              data-index={i}
+              ref={rowVirtualizer.measureElement}
+              className="absolute left-0 right-0"
+              style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
+            >
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-5 gap-2 items-center bg-background">
+                <div>
+                  <Label>ID</Label>
+                  <Input value={lm.id} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['id'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>Region Index</Label>
+                  <Input
+                    value={lm.regionIndex}
+                    type="number"
+                    className={duplicateRegionIndexSet.has(lm.regionIndex|0) ? 'border-red-500' : undefined}
+                    onChange={e => {
+                      const raw = Number.parseInt(e.target.value)||0;
+                      const unique = ensureUniqueRegionIndex(raw, { kind: 'landmark', index: i });
+                      onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['regionIndex'], unique) : x) });
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label>Design</Label>
+                  <Input value={lm.designIndex} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['designIndex'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>District</Label>
+                  <Input value={lm.district} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['district'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>Flags</Label>
+                  <Input value={lm.flags} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['flags'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const GenericRegionsListComp: React.FC<{
+  data: ParsedTriggerData;
+  onChange: (next: ParsedTriggerData) => void;
+  duplicateRegionIndexSet: Set<number>;
+  ensureUniqueRegionIndex: (value: number, exclude: { kind: 'landmark'|'generic'|'blackspot'|'vfx'; index: number }) => number;
+  scrollPosRef: React.MutableRefObject<{ landmarks: number; generic: number; blackspots: number; vfx: number }>;
+}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex, scrollPosRef }) => {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: data.genericRegions.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 110,
+    overscan: 12,
+    getItemKey: (index) => index,
+  });
+  const items = rowVirtualizer.getVirtualItems();
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (el) el.scrollTop = scrollPosRef.current.generic;
+  }, [items.length, data.genericRegions, scrollPosRef]);
+  return (
+    <div ref={parentRef} className="h-[60vh] overflow-auto pr-2" onScroll={e => { scrollPosRef.current.generic = e.currentTarget.scrollTop; }}>
+      {data.genericRegions.length === 0 ? (
+        <div className="text-sm text-muted-foreground p-4">No generic regions</div>
+      ) : null}
+      <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+        {items.map(vi => {
+          const i = vi.index;
+          const gr = data.genericRegions[i];
+          return (
+            <div
+              key={vi.key}
+              data-index={i}
+              ref={rowVirtualizer.measureElement}
+              className="absolute left-0 right-0"
+              style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
+            >
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-center bg-background">
+                <div>
+                  <Label>ID</Label>
+                  <Input value={gr.id} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['id'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>Region Index</Label>
+                  <Input
+                    value={gr.regionIndex}
+                    type="number"
+                    className={duplicateRegionIndexSet.has(gr.regionIndex|0) ? 'border-red-500' : undefined}
+                    onChange={e => {
+                      const raw = Number.parseInt(e.target.value)||0;
+                      const unique = ensureUniqueRegionIndex(raw, { kind: 'generic', index: i });
+                      onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['regionIndex'], unique) : x) });
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label>Group</Label>
+                  <Input value={gr.groupId} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['groupId'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>Type</Label>
+                  <Input value={gr.genericType} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['genericType'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>Cam1/Cam2</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={gr.cameraCut1} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['cameraCut1'], parseInt(e.target.value)||0) : x) })} />
+                    <Input value={gr.cameraCut2} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['cameraCut2'], parseInt(e.target.value)||0) : x) })} />
+                  </div>
+                </div>
+                <div>
+                  <Label>One Way</Label>
+                  <Input value={gr.isOneWay} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['isOneWay'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const BlackspotsListComp: React.FC<{
+  data: ParsedTriggerData;
+  onChange: (next: ParsedTriggerData) => void;
+  duplicateRegionIndexSet: Set<number>;
+  ensureUniqueRegionIndex: (value: number, exclude: { kind: 'landmark'|'generic'|'blackspot'|'vfx'; index: number }) => number;
+  scrollPosRef: React.MutableRefObject<{ landmarks: number; generic: number; blackspots: number; vfx: number }>;
+}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex, scrollPosRef }) => {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: data.blackspots.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 96,
+    overscan: 12,
+    getItemKey: (index) => index,
+  });
+  const items = rowVirtualizer.getVirtualItems();
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (el) el.scrollTop = scrollPosRef.current.blackspots;
+  }, [items.length, data.blackspots, scrollPosRef]);
+  return (
+    <div ref={parentRef} className="h-[60vh] overflow-auto pr-2" onScroll={e => { scrollPosRef.current.blackspots = e.currentTarget.scrollTop; }}>
+      {data.blackspots.length === 0 ? (
+        <div className="text-sm text-muted-foreground p-4">No blackspots</div>
+      ) : null}
+      <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+        {items.map(vi => {
+          const i = vi.index;
+          const bs = data.blackspots[i];
+          return (
+            <div
+              key={vi.key}
+              data-index={i}
+              ref={rowVirtualizer.measureElement}
+              className="absolute left-0 right-0"
+              style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
+            >
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-5 gap-2 items-center bg-background">
+                <div>
+                  <Label>ID</Label>
+                  <Input value={bs.id} type="number" onChange={e => onChange({ ...data, blackspots: data.blackspots.map((x, j) => j===i ? numberField(bs, ['id'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>Region Index</Label>
+                  <Input
+                    value={bs.regionIndex}
+                    type="number"
+                    className={duplicateRegionIndexSet.has(bs.regionIndex|0) ? 'border-red-500' : undefined}
+                    onChange={e => {
+                      const raw = Number.parseInt(e.target.value)||0;
+                      const unique = ensureUniqueRegionIndex(raw, { kind: 'blackspot', index: i });
+                      onChange({ ...data, blackspots: data.blackspots.map((x, j) => j===i ? numberField(bs, ['regionIndex'], unique) : x) });
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label>Score Type</Label>
+                  <Input value={bs.scoreType} type="number" onChange={e => onChange({ ...data, blackspots: data.blackspots.map((x, j) => j===i ? numberField(bs, ['scoreType'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>Score Amount</Label>
+                  <Input value={bs.scoreAmount} type="number" onChange={e => onChange({ ...data, blackspots: data.blackspots.map((x, j) => j===i ? numberField(bs, ['scoreAmount'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const VfxListComp: React.FC<{
+  data: ParsedTriggerData;
+  onChange: (next: ParsedTriggerData) => void;
+  duplicateRegionIndexSet: Set<number>;
+  ensureUniqueRegionIndex: (value: number, exclude: { kind: 'landmark'|'generic'|'blackspot'|'vfx'; index: number }) => number;
+  scrollPosRef: React.MutableRefObject<{ landmarks: number; generic: number; blackspots: number; vfx: number }>;
+}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex, scrollPosRef }) => {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: data.vfxBoxRegions.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 80,
+    overscan: 12,
+    getItemKey: (index) => index,
+  });
+  const items = rowVirtualizer.getVirtualItems();
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (el) el.scrollTop = scrollPosRef.current.vfx;
+  }, [items.length, data.vfxBoxRegions, scrollPosRef]);
+  return (
+    <div ref={parentRef} className="h-[60vh] overflow-auto pr-2" onScroll={e => { scrollPosRef.current.vfx = e.currentTarget.scrollTop; }}>
+      {data.vfxBoxRegions.length === 0 ? (
+        <div className="text-sm text-muted-foreground p-4">No VFX regions</div>
+      ) : null}
+      <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+        {items.map(vi => {
+          const i = vi.index;
+          const v = data.vfxBoxRegions[i];
+          return (
+            <div
+              key={vi.key}
+              data-index={i}
+              ref={rowVirtualizer.measureElement}
+              className="absolute left-0 right-0"
+              style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
+            >
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 items-center bg-background">
+                <div>
+                  <Label>ID</Label>
+                  <Input value={v.id} type="number" onChange={e => onChange({ ...data, vfxBoxRegions: data.vfxBoxRegions.map((x, j) => j===i ? numberField(v, ['id'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div>
+                  <Label>Region Index</Label>
+                  <Input
+                    value={v.regionIndex}
+                    type="number"
+                    className={duplicateRegionIndexSet.has(v.regionIndex|0) ? 'border-red-500' : undefined}
+                    onChange={e => {
+                      const raw = Number.parseInt(e.target.value)||0;
+                      const unique = ensureUniqueRegionIndex(raw, { kind: 'vfx', index: i });
+                      onChange({ ...data, vfxBoxRegions: data.vfxBoxRegions.map((x, j) => j===i ? numberField(v, ['regionIndex'], unique) : x) });
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onChange }) => {
+  // Preserve active tab and list scroll positions across re-renders
+  const [activeTab, setActiveTab] = useState<'header'|'landmarks'|'generic'|'blackspots'|'vfx'|'stunts'|'killzones'|'roaming'|'spawns'>('landmarks');
+  const scrollPosRef = useRef<{ landmarks: number; generic: number; blackspots: number; vfx: number }>(
+    { landmarks: 0, generic: 0, blackspots: 0, vfx: 0 }
+  );
   // =============================
   // regionIndex uniqueness helpers
   // =============================
@@ -188,71 +489,6 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
     }
     return out;
   }
-
-  const LandmarksList: React.FC = () => {
-    const parentRef = useRef<HTMLDivElement>(null);
-    const rowVirtualizer = useVirtualizer({
-      count: data.landmarks.length,
-      getScrollElement: () => parentRef.current,
-      estimateSize: () => 96,
-      overscan: 12,
-    });
-    const items = rowVirtualizer.getVirtualItems();
-    return (
-      <div ref={parentRef} className="h-[60vh] overflow-auto pr-2">
-        {data.landmarks.length === 0 ? (
-          <div className="text-sm text-muted-foreground p-4">No landmarks</div>
-        ) : null}
-        <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
-          {items.map(vi => {
-            const i = vi.index;
-            const lm = data.landmarks[i];
-            return (
-              <div
-                key={vi.key}
-                data-index={i}
-                ref={rowVirtualizer.measureElement}
-                className="absolute left-0 right-0"
-                style={{ transform: `translateY(${vi.start}px)` }}
-              >
-                <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-5 gap-2 items-center bg-background">
-                  <div>
-                    <Label>ID</Label>
-                    <Input value={lm.id} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['id'], parseInt(e.target.value)||0) : x) })} />
-                  </div>
-                  <div>
-                    <Label>Region Index</Label>
-                    <Input
-                      value={lm.regionIndex}
-                      type="number"
-                      className={duplicateRegionIndexSet.has(lm.regionIndex|0) ? 'border-red-500' : undefined}
-                      onChange={e => {
-                        const raw = Number.parseInt(e.target.value)||0;
-                        const unique = ensureUniqueRegionIndex(raw, { kind: 'landmark', index: i });
-                        onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['regionIndex'], unique) : x) });
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <Label>Design</Label>
-                    <Input value={lm.designIndex} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['designIndex'], parseInt(e.target.value)||0) : x) })} />
-                  </div>
-                  <div>
-                    <Label>District</Label>
-                    <Input value={lm.district} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['district'], parseInt(e.target.value)||0) : x) })} />
-                  </div>
-                  <div>
-                    <Label>Flags</Label>
-                    <Input value={lm.flags} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['flags'], parseInt(e.target.value)||0) : x) })} />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
 
   const HeaderEditor: React.FC = () => {
     return (
@@ -420,10 +656,17 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
       getScrollElement: () => parentRef.current,
       estimateSize: () => 110,
       overscan: 12,
+      getItemKey: (index) => {
+        return index;
+      },
     });
     const items = rowVirtualizer.getVirtualItems();
+    useLayoutEffect(() => {
+      const el = parentRef.current;
+      if (el) el.scrollTop = scrollPosRef.current.generic;
+    }, [items.length, data.genericRegions]);
     return (
-      <div ref={parentRef} className="h-[60vh] overflow-auto pr-2">
+      <div ref={parentRef} className="h-[60vh] overflow-auto pr-2" onScroll={e => { scrollPosRef.current.generic = e.currentTarget.scrollTop; }}>
         {data.genericRegions.length === 0 ? (
           <div className="text-sm text-muted-foreground p-4">No generic regions</div>
         ) : null}
@@ -437,7 +680,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 data-index={i}
                 ref={rowVirtualizer.measureElement}
                 className="absolute left-0 right-0"
-                style={{ transform: `translateY(${vi.start}px)` }}
+                style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
               >
                 <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-center bg-background">
                   <div>
@@ -492,10 +735,17 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
       getScrollElement: () => parentRef.current,
       estimateSize: () => 96,
       overscan: 12,
+      getItemKey: (index) => {
+        return index;
+      },
     });
     const items = rowVirtualizer.getVirtualItems();
+    useLayoutEffect(() => {
+      const el = parentRef.current;
+      if (el) el.scrollTop = scrollPosRef.current.blackspots;
+    }, [items.length, data.blackspots]);
     return (
-      <div ref={parentRef} className="h-[60vh] overflow-auto pr-2">
+      <div ref={parentRef} className="h-[60vh] overflow-auto pr-2" onScroll={e => { scrollPosRef.current.blackspots = e.currentTarget.scrollTop; }}>
         {data.blackspots.length === 0 ? (
           <div className="text-sm text-muted-foreground p-4">No blackspots</div>
         ) : null}
@@ -509,7 +759,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 data-index={i}
                 ref={rowVirtualizer.measureElement}
                 className="absolute left-0 right-0"
-                style={{ transform: `translateY(${vi.start}px)` }}
+                style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
               >
                 <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-5 gap-2 items-center bg-background">
                   <div>
@@ -553,10 +803,17 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
       getScrollElement: () => parentRef.current,
       estimateSize: () => 80,
       overscan: 12,
+      getItemKey: (index) => {
+        return index;
+      },
     });
     const items = rowVirtualizer.getVirtualItems();
+    useLayoutEffect(() => {
+      const el = parentRef.current;
+      if (el) el.scrollTop = scrollPosRef.current.vfx;
+    }, [items.length, data.vfxBoxRegions]);
     return (
-      <div ref={parentRef} className="h-[60vh] overflow-auto pr-2">
+      <div ref={parentRef} className="h-[60vh] overflow-auto pr-2" onScroll={e => { scrollPosRef.current.vfx = e.currentTarget.scrollTop; }}>
         {data.vfxBoxRegions.length === 0 ? (
           <div className="text-sm text-muted-foreground p-4">No VFX regions</div>
         ) : null}
@@ -570,7 +827,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 data-index={i}
                 ref={rowVirtualizer.measureElement}
                 className="absolute left-0 right-0"
-                style={{ transform: `translateY(${vi.start}px)` }}
+                style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
               >
                 <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 items-center bg-background">
                   <div>
@@ -620,7 +877,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="landmarks" className="w-full">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="w-full">
         <TabsList className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 w-full gap-1">
           <TabsTrigger value="header">Header</TabsTrigger>
           <TabsTrigger value="landmarks">Landmarks</TabsTrigger>
@@ -651,7 +908,13 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
               <Button size="sm" onClick={addLandmark}>Add</Button>
             </CardHeader>
             <CardContent>
-              <LandmarksList />
+              <LandmarksListComp
+                data={data}
+                onChange={onChange}
+                duplicateRegionIndexSet={duplicateRegionIndexSet}
+                ensureUniqueRegionIndex={ensureUniqueRegionIndex}
+                scrollPosRef={scrollPosRef}
+              />
             </CardContent>
           </Card>
         </TabsContent>
@@ -663,7 +926,13 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
               <Button size="sm" onClick={addGeneric}>Add</Button>
             </CardHeader>
             <CardContent>
-              <GenericRegionsList />
+              <GenericRegionsListComp
+                data={data}
+                onChange={onChange}
+                duplicateRegionIndexSet={duplicateRegionIndexSet}
+                ensureUniqueRegionIndex={ensureUniqueRegionIndex}
+                scrollPosRef={scrollPosRef}
+              />
             </CardContent>
           </Card>
         </TabsContent>
@@ -675,7 +944,13 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
               <Button size="sm" onClick={addBlackspot}>Add</Button>
             </CardHeader>
             <CardContent>
-              <BlackspotsList />
+              <BlackspotsListComp
+                data={data}
+                onChange={onChange}
+                duplicateRegionIndexSet={duplicateRegionIndexSet}
+                ensureUniqueRegionIndex={ensureUniqueRegionIndex}
+                scrollPosRef={scrollPosRef}
+              />
             </CardContent>
           </Card>
         </TabsContent>
@@ -687,7 +962,13 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
               <Button size="sm" onClick={addVfx}>Add</Button>
             </CardHeader>
             <CardContent>
-              <VfxList />
+              <VfxListComp
+                data={data}
+                onChange={onChange}
+                duplicateRegionIndexSet={duplicateRegionIndexSet}
+                ensureUniqueRegionIndex={ensureUniqueRegionIndex}
+                scrollPosRef={scrollPosRef}
+              />
             </CardContent>
           </Card>
         </TabsContent>
