@@ -3,6 +3,7 @@
 
 import type { Parsed } from 'typed-binary';
 import type { ParsedVehicleList, VehicleListEntry } from './vehicleList';
+import type { ParsedTriggerData } from './triggerData';
 
 // ============================================================================
 // Platform and Bundle Constants
@@ -120,6 +121,13 @@ export type WriteOptions = {
       vehicles: VehicleListEntry[];
       header?: ParsedVehicleList['header'];
     };
+    triggerData?: ParsedTriggerData;
+    /**
+     * Generic resource overrides keyed by resource type id. Values can be either
+     * raw encoded bytes to write directly, or a plain object that will be passed
+     * to a registered encoder for that type if one exists.
+     */
+    resources?: Record<number, Uint8Array | unknown>;
   };
 }
 

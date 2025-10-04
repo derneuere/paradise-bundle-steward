@@ -26,7 +26,8 @@ import { writeVehicleListData } from '../vehicleList';
 import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors';
 import { RESOURCE_TYPES } from '../../resourceTypes';
 import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTakeDictionary';
-import { type ParsedTriggerData, parseTriggerData } from '../triggerData';
+import { type ParsedTriggerData, parseTriggerData, writeTriggerDataData } from '../triggerData';
+import { extractResourceSize, isCompressed, compressData } from '../resourceManager';
 
 // ============================================================================
 // Main Bundle Writer
@@ -180,29 +181,95 @@ export function writeBundle(
     const vehicleListDataOffset = bundle.header.resourceDataOffsets[0];
 
     // ----------------------------------------------------------------------
-    // If vehicle list overrides provided, write them in-place to resource data
+    // Generic resource override writing (by type id)
     // ----------------------------------------------------------------------
-    if (options.overrides?.vehicleList) {
-      const vehicleResource = bundle.resources.find(r => r.resourceTypeId === RESOURCE_TYPE_IDS.VEHICLE_LIST);
-      if (vehicleResource) {
-        console.log('Writing vehicle list overrides');
-        const little = bundle.header.platform !== PLATFORMS.PS3;
-        const vehicleBytes = writeVehicleListData({
-          vehicles: options.overrides.vehicleList.vehicles,
-          header: options.overrides.vehicleList.header ?? {
-            numVehicles: options.overrides.vehicleList.vehicles.length,
+    const little = bundle.header.platform !== PLATFORMS.PS3;
+
+    type Encoder = (value: unknown) => Uint8Array;
+    const encoders: Record<number, Encoder> = {
+      [RESOURCE_TYPE_IDS.VEHICLE_LIST]: (value: unknown) => {
+        const v = value as { vehicles: ParsedVehicleList['vehicles']; header?: ParsedVehicleList['header'] };
+        return writeVehicleListData({
+          vehicles: v.vehicles,
+          header: v.header ?? {
+            numVehicles: v.vehicles.length,
             startOffset: 16,
             unknown1: 0,
             unknown2: 0
           }
         }, little);
+      },
+      [RESOURCE_TYPE_IDS.TRIGGER_DATA]: (value: unknown) => {
+        return writeTriggerDataData(value as ParsedTriggerData, little);
+      }
+    };
 
-        console.log("original compressed size", 15860, "new compressed size", vehicleBytes.length);
-        console.log(`Writing vehicle list to offset ${vehicleListDataOffset} with size ${vehicleBytes.length}`);
-        console.log(outBytes.length);
-        // To-Do: Assumption that the list did not change size, so we can just write to the offset
-        outBytes.set(vehicleBytes, vehicleListDataOffset);
-      
+    // Normalize overrides into a single map keyed by resource type id
+    const overrideMap: Record<number, Uint8Array | unknown> = { };
+    if (options.overrides?.vehicleList) {
+      overrideMap[RESOURCE_TYPE_IDS.VEHICLE_LIST] = options.overrides.vehicleList;
+    }
+    if (options.overrides?.triggerData) {
+      overrideMap[RESOURCE_TYPE_IDS.TRIGGER_DATA] = options.overrides.triggerData;
+    }
+    if (options.overrides?.resources) {
+      Object.assign(overrideMap, options.overrides.resources);
+    }
+
+    const typeIds = Object.keys(overrideMap).map(k => Number(k)).filter(k => Number.isFinite(k));
+
+    for (const typeId of typeIds) {
+      const resource = bundle.resources.find(r => r.resourceTypeId === typeId);
+      if (!resource) continue;
+
+      // Compute absolute write span from header resourceDataOffsets + relative diskOffsets
+      let start = 0;
+      let maxSize = 0;
+      let blockIndex = -1;
+      for (let i = 0; i < 3; i++) {
+        const size = extractResourceSize(resource.sizeAndAlignmentOnDisk[i]);
+        if (size > 0) {
+          const base = bundle.header.resourceDataOffsets[i] >>> 0;
+          const rel = resource.diskOffsets[i] >>> 0;
+          start = (base + rel) >>> 0;
+          maxSize = size >>> 0;
+          blockIndex = i;
+          break;
+        }
+      }
+      if (blockIndex < 0 || maxSize <= 0) continue;
+      if (start + maxSize > outBytes.length) {
+        throw new BundleError(`Resource write out of bounds for type ${typeId}`, 'WRITE_ERROR', { start, maxSize, bufferSize: outBytes.length });
+      }
+
+      const rawOriginal = new Uint8Array(originalBuffer, start, maxSize);
+      const wasCompressed = isCompressed(rawOriginal);
+
+      const value = overrideMap[typeId];
+      let newData: Uint8Array;
+      if (value instanceof Uint8Array) {
+        newData = value;
+      } else if (encoders[typeId]) {
+        newData = encoders[typeId](value);
+      } else {
+        console.warn(`No encoder registered for resource type ${typeId}; skipping override.`);
+        continue;
+      }
+
+      const bytesToWrite = wasCompressed ? compressData(newData) : newData;
+
+      if (bytesToWrite.length > maxSize) {
+        throw new BundleError(
+          `Encoded data (${bytesToWrite.length} bytes) exceeds reserved size (${maxSize}) for resource type ${typeId}`,
+          'WRITE_ERROR',
+          { typeId, encoded: bytesToWrite.length, reserved: maxSize }
+        );
+      }
+
+      outBytes.set(bytesToWrite, start);
+      // Zero-fill remaining space for cleanliness
+      if (bytesToWrite.length < maxSize) {
+        outBytes.fill(0, start + bytesToWrite.length, start + maxSize);
       }
     }
 

@@ -145,14 +145,15 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
         originalArrayBuffer,
         {
           includeDebugData: true,
-          overrides: parsedVehicleList
-            ? {
-                vehicleList: {
-                  vehicles: vehicleList,
-                  header: parsedVehicleList.header
-                }
+          overrides: {
+            ...(parsedVehicleList ? {
+              vehicleList: {
+                vehicles: vehicleList,
+                header: parsedVehicleList.header
               }
-            : undefined
+            } : {}),
+            ...(triggerData ? { triggerData } : {})
+          }
         },
       );
 
