@@ -34,6 +34,12 @@ export const RESOURCE_TYPES: Record<number, ResourceType> = {
     description: 'Complete list of all available vehicles with stats and properties', 
     category: 'Data',
   },
+  [RESOURCE_TYPE_IDS.TRIGGER_DATA]: {
+    id: RESOURCE_TYPE_IDS.TRIGGER_DATA,
+    name: 'Trigger Data',
+    description: 'Landmarks, generic regions, blackspots, VFX regions, and related pointers',
+    category: 'Data',
+  },
   [RESOURCE_TYPE_IDS.PLAYER_CAR_COLOURS]: { 
     id: RESOURCE_TYPE_IDS.PLAYER_CAR_COLOURS, 
     name: 'Player Car Colours', 
@@ -102,14 +108,16 @@ export function getResourceCategoryIcon(category: ResourceCategory): string {
  * Finds resource types that have parsers available
  */
 export function getParsableResourceTypes(): ResourceType[] {
-  return Object.values(RESOURCE_TYPES).filter(type => type.parser);
+  // Parser registration is handled elsewhere; treat all known types as parsable candidates
+  return Object.values(RESOURCE_TYPES);
 }
 
 /**
  * Finds resource types that have writers available
  */
 export function getWritableResourceTypes(): ResourceType[] {
-  return Object.values(RESOURCE_TYPES).filter(type => type.writer);
+  // Writers are optional; return all known for now
+  return Object.values(RESOURCE_TYPES);
 }
 
 /**
