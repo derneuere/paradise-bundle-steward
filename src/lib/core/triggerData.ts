@@ -574,17 +574,19 @@ export function parseTriggerDataData(data: Uint8Array, littleEndian: boolean = t
 // Writing
 // =============================================================================
 
-export function writeTriggerDataData(td: ParsedTriggerData, littleEndian: boolean = true): Uint8Array {
-	// Assign miRegionIndex sequentially to avoid collisions (VFX, Blackspot, Generic, Landmark)
+export function writeTriggerDataData(td: ParsedTriggerData, littleEndian: boolean = true, autoAssignRegionIndexes: boolean = true): Uint8Array {
+	// Optionally assign miRegionIndex sequentially to avoid collisions (VFX, Blackspot, Generic, Landmark)
 	const vfxCount = td.vfxBoxRegions.length;
 	const blackspotCount = td.blackspots.length;
 	const genericCount = td.genericRegions.length;
 	const landmarkCount = td.landmarks.length;
 
-	for (let i = 0; i < vfxCount; i++) td.vfxBoxRegions[i].regionIndex = i;
-	for (let i = 0; i < blackspotCount; i++) td.blackspots[i].regionIndex = vfxCount + i;
-	for (let i = 0; i < genericCount; i++) td.genericRegions[i].regionIndex = vfxCount + blackspotCount + i;
-	for (let i = 0; i < landmarkCount; i++) td.landmarks[i].regionIndex = vfxCount + blackspotCount + genericCount + i;
+	if (autoAssignRegionIndexes) {
+		for (let i = 0; i < vfxCount; i++) td.vfxBoxRegions[i].regionIndex = i;
+		for (let i = 0; i < blackspotCount; i++) td.blackspots[i].regionIndex = vfxCount + i;
+		for (let i = 0; i < genericCount; i++) td.genericRegions[i].regionIndex = vfxCount + blackspotCount + i;
+		for (let i = 0; i < landmarkCount; i++) td.landmarks[i].regionIndex = vfxCount + blackspotCount + genericCount + i;
+	}
 
 	const w = new BinWriter(64 * 1024, littleEndian);
 
@@ -760,9 +762,9 @@ export function writeTriggerDataData(td: ParsedTriggerData, littleEndian: boolea
 // High-level wrapper with progress (optional)
 // =============================================================================
 
-export function writeTriggerData(td: ParsedTriggerData, options: { littleEndian?: boolean } = {}, progress?: ProgressCallback): Uint8Array {
+export function writeTriggerData(td: ParsedTriggerData, options: { littleEndian?: boolean; autoAssignRegionIndexes?: boolean } = {}, progress?: ProgressCallback): Uint8Array {
 	progress?.({ type: 'write', stage: 'write', progress: 0.0, message: 'Serializing TriggerData' });
-	const out = writeTriggerDataData(td, options.littleEndian !== false);
+	const out = writeTriggerDataData(td, options.littleEndian !== false, options.autoAssignRegionIndexes !== false);
 	progress?.({ type: 'write', stage: 'write', progress: 1.0, message: 'Done' });
 	return out;
 }

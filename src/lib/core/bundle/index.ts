@@ -28,6 +28,7 @@ import { RESOURCE_TYPES } from '../../resourceTypes';
 import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTakeDictionary';
 import { type ParsedTriggerData, parseTriggerData, writeTriggerDataData } from '../triggerData';
 import { extractResourceSize, extractAlignment, packSizeAndAlignment, isCompressed, compressData } from '../resourceManager';
+import { getSetting } from '../../settings';
 
 // ============================================================================
 // Main Bundle Writer
@@ -70,7 +71,8 @@ export function writeBundleFresh(
       }, little);
     },
     [RESOURCE_TYPE_IDS.TRIGGER_DATA]: (value: unknown) => {
-      return writeTriggerDataData(value as ParsedTriggerData, little);
+      const autoAssign = getSetting('autoAssignRegionIndexes');
+      return writeTriggerDataData(value as ParsedTriggerData, little, autoAssign);
     }
   };
 
