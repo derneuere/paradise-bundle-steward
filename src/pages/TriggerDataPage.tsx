@@ -1,7 +1,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBundle } from '@/context/BundleContext';
-import { TriggerDataEditor } from '@/components/TriggerDataEditor';
+import { TriggerDataEditor } from '@/components/triggerdata/TriggerDataEditor';
 
 const TriggerDataPage = () => {
   const { triggerData, setTriggerData } = useBundle();

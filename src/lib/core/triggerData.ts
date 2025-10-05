@@ -581,11 +581,6 @@ export function writeTriggerDataData(td: ParsedTriggerData, littleEndian: boolea
 	const genericCount = td.genericRegions.length;
 	const landmarkCount = td.landmarks.length;
 
-	for (let i = 0; i < vfxCount; i++) td.vfxBoxRegions[i].regionIndex = i;
-	for (let i = 0; i < blackspotCount; i++) td.blackspots[i].regionIndex = vfxCount + i;
-	for (let i = 0; i < genericCount; i++) td.genericRegions[i].regionIndex = vfxCount + blackspotCount + i;
-	for (let i = 0; i < landmarkCount; i++) td.landmarks[i].regionIndex = vfxCount + blackspotCount + genericCount + i;
-
 	const w = new BinWriter(64 * 1024, littleEndian);
 
 	// Header
