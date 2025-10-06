@@ -35,7 +35,7 @@ A web-based tool for exploring and managing Burnout Paradise bundle files, provi
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ and npm
+- Node.js 20+ and npm
 - Modern web browser with WebGL support
 
 ### Installation
