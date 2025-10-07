@@ -742,12 +742,29 @@ export function writeTriggerDataData(td: ParsedTriggerData, littleEndian: boolea
 		w.align16();
 	}
 
-	// Consolidated TriggerRegion offsets table
+	// Consolidated TriggerRegion offsets table (sorted by regionIndex)
 	cur = w.offset; w.setU32(triggerOffsetPos, cur);
-	for (const off of vfxOffsets) w.writeU32(off);
-	for (const off of blackspotOffsets) w.writeU32(off);
-	for (const off of td.genericRegions.map(gr => genericOffsetsById.get(gr.id) as number)) w.writeU32(off);
-	for (const off of landmarkOffsets) w.writeU32(off);
+	
+	// Collect all regions with their offsets and regionIndex
+	const allRegionOffsets: { regionIndex: number; offset: number }[] = [];
+	for (let i = 0; i < td.vfxBoxRegions.length; i++) {
+		allRegionOffsets.push({ regionIndex: td.vfxBoxRegions[i].regionIndex, offset: vfxOffsets[i] });
+	}
+	for (let i = 0; i < td.blackspots.length; i++) {
+		allRegionOffsets.push({ regionIndex: td.blackspots[i].regionIndex, offset: blackspotOffsets[i] });
+	}
+	for (const gr of td.genericRegions) {
+		allRegionOffsets.push({ regionIndex: gr.regionIndex, offset: genericOffsetsById.get(gr.id) as number });
+	}
+	for (let i = 0; i < td.landmarks.length; i++) {
+		allRegionOffsets.push({ regionIndex: td.landmarks[i].regionIndex, offset: landmarkOffsets[i] });
+	}
+	
+	// Sort by regionIndex and write offsets in order
+	allRegionOffsets.sort((a, b) => a.regionIndex - b.regionIndex);
+	for (const item of allRegionOffsets) {
+		w.writeU32(item.offset);
+	}
 
 	// Size backpatch
 	const end = w.offset;
