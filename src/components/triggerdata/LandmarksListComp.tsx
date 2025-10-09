@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Trash2 } from 'lucide-react';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { numberField } from './utils';
 
@@ -79,8 +80,16 @@ export const LandmarksListComp: React.FC<{
                   <Label>Flags</Label>
                   <Input value={lm.flags} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['flags'], parseInt(e.target.value)||0) : x) })} />
                 </div>
-                <div className="flex items-end">
+                <div className="flex items-end gap-2">
                   <Button variant="secondary" size="sm" onClick={() => onEditBox('landmark', i)}>Edit Box</Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => onChange({ ...data, landmarks: data.landmarks.filter((_, j) => j !== i) })}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </div>
