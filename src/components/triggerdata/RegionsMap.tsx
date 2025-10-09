@@ -1,8 +1,13 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { MapContainer, Polygon, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { ParsedTriggerData, Landmark, GenericRegion, BoxRegion } from '@/lib/core/triggerData';
 import { GenericRegionType, StuntCameraType } from '@/lib/core/triggerData';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Filter } from 'lucide-react';
 
 type PolyData = {
   kind: 'landmark';
@@ -70,6 +75,45 @@ const getCameraTypeName = (type: StuntCameraType): string => {
   return names[type] ?? `Unknown (${type})`;
 };
 
+// All available generic region types
+const ALL_GENERIC_TYPES = [
+  GenericRegionType.E_TYPE_JUNK_YARD,
+  GenericRegionType.E_TYPE_BIKE_SHOP,
+  GenericRegionType.E_TYPE_GAS_STATION,
+  GenericRegionType.E_TYPE_BODY_SHOP,
+  GenericRegionType.E_TYPE_PAINT_SHOP,
+  GenericRegionType.E_TYPE_CAR_PARK,
+  GenericRegionType.E_TYPE_SIGNATURE_TAKEDOWN,
+  GenericRegionType.E_TYPE_KILLZONE,
+  GenericRegionType.E_TYPE_JUMP,
+  GenericRegionType.E_TYPE_SMASH,
+  GenericRegionType.E_TYPE_SIGNATURE_CRASH,
+  GenericRegionType.E_TYPE_SIGNATURE_CRASH_CAMERA,
+  GenericRegionType.E_TYPE_ROAD_LIMIT,
+  GenericRegionType.E_TYPE_OVERDRIVE_BOOST,
+  GenericRegionType.E_TYPE_OVERDRIVE_STRENGTH,
+  GenericRegionType.E_TYPE_OVERDRIVE_SPEED,
+  GenericRegionType.E_TYPE_OVERDRIVE_CONTROL,
+  GenericRegionType.E_TYPE_TIRE_SHOP,
+  GenericRegionType.E_TYPE_TUNING_SHOP,
+  GenericRegionType.E_TYPE_PICTURE_PARADISE,
+  GenericRegionType.E_TYPE_TUNNEL,
+  GenericRegionType.E_TYPE_OVERPASS,
+  GenericRegionType.E_TYPE_BRIDGE,
+  GenericRegionType.E_TYPE_WAREHOUSE,
+  GenericRegionType.E_TYPE_LARGE_OVERHEAD_OBJECT,
+  GenericRegionType.E_TYPE_NARROW_ALLEY,
+  GenericRegionType.E_TYPE_PASS_TUNNEL,
+  GenericRegionType.E_TYPE_PASS_OVERPASS,
+  GenericRegionType.E_TYPE_PASS_BRIDGE,
+  GenericRegionType.E_TYPE_PASS_WAREHOUSE,
+  GenericRegionType.E_TYPE_PASS_LARGEOVERHEADOBJECT,
+  GenericRegionType.E_TYPE_PASS_NARROWALLEY,
+  GenericRegionType.E_TYPE_RAMP,
+  GenericRegionType.E_TYPE_GOLD,
+  GenericRegionType.E_TYPE_ISLAND_ENTITLEMENT,
+];
+
 const FitBounds: React.FC<{ polys: PolyData[] }> = ({ polys }) => {
   const map = useMap();
   
@@ -87,23 +131,29 @@ const FitBounds: React.FC<{ polys: PolyData[] }> = ({ polys }) => {
 };
 
 export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => {
+  // Filter state
+  const [showLandmarks, setShowLandmarks] = useState(true);
+  const [selectedGenericTypes, setSelectedGenericTypes] = useState<Set<GenericRegionType>>(new Set(ALL_GENERIC_TYPES));
+
   const boxes = useMemo(() => {
-    const fromLm = data.landmarks.map(lm => ({
+    const fromLm = showLandmarks ? data.landmarks.map(lm => ({
       kind: 'landmark' as const,
       id: lm.id,
       regionIndex: lm.regionIndex,
       box: lm.box,
       data: lm,
-    }));
-    const fromGen = data.genericRegions.map(gr => ({
-      kind: 'generic' as const,
-      id: gr.id,
-      regionIndex: gr.regionIndex,
-      box: gr.box,
-      data: gr,
-    }));
+    })) : [];
+    const fromGen = data.genericRegions
+      .filter(gr => selectedGenericTypes.has(gr.genericType))
+      .map(gr => ({
+        kind: 'generic' as const,
+        id: gr.id,
+        regionIndex: gr.regionIndex,
+        box: gr.box,
+        data: gr,
+      }));
     return [...fromLm, ...fromGen];
-  }, [data.landmarks, data.genericRegions]);
+  }, [data.landmarks, data.genericRegions, showLandmarks, selectedGenericTypes]);
 
   if (boxes.length === 0) {
     return <div className="text-sm text-muted-foreground p-4">Nothing to display</div>;
@@ -141,8 +191,86 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
     });
   }, [boxes]);
 
+  const toggleGenericType = (type: GenericRegionType) => {
+    setSelectedGenericTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  };
+
+  const selectAllGenericTypes = () => {
+    setSelectedGenericTypes(new Set(ALL_GENERIC_TYPES));
+  };
+
+  const clearAllGenericTypes = () => {
+    setSelectedGenericTypes(new Set());
+  };
+
   return (
-    <div className="h-[60vh]">
+    <div className="space-y-3">
+      {/* Filter Controls */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Checkbox
+          id="show-landmarks"
+          checked={showLandmarks}
+          onCheckedChange={(checked) => setShowLandmarks(!!checked)}
+        />
+        <Label htmlFor="show-landmarks" className="cursor-pointer">
+          Show Landmarks ({data.landmarks.length})
+        </Label>
+
+        <Popover modal={false}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="ml-2">
+              <Filter className="h-4 w-4 mr-2" />
+              Filter Generic Types ({selectedGenericTypes.size}/{ALL_GENERIC_TYPES.length})
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent 
+            className="w-80 max-h-96 overflow-y-auto z-[10000]" 
+            style={{ zIndex: 10000 }}
+            sideOffset={5}
+            align="start"
+          >
+            <div className="space-y-3">
+              <div className="font-semibold text-sm">Filter by Generic Type</div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={selectAllGenericTypes}>
+                  Select All
+                </Button>
+                <Button variant="outline" size="sm" onClick={clearAllGenericTypes}>
+                  Clear All
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {ALL_GENERIC_TYPES.map(type => (
+                  <div key={type} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`type-${type}`}
+                      checked={selectedGenericTypes.has(type)}
+                      onCheckedChange={() => toggleGenericType(type)}
+                    />
+                    <Label
+                      htmlFor={`type-${type}`}
+                      className="text-sm cursor-pointer flex-1"
+                    >
+                      {getGenericRegionTypeName(type)}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {/* Map */}
+      <div className="h-[60vh]">
       <MapContainer 
         {...({ 
           crs: L.CRS.Simple, 
@@ -228,6 +356,7 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
           );
         })}
       </MapContainer>
+      </div>
     </div>
   );
 };
