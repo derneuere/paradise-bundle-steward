@@ -15,6 +15,7 @@ type PolyData = {
   regionIndex: number;
   box: BoxRegion;
   world: Array<[number, number]>;
+  enabled: number;
   data: Landmark;
 } | {
   kind: 'generic';
@@ -22,6 +23,7 @@ type PolyData = {
   regionIndex: number;
   box: BoxRegion;
   world: Array<[number, number]>;
+  enabled: number;
   data: GenericRegion;
 };
 
@@ -134,30 +136,45 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
   // Filter state
   const [showLandmarks, setShowLandmarks] = useState(true);
   const [selectedGenericTypes, setSelectedGenericTypes] = useState<Set<GenericRegionType>>(new Set(ALL_GENERIC_TYPES));
+  const [showEnabled, setShowEnabled] = useState(true);
+  const [showDisabled, setShowDisabled] = useState(true);
 
   const boxes = useMemo(() => {
-    const fromLm = showLandmarks ? data.landmarks.map(lm => ({
-      kind: 'landmark' as const,
-      id: lm.id,
-      regionIndex: lm.regionIndex,
-      box: lm.box,
-      data: lm,
-    })) : [];
+    const fromLm = showLandmarks ? data.landmarks
+      .filter(lm => {
+        const isEnabled = lm.enabled === 1;
+        return (isEnabled && showEnabled) || (!isEnabled && showDisabled);
+      })
+      .map(lm => ({
+        kind: 'landmark' as const,
+        id: lm.id,
+        regionIndex: lm.regionIndex,
+        box: lm.box,
+        enabled: lm.enabled,
+        data: lm,
+      })) : [];
     const fromGen = data.genericRegions
-      .filter(gr => selectedGenericTypes.has(gr.genericType))
+      .filter(gr => {
+        const isEnabled = gr.enabled === 1;
+        const matchesType = selectedGenericTypes.has(gr.genericType);
+        const matchesEnabledFilter = (isEnabled && showEnabled) || (!isEnabled && showDisabled);
+        return matchesType && matchesEnabledFilter;
+      })
       .map(gr => ({
         kind: 'generic' as const,
         id: gr.id,
         regionIndex: gr.regionIndex,
         box: gr.box,
+        enabled: gr.enabled,
         data: gr,
       }));
     return [...fromLm, ...fromGen];
-  }, [data.landmarks, data.genericRegions, showLandmarks, selectedGenericTypes]);
+  }, [data.landmarks, data.genericRegions, showLandmarks, selectedGenericTypes, showEnabled, showDisabled]);
 
-  if (boxes.length === 0) {
-    return <div className="text-sm text-muted-foreground p-4">Nothing to display</div>;
-  }
+  // Calculate counts for display
+  const landmarkCount = boxes.filter(b => b.kind === 'landmark').length;
+  const genericCount = boxes.filter(b => b.kind === 'generic').length;
+  const totalDisplayed = boxes.length;
 
   // Normalize yaw to radians: values > 2π are treated as degrees
   const toYawRadians = (yaw: number) => {
@@ -221,8 +238,41 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
           onCheckedChange={(checked) => setShowLandmarks(!!checked)}
         />
         <Label htmlFor="show-landmarks" className="cursor-pointer">
-          Show Landmarks ({data.landmarks.length})
+          Show Landmarks ({landmarkCount}/{data.landmarks.length})
         </Label>
+
+        <div className="flex items-center gap-2 ml-2">
+          <span className="text-sm text-muted-foreground">|</span>
+          <span className="text-sm font-medium">
+            Generic: {genericCount}/{data.genericRegions.length}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-4 ml-4 pl-4 border-l">
+          <Checkbox
+            id="show-enabled"
+            checked={showEnabled}
+            onCheckedChange={(checked) => setShowEnabled(!!checked)}
+          />
+          <Label htmlFor="show-enabled" className="cursor-pointer">
+            Enabled
+          </Label>
+
+          <Checkbox
+            id="show-disabled"
+            checked={showDisabled}
+            onCheckedChange={(checked) => setShowDisabled(!!checked)}
+          />
+          <Label htmlFor="show-disabled" className="cursor-pointer">
+            Disabled
+          </Label>
+        </div>
+
+        <div className="flex items-center gap-2 ml-4 pl-4 border-l">
+          <span className="text-sm font-semibold text-primary">
+            Total: {totalDisplayed}
+          </span>
+        </div>
 
         <Popover modal={false}>
           <PopoverTrigger asChild>
@@ -271,6 +321,11 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
 
       {/* Map */}
       <div className="h-[60vh]">
+      {boxes.length === 0 ? (
+        <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+          Nothing to display - adjust filters to see regions
+        </div>
+      ) : (
       <MapContainer 
         {...({ 
           crs: L.CRS.Simple, 
@@ -285,14 +340,18 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
       >
         <FitBounds polys={polys} />
         {polys.map((b, i) => {
-          const color = b.kind === 'landmark' ? '#3b82f6' : '#22c55e';
+          const isEnabled = b.enabled === 1;
+          const baseColor = b.kind === 'landmark' ? '#3b82f6' : '#22c55e';
+          const color = isEnabled ? baseColor : '#94a3b8';
+          const fillOpacity = isEnabled ? 0.2 : 0.1;
+          const dashArray = isEnabled ? undefined : '5, 5';
           const box = b.box;
           
           return (
             <Polygon 
               key={`${b.kind}-${i}`} 
               positions={b.world} 
-              pathOptions={{ color, weight: 1, fillOpacity: 0.2 }}
+              pathOptions={{ color, weight: 1, fillOpacity, dashArray }}
             >
               <Tooltip>
                 <div className="text-xs space-y-1">
@@ -302,6 +361,7 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
                   
                   <div><b>ID:</b> {b.id}</div>
                   <div><b>Region Index:</b> {b.regionIndex}</div>
+                  <div><b>Enabled:</b> {b.enabled === 1 ? '✅ Yes' : '❌ No'}</div>
                   
                   <div className="border-t pt-1 mt-1">
                     <div className="font-semibold">Position:</div>
@@ -356,6 +416,7 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
           );
         })}
       </MapContainer>
+      )}
       </div>
     </div>
   );
