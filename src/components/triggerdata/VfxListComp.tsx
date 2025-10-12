@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { numberField } from './utils';
 
@@ -44,7 +45,7 @@ export const VfxListComp: React.FC<{
               className="absolute left-0 right-0"
               style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
             >
-              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-5 gap-2 items-center bg-background">
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-center bg-background">
                 <div>
                   <Label>ID</Label>
                   <Input value={v.id} type="number" onChange={e => onChange({ ...data, vfxBoxRegions: data.vfxBoxRegions.map((x, j) => j===i ? numberField(v, ['id'], parseInt(e.target.value)||0) : x) })} />
@@ -66,6 +67,10 @@ export const VfxListComp: React.FC<{
                   {(v.regionIndex|0) < 0 ? (
                     <div className="text-xs text-red-600 mt-1">Region index should be &gt;= 0</div>
                   ) : null}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label>Enabled</Label>
+                  <Switch checked={v.enabled === 1} onCheckedChange={checked => onChange({ ...data, vfxBoxRegions: data.vfxBoxRegions.map((x, j) => j===i ? { ...v, enabled: checked ? 1 : 0 } : x) })} />
                 </div>
                 <div className="flex items-end">
                   <Button variant="secondary" size="sm" onClick={() => onEditBox('vfx', i)}>Edit Box</Button>

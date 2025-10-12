@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { Trash2 } from 'lucide-react';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { numberField } from './utils';
@@ -45,7 +46,7 @@ export const GenericRegionsListComp: React.FC<{
               className="absolute left-0 right-0"
               style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
             >
-              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-7 gap-2 items-center bg-background">
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-8 gap-2 items-center bg-background">
                 <div>
                   <Label>ID</Label>
                   <Input value={gr.id} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['id'], parseInt(e.target.value)||0) : x) })} />
@@ -86,6 +87,10 @@ export const GenericRegionsListComp: React.FC<{
                 <div>
                   <Label>One Way</Label>
                   <Input value={gr.isOneWay} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['isOneWay'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label>Enabled</Label>
+                  <Switch checked={gr.enabled === 1} onCheckedChange={checked => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? { ...gr, enabled: checked ? 1 : 0 } : x) })} />
                 </div>
                 <div className="flex items-end gap-2">
                   <Button variant="secondary" size="sm" onClick={() => onEditBox('generic', i)}>Edit Box</Button>

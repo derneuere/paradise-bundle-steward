@@ -36,7 +36,7 @@ export const TriggerRegionBaseSchema = object({
   id: u32,
   regionIndex: u16,
   type: u8,
-  pad: u8
+  enabled: u8
 });
 
 export const LandmarkHeaderSchema = object({
@@ -204,6 +204,7 @@ export type TriggerRegion = {
 	id: number; // mId
 	regionIndex: number; // miRegionIndex (short)
 	type: TriggerRegionType;
+	enabled: number; // 0 or 1
 };
 
 export type StartingGrid = {
@@ -358,8 +359,8 @@ function readTriggerRegionBase(r: BinReader): TriggerRegion {
 	const id = r.readI32();
 	const regionIndex = r.readI16();
 	const type = r.readU8() as TriggerRegionType;
-	/* muPad */ r.readU8();
-	return { box, id, regionIndex, type };
+	const enabled = r.readU8();
+	return { box, id, regionIndex, type, enabled };
 }
 
 function writeTriggerRegionBase(w: BinWriter, t: TriggerRegion) {
@@ -367,7 +368,7 @@ function writeTriggerRegionBase(w: BinWriter, t: TriggerRegion) {
 	w.writeI32(t.id);
 	w.writeI16(t.regionIndex);
 	w.writeU8(t.type);
-	w.writeU8(0); // pad
+	w.writeU8(t.enabled & 0xFF);
 }
 
 // =============================================================================

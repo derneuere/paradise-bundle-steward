@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { numberField } from './utils';
 
@@ -44,7 +45,7 @@ export const BlackspotsListComp: React.FC<{
               className="absolute left-0 right-0"
               style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
             >
-              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-center bg-background">
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-7 gap-2 items-center bg-background">
                 <div>
                   <Label>ID</Label>
                   <Input value={bs.id} type="number" onChange={e => onChange({ ...data, blackspots: data.blackspots.map((x, j) => j===i ? numberField(bs, ['id'], parseInt(e.target.value)||0) : x) })} />
@@ -74,6 +75,10 @@ export const BlackspotsListComp: React.FC<{
                 <div>
                   <Label>Score Amount</Label>
                   <Input value={bs.scoreAmount} type="number" onChange={e => onChange({ ...data, blackspots: data.blackspots.map((x, j) => j===i ? numberField(bs, ['scoreAmount'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label>Enabled</Label>
+                  <Switch checked={bs.enabled === 1} onCheckedChange={checked => onChange({ ...data, blackspots: data.blackspots.map((x, j) => j===i ? { ...bs, enabled: checked ? 1 : 0 } : x) })} />
                 </div>
                 <div className="flex items-end">
                   <Button variant="secondary" size="sm" onClick={() => onEditBox('blackspot', i)}>Edit Box</Button>

@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { Trash2 } from 'lucide-react';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { numberField } from './utils';
@@ -45,7 +46,7 @@ export const LandmarksListComp: React.FC<{
               className="absolute left-0 right-0"
               style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
             >
-              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-center bg-background">
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-7 gap-2 items-center bg-background">
                 <div>
                   <Label>ID</Label>
                   <Input value={lm.id} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['id'], parseInt(e.target.value)||0) : x) })} />
@@ -79,6 +80,10 @@ export const LandmarksListComp: React.FC<{
                 <div>
                   <Label>Flags</Label>
                   <Input value={lm.flags} type="number" onChange={e => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? numberField(lm, ['flags'], parseInt(e.target.value)||0) : x) })} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label>Enabled</Label>
+                  <Switch checked={lm.enabled === 1} onCheckedChange={checked => onChange({ ...data, landmarks: data.landmarks.map((x, j) => j===i ? { ...lm, enabled: checked ? 1 : 0 } : x) })} />
                 </div>
                 <div className="flex items-end gap-2">
                   <Button variant="secondary" size="sm" onClick={() => onEditBox('landmark', i)}>Edit Box</Button>
