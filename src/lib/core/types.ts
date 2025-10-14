@@ -34,6 +34,7 @@ export const MEMORY_TYPES = {
 export const RESOURCE_TYPE_IDS = {
   VEHICLE_LIST: 0x10005,
   PLAYER_CAR_COLOURS: 0x1001E,
+  CHALLENGE_LIST: 0x1001F,
   ICE_TAKE_DICTIONARY: 0x41,
   TRIGGER_DATA: 0x10003,
 } as const;
@@ -122,6 +123,7 @@ export type WriteOptions = {
       header?: ParsedVehicleList['header'];
     };
     triggerData?: ParsedTriggerData;
+    challengeList?: import('./challengeList').ParsedChallengeList;
     /**
      * Generic resource overrides keyed by resource type id. Values can be either
      * raw encoded bytes to write directly, or a plain object that will be passed

@@ -15,6 +15,7 @@ import IcePage from "./pages/IcePage";
 import VehicleEditorPage from "./pages/VehicleEditorPage";
 import ResourceInspectorPage from "./pages/ResourceInspectorPage";
 import TriggerDataPage from "./pages/TriggerDataPage";
+import ChallengeListPage from "./pages/ChallengeListPage";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +37,7 @@ const App = () => (
               <Route path="/ice" element={<IcePage />} />
               <Route path="/inspect" element={<ResourceInspectorPage />} />
               <Route path="/triggers" element={<TriggerDataPage />} />
+              <Route path="/challenges" element={<ChallengeListPage />} />
             </Route>
             {/* Legacy index route kept if needed */}
             <Route path="/legacy" element={<Index />} />

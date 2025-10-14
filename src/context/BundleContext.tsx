@@ -12,6 +12,7 @@ import type { VehicleListEntry, ParsedVehicleList } from '@/lib/core/vehicleList
 import type { PlayerCarColours } from '@/lib/core/playerCarColors';
 import type { ParsedIceTakeDictionary } from '@/lib/core/iceTakeDictionary';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
+import type { ParsedChallengeList } from '@/lib/core/challengeList';
 
 export type UIResource = {
   id: string;
@@ -44,6 +45,8 @@ type BundleContextValue = {
   iceDictionary: ParsedIceTakeDictionary | null;
   triggerData: ParsedTriggerData | null;
   setTriggerData: (data: ParsedTriggerData | null) => void;
+  challengeList: ParsedChallengeList | null;
+  setChallengeList: (data: ParsedChallengeList | null) => void;
   loadBundleFromFile: (file: File) => Promise<void>;
   exportBundle: () => Promise<void>;
 };
@@ -62,6 +65,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
   const [playerCarColours, setPlayerCarColours] = useState<PlayerCarColours | null>(null);
   const [iceDictionary, setIceDictionary] = useState<ParsedIceTakeDictionary | null>(null);
   const [triggerData, setTriggerData] = useState<ParsedTriggerData | null>(null);
+  const [challengeList, setChallengeList] = useState<ParsedChallengeList | null>(null);
   const convertResourceToUI = useMemo(() => {
     return (resource: any, bundle: ParsedBundle, debugResources: DebugResource[]): UIResource => {
       const resourceType = getResourceType(resource.resourceTypeId);
@@ -118,6 +122,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
       setPlayerCarColours(parsedResources.playerCarColours || null);
       setIceDictionary(parsedResources.iceTakeDictionary || null);
       setTriggerData(parsedResources.triggerData || null);
+      setChallengeList(parsedResources.challengeList || null);
       setLoadedBundle(bundle);
       setResources(uiResources);
       setDebugResources(debugData);
@@ -152,7 +157,8 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
                 header: parsedVehicleList.header
               }
             } : {}),
-            ...(triggerData ? { triggerData } : {})
+            ...(triggerData ? { triggerData } : {}),
+            ...(challengeList ? { challengeList } : {})
           }
         },
       );
@@ -189,6 +195,8 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     iceDictionary,
     triggerData,
     setTriggerData,
+    challengeList,  
+    setChallengeList,
     loadBundleFromFile,
     exportBundle
   };

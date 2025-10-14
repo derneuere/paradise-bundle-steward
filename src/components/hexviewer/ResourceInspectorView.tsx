@@ -10,6 +10,7 @@ import { getSchemaFields, getSchemaSize } from './utils.ts';
 import { VehicleEntrySchema } from '@/lib/core/vehicleList';
 import { TriggerDataHeaderSchema, TriggerRegionBaseSchema, LandmarkHeaderSchema, GenericRegionHeaderSchema, BlackspotHeaderSchema, VFXBoxRegionHeaderSchema } from '@/lib/core/triggerData';
 import { ICETakeHeader32Schema, ICETakeHeader64Schema, parseIceTakeDictionaryData } from '@/lib/core/iceTakeDictionary';
+import { ChallengeListEntryActionSchema, parseChallengeListData } from '@/lib/core/challengeList';
 import { BufferReader } from 'typed-binary';
 import type { HexRow } from './types';
 
@@ -217,6 +218,52 @@ const schemaRegistry: Record<number, SchemaProvider> = {
         }
       }
     ]
+  },
+  [RESOURCE_TYPE_IDS.CHALLENGE_LIST]: {
+    label: 'ChallengeListEntry',
+    headerSizeFromData: (data) => {
+      const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      const challengesOffset = dv.getUint32(4, true) >>> 0;
+      return challengesOffset;
+    },
+    entrySizeFromData: () => 0xD8, // Size of ChallengeListEntry: 2 actions (0xA0) + metadata (0x38)
+    countFromData: (data, headerSize, entrySize) => {
+      const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      const numChallenges = dv.getUint32(0, true) >>> 0;
+      const maxChallenges = Math.floor((data.length - headerSize) / entrySize);
+      return Math.min(numChallenges, maxChallenges);
+    },
+    fieldsFromData: () => {
+      // Define Challenge List Entry fields manually since it's a complex structure
+      return [
+        // Action 1 fields (first 0x50 bytes)
+        { key: 'action1_actionType', name: 'Action 1 Type', offset: 0x0, size: 1 },
+        { key: 'action1_coopType', name: 'Action 1 Co-op Type', offset: 0x1, size: 1 },
+        { key: 'action1_modifier', name: 'Action 1 Modifier', offset: 0x2, size: 1 },
+        { key: 'action1_combineActionType', name: 'Action 1 Combine Type', offset: 0x3, size: 1 },
+        { key: 'action1_numLocations', name: 'Action 1 Locations', offset: 0x4, size: 1 },
+        { key: 'action1_numTargets', name: 'Action 1 Targets', offset: 0x30, size: 1 },
+        // Action 2 fields (offset 0x50)
+        { key: 'action2_actionType', name: 'Action 2 Type', offset: 0x50, size: 1 },
+        { key: 'action2_coopType', name: 'Action 2 Co-op Type', offset: 0x51, size: 1 },
+        { key: 'action2_modifier', name: 'Action 2 Modifier', offset: 0x52, size: 1 },
+        { key: 'action2_combineActionType', name: 'Action 2 Combine Type', offset: 0x53, size: 1 },
+        { key: 'action2_numLocations', name: 'Action 2 Locations', offset: 0x54, size: 1 },
+        { key: 'action2_numTargets', name: 'Action 2 Targets', offset: 0x80, size: 1 },
+        // Challenge metadata (offset 0xA0)
+        { key: 'descriptionStringID', name: 'Description String ID', offset: 0xA0, size: 16 },
+        { key: 'titleStringID', name: 'Title String ID', offset: 0xB0, size: 16 },
+        { key: 'challengeID', name: 'Challenge ID', offset: 0xC0, size: 8 },
+        { key: 'carID', name: 'Car ID', offset: 0xC8, size: 8 },
+        { key: 'carType', name: 'Car Type', offset: 0xD0, size: 1 },
+        { key: 'carColourIndex', name: 'Car Colour Index', offset: 0xD1, size: 1 },
+        { key: 'carColourPaletteIndex', name: 'Car Colour Palette Index', offset: 0xD2, size: 1 },
+        { key: 'numPlayers', name: 'Num Players', offset: 0xD3, size: 1 },
+        { key: 'numActions', name: 'Num Actions', offset: 0xD4, size: 1 },
+        { key: 'difficulty', name: 'Difficulty', offset: 0xD5, size: 1 },
+        { key: 'entitlementGroup', name: 'Entitlement Group', offset: 0xD6, size: 1 },
+      ];
+    }
   }
 };
 

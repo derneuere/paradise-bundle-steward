@@ -46,6 +46,12 @@ export const RESOURCE_TYPES: Record<number, ResourceType> = {
     description: 'Available player car color palettes and paint options', 
     category: 'Graphics',
   },
+  [RESOURCE_TYPE_IDS.CHALLENGE_LIST]: {
+    id: RESOURCE_TYPE_IDS.CHALLENGE_LIST,
+    name: 'Challenge List',
+    description: 'Available challenges with their properties',
+    category: 'Data',
+  },
 };
 
 // ============================================================================

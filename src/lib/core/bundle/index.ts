@@ -29,6 +29,7 @@ import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTake
 import { type ParsedTriggerData, parseTriggerData, writeTriggerDataData } from '../triggerData';
 import { extractResourceSize, extractAlignment, packSizeAndAlignment, isCompressed, compressData } from '../resourceManager';
 import { getSetting } from '../../settings';
+import { parseChallengeList, ParsedChallengeList, writeChallengeListData } from '../challengeList';
 
 // ============================================================================
 // Main Bundle Writer
@@ -73,6 +74,9 @@ export function writeBundleFresh(
     [RESOURCE_TYPE_IDS.TRIGGER_DATA]: (value: unknown) => {
       const autoAssign = getSetting('autoAssignRegionIndexes');
       return writeTriggerDataData(value as ParsedTriggerData, little, autoAssign);
+    },
+    [RESOURCE_TYPE_IDS.CHALLENGE_LIST]: (value: unknown) => {
+      return writeChallengeListData(value as ParsedChallengeList, little);
     }
   };
 
@@ -82,6 +86,9 @@ export function writeBundleFresh(
   }
   if (options.overrides?.triggerData) {
     overrideMap[RESOURCE_TYPE_IDS.TRIGGER_DATA] = options.overrides.triggerData;
+  }
+  if (options.overrides?.challengeList) {
+    overrideMap[RESOURCE_TYPE_IDS.CHALLENGE_LIST] = options.overrides.challengeList;
   }
   if (options.overrides?.resources) {
     Object.assign(overrideMap, options.overrides.resources);
@@ -446,6 +453,7 @@ export type ParsedResources = {
   playerCarColours?: PlayerCarColours;
   iceTakeDictionary?: ParsedIceTakeDictionary;
   triggerData?: ParsedTriggerData;
+  challengeList?: ParsedChallengeList;
 };
 
 /**
@@ -534,6 +542,16 @@ export function parseBundleResources(
   );
   if (triggerData) {
     resources.triggerData = triggerData;
+  }
+  // Parse Challenge List
+  const challengeList = parseResourceType(
+    buffer,
+    bundle,
+    'Challenge List',
+    parseChallengeList,
+  );
+  if (challengeList) {
+    resources.challengeList = challengeList;
   }
 
   return resources;

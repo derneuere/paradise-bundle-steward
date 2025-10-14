@@ -113,6 +113,11 @@ const ResourcesPage = () => {
               Edit Triggers
             </NavLink>
           )}
+          {resource.type === 'Challenge List' && (
+            <NavLink to="/challenges" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
+              Edit Challenges
+            </NavLink>
+          )}
         </CardContent>
       </Card>
     );
