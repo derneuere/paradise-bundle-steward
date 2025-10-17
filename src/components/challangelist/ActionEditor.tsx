@@ -227,6 +227,29 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, ac
         </div>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <Label>Time Limit (seconds)</Label>
+          <Input
+            type="number"
+            step="0.1"
+            min="0"
+            value={Number.isFinite(action.timeLimit) ? action.timeLimit : 0}
+            onChange={(e) => updateField('timeLimit', parseFloat(e.target.value) || 0)}
+          />
+        </div>
+        <div>
+          <Label>Convoy Time (seconds)</Label>
+          <Input
+            type="number"
+            step="0.1"
+            min="0"
+            value={Number.isFinite(action.convoyTime) ? action.convoyTime : 0}
+            onChange={(e) => updateField('convoyTime', parseFloat(e.target.value) || 0)}
+          />
+        </div>
+      </div>
+
       <div>
         <Label className="mb-2 block">Locations</Label>
         <div className="space-y-4 border rounded-lg p-4">

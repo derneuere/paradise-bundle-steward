@@ -10,6 +10,7 @@ import {
 } from '@/lib/core/challengeList';
 import { ActionEditor } from './ActionEditor';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CgsIdInput } from '@/components/common/CgsIdInput';
 
 type ChallengeEntryEditorProps = {
   challenge: ChallengeListEntry;
@@ -53,18 +54,11 @@ export const ChallengeEntryEditor: React.FC<ChallengeEntryEditorProps> = ({ chal
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
-              <Label>Challenge ID</Label>
-              <Input
-                type="text"
-                value={challenge.challengeID.toString()}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  try {
-                    updateField('challengeID', BigInt(val || '0'));
-                  } catch {
-                    // Invalid bigint, ignore
-                  }
-                }}
+              <CgsIdInput
+                label="Challenge ID (CgsID)"
+                value={challenge.challengeID}
+                onChange={(v) => updateField('challengeID', v)}
+                isOnlyGameId
               />
             </div>
             <div>
@@ -101,7 +95,6 @@ export const ChallengeEntryEditor: React.FC<ChallengeEntryEditorProps> = ({ chal
                   <SelectItem value="102">6 Players (0x66)</SelectItem>
                   <SelectItem value="119">7 Players (0x77)</SelectItem>
                   <SelectItem value="136">8 Players (0x88)</SelectItem>
-                  <SelectItem value="153">9 Players (0x99)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -190,18 +183,12 @@ export const ChallengeEntryEditor: React.FC<ChallengeEntryEditorProps> = ({ chal
         <TabsContent value="advanced" className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
-              <Label>Car ID</Label>
-              <Input
-                type="text"
-                value={challenge.carID.toString()}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  try {
-                    updateField('carID', BigInt(val || '0'));
-                  } catch {
-                    // Invalid bigint, ignore
-                  }
-                }}
+              <CgsIdInput
+                label="Car ID (CgsID)"
+                value={challenge.carID}
+                onChange={(v) => updateField('carID', v)}
+                allowHexToggle
+                allowDecimalToggle
               />
             </div>
             <div>

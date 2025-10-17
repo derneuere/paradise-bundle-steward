@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import type { VehicleListEntry } from '@/lib/core/vehicleList';
 import { getDecryptedId, Rank, VehicleType, CarType, LiveryType } from '@/lib/core/vehicleList';
+import { CgsIdInput } from '@/components/common/CgsIdInput';
 
 type VehicleEditorProps = {
   vehicle: VehicleListEntry | null;
@@ -91,6 +92,7 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
           boostCapacity: 100,
           strengthStat: 100
         },
+        unknownData: new Uint8Array(16),
         attribCollectionKey: 0n,
         audioData: {
           exhaustName: 0n,
@@ -201,40 +203,24 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="vehicleId">Vehicle ID (Hex)</Label>
-                    <Input
-                      id="vehicleId"
-                      value={`0x${editedVehicle.id.toString(16).toUpperCase()}`}
-                      onChange={(e) => {
-                        const hex = e.target.value.replace('0x', '');
-                        try {
-                          const value = BigInt(`0x${hex}`);
-                          updateField('id', value);
-                        } catch (e) {
-                          // Invalid hex, ignore
-                        }
-                      }}
-                      placeholder="Enter vehicle ID as hex"
+                    <CgsIdInput
+                      label="Vehicle ID (CgsID)"
+                      value={editedVehicle.id}
+                      onChange={(v) => updateField('id', v)}
+                      allowHexToggle
+                      allowDecimalToggle
                     />
                     <div className="text-xs text-muted-foreground mt-1">
                       Decrypted: {getDecryptedId(editedVehicle.id)}
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="parentId">Parent ID (Hex)</Label>
-                    <Input
-                      id="parentId"
-                      value={`0x${editedVehicle.parentId.toString(16).toUpperCase()}`}
-                      onChange={(e) => {
-                        const hex = e.target.value.replace('0x', '');
-                        try {
-                          const value = BigInt(`0x${hex}`);
-                          updateField('parentId', value);
-                        } catch (e) {
-                          // Invalid hex, ignore
-                        }
-                      }}
-                      placeholder="Enter parent ID as hex"
+                    <CgsIdInput
+                      label="Parent ID (CgsID)"
+                      value={editedVehicle.parentId}
+                      onChange={(v) => updateField('parentId', v)}
+                      allowHexToggle
+                      allowDecimalToggle
                     />
                     <div className="text-xs text-muted-foreground mt-1">
                       Decrypted: {getDecryptedId(editedVehicle.parentId)}
@@ -461,38 +447,24 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="exhaustName">Exhaust Name (Hex)</Label>
-                    <Input
-                      id="exhaustName"
-                      value={`0x${editedVehicle.audioData.exhaustName.toString(16).toUpperCase()}`}
-                      onChange={(e) => {
-                        const hex = e.target.value.replace('0x', '');
-                        try {
-                          const value = BigInt(`0x${hex}`);
-                          updateField('audioData.exhaustName', value);
-                        } catch (e) {
-                          // Invalid hex, ignore
-                        }
-                      }}
+                    <CgsIdInput
+                      label="Exhaust Name (CgsID)"
+                      value={editedVehicle.audioData.exhaustName}
+                      onChange={(v) => updateField('audioData.exhaustName', v)}
+                      allowHexToggle
+                      allowDecimalToggle
                     />
                     <div className="text-xs text-muted-foreground mt-1">
                       Decrypted: {getDecryptedId(editedVehicle.audioData.exhaustName)}
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="engineName">Engine Name (Hex)</Label>
-                    <Input
-                      id="engineName"
-                      value={`0x${editedVehicle.audioData.engineName.toString(16).toUpperCase()}`}
-                      onChange={(e) => {
-                        const hex = e.target.value.replace('0x', '');
-                        try {
-                          const value = BigInt(`0x${hex}`);
-                          updateField('audioData.engineName', value);
-                        } catch (e) {
-                          // Invalid hex, ignore
-                        }
-                      }}
+                    <CgsIdInput
+                      label="Engine Name (CgsID)"
+                      value={editedVehicle.audioData.engineName}
+                      onChange={(v) => updateField('audioData.engineName', v)}
+                      allowHexToggle
+                      allowDecimalToggle
                     />
                     <div className="text-xs text-muted-foreground mt-1">
                       Decrypted: {getDecryptedId(editedVehicle.audioData.engineName)}
@@ -571,88 +543,48 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
                 </div>
 
                 <div>
-                  <Label htmlFor="attribKey">Attribute Collection Key (Hex)</Label>
-                  <Input
-                    id="attribKey"
-                    value={`0x${editedVehicle.attribCollectionKey.toString(16).toUpperCase()}`}
-                    onChange={(e) => {
-                      const hex = e.target.value.replace('0x', '');
-                      try {
-                        const value = BigInt(`0x${hex}`);
-                        updateField('attribCollectionKey', value);
-                      } catch (e) {
-                        // Invalid hex, ignore
-                      }
-                    }}
+                  <CgsIdInput
+                    label="Attribute Collection Key (GameDB)"
+                    value={editedVehicle.attribCollectionKey}
+                    onChange={(v) => updateField('attribCollectionKey', v)}
+                    isOnlyGameId
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="exhaustEntityKey">Exhaust Entity Key (Hex)</Label>
-                    <Input
-                      id="exhaustEntityKey"
-                      value={`0x${editedVehicle.audioData.exhaustEntityKey.toString(16).toUpperCase()}`}
-                      onChange={(e) => {
-                        const hex = e.target.value.replace('0x', '');
-                        try {
-                          const value = BigInt(`0x${hex}`);
-                          updateField('audioData.exhaustEntityKey', value);
-                        } catch (e) {
-                          // Invalid hex, ignore
-                        }
-                      }}
+                    <CgsIdInput
+                      label="Exhaust Entity Key (GameDB)"
+                      value={editedVehicle.audioData.exhaustEntityKey}
+                      onChange={(v) => updateField('audioData.exhaustEntityKey', v)}
+                      isOnlyGameId
                     />
                   </div>
                   <div>
-                    <Label htmlFor="engineEntityKey">Engine Entity Key (Hex)</Label>
-                    <Input
-                      id="engineEntityKey"
-                      value={`0x${editedVehicle.audioData.engineEntityKey.toString(16).toUpperCase()}`}
-                      onChange={(e) => {
-                        const hex = e.target.value.replace('0x', '');
-                        try {
-                          const value = BigInt(`0x${hex}`);
-                          updateField('audioData.engineEntityKey', value);
-                        } catch (e) {
-                          // Invalid hex, ignore
-                        }
-                      }}
+                    <CgsIdInput
+                      label="Engine Entity Key (GameDB)"
+                      value={editedVehicle.audioData.engineEntityKey}
+                      onChange={(v) => updateField('audioData.engineEntityKey', v)}
+                      isOnlyGameId
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="wonCarVoiceOverKey">Won Car Voice Over Key (Hex)</Label>
-                    <Input
-                      id="wonCarVoiceOverKey"
-                      value={`0x${editedVehicle.audioData.wonCarVoiceOverKey.toString(16).toUpperCase()}`}
-                      onChange={(e) => {
-                        const hex = e.target.value.replace('0x', '');
-                        try {
-                          const value = BigInt(`0x${hex}`);
-                          updateField('audioData.wonCarVoiceOverKey', value);
-                        } catch (e) {
-                          // Invalid hex, ignore
-                        }
-                      }}
+                    <CgsIdInput
+                      label="Won Car Voice Over Key (GameDB)"
+                      value={editedVehicle.audioData.wonCarVoiceOverKey}
+                      onChange={(v) => updateField('audioData.wonCarVoiceOverKey', v)}
+                      isOnlyGameId
                     />
                   </div>
                   <div>
-                    <Label htmlFor="rivalReleasedVoiceOverKey">Rival Released Voice Over Key (Hex)</Label>
-                    <Input
-                      id="rivalReleasedVoiceOverKey"
-                      value={`0x${editedVehicle.audioData.rivalReleasedVoiceOverKey.toString(16).toUpperCase()}`}
-                      onChange={(e) => {
-                        const hex = e.target.value.replace('0x', '');
-                        try {
-                          const value = BigInt(`0x${hex}`);
-                          updateField('audioData.rivalReleasedVoiceOverKey', value);
-                        } catch (e) {
-                          // Invalid hex, ignore
-                        }
-                      }}
+                    <CgsIdInput
+                      label="Rival Released Voice Over Key (GameDB)"
+                      value={editedVehicle.audioData.rivalReleasedVoiceOverKey}
+                      onChange={(v) => updateField('audioData.rivalReleasedVoiceOverKey', v)}
+                      isOnlyGameId
                     />
                   </div>
                 </div>

@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { ParsedChallengeList, ChallengeListEntry } from '@/lib/core/challengeList';
 import { ChallengeEntriesList } from './ChallengeEntriesList';
@@ -13,10 +15,11 @@ type ChallengeListEditorProps = {
 
 export const ChallengeListEditor: React.FC<ChallengeListEditorProps> = ({ data, onChange }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'challenges'>('overview');
+  const [filterHasCarId, setFilterHasCarId] = useState(false);
 
   const stats = useMemo(() => {
     const difficultyCount = { easy: 0, medium: 0, hard: 0, veryHard: 0 };
-    const playerCount = { two: 0, three: 0, four: 0, five: 0, six: 0, seven: 0, eight: 0, nine: 0, ten: 0, other: 0 };
+    const playerCount = { two: 0, three: 0, four: 0, five: 0, six: 0, seven: 0, eight: 0, other: 0 };
     const entitlementCount = new Map<number, number>();
 
     data.challenges.forEach(challenge => {
@@ -37,7 +40,6 @@ export const ChallengeListEditor: React.FC<ChallengeListEditorProps> = ({ data, 
       else if (numPlayers === 0x66) playerCount.six++;
       else if (numPlayers === 0x77) playerCount.seven++;
       else if (numPlayers === 0x88) playerCount.eight++;
-      else if (numPlayers === 0x99) playerCount.nine++;
       else playerCount.other++;
 
       // Count entitlements
@@ -47,6 +49,10 @@ export const ChallengeListEditor: React.FC<ChallengeListEditorProps> = ({ data, 
 
     return { difficultyCount, playerCount, entitlementCount };
   }, [data.challenges]);
+
+  const visibleChallenges = useMemo(() => {
+    return filterHasCarId ? data.challenges.filter(c => c.carID !== 0n) : data.challenges;
+  }, [filterHasCarId, data.challenges]);
 
   const addChallenge = () => {
     const newChallenge: ChallengeListEntry = {
@@ -181,9 +187,7 @@ export const ChallengeListEditor: React.FC<ChallengeListEditorProps> = ({ data, 
           <div>
             8-Player: <b>{stats.playerCount.eight}</b>
           </div>
-          <div>
-            9-Player: <b>{stats.playerCount.nine}</b>
-          </div>
+          
         </CardContent>
       </Card>
 
@@ -207,14 +211,28 @@ export const ChallengeListEditor: React.FC<ChallengeListEditorProps> = ({ data, 
         <TabsContent value="challenges">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Challenges ({data.challenges.length})</CardTitle>
+              <div className="flex items-center gap-4">
+                <CardTitle>
+                  {filterHasCarId
+                    ? `Challenges (${visibleChallenges.length} / ${data.challenges.length})`
+                    : `Challenges (${data.challenges.length})`}
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="filter-has-carid"
+                    checked={filterHasCarId}
+                    onCheckedChange={(checked) => setFilterHasCarId(!!checked)}
+                  />
+                  <Label htmlFor="filter-has-carid" className="text-sm cursor-pointer">Has Car ID</Label>
+                </div>
+              </div>
               <Button size="sm" onClick={addChallenge}>
                 Add Challenge
               </Button>
             </CardHeader>
             <CardContent>
               <ChallengeEntriesList
-                challenges={data.challenges}
+                challenges={visibleChallenges}
                 onUpdate={updateChallenge}
                 onDelete={deleteChallenge}
               />

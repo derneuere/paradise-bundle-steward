@@ -9,7 +9,7 @@ type ChallengeOverviewProps = {
   data: ParsedChallengeList;
   stats: {
     difficultyCount: { easy: number; medium: number; hard: number; veryHard: number };
-    playerCount: { two: number; three: number; four: number; five: number; six: number; seven: number; eight: number; nine: number; other: number };
+    playerCount: { two: number; three: number; four: number; five: number; six: number; seven: number; eight: number; other: number };
     entitlementCount: Map<number, number>;
   };
 };
@@ -86,10 +86,7 @@ export const ChallengeOverview: React.FC<ChallengeOverviewProps> = ({ data, stat
             <div className="text-sm text-muted-foreground">8-Player</div>
             <div className="text-2xl font-bold">{stats.playerCount.eight}</div>
           </div>
-          <div className="border rounded p-3">
-            <div className="text-sm text-muted-foreground">9-Player</div>
-            <div className="text-2xl font-bold">{stats.playerCount.nine}</div>
-          </div>
+          
           <div className="border rounded p-3">
             <div className="text-sm text-muted-foreground">Other</div>
             <div className="text-2xl font-bold">{stats.playerCount.other}</div>

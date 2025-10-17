@@ -2,6 +2,7 @@ import React from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { LocationData } from '@/lib/core/challengeList';
+import { CgsIdInput } from '@/components/common/CgsIdInput';
 
 type LocationDataEditorProps = {
   locationData: LocationData;
@@ -45,35 +46,21 @@ export const LocationDataEditor: React.FC<LocationDataEditorProps> = ({
           />
         </div>
         <div>
-          <Label className="text-xs">Trigger ID</Label>
-          <Input
-            type="text"
-            value={locationData.triggerID.toString()}
-            onChange={(e) => {
-              try {
-                updateField('triggerID', BigInt(e.target.value || '0'));
-              } catch {
-                // Invalid bigint, ignore
-              }
-            }}
+          <CgsIdInput
+            label="Trigger ID (CgsID)"
+            value={locationData.triggerID}
+            onChange={(v) => updateField('triggerID', v)}
             disabled={disabled}
-            className="h-8"
+            isOnlyGameId
           />
         </div>
         <div>
-          <Label className="text-xs">Road ID</Label>
-          <Input
-            type="text"
-            value={locationData.roadID.toString()}
-            onChange={(e) => {
-              try {
-                updateField('roadID', BigInt(e.target.value || '0'));
-              } catch {
-                // Invalid bigint, ignore
-              }
-            }}
+          <CgsIdInput
+            label="Road ID (CgsID)"
+            value={locationData.roadID}
+            onChange={(v) => updateField('roadID', v)}
             disabled={disabled}
-            className="h-8"
+            isOnlyGameId
           />
         </div>
       </div>
