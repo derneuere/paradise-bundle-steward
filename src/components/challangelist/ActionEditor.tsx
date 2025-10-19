@@ -11,6 +11,7 @@ import {
   CombineActionType,
   LocationType,
   ChallengeDataType,
+  getOptions,
 } from '@/lib/core/challengeList';
 import { LocationDataEditor } from './LocationDataEditor';
 
@@ -21,95 +22,17 @@ type ActionEditorProps = {
   disabled?: boolean;
 };
 
-const actionTypeOptions = [
-  { value: ChallengeActionType.MINIMUM_SPEED, label: 'Minimum Speed' },
-  { value: ChallengeActionType.IN_AIR, label: 'In Air' },
-  { value: ChallengeActionType.AIR_DISTANCE, label: 'Air Distance' },
-  { value: ChallengeActionType.LEAP_CARS, label: 'Leap Cars' },
-  { value: ChallengeActionType.DRIFT, label: 'Drift' },
-  { value: ChallengeActionType.NEAR_MISS, label: 'Near Miss' },
-  { value: ChallengeActionType.BARREL_ROLLS, label: 'Barrel Rolls' },
-  { value: ChallengeActionType.ONCOMING, label: 'Oncoming' },
-  { value: ChallengeActionType.FLATSPIN, label: 'Flat Spin' },
-  { value: ChallengeActionType.LAND_SUCCESSFUL, label: 'Land Successful' },
-  { value: ChallengeActionType.ROAD_RULE_TIME, label: 'Road Rule Time' },
-  { value: ChallengeActionType.ROAD_RULE_CRASH, label: 'Road Rule Crash' },
-  { value: ChallengeActionType.BURNOUTS, label: 'Burnouts' },
-  { value: ChallengeActionType.MEET_UP, label: 'Meet Up' },
-  { value: ChallengeActionType.BILLBOARD, label: 'Billboard' },
-  { value: ChallengeActionType.BOOST_TIME, label: 'Boost Time' },
-  { value: ChallengeActionType.STUNT_SCORE, label: 'Stunt Score' },
-  { value: ChallengeActionType.TAKEDOWNS, label: 'Takedowns' },
-  { value: ChallengeActionType.DISTANCE_TRAVELED, label: 'Distance Traveled' },
-];
+const actionTypeOptions = getOptions('actionType');
 
-const coopTypeOptions = [
-  { value: ChallengeCoopType.ONCE, label: 'Once' },
-  { value: ChallengeCoopType.INDIVIDUAL, label: 'Individual' },
-  { value: ChallengeCoopType.INDIVIDUAL_ACCUMULATION, label: 'Individual Accumulation' },
-  { value: ChallengeCoopType.SIMULTANEOUS, label: 'Simultaneous' },
-  { value: ChallengeCoopType.CUMULATIVE, label: 'Cumulative' },
-  { value: ChallengeCoopType.AVERAGE, label: 'Average' },
-  { value: ChallengeCoopType.INDIVIDUAL_SEQUENCE, label: 'Individual Sequence' },
-];
+const coopTypeOptions = getOptions('coopType');
 
-const modifierOptions = [
-  { value: ChallengeModifier.NONE, label: 'None' },
-  { value: ChallengeModifier.WITHOUT_CRASHING, label: 'Without Crashing' },
-  { value: ChallengeModifier.PRISTINE, label: 'Pristine' },
-  { value: ChallengeModifier.HEAD_ON, label: 'Head On' },
-  { value: ChallengeModifier.IN_AIR, label: 'In Air' },
-  { value: ChallengeModifier.BANK_FOR_SUCCESS, label: 'Bank For Success' },
-  { value: ChallengeModifier.STANDS_BY_BEFORE_PART_2, label: 'Stands By Before Part 2' },
-  { value: ChallengeModifier.TIMER_STARTS_ON_CHALLENGE_ACTIVATION, label: 'Timer Starts On Challenge Activation' },
-];
+const modifierOptions = getOptions('modifier');
 
-const combineActionTypeOptions = [
-  { value: CombineActionType.CHAIN, label: 'Chain' },
-  { value: CombineActionType.FAILURE_RESETS_CHAIN, label: 'Failure Resets Chain' },
-  { value: CombineActionType.FAILURE_RESETS_EVERYONE, label: 'Failure Resets Everyone' },
-  { value: CombineActionType.SIMULTANEOUS, label: 'Simultaneous' },
-  { value: CombineActionType.INDEPENDENT, label: 'Independent' },
-];
+const combineActionTypeOptions = getOptions('combineActionType');
 
-const locationTypeOptions = [
-  { value: LocationType.ANYWHERE, label: 'Anywhere' },
-  { value: LocationType.DISTRICT, label: 'District' },
-  { value: LocationType.COUNTY, label: 'County' },
-  { value: LocationType.TRIGGER, label: 'Trigger' },
-  { value: LocationType.ROAD, label: 'Road' },
-  { value: LocationType.ROAD_NO_MARKER, label: 'Road (No Marker)' },
-  { value: LocationType.GAS_STATION, label: 'Gas Station' },
-  { value: LocationType.AUTO_REPAIR, label: 'Auto Repair' },
-  { value: LocationType.PAINT_SHOP, label: 'Paint Shop' },
-];
+const locationTypeOptions = getOptions('locationType');
 
-const dataTypeOptions = [
-  { value: ChallengeDataType.CRASHES, label: 'Crashes' },
-  { value: ChallengeDataType.NEAR_MISS, label: 'Near Miss' },
-  { value: ChallengeDataType.ONCOMING, label: 'Oncoming' },
-  { value: ChallengeDataType.DRIFT, label: 'Drift' },
-  { value: ChallengeDataType.AIR, label: 'Air' },
-  { value: ChallengeDataType.AIR_DISTANCE, label: 'Air Distance' },
-  { value: ChallengeDataType.BARREL_ROLLS, label: 'Barrel Rolls' },
-  { value: ChallengeDataType.FLAT_SPINS, label: 'Flat Spins' },
-  { value: ChallengeDataType.CARS_LEAPT, label: 'Cars Leapt' },
-  { value: ChallengeDataType.SPEED_ROAD_RULE, label: 'Speed Road Rule' },
-  { value: ChallengeDataType.CRASH_ROAD_RULE, label: 'Crash Road Rule' },
-  { value: ChallengeDataType.SUCCESSFUL_LANDINGS, label: 'Successful Landings' },
-  { value: ChallengeDataType.BURNOUTS, label: 'Burnouts' },
-  { value: ChallengeDataType.POWER_PARKS, label: 'Power Parks' },
-  { value: ChallengeDataType.PERCENTAGE, label: 'Percentage' },
-  { value: ChallengeDataType.MEET_UP, label: 'Meet Up' },
-  { value: ChallengeDataType.BILLBOARDS, label: 'Billboards' },
-  { value: ChallengeDataType.BOOST_TIME, label: 'Boost Time' },
-  { value: ChallengeDataType.DISTANCE, label: 'Distance' },
-  { value: ChallengeDataType.CHAIN, label: 'Chain' },
-  { value: ChallengeDataType.MULTIPLIER, label: 'Multiplier' },
-  { value: ChallengeDataType.STUNT_SCORE, label: 'Stunt Score' },
-  { value: ChallengeDataType.TAKEDOWNS, label: 'Takedowns' },
-  { value: ChallengeDataType.DISTANCE_TRAVELED, label: 'Distance Traveled' },
-];
+const dataTypeOptions = getOptions('dataType');
 
 export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, actionIndex, disabled }) => {
   const updateField = <K extends keyof ChallengeListEntryAction>(

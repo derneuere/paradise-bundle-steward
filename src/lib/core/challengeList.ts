@@ -319,6 +319,173 @@ export enum ChallengeDataType {
     COUNT = 38,
 }
 
+// =============================================================================
+// UI option registry for enums
+// =============================================================================
+
+export type EnumOption<T extends number> = { value: T; label: string };
+
+export type ChallengeOptionRegistry = {
+    actionType: EnumOption<ChallengeActionType>[];
+    coopType: EnumOption<ChallengeCoopType>[];
+    modifier: EnumOption<ChallengeModifier>[];
+    combineActionType: EnumOption<CombineActionType>[];
+    locationType: EnumOption<LocationType>[];
+    dataType: EnumOption<ChallengeDataType>[];
+}
+
+export const challengeOptionRegistry: ChallengeOptionRegistry = {
+    actionType: [
+        { value: ChallengeActionType.MINIMUM_SPEED, label: 'Minimum Speed' },
+        { value: ChallengeActionType.IN_AIR, label: 'In Air' },
+        { value: ChallengeActionType.AIR_DISTANCE, label: 'Air Distance' },
+        { value: ChallengeActionType.LEAP_CARS, label: 'Leap Cars' },
+        { value: ChallengeActionType.DRIFT, label: 'Drift' },
+        { value: ChallengeActionType.NEAR_MISS, label: 'Near Miss' },
+        { value: ChallengeActionType.BARREL_ROLLS, label: 'Barrel Rolls' },
+        { value: ChallengeActionType.ONCOMING, label: 'Oncoming' },
+        { value: ChallengeActionType.FLATSPIN, label: 'Flat Spin' },
+        { value: ChallengeActionType.LAND_SUCCESSFUL, label: 'Land Successful' },
+        { value: ChallengeActionType.ROAD_RULE_TIME, label: 'Road Rule Time' },
+        { value: ChallengeActionType.ROAD_RULE_CRASH, label: 'Road Rule Crash' },
+        { value: ChallengeActionType.PLAYER_POWER_PARKING, label: 'Player Power Parking' },
+        { value: ChallengeActionType.TRAFFIC_POWER_PARKING, label: 'Traffic Power Parking' },
+        { value: ChallengeActionType.CRASH_INTO_PLAYER, label: 'Crash Into Player' },
+        { value: ChallengeActionType.BURNOUTS, label: 'Burnouts' },
+        { value: ChallengeActionType.MEET_UP, label: 'Meet Up' },
+        { value: ChallengeActionType.BILLBOARD, label: 'Billboard' },
+        { value: ChallengeActionType.BOOST_TIME, label: 'Boost Time' },
+        { value: ChallengeActionType.BARREL_ROLLS_REVERSE, label: 'Barrel Rolls Reverse' },
+        { value: ChallengeActionType.FLATSPIN_REVERSE, label: 'Flat Spin Reverse' },
+        { value: ChallengeActionType.LAND_SUCCESSFUL_REVERSE, label: 'Land Successful Reverse' },
+        { value: ChallengeActionType.CONVOY_RELATED, label: 'Convoy Related' },
+        { value: ChallengeActionType.UNKNOWN_23, label: 'Unknown 23' },
+        { value: ChallengeActionType.AIR_CHAINED_MULTIPLIER, label: 'Air Chained Multiplier' },
+        { value: ChallengeActionType.FLAT_SPIN_CHAINED_MULTIPLIER, label: 'Flat Spin Chained Multiplier' },
+        { value: ChallengeActionType.BARREL_ROLL_CHAINED_MULTIPLIER, label: 'Barrel Roll Chained Multiplier' },
+        { value: ChallengeActionType.SUPER_JUMP_CHAINED_MULTIPLIER, label: 'Super Jump Chained Multiplier' },
+        { value: ChallengeActionType.BILLBOARD_CHAINED_MULTIPLIER, label: 'Billboard Chained Multiplier' },
+        { value: ChallengeActionType.UNKNOWN_CHAINED_MULTIPLIER, label: 'Unknown Chained Multiplier' },
+        { value: ChallengeActionType.CHAINED_MULTIPLIER, label: 'Chained Multiplier' },
+        { value: ChallengeActionType.AIR_MULTIPLIER, label: 'Air Multiplier' },
+        { value: ChallengeActionType.FLAT_SPIN_MULTIPLIER, label: 'Flat Spin Multiplier' },
+        { value: ChallengeActionType.STUNT_SCORE, label: 'Stunt Score' },
+        { value: ChallengeActionType.CORKSCREW, label: 'Corkscrew' },
+        { value: ChallengeActionType.LAND_SUPER_JUMPS, label: 'Land Super Jumps' },
+        { value: ChallengeActionType.LAND_SPECIFIC_SUPER_JUMP, label: 'Land Specific Super Jump' },
+        { value: ChallengeActionType.SMASH_SPECIFIC_BILLBOARD, label: 'Smash Specific Billboard' },
+        { value: ChallengeActionType.INTERSTATE_LAP, label: 'Interstate Lap' },
+        { value: ChallengeActionType.INTERSTATE_LAP_NO_STOP, label: 'Interstate Lap No Stop' },
+        { value: ChallengeActionType.INTERSTATE_LAP_NO_CRASH, label: 'Interstate Lap No Crash' },
+        { value: ChallengeActionType.AERIAL_NEAR_MISS, label: 'Aerial Near Miss' },
+        { value: ChallengeActionType.REV_DRIVING, label: 'Rev Driving' },
+        { value: ChallengeActionType.REV_ONCOMING, label: 'Rev Oncoming' },
+        { value: ChallengeActionType.TAKEDOWNS, label: 'Takedowns' },
+        { value: ChallengeActionType.VERT_TAKEDOWN, label: 'Vert Takedown' },
+        { value: ChallengeActionType.TARGET, label: 'Target' },
+        { value: ChallengeActionType.WHEELIE_DISTANCE, label: 'Wheelie Distance' },
+        { value: ChallengeActionType.WHEELIE_TIMES, label: 'Wheelie Times' },
+        { value: ChallengeActionType.WHEELIE_NEAR_MISS, label: 'Wheelie Near Miss' },
+        { value: ChallengeActionType.WHEELIE_ONCOMING, label: 'Wheelie Oncoming' },
+        { value: ChallengeActionType.ONCOMING_NEAR_MISS, label: 'Oncoming Near Miss' },
+        { value: ChallengeActionType.NO_LONGER_EXISTS_58, label: 'No Longer Exists 58' },
+        { value: ChallengeActionType.NO_LONGER_EXISTS_59, label: 'No Longer Exists 59' },
+        { value: ChallengeActionType.DISTANCE_TRAVELED, label: 'Distance Traveled' },
+        { value: ChallengeActionType.NO_LONGER_EXISTS_61, label: 'No Longer Exists 61' },
+        { value: ChallengeActionType.JUMP_OVER_BIKES, label: 'Jump Over Bikes' },
+        { value: ChallengeActionType.COUNT, label: 'Count' },
+    ],
+    coopType: [
+        { value: ChallengeCoopType.ONCE, label: 'Once' },
+        { value: ChallengeCoopType.INDIVIDUAL, label: 'Individual' },
+        { value: ChallengeCoopType.INDIVIDUAL_ACCUMULATION, label: 'Individual Accumulation' },
+        { value: ChallengeCoopType.SIMULTANEOUS, label: 'Simultaneous' },
+        { value: ChallengeCoopType.CUMULATIVE, label: 'Cumulative' },
+        { value: ChallengeCoopType.AVERAGE, label: 'Average' },
+        { value: ChallengeCoopType.INDIVIDUAL_SEQUENCE, label: 'Individual Sequence' },
+    ],
+    modifier: [
+        { value: ChallengeModifier.NONE, label: 'None' },
+        { value: ChallengeModifier.WITHOUT_CRASHING, label: 'Without Crashing' },
+        { value: ChallengeModifier.PRISTINE, label: 'Pristine' },
+        { value: ChallengeModifier.HEAD_ON, label: 'Head On' },
+        { value: ChallengeModifier.IN_AIR, label: 'In Air' },
+        { value: ChallengeModifier.BANK_FOR_SUCCESS, label: 'Bank For Success' },
+        { value: ChallengeModifier.STANDS_BY_BEFORE_PART_2, label: 'Stands By Before Part 2' },
+        { value: ChallengeModifier.TIMER_STARTS_ON_CHALLENGE_ACTIVATION, label: 'Timer Starts On Challenge Activation' },
+    ],
+    combineActionType: [
+        { value: CombineActionType.CHAIN, label: 'Chain' },
+        { value: CombineActionType.FAILURE_RESETS_CHAIN, label: 'Failure Resets Chain' },
+        { value: CombineActionType.FAILURE_RESETS_EVERYONE, label: 'Failure Resets Everyone' },
+        { value: CombineActionType.UNKNOWN_3, label: 'Unknown 3' },
+        { value: CombineActionType.SIMULTANEOUS, label: 'Simultaneous' },
+        { value: CombineActionType.INDEPENDENT, label: 'Independent' },
+        { value: CombineActionType.UNKNOWN_6, label: 'Unknown 6' },
+    ],
+    locationType: [
+        { value: LocationType.ANYWHERE, label: 'Anywhere' },
+        { value: LocationType.DISTRICT, label: 'District' },
+        { value: LocationType.COUNTY, label: 'County' },
+        { value: LocationType.TRIGGER, label: 'Trigger' },
+        { value: LocationType.ROAD, label: 'Road' },
+        { value: LocationType.ROAD_NO_MARKER, label: 'Road (No Marker)' },
+        { value: LocationType.GAS_STATION, label: 'Gas Station' },
+        { value: LocationType.AUTO_REPAIR, label: 'Auto Repair' },
+        { value: LocationType.PAINT_SHOP, label: 'Paint Shop' },
+    ],
+    dataType: [
+        { value: ChallengeDataType.CRASHES, label: 'Crashes' },
+        { value: ChallengeDataType.NEAR_MISS, label: 'Near Miss' },
+        { value: ChallengeDataType.ONCOMING, label: 'Oncoming' },
+        { value: ChallengeDataType.DRIFT, label: 'Drift' },
+        { value: ChallengeDataType.AIR, label: 'Air' },
+        { value: ChallengeDataType.AIR_DISTANCE, label: 'Air Distance' },
+        { value: ChallengeDataType.BARREL_ROLLS, label: 'Barrel Rolls' },
+        { value: ChallengeDataType.FLAT_SPINS, label: 'Flat Spins' },
+        { value: ChallengeDataType.CARS_LEAPT, label: 'Cars Leapt' },
+        { value: ChallengeDataType.SPEED_ROAD_RULE, label: 'Speed Road Rule' },
+        { value: ChallengeDataType.CRASH_ROAD_RULE, label: 'Crash Road Rule' },
+        { value: ChallengeDataType.SUCCESSFUL_LANDINGS, label: 'Successful Landings' },
+        { value: ChallengeDataType.BURNOUTS, label: 'Burnouts' },
+        { value: ChallengeDataType.POWER_PARKS, label: 'Power Parks' },
+        { value: ChallengeDataType.PERCENTAGE, label: 'Percentage' },
+        { value: ChallengeDataType.MEET_UP, label: 'Meet Up' },
+        { value: ChallengeDataType.BILLBOARDS, label: 'Billboards' },
+        { value: ChallengeDataType.BOOST_TIME, label: 'Boost Time' },
+        { value: ChallengeDataType.CONVOY_POSITION, label: 'Convoy Position' },
+        { value: ChallengeDataType.DISTANCE, label: 'Distance' },
+        { value: ChallengeDataType.CHAIN, label: 'Chain' },
+        { value: ChallengeDataType.MULTIPLIER, label: 'Multiplier' },
+        { value: ChallengeDataType.STUNT_SCORE, label: 'Stunt Score' },
+        { value: ChallengeDataType.CORKSCREW, label: 'Corkscrew' },
+        { value: ChallengeDataType.SUPER_JUMP, label: 'Super Jump' },
+        { value: ChallengeDataType.INTERSTATE_LAP, label: 'Interstate Lap' },
+        { value: ChallengeDataType.TAKEDOWNS, label: 'Takedowns' },
+        { value: ChallengeDataType.VERT_TAKEDOWN, label: 'Vert Takedown' },
+        { value: ChallengeDataType.AERIAL_NEAR_MISS, label: 'Aerial Near Miss' },
+        { value: ChallengeDataType.REV_DRIVING, label: 'Rev Driving' },
+        { value: ChallengeDataType.REV_ONCOMING, label: 'Rev Oncoming' },
+        { value: ChallengeDataType.TARGET, label: 'Target' },
+        { value: ChallengeDataType.BIKES_LEAPT, label: 'Bikes Leapt' },
+        { value: ChallengeDataType.WHEELIE, label: 'Wheelie' },
+        { value: ChallengeDataType.WHEELIE_NEAR_MISS, label: 'Wheelie Near Miss' },
+        { value: ChallengeDataType.WHEELIE_ONCOMING, label: 'Wheelie Oncoming' },
+        { value: ChallengeDataType.ONCOMING_NEAR_MISS, label: 'Oncoming Near Miss' },
+        { value: ChallengeDataType.DISTANCE_TRAVELED, label: 'Distance Traveled' },
+        { value: ChallengeDataType.COUNT, label: 'Count' },
+    ],
+};
+
+export function getOptions<K extends keyof ChallengeOptionRegistry>(key: K): Readonly<ChallengeOptionRegistry[K]> {
+    return challengeOptionRegistry[key];
+}
+
+export function getLabel<K extends keyof ChallengeOptionRegistry>(key: K, value: number): string | undefined {
+    const arr = challengeOptionRegistry[key] as ReadonlyArray<{ value: number; label: string }>;
+    return arr.find(o => o.value === value)?.label;
+}
+
 export type ParsedChallengeList = {
     numChallenges: number;
     challenges: ChallengeListEntry[];
