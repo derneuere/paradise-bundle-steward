@@ -1,7 +1,7 @@
 // Settings management for user preferences
 // Uses localStorage to persist settings across sessions
 
-const SETTINGS_KEY = 'paradise-bundle-steward-settings';
+const SETTINGS_KEY = 'online-bundle-manager-settings';
 
 type Settings = {
   autoAssignRegionIndexes: boolean;

@@ -1,14 +1,15 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Upload, Download, Hexagon, Database, Car, Palette } from 'lucide-react';
+import { Upload, Download, Hexagon, Database } from 'lucide-react';
 import { useBundle } from '@/context/BundleContext';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useRef } from 'react';
+import { useRef, useState, useMemo } from 'react';
+import { ExportWarningModal } from '@/components/capabilities';
+import { CAPABILITIES, type FeatureCapability } from '@/lib/capabilities';
 
 export const BundleLayout = () => {
-  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showExportWarning, setShowExportWarning] = useState(false);
   const {
     isLoading,
     isModified,
@@ -16,12 +17,46 @@ export const BundleLayout = () => {
     loadBundleFromFile,
     exportBundle,
     vehicleList,
-    resources,
     playerCarColours,
-    iceDictionary
   } = useBundle();
 
   const hasBundle = !!loadedBundle;
+
+  // Check which unsupported features have been modified
+  const unsupportedModifiedFeatures = useMemo(() => {
+    const unsupported: FeatureCapability[] = [];
+    
+    // Check if vehicle list is present and modified (but doesn't have write support)
+    if (vehicleList && vehicleList.length > 0) {
+      const vehicleCap = CAPABILITIES.resources.find(r => r.id === 'vehicle-list');
+      if (vehicleCap && !vehicleCap.write) {
+        unsupported.push(vehicleCap);
+      }
+    }
+    
+    // Check if player car colours is present (but doesn't have write support)
+    if (playerCarColours) {
+      const colorsCap = CAPABILITIES.resources.find(r => r.id === 'player-car-colours');
+      if (colorsCap && !colorsCap.write) {
+        unsupported.push(colorsCap);
+      }
+    }
+    
+    return unsupported;
+  }, [vehicleList, playerCarColours]);
+
+  const handleExportClick = () => {
+    if (isModified && unsupportedModifiedFeatures.length > 0) {
+      setShowExportWarning(true);
+    } else {
+      void exportBundle();
+    }
+  };
+
+  const handleConfirmExport = () => {
+    setShowExportWarning(false);
+    void exportBundle();
+  };
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -29,7 +64,7 @@ export const BundleLayout = () => {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">Bundle Manager</h1>
+              <h1 className="text-2xl font-bold tracking-tight">Online Bundle Manager</h1>
               <p className="text-muted-foreground">Burnout Paradise Bundle Editor & Resource Explorer</p>
             </div>
             <div className="flex items-center gap-3">
@@ -53,7 +88,7 @@ export const BundleLayout = () => {
                 {isLoading ? 'Loading...' : 'Load Bundle'}
               </Button>
               {hasBundle && (
-                <Button onClick={() => void exportBundle()} disabled={isLoading} variant="outline" className="gap-2">
+                <Button onClick={handleExportClick} disabled={isLoading} variant="outline" className="gap-2">
                   <Download className="w-4 h-4" />
                   Export Bundle
                 </Button>
@@ -96,6 +131,13 @@ export const BundleLayout = () => {
           )}
         </div>
       </main>
+      
+      <ExportWarningModal
+        open={showExportWarning}
+        onOpenChange={setShowExportWarning}
+        onConfirm={handleConfirmExport}
+        unsupportedFeatures={unsupportedModifiedFeatures}
+      />
     </div>
   );
 };

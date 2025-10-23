@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { useBundle } from '@/context/BundleContext';
+import { useBundle, type UIResource } from '@/context/BundleContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Database, Cpu, Filter, Search, File, Image, Volume2, Code, Palette, Car } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { CapabilityBadge } from '@/components/capabilities';
 
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -58,7 +59,7 @@ const ResourcesPage = () => {
   const compressionRatio = totalUncompressed > 0 ? (totalCompressed / totalUncompressed * 100).toFixed(1) : '0';
   const currentPlatform = loadedBundle ? ['PC', 'Xbox 360', 'PlayStation 3'][loadedBundle.header.platform - 1] || 'None' : 'None';
 
-  const ResourceCard = ({ resource }: { resource: any }) => {
+  const ResourceCard = ({ resource }: { resource: UIResource }) => {
     const IconComponent = getCategoryIcon(resource.category);
     return (
       <Card className="h-fit border rounded-lg hover:shadow-lg transition-all duration-200">
@@ -73,7 +74,10 @@ const ResourcesPage = () => {
                 <p className="text-xs text-muted-foreground truncate" title={resource.typeName}>{resource.typeName}</p>
               </div>
             </div>
-            <Badge variant="outline" className="text-xs shrink-0">{resource.category}</Badge>
+            <div className="flex flex-col gap-1.5 items-end shrink-0">
+              <Badge variant="outline" className="text-xs">{resource.category}</Badge>
+              <CapabilityBadge resourceTypeId={resource.raw.resourceTypeId} variant="compact" />
+            </div>
           </div>
 
           <div className="space-y-2">

@@ -108,7 +108,7 @@ export const BundleManager = () => {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">Bundle Manager</h1>
+              <h1 className="text-2xl font-bold tracking-tight">Online Bundle Manager</h1>
               <p className="text-muted-foreground">
                 Burnout Paradise Bundle Editor & Resource Explorer
               </p>

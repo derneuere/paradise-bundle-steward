@@ -2,6 +2,7 @@ import { useBundle } from '@/context/BundleContext';
 import { PlayerCarColoursComponent } from '@/components/PlayerCarColours';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
+import { CapabilityWarning } from '@/components/capabilities';
 
 const ColorsPage = () => {
   const { playerCarColours } = useBundle();
@@ -13,7 +14,12 @@ const ColorsPage = () => {
       </Alert>
     );
   }
-  return <PlayerCarColoursComponent colours={playerCarColours} />;
+  return (
+    <div className="space-y-4">
+      <CapabilityWarning featureId="player-car-colours" />
+      <PlayerCarColoursComponent colours={playerCarColours} />
+    </div>
+  );
 };
 
 export default ColorsPage;

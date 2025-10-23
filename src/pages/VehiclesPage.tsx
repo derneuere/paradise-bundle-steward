@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useBundle } from '@/context/BundleContext';
 import { VehicleList } from '@/components/VehicleList';
 import type { VehicleListEntry } from '@/lib/core/vehicleList';
+import { CapabilityWarning } from '@/components/capabilities';
 
 const VehiclesPage = () => {
   const navigate = useNavigate();
@@ -33,13 +34,16 @@ const VehiclesPage = () => {
   };
 
   return (
-    <VehicleList
-      vehicles={vehicleList}
-      onAddVehicle={handleAddVehicle}
-      onEditVehicle={handleEditVehicle}
-      onDeleteVehicle={handleDeleteVehicle}
-      onExportBundle={handleExportBundle}
-    />
+    <div className="space-y-4">
+      <CapabilityWarning featureId="vehicle-list" />
+      <VehicleList
+        vehicles={vehicleList}
+        onAddVehicle={handleAddVehicle}
+        onEditVehicle={handleEditVehicle}
+        onDeleteVehicle={handleDeleteVehicle}
+        onExportBundle={handleExportBundle}
+      />
+    </div>
   );
 };
 
