@@ -385,15 +385,19 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
               <div className="text-sm text-muted-foreground">No items to edit.</div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {(['positionX','positionY','positionZ','rotationX','rotationY','rotationZ','dimensionX','dimensionY','dimensionZ'] as BoxField[]).map((f) => (
+                {(['positionX','positionZ','positionY','rotationX','rotationZ','rotationY','dimensionX','dimensionZ','dimensionY'] as BoxField[]).map((f) => (
                   <div key={f} className="flex flex-col gap-1">
                     <label className="text-sm font-medium capitalize">{f}</label>
                     <input
                       type="number"
-                      step="0.01"
+                      step="any"
                       className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
                       value={currentBox ? (currentBox[f] ?? 0) : 0}
-                      onChange={(e) => updateCurrentBox(f, Number.parseFloat(e.target.value))}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '' || val === '-') return;
+                        updateCurrentBox(f, Number.parseFloat(val));
+                      }}
                       disabled={!currentBox}
                     />
                   </div>
