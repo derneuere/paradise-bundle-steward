@@ -60,7 +60,9 @@ const VEHICLE_TYPE_OPTIONS = [
 const BOOST_TYPE_OPTIONS = [
   { value: CarType.SPEED, label: 'SPEED' },
   { value: CarType.AGGRESSION, label: 'AGGRESSION' },
-  { value: CarType.STUNT, label: 'STUNT' }
+  { value: CarType.STUNT, label: 'STUNT' },
+  { value: CarType.NONE, label: 'NONE' },
+  { value: CarType.LOCKED, label: 'LOCKED' }
 ];
 
 const LIVERY_TYPE_OPTIONS = [
