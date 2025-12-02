@@ -863,7 +863,7 @@ export function writeChallengeListData(challengeList: ParsedChallengeList, littl
 // High-level wrapper with progress (optional)
 // =============================================================================
 
-export function writeChallengeList(td: ParsedChallengeList, options: { littleEndian?: boolean; autoAssignRegionIndexes?: boolean } = {}, progress?: ProgressCallback): Uint8Array {
+export function writeChallengeList(td: ParsedChallengeList, options: { littleEndian?: boolean } = {}, progress?: ProgressCallback): Uint8Array {
 	progress?.({ type: 'write', stage: 'write', progress: 0.0, message: 'Serializing ChallengeList' });
 	const out = writeChallengeListData(td, options.littleEndian !== false);
 	progress?.({ type: 'write', stage: 'write', progress: 1.0, message: 'Done' });

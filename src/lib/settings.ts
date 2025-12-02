@@ -4,11 +4,11 @@
 const SETTINGS_KEY = 'online-bundle-manager-settings';
 
 type Settings = {
-  autoAssignRegionIndexes: boolean;
+  // Add future settings here
 };
 
 const DEFAULT_SETTINGS: Settings = {
-  autoAssignRegionIndexes: true, // Default to true (current behavior)
+  // Add future defaults here
 };
 
 export function getSettings(): Settings {

@@ -28,7 +28,6 @@ import { RESOURCE_TYPES } from '../../resourceTypes';
 import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTakeDictionary';
 import { type ParsedTriggerData, parseTriggerData, writeTriggerDataData } from '../triggerData';
 import { extractResourceSize, extractAlignment, packSizeAndAlignment, isCompressed, compressData } from '../resourceManager';
-import { getSetting } from '../../settings';
 import { parseChallengeList, ParsedChallengeList, writeChallengeListData } from '../challengeList';
 
 // ============================================================================
@@ -72,8 +71,7 @@ export function writeBundleFresh(
       }, little);
     },
     [RESOURCE_TYPE_IDS.TRIGGER_DATA]: (value: unknown) => {
-      const autoAssign = getSetting('autoAssignRegionIndexes');
-      return writeTriggerDataData(value as ParsedTriggerData, little, autoAssign);
+      return writeTriggerDataData(value as ParsedTriggerData, little);
     },
     [RESOURCE_TYPE_IDS.CHALLENGE_LIST]: (value: unknown) => {
       return writeChallengeListData(value as ParsedChallengeList, little);
