@@ -4,9 +4,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trash2 } from 'lucide-react';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
+import { StuntCameraType } from '@/lib/core/triggerData';
 import { numberField } from './utils';
+
+const cameraTypeOptions = [
+  { value: StuntCameraType.E_STUNT_CAMERA_TYPE_NO_CUTS, label: 'No Cuts' },
+  { value: StuntCameraType.E_STUNT_CAMERA_TYPE_CUSTOM, label: 'Custom' },
+  { value: StuntCameraType.E_STUNT_CAMERA_TYPE_NORMAL, label: 'Normal' },
+];
 
 export const GenericRegionsListComp: React.FC<{
   data: ParsedTriggerData;
@@ -46,7 +54,7 @@ export const GenericRegionsListComp: React.FC<{
               className="absolute left-0 right-0"
               style={{ height: vi.size, transform: `translateY(${vi.start}px)` }}
             >
-              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-8 gap-2 items-center bg-background">
+              <div className="mb-3 border rounded p-3 grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2 items-center bg-background">
                 <div>
                   <Label>ID</Label>
                   <Input value={gr.id} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['id'], parseInt(e.target.value)||0) : x) })} />
@@ -78,11 +86,43 @@ export const GenericRegionsListComp: React.FC<{
                   <Input value={gr.genericType} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['genericType'], parseInt(e.target.value)||0) : x) })} />
                 </div>
                 <div>
-                  <Label>Cam1/Cam2</Label>
+                  <Label>Cam Cut 1/2</Label>
                   <div className="grid grid-cols-2 gap-2">
                     <Input value={gr.cameraCut1} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['cameraCut1'], parseInt(e.target.value)||0) : x) })} />
                     <Input value={gr.cameraCut2} type="number" onChange={e => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? numberField(gr, ['cameraCut2'], parseInt(e.target.value)||0) : x) })} />
                   </div>
+                </div>
+                <div>
+                  <Label>Cam Type 1</Label>
+                  <Select
+                    value={gr.cameraType1.toString()}
+                    onValueChange={(val) => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? { ...gr, cameraType1: parseInt(val) as StuntCameraType } : x) })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cameraTypeOptions.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value.toString()}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Cam Type 2</Label>
+                  <Select
+                    value={gr.cameraType2.toString()}
+                    onValueChange={(val) => onChange({ ...data, genericRegions: data.genericRegions.map((x, j) => j===i ? { ...gr, cameraType2: parseInt(val) as StuntCameraType } : x) })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cameraTypeOptions.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value.toString()}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label>One Way</Label>
