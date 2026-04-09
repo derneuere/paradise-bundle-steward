@@ -126,6 +126,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
       id: 0,
       regionIndex: nextFreeRegionIndex(),
       box: { positionX:0, positionY:0, positionZ:0, rotationX:0, rotationY:0, rotationZ:0, dimensionX:1, dimensionY:1, dimensionZ:1 },
+      enabled: 1,
       startingGrids: [],
       designIndex: 0,
       district: 0,
@@ -140,6 +141,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
       id: 0,
       regionIndex: nextFreeRegionIndex(),
       box: { positionX:0, positionY:0, positionZ:0, rotationX:0, rotationY:0, rotationZ:0, dimensionX:1, dimensionY:1, dimensionZ:1 },
+      enabled: 1,
       groupId: 0,
       cameraCut1: 0,
       cameraCut2: 0,
@@ -157,6 +159,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
       id: 0,
       regionIndex: nextFreeRegionIndex(),
       box: { positionX:0, positionY:0, positionZ:0, rotationX:0, rotationY:0, rotationZ:0, dimensionX:1, dimensionY:1, dimensionZ:1 },
+      enabled: 1,
       scoreType: 0 as BlackspotScoreType,
       scoreAmount: 0,
     };
@@ -168,7 +171,8 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
       type: 3 as TriggerRegionType,
       id: 0,
       regionIndex: nextFreeRegionIndex(),
-      box: { positionX:0, positionY:0, positionZ:0, rotationX:0, rotationY:0, rotationZ:0, dimensionX:1, dimensionY:1, dimensionZ:1 }
+      box: { positionX:0, positionY:0, positionZ:0, rotationX:0, rotationY:0, rotationZ:0, dimensionX:1, dimensionY:1, dimensionZ:1 },
+      enabled: 1,
     };
     onChange({ ...data, vfxBoxRegions: [...data.vfxBoxRegions, v] });
   };

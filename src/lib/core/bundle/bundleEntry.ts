@@ -106,8 +106,8 @@ export function bundleEntryToSchema(entry: {
   dependencyCount: number;
 }): Parsed<typeof BundleEntryWriteSchema> {
   return {
-    id: { low: entry.id.low, high: entry.id.high },
-    references: { low: entry.references.low, high: entry.references.high },
+    id: { low: Number(entry.id & 0xFFFFFFFFn), high: Number((entry.id >> 32n) & 0xFFFFFFFFn) },
+    references: { low: Number(entry.references & 0xFFFFFFFFn), high: Number((entry.references >> 32n) & 0xFFFFFFFFn) },
     dependenciesListOffset: entry.dependenciesListOffset,
     type: entry.type,
     dependencyCount: entry.dependencyCount
@@ -204,7 +204,8 @@ export function parseImportEntries(reader: BufferReader, resources: ResourceEntr
           const rawImport = ImportEntrySchema.read(reader);
           const importEntry: ImportEntry = {
             resourceId: rawImport.resourceId,
-            offset: rawImport.offset
+            offset: rawImport.offset,
+            padding: rawImport.padding
           };
           imports.push(importEntry);
         } catch (error) {

@@ -93,7 +93,7 @@ export const VehicleEditor = ({ vehicle, isOpen, onClose, onSave, isNewVehicle =
           boostCapacity: 100,
           strengthStat: 100
         },
-        unknownData: new Uint8Array(16),
+        unknownData: Array.from(new Uint8Array(16)),
         attribCollectionKey: 0n,
         audioData: {
           exhaustName: 0n,

@@ -35,7 +35,7 @@ function extractStreetDataRaw(buffer: ArrayBuffer): Uint8Array {
 		const base = bundle.header.resourceDataOffsets[bi] >>> 0;
 		const rel = resource.diskOffsets[bi] >>> 0;
 		const start = (base + rel) >>> 0;
-		let slice = new Uint8Array(buffer, start, size);
+		let slice = new Uint8Array(buffer.slice(start, start + size));
 		if (isCompressed(slice)) slice = decompressData(slice);
 		return slice;
 	}
