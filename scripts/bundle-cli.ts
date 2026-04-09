@@ -363,6 +363,226 @@ function cmdStress(args: CliArgs) {
 }
 
 // ---------------------------------------------------------------------------
+// Fuzz command
+// ---------------------------------------------------------------------------
+
+/**
+ * mulberry32 — tiny seedable PRNG with a 2^32 period.
+ * Good enough for reproducible structural fuzzing; not cryptographic.
+ */
+function mulberry32(seed: number): () => number {
+	let state = seed >>> 0;
+	return () => {
+		state = (state + 0x6D2B79F5) >>> 0;
+		let t = state;
+		t = Math.imul(t ^ (t >>> 15), t | 1);
+		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+type MutationOp = { op: string; path: string; a?: number; b?: number };
+
+/**
+ * Walk the top-level properties of `model` and apply 1–3 random structural
+ * mutations to its arrays. Records every mutation into `trace` so a failing
+ * iteration can be reproduced and understood.
+ *
+ * Intentionally generic: only touches top-level arrays. Nested arrays and
+ * primitive fields are untouched — fuzzing is about exercising count-derived
+ * pointer math and writer branches, not about random garbage. Handlers that
+ * need deeper or paired mutations should rely on stress scenarios instead.
+ */
+function randomMutate<T extends Record<string, unknown>>(
+	model: T,
+	rng: () => number,
+	trace: MutationOp[],
+): T {
+	const arrayKeys: string[] = [];
+	for (const key of Object.keys(model)) {
+		if (Array.isArray(model[key])) arrayKeys.push(key);
+	}
+	if (arrayKeys.length === 0) return model;
+
+	const numMutations = 1 + Math.floor(rng() * 3); // 1..3
+	const next: Record<string, unknown> = { ...model };
+
+	for (let m = 0; m < numMutations; m++) {
+		const key = arrayKeys[Math.floor(rng() * arrayKeys.length)];
+		const arr = (next[key] as unknown[]).slice();
+		const len = arr.length;
+
+		// Op distribution: pop, dup, swap, clear, append.
+		// Bias away from 'clear' (destructive) — 1 in 12 slots.
+		const roll = Math.floor(rng() * 12);
+		if (len === 0) {
+			// Nothing to mutate on an empty array this round.
+			trace.push({ op: 'noop-empty', path: key });
+			continue;
+		}
+
+		if (roll < 3) {
+			const idx = Math.floor(rng() * len);
+			arr.splice(idx, 1);
+			trace.push({ op: 'pop', path: key, a: idx });
+		} else if (roll < 6) {
+			const idx = Math.floor(rng() * len);
+			// Deep clone via JSON with bigint tagging so CgsID-style fields survive.
+			const clone = JSON.parse(
+				JSON.stringify(arr[idx], jsonReplacer),
+				jsonReviver,
+			);
+			arr.push(clone);
+			trace.push({ op: 'dup', path: key, a: idx });
+		} else if (roll < 9) {
+			if (len >= 2) {
+				const i = Math.floor(rng() * len);
+				let j = Math.floor(rng() * len);
+				if (j === i) j = (j + 1) % len;
+				const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+				trace.push({ op: 'swap', path: key, a: i, b: j });
+			} else {
+				trace.push({ op: 'noop-swap-single', path: key });
+				continue;
+			}
+		} else if (roll < 10) {
+			arr.length = 0;
+			trace.push({ op: 'clear', path: key });
+		} else {
+			// append clone of last element (structurally safer than "new zeroed element"
+			// because we don't know the element schema).
+			const clone = JSON.parse(
+				JSON.stringify(arr[len - 1], jsonReplacer),
+				jsonReviver,
+			);
+			arr.push(clone);
+			trace.push({ op: 'append', path: key, a: len - 1 });
+		}
+
+		next[key] = arr;
+	}
+
+	return next as T;
+}
+
+function formatTrace(trace: MutationOp[]): string {
+	return trace
+		.map((t) => {
+			if (t.op === 'swap') return `swap ${t.path} @${t.a} ↔ @${t.b}`;
+			if (t.op === 'pop') return `pop ${t.path} @${t.a}`;
+			if (t.op === 'dup') return `dup ${t.path} @${t.a}`;
+			if (t.op === 'append') return `append ${t.path} @${t.a}`;
+			if (t.op === 'clear') return `clear ${t.path}`;
+			return `${t.op} ${t.path}`;
+		})
+		.join(', ');
+}
+
+function cmdFuzz(args: CliArgs) {
+	const [bundlePath] = args.positional;
+	if (!bundlePath) throw new Error('Usage: fuzz <bundle> [--type <key>] [--iterations N] [--seed S]');
+
+	const iterations = Number(args.options.get('iterations') ?? 50);
+	if (!Number.isFinite(iterations) || iterations <= 0) {
+		throw new Error(`--iterations must be a positive integer (got ${args.options.get('iterations')})`);
+	}
+	const seed = args.options.has('seed')
+		? Number(args.options.get('seed'))
+		: (Date.now() & 0xFFFFFFFF) >>> 0;
+	if (!Number.isFinite(seed)) {
+		throw new Error(`--seed must be a number (got ${args.options.get('seed')})`);
+	}
+
+	const { buffer } = loadBundleBytes(bundlePath);
+	const bundle = parseBundle(buffer);
+	const handler = pickHandler(bundle, args);
+
+	if (!handler.caps.write || !handler.writeRaw) {
+		throw new Error(`${handler.name} is read-only — cannot fuzz without a writer.`);
+	}
+
+	const ctx = resourceCtxFromBundle(bundle);
+	const resource = bundle.resources.find((r) => r.resourceTypeId === handler.typeId)!;
+	const raw = extractResourceRaw(buffer, bundle, resource);
+	const baseline = handler.parseRaw(raw, ctx);
+
+	console.log(`Fuzzing ${handler.name} [${handler.key}]: ${handler.describe(baseline)}`);
+	console.log(`  original raw: ${raw.byteLength} bytes, sha1 ${sha1(raw)}`);
+	console.log(`  seed: ${seed}, iterations: ${iterations}`);
+
+	// Verify baseline writer works before we spend time on mutations — a broken
+	// baseline writer would produce a cascade of meaningless fuzz "failures".
+	try {
+		const w1 = handler.writeRaw!(baseline, ctx);
+		const reparsed = handler.parseRaw(w1, ctx);
+		const w2 = handler.writeRaw!(reparsed, ctx);
+		if (!bytesEqual(w1, w2)) {
+			throw new Error(`baseline writer is not idempotent (${w1.byteLength} B vs ${w2.byteLength} B)`);
+		}
+	} catch (err) {
+		console.log(`FUZZ ABORT — baseline writer check failed: ${err instanceof Error ? err.message : String(err)}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	const rng = mulberry32(seed);
+	const tolerated = handler.fuzz?.tolerateErrors ?? [];
+
+	// Bigint-safe deep clone — reuse the same replacer/reviver the dump/pack
+	// commands use so handlers with CgsID fields don't lose data.
+	const cloneModel = <T,>(m: T): T =>
+		JSON.parse(JSON.stringify(m, jsonReplacer), jsonReviver) as T;
+
+	let ok = 0;
+	let toleratedCount = 0;
+	let failed = 0;
+
+	for (let i = 0; i < iterations; i++) {
+		const trace: MutationOp[] = [];
+		let mutated: unknown;
+		try {
+			mutated = randomMutate(cloneModel(baseline) as Record<string, unknown>, rng, trace);
+		} catch (err) {
+			console.log(`  iter ${String(i).padStart(4, ' ')}  FAIL  mutate threw: ${err instanceof Error ? err.message : String(err)}`);
+			console.log(`        trace: ${formatTrace(trace)}`);
+			failed++;
+			continue;
+		}
+
+		try {
+			const write1 = handler.writeRaw!(mutated as never, ctx);
+			const reparsed = handler.parseRaw(write1, ctx);
+			const write2 = handler.writeRaw!(reparsed, ctx);
+
+			if (!bytesEqual(write1, write2)) {
+				console.log(
+					`  iter ${String(i).padStart(4, ' ')}  FAIL  writer not idempotent ` +
+						`(write1 ${write1.byteLength} B sha1 ${sha1(write1).slice(0, 12)}, ` +
+						`write2 ${write2.byteLength} B sha1 ${sha1(write2).slice(0, 12)})`,
+				);
+				console.log(`        trace: ${formatTrace(trace)}`);
+				failed++;
+				continue;
+			}
+
+			ok++;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (tolerated.some((re) => re.test(msg))) {
+				toleratedCount++;
+				continue;
+			}
+			console.log(`  iter ${String(i).padStart(4, ' ')}  FAIL  threw: ${msg}`);
+			console.log(`        trace: ${formatTrace(trace)}`);
+			failed++;
+		}
+	}
+
+	console.log(`\nfuzz: ${ok} ok, ${toleratedCount} tolerated, ${failed} failed`);
+	if (failed > 0) process.exitCode = 1;
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -377,8 +597,9 @@ function main() {
 			case 'pack':      return cmdPack(args);
 			case 'roundtrip': return cmdRoundtrip(args);
 			case 'stress':    return cmdStress(args);
+			case 'fuzz':      return cmdFuzz(args);
 			default:
-				console.error('Commands: list | parse | dump | pack | roundtrip | stress');
+				console.error('Commands: list | parse | dump | pack | roundtrip | stress | fuzz');
 				console.error('Registered handlers: ' + registry.map((h) => h.key).join(', '));
 				process.exit(1);
 		}

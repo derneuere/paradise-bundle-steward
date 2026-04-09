@@ -60,6 +60,19 @@ export interface ResourceHandler<Model = unknown> {
 	 * but the CLI will refuse to run them since there is nothing to write.
 	 */
 	stressScenarios?: StressScenario<Model>[];
+
+	/**
+	 * Optional configuration for the `bundle-cli fuzz` command.
+	 *
+	 * `tolerateErrors` lists writer error-message patterns that the fuzzer
+	 * should count as "expected rejection" rather than unexpected failure.
+	 * For example, StreetData's writer throws when `challenges.length !=
+	 * roads.length`; a generic structural mutation can easily violate that
+	 * invariant, and the fuzzer should not flag it as a crash.
+	 */
+	fuzz?: {
+		tolerateErrors?: RegExp[];
+	};
 }
 
 /**

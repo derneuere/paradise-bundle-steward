@@ -839,8 +839,13 @@ function writeChallengeListEntry(writer: BinWriter, challenge: ChallengeListEntr
 }
 
 export function writeChallengeListData(challengeList: ParsedChallengeList, littleEndian: boolean = true): Uint8Array {
+    if (challengeList.numChallenges !== challengeList.challenges.length) {
+        throw new Error(
+            `ChallengeList.write: numChallenges (${challengeList.numChallenges}) must equal challenges.length (${challengeList.challenges.length}).`,
+        );
+    }
     const writer = new BinWriter(64 * 1024, littleEndian);
-    
+
     // Write header
     writer.writeU32(challengeList.numChallenges);
     const challengesOffsetPos = writer.offset;

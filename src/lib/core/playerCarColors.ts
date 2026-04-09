@@ -18,7 +18,7 @@
 // This file does NOT support 64-bit Paradise Remastered. All is64Bit code
 // paths were deliberately removed during the CLI-first refactor.
 
-import { BinReader } from './binTools';
+import { BinReader, BinWriter } from './binTools';
 import { parseBundle } from './bundle';
 import { getResourceData, isNestedBundle, decompressData } from './resourceManager';
 import type {
@@ -162,6 +162,88 @@ export function parsePlayerCarColoursData(data: Uint8Array): PlayerCarColours {
 	}
 
 	return { palettes, totalColors };
+}
+
+// =============================================================================
+// Writer
+// =============================================================================
+
+function writeColor(w: BinWriter, c: PlayerCarColor) {
+	w.writeF32(c.red);
+	w.writeF32(c.green);
+	w.writeF32(c.blue);
+	w.writeF32(c.alpha);
+}
+
+/**
+ * Encode PlayerCarColours back into the 32-bit PC on-disk layout.
+ *
+ * Emits:
+ *   0x00  5 × PlayerCarColourPalette header (0x3C total)
+ *   0x3C  zero-pad to 0x10 alignment
+ *   0x??  palette[0].paint colors, palette[0].pearl colors,
+ *         palette[1].paint colors, ... (Vector4 f32 × N each)
+ *
+ * Pointer fields are absolute offsets into the resource. Palettes are emitted
+ * sequentially with no attempt to detect shared/aliased arrays — round-trip
+ * uses `stableWriter` for that reason.
+ *
+ * Validation is strict: every palette must have
+ * `paintColours.length === pearlColours.length === numColours`. Matches the
+ * "fail loudly on inconsistent counts" rule StreetData established.
+ */
+export function writePlayerCarColoursData(model: PlayerCarColours): Uint8Array {
+	if (model.palettes.length !== 5) {
+		throw new Error(
+			`PlayerCarColours.write: expected exactly 5 palettes, got ${model.palettes.length}`,
+		);
+	}
+	for (let i = 0; i < 5; i++) {
+		const p = model.palettes[i];
+		if (p.paintColours.length !== p.numColours) {
+			throw new Error(
+				`PlayerCarColours.write: palette[${i}] (${p.typeName}) paintColours.length ` +
+					`${p.paintColours.length} != numColours ${p.numColours}`,
+			);
+		}
+		if (p.pearlColours.length !== p.numColours) {
+			throw new Error(
+				`PlayerCarColours.write: palette[${i}] (${p.typeName}) pearlColours.length ` +
+					`${p.pearlColours.length} != numColours ${p.numColours}`,
+			);
+		}
+	}
+
+	const w = new BinWriter(1024, true); // 32-bit PC is little-endian
+
+	// Reserve five 0xC palette headers; remember the offset of each pointer
+	// field so we can back-patch after the color arrays are placed.
+	type Slot = { paintOffPos: number; pearlOffPos: number };
+	const slots: Slot[] = [];
+	for (let i = 0; i < 5; i++) {
+		const paintOffPos = w.offset; w.writeU32(0);
+		const pearlOffPos = w.offset; w.writeU32(0);
+		w.writeI32(model.palettes[i].numColours);
+		slots.push({ paintOffPos, pearlOffPos });
+	}
+	// header is 0x3C — pad up to 0x40 so the first color starts 16-aligned.
+	w.align16();
+
+	for (let i = 0; i < 5; i++) {
+		const p = model.palettes[i];
+		const paintOff = w.offset;
+		for (const c of p.paintColours) writeColor(w, c);
+		const pearlOff = w.offset;
+		for (const c of p.pearlColours) writeColor(w, c);
+
+		// Retail writes an offset of 0 when a palette is empty — spec says
+		// pointer fields are unused when numColours == 0, and the reader
+		// guards on `paintOff > 0`. Mirror that.
+		w.setU32(slots[i].paintOffPos, p.numColours > 0 ? paintOff >>> 0 : 0);
+		w.setU32(slots[i].pearlOffPos, p.numColours > 0 ? pearlOff >>> 0 : 0);
+	}
+
+	return w.bytes;
 }
 
 // =============================================================================

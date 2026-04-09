@@ -38,6 +38,13 @@ export const streetDataHandler: ResourceHandler<ParsedStreetData> = {
 		{ bundle: 'example/BTTSTREETDATA.DAT', expect: { parseOk: true, stableWriter: true } },
 	],
 
+	// Structural fuzzing can easily pop/clone roads without the matching
+	// challenges.length update. The writer rejects those with a clear error;
+	// the fuzzer should count those as "tolerated" not "failed".
+	fuzz: {
+		tolerateErrors: [/challenges\.length.*must equal roads\.length/i],
+	},
+
 	stressScenarios: [
 		{
 			name: 'baseline',
