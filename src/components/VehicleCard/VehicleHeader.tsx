@@ -36,11 +36,11 @@ export const VehicleHeader = ({ vehicle }: VehicleHeaderProps) => {
       {/* Vehicle IDs */}
       <div className="flex flex-wrap gap-2 text-xs">
         <div className={`font-mono ${BurnoutColors.primary.text} ${BurnoutColors.primary.bg} px-2 py-1 rounded`}>
-          🆔 {vehicle.id}
+          🆔 {vehicle.id.toString()}
         </div>
         {vehicle.parentId && (
           <div className="font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
-            👨‍👩‍👧‍👦 {vehicle.parentId}
+            👨‍👩‍👧‍👦 {vehicle.parentId.toString()}
           </div>
         )}
       </div>

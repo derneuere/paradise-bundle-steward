@@ -205,7 +205,7 @@ export function validateResourceEntry(resource: ResourceEntry, bufferSize: numbe
   const errors: ValidationError[] = [];
 
   // Check resource ID
-  if (resource.resourceId === 0n) {
+  if (resource.resourceId.low === 0 && resource.resourceId.high === 0) {
     errors.push(new ValidationError('Resource ID cannot be zero'));
   }
 

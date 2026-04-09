@@ -35,8 +35,8 @@ function extractStreetDataRaw(buffer: ArrayBuffer): Uint8Array {
 		const base = bundle.header.resourceDataOffsets[bi] >>> 0;
 		const rel = resource.diskOffsets[bi] >>> 0;
 		const start = (base + rel) >>> 0;
-		let slice = new Uint8Array(buffer, start, size);
-		if (isCompressed(slice)) slice = decompressData(slice);
+		let slice: Uint8Array<ArrayBuffer> = new Uint8Array(buffer.slice(start, start + size));
+		if (isCompressed(slice)) slice = decompressData(slice) as Uint8Array<ArrayBuffer>;
 		return slice;
 	}
 	throw new Error('StreetData resource had no populated block');
