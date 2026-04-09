@@ -10,10 +10,10 @@ A modern web-based tool for exploring and modifying Burnout Paradise bundle file
 - **Trigger Data** — complete editor for world trigger regions: landmarks, generic regions, blackspots, VFX regions, killzones, roaming and spawn locations.
 - **Vehicle List** — editor for all 284+ vehicles with gameplay stats, audio config, flags, and unlock metadata. Writer round-trips **byte-exact** against the reference fixture.
 - **Street Data** — tabbed editor for streets, junctions, roads, and challenge par scores used by the road network. Writer is lossy-but-idempotent: the first write drops the retail spans/exits tail (which the game ignores due to a FixUp bug), subsequent writes are stable.
+- **Player Car Colours** — editor for all color palettes (Gloss, Metallic, Pearlescent, Special, Party) with paint and pearl Vector4 color values. Writer round-trips **byte-exact** against the reference fixture. 32-bit PC layout.
 
 ### Read-only
 
-- **Player Car Colours** — view all color palettes (Gloss, Metallic, Pearlescent, Special, Party) with paint and pearl Vector4 color values. 32-bit PC layout.
 - **ICE Take Dictionary** — partial support for the in-game camera editor take dictionary. Spec incomplete on the Burnout Wiki.
 
 ### Tools
@@ -95,6 +95,10 @@ npm run bundle -- roundtrip example/TRIGGERS.DAT
 npm run bundle -- stress example/BTTSTREETDATA.DAT
 npm run bundle -- stress example/VEHICLELIST.BUNDLE --type vehicleList
 npm run bundle -- stress example/VEHICLELIST.BUNDLE --type vehicleList --scenario add-vehicle
+
+# Seeded random structural fuzzing
+npm run bundle -- fuzz example/BTTSTREETDATA.DAT --iterations 100 --seed 1
+npm run bundle -- fuzz example/VEHICLELIST.BUNDLE --type playerCarColours
 ```
 
 ### Stress mode
@@ -105,8 +109,29 @@ Today's coverage:
 
 - **StreetData**: `baseline`, `remove-last-street`, `remove-last-road-and-challenge`, `edit-road-debug-name`, `zero-all-challenge-scores` (5 scenarios)
 - **VehicleList**: `baseline`, `edit-first-name`, `toggle-first-flags`, `swap-first-two`, `bulk-zero-colors`, `add-vehicle`, `remove-last-vehicle` (7 scenarios)
+- **TriggerData**: `baseline`, `remove-last-landmark`, `remove-last-generic-region`, `remove-last-blackspot`, `remove-last-spawn-location`, `edit-first-landmark-id`, `zero-first-spawn-position`, `bulk-pop-every-array` (8 scenarios)
+- **ChallengeList**: `baseline`, `remove-last-challenge`, `edit-first-challenge-title`, `zero-first-challenge-difficulty`, `zero-first-action-time-limit`, `duplicate-last-challenge` (6 scenarios)
 
 Single-field mutations are surgical — editing `vehicles[0].boostCapacity` changes exactly one byte at the expected offset, nothing adjacent.
+
+### Fuzz mode
+
+`fuzz` applies **seeded random structural mutations** to the top-level arrays of a handler's model, then asserts writer idempotence and re-parse success on every iteration. Unlike stress scenarios (which are hand-curated and deterministic), fuzzing is generic — the same mutation walker runs against every writable handler — and intentionally explores combinations of edits no one would write by hand.
+
+Operators: `pop`, `dup`, `swap`, `clear`, `append` (bias away from `clear`). Only top-level arrays are touched; nested arrays and primitive fields are left alone. The goal is exercising count-derived pointer math and writer branches, not random-byte garbage.
+
+Handlers declare `fuzz.tolerateErrors` regexes for known invariant violations — e.g., StreetData enforces `challenges.length === roads.length` and TriggerData's writer rejects killzones whose `triggerIds` reference a popped GenericRegion. The fuzzer counts those as **tolerated rejections** (expected) rather than **failures** (bugs).
+
+```bash
+# 100 random mutations, fixed seed for reproducibility
+npm run bundle -- fuzz example/TRIGGERS.DAT --iterations 100 --seed 42
+
+# Failures print a mutation trace so you can reproduce by hand:
+#   iter  42  FAIL  writer not idempotent (write1 30016 B, write2 30080 B)
+#         trace: pop streets @17, dup junctions @3, swap roads @5 ↔ @12
+```
+
+Default seed is `Date.now()` (printed at startup). Same seed → identical mutation sequence → identical results.
 
 ## Architecture
 
@@ -118,7 +143,8 @@ The core of the app is the **resource handler registry** at `src/lib/core/regist
 - `writeRaw(model, ctx)` — re-encode the model (optional for read-only handlers)
 - `describe(model)` — one-line CLI summary
 - `fixtures` — pinned example bundles for regression testing
-- `stressScenarios` — optional mutation scenarios
+- `stressScenarios` — optional hand-curated mutation scenarios
+- `fuzz.tolerateErrors` — optional regexes for writer-invariant rejections the CLI fuzzer should treat as expected
 
 The registry is the single source of truth for which resources exist and how they behave. `src/lib/resourceTypes.ts`, `src/lib/capabilities.ts`, `src/context/BundleContext.tsx` state, `src/pages/ResourcesPage.tsx` NavLinks, and `src/App.tsx` routes are all **derived from the registry** — adding a new resource type requires editing exactly one new file in `registry/handlers/` plus one line in `registry/index.ts`.
 
@@ -168,9 +194,8 @@ src/lib/core/
 
 ### Short term
 
-- **PlayerCarColours write support** — parser now follows the 32-bit PC spec from `docs/PlayerCarColours.md`, writer still pending
-- **TriggerData + ChallengeList stress scenarios** — interface is in place, just needs scenarios
-- **Fuzz mode** for the CLI — random structural mutations to find edge cases
+- **More handler-level fuzz coverage** — the generic array walker only touches top-level arrays; nested per-entry arrays (road spans, junction exits, challenge actions) are still out of reach
+- **Editor-side coverage for PlayerCarColours writes** — the writer is live and byte-exact, but the `ColorsPage` edit flow should grow explicit "add/remove color" affordances
 
 ### Blocked
 
