@@ -1,60 +1,42 @@
 # Online Bundle Manager
 
-A modern web-based tool for exploring and modifying Burnout Paradise bundle files. Built with React and TypeScript, Online Bundle Manager provides an intuitive interface for viewing and editing game resources including challenge lists, trigger data, vehicle lists, and more.
+A modern web-based tool for exploring and modifying Burnout Paradise bundle files. Built with React and TypeScript, Online Bundle Manager provides an intuitive interface for viewing and editing game resources including challenges, trigger data, vehicles, street data, and more.
 
 ## Features
 
-### Fully Supported (Read + Write + Edit)
+### Fully supported (read + write + editor)
 
-- **Challenge List** - View and modify game challenges with a visual editor
-  - Edit challenge properties, actions, and metadata
-  - Modify difficulty, player requirements, and entitlements
-  - Full read/write support with data validation
+- **Challenge List** — visual editor for all 500 freeburn challenges, with difficulty, player requirements, actions, and locations.
+- **Trigger Data** — complete editor for world trigger regions: landmarks, generic regions, blackspots, VFX regions, killzones, roaming and spawn locations.
+- **Vehicle List** — editor for all 284+ vehicles with gameplay stats, audio config, flags, and unlock metadata. Writer round-trips **byte-exact** against the reference fixture.
+- **Street Data** — tabbed editor for streets, junctions, roads, and challenge par scores used by the road network. Writer is lossy-but-idempotent: the first write drops the retail spans/exits tail (which the game ignores due to a FixUp bug), subsequent writes are stable.
 
-- **Trigger Data** - Complete editor for world trigger regions
-  - Landmarks, generic regions, blackspots, and VFX regions
-  - Spawn locations and roaming locations
-  - Full read/write support with coordinate editing
+### Read-only
 
-### Read-Only Support
-
-- **Vehicle List** - Browse all 284+ vehicles with detailed stats
-  - Gameplay stats (speed, strength, boost capacity)
-  - Audio configuration and category classification
-  - Technical specifications and unlock requirements
-  - ⚠️ Editor available but write support not yet working
-
-- **Player Car Colours** - Explore color palettes
-  - 5 palette types: Gloss, Metallic, Pearlescent, Special, Party
-  - Paint and pearl color variations
-  - Interactive color swatches with hex/RGB values
-  - Support for "neon" colors (buffer overread exploit colors)
-  - ⚠️ Write support not yet implemented
+- **Player Car Colours** — view all color palettes (Gloss, Metallic, Pearlescent, Special, Party) with paint and pearl Vector4 color values. 32-bit PC layout.
+- **ICE Take Dictionary** — partial support for the in-game camera editor take dictionary. Spec incomplete on the Burnout Wiki.
 
 ### Tools
 
-- **Hex Viewer** - Low-level bundle inspection
-  - Navigate bundle structure with visual coverage map
-  - Inspect resource entries and raw data
-  - Search by offset and view resource metadata
-  - Color-coded sections by resource type
+- **Hex Viewer** — low-level bundle inspection with coverage map, resource metadata, and color-coded sections by type.
+- **Bundle CLI** — a first-class command-line harness that drives the exact same handler registry the UI consumes. See [CLI](#cli).
 
-### Platform Support
+### Platform support
 
-- PC (32-bit)
+- 32-bit PC. 64-bit Paradise Remastered and big-endian console bundles (X360, PS3) are not supported.
 
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
-- Node.js 20+ and npm
+- **Node.js 22+** (the `lovable-tagger` devDep and Vite 5 require it)
 - Modern web browser with WebGL support
 
 ### Installation
 
 ```bash
-git clone <repository-url>
-cd online-bundle-manager
+git clone https://github.com/derneuere/paradise-bundle-steward.git
+cd paradise-bundle-steward
 npm install
 ```
 
@@ -64,7 +46,7 @@ npm install
 npm run dev
 ```
 
-Open your browser to `http://localhost:5173` (or the port shown in terminal).
+Open your browser to `http://localhost:8080`.
 
 ### Building
 
@@ -72,101 +54,164 @@ Open your browser to `http://localhost:5173` (or the port shown in terminal).
 npm run build
 ```
 
+### Tests
+
+```bash
+npm run test:run                  # run the full vitest suite
+npm run test                      # watch mode
+```
+
+The test suite is auto-generated from the handler registry — every registered handler's `fixtures` array contributes tests without touching `registry.test.ts`. Writable handlers assert byte-exact or idempotent round-trips against the sample bundles in `example/`.
+
 ## Usage
 
-1. **Load a Bundle** - Click "Load Bundle File" and select a Burnout Paradise `.bundle` file
-2. **Explore Resources** - Browse all resources in the bundle with the resource explorer
-3. **Edit Supported Resources** - For Challenge List and Trigger Data, click to open the visual editor
-4. **Make Changes** - Edit properties, add/remove entries, modify values
-5. **Export Modified Bundle** - Save your changes to a new bundle file
-6. **Inspect with Hex Viewer** - Use the hex viewer for low-level inspection of any resource
+1. **Load a bundle** — click "Load Bundle File" and pick a `.BUNDLE` / `.DAT` / `.BNDL` file. All example bundles under `example/` work.
+2. **Explore resources** — the Resources tab lists every resource in the bundle with its type, size, and an "Edit" link when a handler is registered.
+3. **Edit** — click any "Edit X" link to open the visual editor for that resource. Every editor reads through `useBundle().getResource<T>(key)` and writes back through `setResource(key, next)` — no page-specific context plumbing.
+4. **Export** — the "Export Bundle" button in the header rebuilds the bundle via `writeBundleFresh`, which iterates the registry and calls each writable handler's `writeRaw` for any resource you edited.
+5. **Inspect** — the Hex View tab shows the raw bundle layout for any resource, and the Resource Inspector page drills into individual entries.
 
-## Motivation
+## CLI
 
-### Why This Project Exists
+The CLI (`scripts/bundle-cli.ts`) is the primary surface for iterating on parsers and finding edge cases. It drives the same `src/lib/core/registry` the UI uses, so every improvement flows both ways automatically.
 
-Online Bundle Manager was created to modernize the Burnout Paradise modding experience with three core goals:
+```bash
+# Enumerate resources in a bundle
+npm run bundle -- list example/VEHICLELIST.BUNDLE
 
-1. **Modern Tech Stack** - Built with React and TypeScript, technologies that enable rapid development and excellent developer experience. Coming from a web development background, these tools are natural and productive.
+# Parse a known resource and print a summary
+npm run bundle -- parse example/BTTSTREETDATA.DAT
+npm run bundle -- parse example/CAMERAS.BUNDLE --type iceTakeDictionary
 
-2. **Better UX** - React makes it dramatically easier to create intuitive, responsive interfaces compared to traditional C# Windows Forms (used by the original Bundle Manager). Modern web UI patterns provide a superior user experience.
+# Dump a parsed model to JSON (bigint-safe) and re-pack it
+npm run bundle -- dump example/VEHICLELIST.BUNDLE out.json --type vehicleList
+npm run bundle -- pack out.json patched.BUNDLE --type vehicleList
 
-3. **AI-Assisted Development** - The combination of TypeScript and React is exceptionally well-suited for AI-assisted coding. The goal is to "vibe code" through Burnout Wiki specifications in about an hour per feature. This is a passion project, and the thesis is that AI-assisted development makes it feasible to implement game specs quickly and accurately—something that's already working well today and will only get better.
+# Full read → write → re-read check
+npm run bundle -- roundtrip example/ONLINECHALLENGES.BNDL
+npm run bundle -- roundtrip example/TRIGGERS.DAT
 
-### Development Workflow
+# Run a handler's registered stress scenarios
+npm run bundle -- stress example/BTTSTREETDATA.DAT
+npm run bundle -- stress example/VEHICLELIST.BUNDLE --type vehicleList
+npm run bundle -- stress example/VEHICLELIST.BUNDLE --type vehicleList --scenario add-vehicle
+```
 
-- **UI Development**: [Lovable](https://lovable.dev) for rapid UI prototyping and hosting
-- **Logic Implementation**: Cursor AI for implementing parsers, editors, and business logic
-- **Specifications**: [Burnout Wiki](https://burnout.wiki) as the authoritative source
+### Stress mode
 
-### What Works Well
+`stress` runs a set of pre-registered mutation scenarios against a writable handler. Each scenario applies a known edit (remove last street, toggle a flag, add a brand-new vehicle with every field populated, etc.), writes the mutated model, re-parses the bytes, writes again, and asserts the writer is idempotent. An optional per-scenario `verify` hook does deeper field-level checks.
 
-- **UI with Proper Types** - When data types are correctly defined, React components practically write themselves
-- **Spec Coding** - AI assistance is good but not perfect. You still need to deeply understand the specification and catch bugs, even when referencing existing C# implementations from Bundle Manager.
+Today's coverage:
 
-## Roadmap / TODO
+- **StreetData**: `baseline`, `remove-last-street`, `remove-last-road-and-challenge`, `edit-road-debug-name`, `zero-all-challenge-scores` (5 scenarios)
+- **VehicleList**: `baseline`, `edit-first-name`, `toggle-first-flags`, `swap-first-two`, `bulk-zero-colors`, `add-vehicle`, `remove-last-vehicle` (7 scenarios)
 
-### Short Term
+Single-field mutations are surgical — editing `vehicles[0].boostCapacity` changes exactly one byte at the expected offset, nothing adjacent.
 
-- [ ] **VehicleList Write Support** - Currently only read-only; writing needs debugging
-- [ ] **PlayerCarColours Write Support** - Parser works, but serialization not yet implemented
+## Architecture
+
+### Handler registry
+
+The core of the app is the **resource handler registry** at `src/lib/core/registry/`. Every resource type is represented by a single `ResourceHandler<Model>` object that bundles:
+
+- `parseRaw(bytes, ctx)` — decode already-decompressed bytes into a typed model
+- `writeRaw(model, ctx)` — re-encode the model (optional for read-only handlers)
+- `describe(model)` — one-line CLI summary
+- `fixtures` — pinned example bundles for regression testing
+- `stressScenarios` — optional mutation scenarios
+
+The registry is the single source of truth for which resources exist and how they behave. `src/lib/resourceTypes.ts`, `src/lib/capabilities.ts`, `src/context/BundleContext.tsx` state, `src/pages/ResourcesPage.tsx` NavLinks, and `src/App.tsx` routes are all **derived from the registry** — adding a new resource type requires editing exactly one new file in `registry/handlers/` plus one line in `registry/index.ts`.
+
+### Directory layout
+
+```
+src/lib/core/
+  registry/
+    handler.ts         # ResourceHandler + StressScenario interfaces
+    index.ts           # handler array + byTypeId/byKey lookup
+    extract.ts         # single absolute-offset + decompress helper
+    bundleOps.ts       # parseBundleResourcesViaRegistry (used by UI)
+    editors.ts         # handler.key → lazy React page map
+    handlers/          # one file per resource type
+    registry.test.ts   # auto-generated fixture suite
+  bundle/              # low-level bundle parser (header, entries, debug data)
+  streetData.ts        # parseRaw/writeRaw for StreetData
+  triggerData.ts
+  challengeList.ts
+  vehicleList.ts
+  playerCarColors.ts   # 32-bit only
+  iceTakeDictionary.ts # read-only, partial
+  binTools.ts          # BinReader / BinWriter primitives
+  resourceManager.ts   # extractResourceData, compress/decompress
+```
+
+### Adding a new resource type
+
+1. Write the binary parser and writer in `src/lib/core/<key>.ts` with `parse*Data(bytes)` and `write*Data(model)` functions. Use `BinReader` / `BinWriter` from `binTools.ts`.
+2. Create `src/lib/core/registry/handlers/<key>.ts` exporting a `ResourceHandler<Model>`.
+3. Add one import and one array entry in `src/lib/core/registry/index.ts`.
+4. (If editable) add a lazy `<key>: lazy(() => import('@/pages/<Key>Page'))` entry in `registry/editors.ts` and drop a `src/pages/<Key>Page.tsx` that reads via `useBundle().getResource<T>(key)` and writes via `setResource(key, next)`.
+5. (Optional) add a `HANDLER_META` entry in `src/lib/capabilities.ts` for notes and wiki URLs.
+
+`types.ts`, `resourceTypes.ts`, `capabilities.ts` (except meta), `BundleContext.tsx`, `ResourcesPage.tsx`, and `App.tsx` are **never touched**.
+
+### Technical details
+
+- **React 18** + **TypeScript 5** + **Vite 5** for the app shell
+- **shadcn/ui** + **Tailwind CSS** for the UI component library
+- **typed-binary** + custom `BinReader` / `BinWriter` for binary parsing
+- **pako** for zlib compression/decompression
+- **vitest** for the auto-generated fixture suite
+- **tsx** runs the CLI under Node without a separate build step
+
+## Roadmap
+
+### Short term
+
+- **PlayerCarColours write support** — parser now follows the 32-bit PC spec from `docs/PlayerCarColours.md`, writer still pending
+- **TriggerData + ChallengeList stress scenarios** — interface is in place, just needs scenarios
+- **Fuzz mode** for the CLI — random structural mutations to find edge cases
 
 ### Blocked
 
-- [ ] **ICE Take Dictionary** - Implementation blocked due to missing/incomplete specification on Burnout Wiki
+- **ICE Take Dictionary** full support — blocked by incomplete Burnout Wiki spec
 
-### Long Term
+### Long term
 
-- [ ] Additional resource type parsers (based on community needs)
-- [ ] Resource diffing and comparison tools
+- Additional resource type parsers (based on community needs)
+- Resource diffing and comparison tools in the CLI (`bundle -- diff a.bundle b.bundle`)
 
-## Technical Details
+## Motivation
 
-### Architecture
+### Why this project exists
 
-Built with modern web technologies:
-- **React 18** - UI framework
-- **TypeScript 5** - Type-safe development
-- **Vite** - Fast build tooling
-- **shadcn/ui** - Beautiful, accessible component library
-- **Tailwind CSS** - Utility-first styling
-- **typed-binary** - Binary data parsing
+Online Bundle Manager modernizes the Burnout Paradise modding experience with three core goals:
 
-### Bundle Format
+1. **Modern tech stack** — React and TypeScript enable rapid development and excellent DX. Coming from web development, these tools are natural and productive.
+2. **Better UX** — React makes it dramatically easier to create intuitive, responsive interfaces than traditional C# Windows Forms. Modern web UI patterns provide a superior user experience.
+3. **AI-assisted development** — TypeScript and React are exceptionally well-suited for AI-assisted coding. The goal is to "vibe code" through Burnout Wiki specifications in about an hour per feature. This is a passion project, and the thesis is that AI-assisted development makes it feasible to implement game specs quickly and accurately.
 
-- Supports both standalone and nested bundle formats
-- Automatic decompression of zlib-compressed data
-- Resource entries with metadata (flags, memory type, compression info)
+### Development workflow
 
-### Parser Architecture
+- **UI prototyping**: [Lovable](https://lovable.dev) for rapid UI iteration
+- **Core logic**: [Claude Code](https://claude.com/code) for implementing parsers, writers, and the CLI harness
+- **Specifications**: [Burnout Wiki](https://burnout.wiki) snapshots in `docs/` as the authoritative source
 
-Each resource type has three components:
-1. **Parser** (`parse*Data`) - Converts binary data to structured objects
-2. **Writer** (`write*Data`) - Serializes structured objects back to binary
-3. **Editor UI** - React components for visual editing
+### What works well
 
-See [`src/lib/capabilities.ts`](src/lib/capabilities.ts) for current implementation status of each resource type.
+- **Typed models make editors trivial** — once `ResourceHandler<Model>` is defined, the React components practically write themselves via shadcn/ui primitives.
+- **CLI-driven iteration** — the registry is the single source of truth, so the CLI is the primary surface for debugging parsers. `bundle -- roundtrip` catches regressions in seconds; `bundle -- stress` catches edge cases AI assistants tend to miss when writing writers.
 
 ## Contributing
 
-Contributions are welcome! This codebase is designed to be AI-friendly for rapid feature development.
+Contributions are welcome! The codebase is designed to be AI-friendly for rapid feature development.
 
-### Adding a New Resource Parser
+### Areas for contribution
 
-1. Check [Burnout Wiki](https://burnout.wiki) for the resource specification
-2. Create parser in `src/lib/core/[resourceType].ts`
-3. Implement reader and writer functions
-4. Add types to `src/lib/core/types.ts`
-5. Create editor UI in `src/pages/[ResourceType]Page.tsx`
-6. Update `src/lib/capabilities.ts` with feature status
-
-### Areas for Contribution
-
-- Additional resource type parsers
+- Additional resource type parsers — use the handler-registry pattern, reference the matching `docs/*.md` spec
+- Stress scenarios for existing handlers
 - UI/UX improvements
 - Bug fixes and optimizations
-- Documentation updates
-- Test coverage
 
 ## License
 
@@ -174,8 +219,9 @@ This project is for educational and research purposes. Burnout Paradise is a tra
 
 ## Resources
 
-- [Burnout Wiki](https://burnout.wiki) - Comprehensive documentation of game formats
-- [Original Bundle Manager](https://github.com/burninrubber0/Bundle-Manager) - C# implementation by the community
+- [Burnout Wiki](https://burnout.wiki) — comprehensive documentation of game formats
+- [Bundle Manager (C#)](https://github.com/burninrubber0/Bundle-Manager) — reference implementation by the community
+- `docs/` — local snapshots of the Burnout Wiki spec pages used as the ground truth for each handler
 
 ## Acknowledgments
 
