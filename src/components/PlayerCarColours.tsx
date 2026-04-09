@@ -107,7 +107,7 @@ export const PlayerCarColoursComponent = ({ colours }: PlayerCarColoursProps) =>
           <Palette className="w-6 h-6" />
           Player Car Colours
           <Badge variant="outline" className="ml-auto">
-            {colours.is64Bit ? '64-bit' : '32-bit'}
+            32-bit
           </Badge>
         </CardTitle>
         <p className="text-muted-foreground">

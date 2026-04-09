@@ -22,13 +22,15 @@ import {
   calculateBundleStats
 } from '../resourceManager';
 import { parseVehicleList, type ParsedVehicleList } from '../vehicleList';
-import { writeVehicleListData } from '../vehicleList';
 import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors';
 import { RESOURCE_TYPES } from '../../resourceTypes';
 import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTakeDictionary';
-import { type ParsedTriggerData, parseTriggerData, writeTriggerDataData } from '../triggerData';
+import { type ParsedTriggerData, parseTriggerData } from '../triggerData';
 import { extractResourceSize, extractAlignment, packSizeAndAlignment, isCompressed, compressData } from '../resourceManager';
-import { parseChallengeList, ParsedChallengeList, writeChallengeListData } from '../challengeList';
+import { parseChallengeList, type ParsedChallengeList } from '../challengeList';
+import { parseStreetData, type ParsedStreetData } from '../streetData';
+import { registry, getHandlerByTypeId, resourceCtxFromBundle } from '../registry';
+import { parseBundleResourcesViaRegistry } from '../registry/bundleOps';
 
 // ============================================================================
 // Main Bundle Writer
@@ -53,44 +55,47 @@ export function writeBundleFresh(
   reportProgress(progressCallback, 'write', 0, 'Starting fresh bundle write');
 
   const isLittleEndian = bundle.header.platform !== PLATFORMS.PS3;
+  const ctx = resourceCtxFromBundle(bundle);
 
-  // Normalize overrides into a single map keyed by resource type id
-  type Encoder = (value: unknown) => Uint8Array;
-  const little = isLittleEndian;
-  const encoders: Record<number, Encoder> = {
-    [RESOURCE_TYPE_IDS.VEHICLE_LIST]: (value: unknown) => {
-      const v = value as { vehicles: ParsedVehicleList['vehicles']; header?: ParsedVehicleList['header'] };
-      return writeVehicleListData({
-        vehicles: v.vehicles,
-        header: v.header ?? {
-          numVehicles: v.vehicles.length,
-          startOffset: 16,
-          unknown1: 0,
-          unknown2: 0
-        }
-      }, little);
-    },
-    [RESOURCE_TYPE_IDS.TRIGGER_DATA]: (value: unknown) => {
-      return writeTriggerDataData(value as ParsedTriggerData, little);
-    },
-    [RESOURCE_TYPE_IDS.CHALLENGE_LIST]: (value: unknown) => {
-      return writeChallengeListData(value as ParsedChallengeList, little);
-    }
+  // Normalize overrides into a single map keyed by resource type id. Values
+  // are either raw encoded bytes or a model object that gets piped through
+  // the matching ResourceHandler's writeRaw(). Legacy field-name overrides
+  // (vehicleList, triggerData, challengeList, streetData) are mapped to their
+  // typeId for the duration of Step 5; Step 6 switches BundleContext to emit
+  // only options.overrides.resources.
+  const overrideMap: Record<number, Uint8Array | unknown> = {};
+  const legacyKey: Record<string, number> = {
+    vehicleList: RESOURCE_TYPE_IDS.VEHICLE_LIST,
+    triggerData: RESOURCE_TYPE_IDS.TRIGGER_DATA,
+    challengeList: RESOURCE_TYPE_IDS.CHALLENGE_LIST,
+    streetData: RESOURCE_TYPE_IDS.STREET_DATA,
   };
+  const rawOverrides = options.overrides as Record<string, unknown> | undefined;
+  if (rawOverrides) {
+    for (const [k, v] of Object.entries(rawOverrides)) {
+      if (k === 'resources' && v && typeof v === 'object') {
+        Object.assign(overrideMap, v as Record<number, unknown>);
+      } else if (k in legacyKey && v !== undefined) {
+        overrideMap[legacyKey[k]] = v;
+      }
+    }
+  }
 
-  const overrideMap: Record<number, Uint8Array | unknown> = { };
-  if (options.overrides?.vehicleList) {
-    overrideMap[RESOURCE_TYPE_IDS.VEHICLE_LIST] = options.overrides.vehicleList;
-  }
-  if (options.overrides?.triggerData) {
-    overrideMap[RESOURCE_TYPE_IDS.TRIGGER_DATA] = options.overrides.triggerData;
-  }
-  if (options.overrides?.challengeList) {
-    overrideMap[RESOURCE_TYPE_IDS.CHALLENGE_LIST] = options.overrides.challengeList;
-  }
-  if (options.overrides?.resources) {
-    Object.assign(overrideMap, options.overrides.resources);
-  }
+  /**
+   * Apply a single override to its resource bytes. Called per primary block
+   * when an override is present. Returns the uncompressed bytes the new
+   * resource should contain; compression is handled by the caller.
+   */
+  const applyOverride = (typeId: number, value: unknown, fallback: Uint8Array): Uint8Array => {
+    if (value instanceof Uint8Array) return value;
+    const handler = getHandlerByTypeId(typeId);
+    if (handler && handler.caps.write && handler.writeRaw) {
+      return handler.writeRaw(value as never, ctx);
+    }
+    // No writable handler for this type → fall back to original bytes.
+    return fallback;
+  };
+  void registry; // keep import live for handler auto-registration side effects
 
   type Segment = {
     resourceIndex: number;
@@ -129,15 +134,11 @@ export function writeBundleFresh(
       // Apply override only to primary block for the resource (matches in-place writer behavior)
       if (bi === primaryBlock && Object.prototype.hasOwnProperty.call(overrideMap, resource.resourceTypeId)) {
         const overrideValue = overrideMap[resource.resourceTypeId];
-        let newUncompressed: Uint8Array;
-        if (overrideValue instanceof Uint8Array) {
-          newUncompressed = overrideValue;
-        } else if (encoders[resource.resourceTypeId]) {
-          newUncompressed = encoders[resource.resourceTypeId](overrideValue);
-        } else {
-          // No encoder: fallback to original bytes
-          newUncompressed = wasCompressed ? rawOriginal : rawOriginal.slice();
-        }
+        const newUncompressed = applyOverride(
+          resource.resourceTypeId,
+          overrideValue,
+          wasCompressed ? rawOriginal : rawOriginal.slice(),
+        );
         finalBytes = wasCompressed ? compressData(newUncompressed) : newUncompressed;
         uncompressedSize = newUncompressed.length;
       } else {
@@ -452,105 +453,34 @@ export type ParsedResources = {
   iceTakeDictionary?: ParsedIceTakeDictionary;
   triggerData?: ParsedTriggerData;
   challengeList?: ParsedChallengeList;
+  streetData?: ParsedStreetData;
 };
 
 /**
- * Parses a specific resource type from bundle data
- */
-function parseResourceType<T>(
-  buffer: ArrayBuffer,
-  bundle: ParsedBundle,
-  resourceName: string,
-  parseFn: (buffer: ArrayBuffer, resource: any, options: any) => T
-): T | null {
-  const resourceType = Object.values(RESOURCE_TYPES).find(rt => rt.name === resourceName);
-  if (!resourceType) return null;
-
-  const resource = bundle.resources.find(r => r.resourceTypeId === resourceType.id);
-  if (!resource) return null;
-
-  try {
-    let options: any = {};
-
-    // Set platform-specific options
-    if (resourceName === 'Vehicle List') {
-      options.littleEndian = bundle.header.platform !== PLATFORMS.PS3;
-    } else if (resourceName === 'Player Car Colours') {
-      options.is64Bit = bundle.header.platform === PLATFORMS.PC;
-      options.strict = false;
-    } else if (resourceName === 'ICE Dictionary') {
-      options.littleEndian = bundle.header.platform !== PLATFORMS.PS3;
-    }
-
-    return parseFn(buffer, resource, options);
-  } catch (error) {
-    console.warn(`Failed to parse ${resourceName}:`, error);
-    return null;
-  }
-}
-
-/**
- * Parses all known resource types from a bundle
+ * Parses all known resource types from a bundle and returns the legacy
+ * ParsedResources shape. Internally delegates to the registry-driven
+ * parseBundleResourcesViaRegistry — this function exists only as a thin
+ * compatibility shim for callers that still expect the named fields. Step 6
+ * of the CLI refactor migrates BundleContext to the generic map form and
+ * removes this shim.
  */
 export function parseBundleResources(
   buffer: ArrayBuffer,
   bundle: ParsedBundle
 ): ParsedResources {
-  const resources: ParsedResources = {};
-
-  // Parse vehicle list
-  const vehicleList = parseResourceType(
-    buffer,
-    bundle,
-    'Vehicle List',
-    parseVehicleList
-  );
-  if (vehicleList) {
-    resources.vehicleList = vehicleList;
-  }
-
-  // Parse player car colours
-  const playerCarColours = parseResourceType(
-    buffer,
-    bundle,
-    'Player Car Colours',
-    parsePlayerCarColours
-  );
-  if (playerCarColours) {
-    resources.playerCarColours = playerCarColours;
-  }
-
-  // Parse ICE Take Dictionary
-  const iceDict = parseResourceType(
-    buffer,
-    bundle,
-    'ICE Dictionary',
-    parseIceTakeDictionary
-  );
-  if (iceDict) {
-    resources.iceTakeDictionary = iceDict;
-  }
-
-  // Parse Trigger Data
-  const triggerData = parseResourceType(
-    buffer,
-    bundle,
-    'Trigger Data',
-    parseTriggerData, 
-  );
-  if (triggerData) {
-    resources.triggerData = triggerData;
-  }
-  // Parse Challenge List
-  const challengeList = parseResourceType(
-    buffer,
-    bundle,
-    'Challenge List',
-    parseChallengeList,
-  );
-  if (challengeList) {
-    resources.challengeList = challengeList;
-  }
-
-  return resources;
+  const map = parseBundleResourcesViaRegistry(buffer, bundle);
+  const out: ParsedResources = {};
+  const vehicleList = map.get('vehicleList') as ParsedVehicleList | undefined;
+  if (vehicleList) out.vehicleList = vehicleList;
+  const playerCarColours = map.get('playerCarColours') as PlayerCarColours | undefined;
+  if (playerCarColours) out.playerCarColours = playerCarColours;
+  const iceTakeDictionary = map.get('iceTakeDictionary') as ParsedIceTakeDictionary | undefined;
+  if (iceTakeDictionary) out.iceTakeDictionary = iceTakeDictionary;
+  const triggerData = map.get('triggerData') as ParsedTriggerData | undefined;
+  if (triggerData) out.triggerData = triggerData;
+  const challengeList = map.get('challengeList') as ParsedChallengeList | undefined;
+  if (challengeList) out.challengeList = challengeList;
+  const streetData = map.get('streetData') as ParsedStreetData | undefined;
+  if (streetData) out.streetData = streetData;
+  return out;
 }

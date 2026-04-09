@@ -2,9 +2,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBundle } from '@/context/BundleContext';
 import { TriggerDataEditor } from '@/components/triggerdata/TriggerDataEditor';
+import type { ParsedTriggerData } from '@/lib/core/triggerData';
 
 const TriggerDataPage = () => {
-  const { triggerData, setTriggerData } = useBundle();
+  const { getResource, setResource } = useBundle();
+  const triggerData = getResource<ParsedTriggerData>('triggerData');
 
   return (
     <div className="space-y-4">
@@ -14,9 +16,9 @@ const TriggerDataPage = () => {
         </CardHeader>
         <CardContent>
           {triggerData ? (
-            <TriggerDataEditor data={triggerData} onChange={setTriggerData} />
+            <TriggerDataEditor data={triggerData} onChange={(next) => setResource('triggerData', next)} />
           ) : (
-            <div className="text-sm text-muted-foreground">{triggerData ? 'Loading Trigger Data...' : 'Load a bundle to begin.'}</div>
+            <div className="text-sm text-muted-foreground">Load a bundle to begin.</div>
           )}
         </CardContent>
       </Card>
@@ -25,5 +27,3 @@ const TriggerDataPage = () => {
 };
 
 export default TriggerDataPage;
-
-

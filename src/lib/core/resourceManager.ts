@@ -19,16 +19,29 @@ import {
 // ============================================================================
 
 /**
- * Extracts raw resource data from a bundle buffer
+ * Extracts raw resource data from a bundle buffer.
+ *
+ * `resource.diskOffsets[i]` is the offset RELATIVE to the start of the
+ * corresponding memory block (`bundle.header.resourceDataOffsets[i]`), so the
+ * absolute offset into the buffer is `base + rel`. Earlier versions of this
+ * function treated diskOffsets as absolute, which silently returned bytes
+ * starting at 0 (the bundle header). Every parser had to paper over it with a
+ * nested-bundle fallback. The signature now requires the parsed bundle so the
+ * base offset is always available.
  */
-export function extractResourceData(buffer: ArrayBuffer, resource: ResourceEntry): Uint8Array {
+export function extractResourceData(
+  buffer: ArrayBuffer,
+  bundle: ParsedBundle,
+  resource: ResourceEntry,
+): Uint8Array {
   for (let i = 0; i < 3; i++) {
     const size = extractResourceSize(resource.sizeAndAlignmentOnDisk[i]);
-    if (size > 0) {
-      const offset = resource.diskOffsets[i];
-      if (offset + size <= buffer.byteLength) {
-        return new Uint8Array(buffer, offset, size);
-      }
+    if (size <= 0) continue;
+    const base = bundle.header.resourceDataOffsets[i] >>> 0;
+    const rel = resource.diskOffsets[i] >>> 0;
+    const start = (base + rel) >>> 0;
+    if (start + size <= buffer.byteLength) {
+      return new Uint8Array(buffer, start, size);
     }
   }
   return new Uint8Array();
@@ -115,7 +128,7 @@ export function compressData(data: Uint8Array, level: number = 6): Uint8Array {
  * Gets resource data with automatic decompression
  */
 export function getResourceData(context: ResourceContext): ResourceData {
-  const rawData = extractResourceData(context.buffer, context.resource);
+  const rawData = extractResourceData(context.buffer, context.bundle, context.resource);
   const compressed = isCompressed(rawData);
   const data = compressed ? decompressData(rawData) : rawData;
 
@@ -295,7 +308,7 @@ export function calculateBundleStats(bundle: ParsedBundle, buffer: ArrayBuffer):
     stats.resourceTypes[resource.resourceTypeId] = (stats.resourceTypes[resource.resourceTypeId] || 0) + 1;
 
     // Check if compressed
-    const data = extractResourceData(buffer, resource);
+    const data = extractResourceData(buffer, bundle, resource);
     if (isCompressed(data)) {
       stats.compressedResources++;
       stats.compressedSize += data.length;

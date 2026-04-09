@@ -1,18 +1,13 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { parseBundle, parseBundleResources, writeBundleFresh, getPlatformName, getFlagNames, formatResourceId } from '@/lib/core/bundle';
+import { parseBundle, writeBundleFresh, getPlatformName, getFlagNames, formatResourceId } from '@/lib/core/bundle';
+import { parseBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
 import { u64ToBigInt } from '@/lib/core/u64';
 import { getResourceType } from '@/lib/resourceTypes';
 import { extractResourceSize, getMemoryTypeName } from '@/lib/core/resourceManager';
 import { findDebugResourceById } from '@/lib/core/bundle/debugData';
 import type { ParsedBundle } from '@/lib/core/types';
 import type { DebugResource } from '@/lib/core/bundle/debugData';
-import type { ParsedResources } from '@/lib/core/bundle';
-import type { VehicleListEntry, ParsedVehicleList } from '@/lib/core/vehicleList';
-import type { PlayerCarColours } from '@/lib/core/playerCarColors';
-import type { ParsedIceTakeDictionary } from '@/lib/core/iceTakeDictionary';
-import type { ParsedTriggerData } from '@/lib/core/triggerData';
-import type { ParsedChallengeList } from '@/lib/core/challengeList';
 
 export type UIResource = {
   id: string;
@@ -37,16 +32,13 @@ type BundleContextValue = {
   loadedBundle: ParsedBundle | null;
   resources: UIResource[];
   debugResources: DebugResource[];
-  vehicleList: VehicleListEntry[];
-  parsedVehicleList: ParsedVehicleList | null;
-  setVehicleList: (list: VehicleListEntry[]) => void;
-  setParsedVehicleList: (v: ParsedVehicleList | null) => void;
-  playerCarColours: PlayerCarColours | null;
-  iceDictionary: ParsedIceTakeDictionary | null;
-  triggerData: ParsedTriggerData | null;
-  setTriggerData: (data: ParsedTriggerData | null) => void;
-  challengeList: ParsedChallengeList | null;
-  setChallengeList: (data: ParsedChallengeList | null) => void;
+  /**
+   * Generic handler-key → parsed model map. Editor pages consume this via
+   * getResource<T>('streetData') and push edits back via setResource('streetData', model).
+   */
+  parsedResources: Map<string, unknown>;
+  getResource: <T>(key: string) => T | null;
+  setResource: (key: string, next: unknown | null) => void;
   loadBundleFromFile: (file: File) => Promise<void>;
   exportBundle: () => Promise<void>;
 };
@@ -60,16 +52,12 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
   const [loadedBundle, setLoadedBundle] = useState<ParsedBundle | null>(null);
   const [resources, setResources] = useState<UIResource[]>([]);
   const [debugResources, setDebugResources] = useState<DebugResource[]>([]);
-  const [vehicleList, setVehicleList] = useState<VehicleListEntry[]>([]);
-  const [parsedVehicleList, setParsedVehicleList] = useState<ParsedVehicleList | null>(null);
-  const [playerCarColours, setPlayerCarColours] = useState<PlayerCarColours | null>(null);
-  const [iceDictionary, setIceDictionary] = useState<ParsedIceTakeDictionary | null>(null);
-  const [triggerData, setTriggerData] = useState<ParsedTriggerData | null>(null);
-  const [challengeList, setChallengeList] = useState<ParsedChallengeList | null>(null);
+  const [parsedResources, setParsedResources] = useState<Map<string, unknown>>(() => new Map());
+
   const convertResourceToUI = useMemo(() => {
-    return (resource: any, bundle: ParsedBundle, debugResources: DebugResource[]): UIResource => {
+    return (resource: any, bundle: ParsedBundle, debugData: DebugResource[]): UIResource => {
       const resourceType = getResourceType(resource.resourceTypeId);
-      const debugResource = findDebugResourceById(debugResources, formatResourceId(u64ToBigInt(resource.resourceId)));
+      const debugResource = findDebugResourceById(debugData, formatResourceId(u64ToBigInt(resource.resourceId)));
 
       let memoryTypeIndex = 0;
       let uncompressed = extractResourceSize(resource.uncompressedSizeAndAlignment[0]);
@@ -115,14 +103,9 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       const uiResources = bundle.resources.map((resource) => convertResourceToUI(resource, bundle, debugData));
-      const parsedResources: ParsedResources = parseBundleResources(arrayBuffer, bundle);
+      const modelMap = parseBundleResourcesViaRegistry(arrayBuffer, bundle);
 
-      setParsedVehicleList(parsedResources.vehicleList || null);
-      setVehicleList(parsedResources.vehicleList?.vehicles || []);
-      setPlayerCarColours(parsedResources.playerCarColours || null);
-      setIceDictionary(parsedResources.iceTakeDictionary || null);
-      setTriggerData(parsedResources.triggerData || null);
-      setChallengeList(parsedResources.challengeList || null);
+      setParsedResources(modelMap);
       setLoadedBundle(bundle);
       setResources(uiResources);
       setDebugResources(debugData);
@@ -139,27 +122,43 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const getResource = useCallback(
+    <T,>(key: string): T | null => {
+      const v = parsedResources.get(key);
+      return (v as T | undefined) ?? null;
+    },
+    [parsedResources],
+  );
+
+  const setResource = useCallback((key: string, next: unknown | null) => {
+    setParsedResources((prev) => {
+      const copy = new Map(prev);
+      if (next == null) copy.delete(key);
+      else copy.set(key, next);
+      return copy;
+    });
+    setIsModified(true);
+  }, []);
+
   const exportBundle = async () => {
     if (!loadedBundle || !originalArrayBuffer) {
       toast.error('No bundle loaded to export');
       return;
     }
     try {
+      // Build a generic resources override map keyed by handler.key, which
+      // writeBundleFresh translates to typeId via the registry.
+      const overrides: Record<string, unknown> = {};
+      for (const [key, model] of parsedResources) {
+        overrides[key] = model;
+      }
+
       const outBuffer = writeBundleFresh(
         loadedBundle,
         originalArrayBuffer,
         {
           includeDebugData: true,
-          overrides: {
-            ...(parsedVehicleList ? {
-              vehicleList: {
-                vehicles: vehicleList,
-                header: parsedVehicleList.header
-              }
-            } : {}),
-            ...(triggerData ? { triggerData } : {}),
-            ...(challengeList ? { challengeList } : {})
-          }
+          overrides: { resources: keyedOverridesToTypeIdMap(parsedResources, loadedBundle) },
         },
       );
 
@@ -187,16 +186,9 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     loadedBundle,
     resources,
     debugResources,
-    vehicleList,
-    parsedVehicleList,
-    setVehicleList,
-    setParsedVehicleList,
-    playerCarColours,
-    iceDictionary,
-    triggerData,
-    setTriggerData,
-    challengeList,  
-    setChallengeList,
+    parsedResources,
+    getResource,
+    setResource,
     loadBundleFromFile,
     exportBundle
   };
@@ -210,4 +202,23 @@ export const useBundle = () => {
   return ctx;
 };
 
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
 
+// Translate handler-key → model map to typeId → model map for writeBundleFresh.
+// Uses the registry to look up handler metadata; imported here (not above) so
+// the registry side-effect module lands once per app boot.
+import { getHandlerByKey } from '@/lib/core/registry';
+function keyedOverridesToTypeIdMap(
+  map: Map<string, unknown>,
+  _bundle: ParsedBundle,
+): Record<number, unknown> {
+  const out: Record<number, unknown> = {};
+  for (const [key, model] of map) {
+    const handler = getHandlerByKey(key);
+    if (!handler || !handler.caps.write) continue;
+    out[handler.typeId] = model;
+  }
+  return out;
+}

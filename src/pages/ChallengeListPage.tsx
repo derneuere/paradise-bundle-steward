@@ -1,9 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBundle } from '@/context/BundleContext';
 import { ChallengeListEditor } from '@/components/challangelist';
+import type { ParsedChallengeList } from '@/lib/core/challengeList';
 
 const ChallengeListPage = () => {
-  const { challengeList, setChallengeList } = useBundle();
+  const { getResource, setResource } = useBundle();
+  const challengeList = getResource<ParsedChallengeList>('challengeList');
 
   return (
     <div className="space-y-4">
@@ -13,10 +15,10 @@ const ChallengeListPage = () => {
         </CardHeader>
         <CardContent>
           {challengeList ? (
-            <ChallengeListEditor data={challengeList} onChange={setChallengeList} />
+            <ChallengeListEditor data={challengeList} onChange={(next) => setResource('challengeList', next)} />
           ) : (
             <div className="text-sm text-muted-foreground">
-              {challengeList === undefined ? 'Loading Challenge List...' : 'No Challenge List found in this bundle.'}
+              No Challenge List found in this bundle.
             </div>
           )}
         </CardContent>

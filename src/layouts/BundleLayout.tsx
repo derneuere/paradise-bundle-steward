@@ -5,7 +5,8 @@ import { Upload, Download, Hexagon, Database } from 'lucide-react';
 import { useBundle } from '@/context/BundleContext';
 import { useRef, useState, useMemo } from 'react';
 import { ExportWarningModal } from '@/components/capabilities';
-import { CAPABILITIES, type FeatureCapability } from '@/lib/capabilities';
+import { getCapabilityByTypeId, type FeatureCapability } from '@/lib/capabilities';
+import { registry } from '@/lib/core/registry';
 
 export const BundleLayout = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -16,34 +17,24 @@ export const BundleLayout = () => {
     loadedBundle,
     loadBundleFromFile,
     exportBundle,
-    vehicleList,
-    playerCarColours,
+    parsedResources,
   } = useBundle();
 
   const hasBundle = !!loadedBundle;
 
-  // Check which unsupported features have been modified
+  // Check which present-but-unsupported-for-write features have been modified.
+  // Drives the export warning. Looks up capability metadata by type id so
+  // adding a new resource doesn't need edits here.
   const unsupportedModifiedFeatures = useMemo(() => {
     const unsupported: FeatureCapability[] = [];
-    
-    // Check if vehicle list is present and modified (but doesn't have write support)
-    if (vehicleList && vehicleList.length > 0) {
-      const vehicleCap = CAPABILITIES.resources.find(r => r.id === 'vehicle-list');
-      if (vehicleCap && !vehicleCap.write) {
-        unsupported.push(vehicleCap);
-      }
+    for (const handler of registry) {
+      if (handler.caps.write) continue;
+      if (!parsedResources.has(handler.key)) continue;
+      const cap = getCapabilityByTypeId(handler.typeId);
+      if (cap) unsupported.push(cap);
     }
-    
-    // Check if player car colours is present (but doesn't have write support)
-    if (playerCarColours) {
-      const colorsCap = CAPABILITIES.resources.find(r => r.id === 'player-car-colours');
-      if (colorsCap && !colorsCap.write) {
-        unsupported.push(colorsCap);
-      }
-    }
-    
     return unsupported;
-  }, [vehicleList, playerCarColours]);
+  }, [parsedResources]);
 
   const handleExportClick = () => {
     if (isModified && unsupportedModifiedFeatures.length > 0) {

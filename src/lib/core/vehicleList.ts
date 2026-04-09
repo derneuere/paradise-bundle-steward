@@ -175,7 +175,10 @@ export type VehicleListEntry = {
   gamePlayData: VehicleListEntryGamePlayData;
   attribCollectionKey: bigint;
   audioData: VehicleListEntryAudioData;
-  unknownData: Uint8Array; // 16 bytes of unknown data
+  // 16 bytes — per spec comment "Plane-related? Always null". Stored as a
+  // plain number[] so JSON dump/pack round-trips cleanly (Uint8Array
+  // serializes to {"0":…} which does not round-trip through JSON.parse).
+  unknownData: number[];
   category: number;
   vehicleType: VehicleType;
   boostType: CarType;
@@ -215,12 +218,11 @@ export function makeVehicleListSchema(count: number) {
 // ============================================================================
 
 function decodeString(bytes: number[]): string {
-  // Find null terminator
+  // Stop at the first null byte. No trimming — leading/trailing whitespace
+  // is preserved verbatim so byte-exact round-trip holds.
   const nullIndex = bytes.indexOf(0);
   const effectiveBytes = nullIndex >= 0 ? bytes.slice(0, nullIndex) : bytes;
-
-  // Convert to string and trim whitespace
-  return new TextDecoder('utf-8').decode(new Uint8Array(effectiveBytes)).trim();
+  return new TextDecoder('utf-8').decode(new Uint8Array(effectiveBytes));
 }
 
 // Helper function to get decrypted ID for display
@@ -318,7 +320,7 @@ function processVehicleEntry(rawEntry: Parsed<typeof VehicleEntrySchema>): Vehic
       gamePlayData,
       attribCollectionKey: u64ToBigInt(rawEntry.attribCollectionKey),
       audioData,
-      unknownData: new Uint8Array(rawEntry.unknown),
+      unknownData: Array.from(rawEntry.unknown),
       category: rawEntry.category,
       vehicleType,
       boostType,
@@ -409,7 +411,7 @@ export function parseVehicleList(
     reportProgress(progressCallback, 'parse', 0, 'Starting vehicle list parsing');
 
     const context: ResourceContext = {
-      bundle: {} as ParsedBundle, // Not needed for this parser
+      bundle: parseBundle(buffer),
       resource,
       buffer
     };
@@ -601,11 +603,14 @@ export function parseVehicleListData(
     try {
       const rawEntry = VehicleEntrySchema.read(reader);
       const entry = processVehicleEntry(rawEntry);
-
-      if (entry && isValidVehicleEntry(entry)) {
+      // Keep every entry the schema read. The previous behavior silently
+      // dropped rows with empty names or id === 0, which made the reader
+      // lossy for stress mutations that zero out fields. If
+      // processVehicleEntry itself returns null it means the schema read
+      // failed structurally — that is a real error and we still skip.
+      if (entry) {
         entries.push(entry);
       }
-
     } catch (error) {
       console.warn(`Error parsing vehicle entry ${i}:`, error);
       // Continue with next entry unless in strict mode
@@ -634,9 +639,11 @@ export function parseVehicleListData(
 function encodeFixedString(str: string, length: number): Uint8Array {
   const bytes = new Uint8Array(length);
   const encoded = new TextEncoder().encode(str);
-  const toCopy = Math.min(encoded.length, length - 1);
+  // Allow the full field to be used; the remaining bytes stay zero.
+  // Strings shorter than `length` are implicitly null-terminated by the
+  // zeroed buffer; strings exactly `length` bytes survive intact.
+  const toCopy = Math.min(encoded.length, length);
   bytes.set(encoded.subarray(0, toCopy));
-  // null-terminated by default due to zeroed buffer
   return bytes;
 }
 
@@ -653,7 +660,10 @@ export function writeVehicleListData(list: ParsedVehicleList, littleEndian: bool
 
   // Header
   dv.setUint32(0, count, littleEndian);
-  dv.setUint32(4, headerSize, littleEndian);
+  // startOffset defaults to 16 (immediately after the header) but is
+  // preserved from the parsed value when present so bundles that happen to
+  // use a different entry offset still round-trip.
+  dv.setUint32(4, list.header?.startOffset ?? headerSize, littleEndian);
   dv.setUint32(8, list.header?.unknown1 ?? 0, littleEndian);
   dv.setUint32(12, list.header?.unknown2 ?? 0, littleEndian);
 
@@ -712,8 +722,11 @@ export function writeVehicleListData(list: ParsedVehicleList, littleEndian: bool
     out[offset + 230] = v.audioData.aiExhaustIndex3rdPick & 0xFF;
     out[offset + 231] = 0; // padding2
 
-    // unknown (16)
-    out.set(v.unknownData.subarray(0, 16), offset + 232);
+    // unknown (16) — always zero on PC per the spec, but preserve whatever
+    // the reader saw so round-trip is byte-exact for odd inputs.
+    for (let i = 0; i < 16; i++) {
+      out[offset + 232 + i] = v.unknownData?.[i] ?? 0;
+    }
 
     // category, vehicleAndBoostType
     const vehicleAndBoost = ((v.vehicleType & 0xF) << 4) | (v.boostType & 0xF);
@@ -732,10 +745,11 @@ export function writeVehicleListData(list: ParsedVehicleList, littleEndian: bool
 
     offset += entrySize;
   }
-  
-  // Compress with zlib/deflate to match how data is stored on disk
-  const compressed = pako.deflate(out, { level: 9, windowBits: 15 });
-  return compressed;
+
+  // Return raw uncompressed bytes. Bundle-level compression is applied by
+  // writeBundleFresh when the resource entry has the COMPRESSED flag set,
+  // matching every other handler's writer contract.
+  return out;
 }
 
 // ============================================================================

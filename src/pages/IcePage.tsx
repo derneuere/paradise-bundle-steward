@@ -1,9 +1,11 @@
 import { useBundle } from '@/context/BundleContext';
 import { IceTakeDictionaryComponent } from '@/components/IceTakeDictionary';
 import { CapabilityWarning } from '@/components/capabilities';
+import type { ParsedIceTakeDictionary } from '@/lib/core/iceTakeDictionary';
 
 const IcePage = () => {
-  const { iceDictionary } = useBundle();
+  const { getResource } = useBundle();
+  const iceDictionary = getResource<ParsedIceTakeDictionary>('iceTakeDictionary');
   if (!iceDictionary) return null;
   return (
     <div className="space-y-4">

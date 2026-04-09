@@ -785,7 +785,7 @@ export function parseTriggerData(
     reportProgress(progressCallback, 'parse', 0.0, 'Starting TriggerData parsing');
 
     const context: ResourceContext = {
-      bundle: {} as ParsedBundle,
+      bundle: parseBundle(buffer),
       resource,
       buffer
     };

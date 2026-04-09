@@ -1,48 +1,44 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { VehicleEditor } from '@/components/VehicleEditor';
 import { useBundle } from '@/context/BundleContext';
-import type { VehicleListEntry } from '@/lib/core/vehicleList';
+import type { VehicleListEntry, ParsedVehicleList } from '@/lib/core/vehicleList';
 
 const VehicleEditorPage = () => {
   const navigate = useNavigate();
   const params = useParams();
   const idParam = params.id;
   const isNew = idParam === 'new';
-  const { vehicleList, setVehicleList, parsedVehicleList, setParsedVehicleList, setIsModified } = useBundle();
+  const { getResource, setResource } = useBundle();
+  const parsedVehicleList = getResource<ParsedVehicleList>('vehicleList');
+  const vehicles: VehicleListEntry[] = parsedVehicleList?.vehicles ?? [];
 
   const vehicle = useMemo<VehicleListEntry | null>(() => {
     if (!idParam || idParam === 'new') return null;
     try {
       const id = BigInt(idParam);
-      return vehicleList.find(v => v.id === id) || null;
+      return vehicles.find((v) => v.id === id) || null;
     } catch {
       return null;
     }
-  }, [vehicleList, idParam]);
+  }, [vehicles, idParam]);
 
-  const handleClose = () => navigate('/vehicles');
+  const handleClose = () => navigate('/vehicleList');
 
   const handleSave = (saved: VehicleListEntry) => {
-    let updated = vehicleList;
+    if (!parsedVehicleList) return;
+    let updated: VehicleListEntry[];
     if (isNew) {
-      updated = [...vehicleList, saved];
+      updated = [...vehicles, saved];
     } else {
-      updated = vehicleList.map(v => (v.id === saved.id ? saved : v));
+      updated = vehicles.map((v) => (v.id === saved.id ? saved : v));
     }
-    setVehicleList(updated);
-    if (parsedVehicleList) {
-      setParsedVehicleList({
-        ...parsedVehicleList,
-        vehicles: updated,
-        header: {
-          ...parsedVehicleList.header,
-          numVehicles: updated.length
-        }
-      });
-    }
-    setIsModified(true);
-    navigate('/vehicles');
+    setResource('vehicleList', {
+      ...parsedVehicleList,
+      vehicles: updated,
+      header: { ...parsedVehicleList.header, numVehicles: updated.length },
+    });
+    navigate('/vehicleList');
   };
 
   return (
@@ -51,5 +47,3 @@ const VehicleEditorPage = () => {
 };
 
 export default VehicleEditorPage;
-
-

@@ -216,7 +216,7 @@ export function parseIceTakeDictionary(
 		reportProgress(progressCallback, 'parse', 0, 'Starting ICE dictionary parsing');
 
 		const context: ResourceContext = {
-			bundle: {} as ParsedBundle,
+			bundle: parseBundle(buffer),
 			resource,
 			buffer
 		};

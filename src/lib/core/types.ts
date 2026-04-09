@@ -4,6 +4,7 @@
 import type { Parsed } from 'typed-binary';
 import type { ParsedVehicleList, VehicleListEntry } from './vehicleList';
 import type { ParsedTriggerData } from './triggerData';
+import type { ParsedStreetData } from './streetData';
 
 // ============================================================================
 // Platform and Bundle Constants
@@ -37,6 +38,7 @@ export const RESOURCE_TYPE_IDS = {
   CHALLENGE_LIST: 0x1001F,
   ICE_TAKE_DICTIONARY: 0x41,
   TRIGGER_DATA: 0x10003,
+  STREET_DATA: 0x10018,
 } as const;
 
 // ============================================================================
@@ -124,6 +126,7 @@ export type WriteOptions = {
     };
     triggerData?: ParsedTriggerData;
     challengeList?: import('./challengeList').ParsedChallengeList;
+    streetData?: ParsedStreetData;
     /**
      * Generic resource overrides keyed by resource type id. Values can be either
      * raw encoded bytes to write directly, or a plain object that will be passed

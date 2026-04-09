@@ -4,9 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Database, Cpu, Filter, Search, File, Image, Volume2, Code, Palette, Car } from 'lucide-react';
+import { Database, Cpu, Filter, Search, File, Image, Volume2, Code } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { CapabilityBadge } from '@/components/capabilities';
+import { getHandlerByTypeId } from '@/lib/core/registry';
 
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -27,7 +28,7 @@ const getCategoryIcon = (category: string) => {
 };
 
 const ResourcesPage = () => {
-  const { resources, loadedBundle, iceDictionary } = useBundle();
+  const { resources, loadedBundle } = useBundle();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -99,29 +100,18 @@ const ResourcesPage = () => {
               </div>
             </div>
           </div>
-          {resource.type === 'Vehicle List' && (
-            <NavLink to="/vehicles" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
-            <Car className="inline w-4 h-4 mr-1" /> Edit Vehicles
-          </NavLink>)}
-          {resource.type === 'Player Car Colours' && (
-            <NavLink to="/colors" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
-            <Palette className="inline w-4 h-4 mr-1" /> Edit Player Colours
-          </NavLink>)}
-          {resource.type === 'ICE Dictionary' && (
-            <NavLink to="/ice" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
-              Edit ICE Takes
-            </NavLink>
-          )}
-          {resource.type === 'Trigger Data' && (
-            <NavLink to="/triggers" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
-              Edit Triggers
-            </NavLink>
-          )}
-          {resource.type === 'Challenge List' && (
-            <NavLink to="/challenges" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
-              Edit Challenges
-            </NavLink>
-          )}
+          {(() => {
+            const handler = getHandlerByTypeId(resource.raw.resourceTypeId);
+            if (!handler || !handler.caps.read) return null;
+            return (
+              <NavLink
+                to={`/${handler.key}`}
+                className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}
+              >
+                Edit {handler.name}
+              </NavLink>
+            );
+          })()}
         </CardContent>
       </Card>
     );

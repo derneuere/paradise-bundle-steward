@@ -3,9 +3,11 @@ import { PlayerCarColoursComponent } from '@/components/PlayerCarColours';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
 import { CapabilityWarning } from '@/components/capabilities';
+import type { PlayerCarColours } from '@/lib/core/playerCarColors';
 
 const ColorsPage = () => {
-  const { playerCarColours } = useBundle();
+  const { getResource } = useBundle();
+  const playerCarColours = getResource<PlayerCarColours>('playerCarColours');
   if (!playerCarColours) {
     return (
       <Alert>

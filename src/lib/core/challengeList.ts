@@ -722,7 +722,7 @@ export function parseChallengeList(
       reportProgress(progressCallback, 'parse', 0.0, 'Starting ChallengeList parsing');
   
       const context: ResourceContext = {
-        bundle: {} as ParsedBundle,
+        bundle: parseBundle(buffer),
         resource,
         buffer
       };

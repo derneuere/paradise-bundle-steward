@@ -1,3 +1,4 @@
+import { Suspense, createElement } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -9,15 +10,29 @@ import { BundleProvider } from "./context/BundleContext";
 import BundleLayout from "./layouts/BundleLayout";
 import ResourcesPage from "./pages/ResourcesPage";
 import HexViewPage from "./pages/HexViewPage";
-import VehiclesPage from "./pages/VehiclesPage";
-import ColorsPage from "./pages/ColorsPage";
-import IcePage from "./pages/IcePage";
 import VehicleEditorPage from "./pages/VehicleEditorPage";
 import ResourceInspectorPage from "./pages/ResourceInspectorPage";
-import TriggerDataPage from "./pages/TriggerDataPage";
-import ChallengeListPage from "./pages/ChallengeListPage";
+import { registry } from "@/lib/core/registry";
+import { EDITOR_PAGES } from "@/lib/core/registry/editors";
 
 const queryClient = new QueryClient();
+
+// Generate one <Route path="/{key}" /> per registered handler that has an
+// editor page mapped. Adding a new editable resource = one new entry in
+// EDITOR_PAGES plus one registry/index.ts line. App.tsx stays untouched.
+const handlerRoutes = registry
+  .filter((h) => EDITOR_PAGES[h.key])
+  .map((h) => (
+    <Route
+      key={h.key}
+      path={`/${h.key}`}
+      element={
+        <Suspense fallback={<div className="p-6 text-muted-foreground">Loading {h.name}…</div>}>
+          {createElement(EDITOR_PAGES[h.key])}
+        </Suspense>
+      }
+    />
+  ));
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -31,13 +46,11 @@ const App = () => (
             <Route element={<BundleLayout />}>
               <Route path="/resources" element={<ResourcesPage />} />
               <Route path="/hexview" element={<HexViewPage />} />
-              <Route path="/vehicles" element={<VehiclesPage />} />
-              <Route path="/vehicles/:id" element={<VehicleEditorPage />} />
-              <Route path="/colors" element={<ColorsPage />} />
-              <Route path="/ice" element={<IcePage />} />
               <Route path="/inspect" element={<ResourceInspectorPage />} />
-              <Route path="/triggers" element={<TriggerDataPage />} />
-              <Route path="/challenges" element={<ChallengeListPage />} />
+              {/* Vehicle editor keeps its nested :id route; the list page is
+                  generated from the registry like the other editors. */}
+              <Route path="/vehicleList/:id" element={<VehicleEditorPage />} />
+              {handlerRoutes}
             </Route>
             {/* Legacy index route kept if needed */}
             <Route path="/legacy" element={<Index />} />
