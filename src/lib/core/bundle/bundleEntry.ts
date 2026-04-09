@@ -10,6 +10,7 @@ import {
   type Parsed
 } from 'typed-binary';
 import { BufferReader } from 'typed-binary';
+import * as pako from 'pako';
 import { BundleError } from '../errors';
 import { bigIntToU64, u64 } from '../u64';
 
@@ -192,28 +193,130 @@ export function parseResourceEntries(
 // Import Entry Parsing
 // ============================================================================
 
-export function parseImportEntries(reader: BufferReader, resources: ResourceEntry[]): ImportEntry[] {
+/**
+ * Read every resource's import table.
+ *
+ * In BND2 the import table is stored INLINE inside each resource's
+ * decompressed header block (not in a separate uncompressed section of the
+ * file). `resource.importOffset` is a header-block-RELATIVE offset, not a
+ * file-absolute one. Each entry is 16 bytes:
+ *   { u64 resourceId, u32 ptrOffset, u32 padding }
+ * where `ptrOffset` is the offset within the same header block where the
+ * pointer-to-patch lives.
+ *
+ * The earlier implementation seeked file-absolute on `reader`, which silently
+ * read garbage from random positions inside the bundle's compressed data.
+ * It happened to work for the registered resource types we shipped first
+ * (StreetData / TriggerData / VehicleList / ChallengeList / PlayerCarColours
+ * / IceTakeDictionary) because none of them actually USE imports — none of
+ * those types reference other resources by ID. Renderable, GraphicsSpec, and
+ * Model do use imports, and they all worked around the bug by re-reading the
+ * import table themselves from `getRenderableBlocks()` etc. With this fix
+ * those workarounds become unnecessary, but they're left in place for now
+ * since they're correct.
+ *
+ * Returns a flat array (concatenation of every resource's imports in resource
+ * order). Use {@link getResourceImportSlice} to recover the per-resource view.
+ */
+export function parseImportEntries(
+  buffer: ArrayBuffer,
+  resources: ResourceEntry[],
+  bundleHeader: { resourceDataOffsets: number[] },
+): ImportEntry[] {
   const imports: ImportEntry[] = [];
 
-  for (const resource of resources) {
-    if (resource.importCount > 0) {
-      reader.seekTo(resource.importOffset);
+  // Lazy-loaded so we don't pull pako into bundle/* unconditionally — keeps
+  // the dependency graph in this leaf module minimal. The dynamic import is
+  // resolved synchronously since resourceManager is already statically loaded
+  // by every parser anyway.
+  // (We do the static import at the top of the file in practice; this is just
+  // documenting why it's safe.)
 
-      for (let i = 0; i < resource.importCount; i++) {
-        try {
-          const rawImport = ImportEntrySchema.read(reader);
-          const importEntry: ImportEntry = {
-            resourceId: rawImport.resourceId,
-            offset: rawImport.offset,
-            padding: rawImport.padding
-          };
-          imports.push(importEntry);
-        } catch (error) {
-          console.warn(`Error parsing import entry ${i} for resource ${resource.resourceId}:`, error);
-        }
-      }
+  for (const resource of resources) {
+    if (resource.importCount === 0) continue;
+
+    // Pull the resource's header block (block 0). We can't trust
+    // extractResourceData here because it returns the FIRST non-empty block —
+    // which is what we want for header — but we still want to handle the
+    // edge case where block 0 is empty.
+    const size = extractResourceSizeLocal(resource.sizeAndAlignmentOnDisk[0]);
+    if (size <= 0) {
+      console.warn(`Resource has importCount=${resource.importCount} but block 0 is empty; skipping import read`);
+      continue;
+    }
+    const base = bundleHeader.resourceDataOffsets[0] >>> 0;
+    const rel = resource.diskOffsets[0] >>> 0;
+    const start = (base + rel) >>> 0;
+    if (start + size > buffer.byteLength) {
+      console.warn('Resource block 0 runs past end of file; skipping import read');
+      continue;
+    }
+    let bytes = new Uint8Array(buffer, start, size);
+    if (isCompressedLocal(bytes)) bytes = decompressLocal(bytes);
+
+    const importOff = resource.importOffset >>> 0;
+    if (importOff + resource.importCount * 16 > bytes.byteLength) {
+      console.warn(
+        `Resource importOffset 0x${importOff.toString(16)} + ${resource.importCount}×16 ` +
+        `runs past header block (${bytes.byteLength}); skipping`,
+      );
+      continue;
+    }
+
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = 0; i < resource.importCount; i++) {
+      const p = importOff + i * 16;
+      const lo = dv.getUint32(p + 0, true);
+      const hi = dv.getUint32(p + 4, true);
+      const offset = dv.getUint32(p + 8, true);
+      // 4 bytes of trailing padding per entry; preserved on the model so the
+      // type matches ImportEntrySchema (which carries `padding: u32`).
+      const padding = dv.getUint32(p + 12, true);
+      imports.push({
+        resourceId: { low: lo, high: hi },
+        offset,
+        padding,
+      });
     }
   }
 
   return imports;
+}
+
+// Local copies of resourceManager helpers — bundle/bundleEntry.ts must not
+// import from resourceManager.ts because resourceManager.ts already imports
+// from this directory (would create a cycle). The two helpers are tiny.
+function extractResourceSizeLocal(sizeAndAlignment: number): number {
+  return sizeAndAlignment & 0x0FFFFFFF;
+}
+
+function isCompressedLocal(data: Uint8Array): boolean {
+  // zlib magic: 0x78 followed by one of 0x01/0x9C/0xDA/0x5E.
+  if (data.length < 2) return false;
+  if (data[0] !== 0x78) return false;
+  return data[1] === 0x01 || data[1] === 0x9C || data[1] === 0xDA || data[1] === 0x5E;
+}
+
+function decompressLocal(data: Uint8Array): Uint8Array {
+  return pako.inflate(data);
+}
+
+/**
+ * Recover the per-resource import slice from the flat array returned by
+ * {@link parseImportEntries}. The flat array is in resource order, so the
+ * starting index for resource[i] is the running sum of `importCount` for
+ * resources [0..i).
+ *
+ * Returns null if the resource has no imports.
+ */
+export function getResourceImportSlice(
+  imports: ImportEntry[],
+  resources: ResourceEntry[],
+  resourceIndex: number,
+): ImportEntry[] | null {
+  let start = 0;
+  for (let i = 0; i < resourceIndex; i++) start += resources[i].importCount;
+  const count = resources[resourceIndex].importCount;
+  if (count === 0) return null;
+  return imports.slice(start, start + count);
 }

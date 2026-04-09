@@ -367,8 +367,10 @@ export function parseBundle(
 
     reportProgress(progressCallback, 'parse', 0.6, 'Parsing import entries');
 
-    // Parse imports
-    const imports = parseImportEntries(reader, resources);
+    // Parse imports. Reads each resource's inline import table from its
+    // decompressed header block — see parseImportEntries() for details and
+    // history of the prior file-absolute bug.
+    const imports = parseImportEntries(buffer, resources, header);
 
     reportProgress(progressCallback, 'parse', 0.8, 'Parsing debug data');
 
