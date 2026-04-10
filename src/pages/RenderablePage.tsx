@@ -41,7 +41,7 @@ import {
 import { getImportsByPtrOffset, getImportIds } from '@/lib/core/bundle';
 import { extractResourceSize, isCompressed, decompressData } from '@/lib/core/resourceManager';
 import { u64ToBigInt } from '@/lib/core/u64';
-import { resolveMaterialTextures, type ResolvedMaterial, type TextureSourceBundle } from '@/lib/core/materialChain';
+import { resolveMaterialTextures, parseShaderNameMap, type ResolvedMaterial, type TextureSourceBundle, type ShaderNameMap } from '@/lib/core/materialChain';
 import { parseBundle } from '@/lib/core/bundle';
 import { parsePlayerCarColoursData, type PlayerCarColours, type PlayerCarColourPalette, PALETTE_TYPE_NAMES, PaletteType } from '@/lib/core/playerCarColors';
 import { extractResourceRaw } from '@/lib/core/registry/extract';
@@ -75,6 +75,8 @@ type DecodedMesh = {
 	// Resolved textures for this mesh's material. Null if resolution failed
 	// or the material has no textures in this bundle.
 	resolvedMaterial: ResolvedMaterial | null;
+	// Summary of the picked VertexDescriptor's attribute layout for the info panel.
+	vertexLayout: { type: number; offset: number; stride: number }[] | null;
 };
 
 type DecodedRenderable = {
@@ -109,6 +111,7 @@ function decodeOneRenderable(
 	textureCache: Map<bigint, DecodedTexture | null>,
 	materialCache: Map<bigint, ResolvedMaterial | null>,
 	secondarySources: TextureSourceBundle[] = [],
+	shaderNames: ShaderNameMap | null = null,
 ): DecodedRenderable {
 	const resourceId = u64ToBigInt(resource.resourceId);
 	try {
@@ -156,7 +159,7 @@ function decodeOneRenderable(
 		// the same buffer six times. Key on the JSON of the attribute layout.
 		const vertCache = new Map<string, ReturnType<typeof decodeVertexArrays>>();
 
-		const decodeFor = (mesh: RenderableMesh) => {
+		const decodeFor = (mesh: RenderableMesh): { arrays: ReturnType<typeof decodeVertexArrays>; layout: DecodedMesh['vertexLayout'] } | null => {
 			const picked = pickPrimaryVertexDescriptor(mesh, resolveVd);
 			if (!picked) return null;
 			const key = JSON.stringify(picked.descriptor.attributes.map((a) => [a.type, a.offset, a.stride]));
@@ -165,14 +168,16 @@ function decodeOneRenderable(
 				arrays = decodeVertexArrays(body, renderable.vertexBuffer, picked.descriptor);
 				vertCache.set(key, arrays);
 			}
-			return arrays;
+			const layout = picked.descriptor.attributes.map(a => ({ type: a.type, offset: a.offset, stride: a.stride }));
+			return { arrays, layout };
 		};
 
 		for (const mesh of renderable.meshes) {
 			if (mesh.numIndices === 0) continue;
 			if (mesh.primitiveType !== 4) continue; // only TRIANGLELIST
-			const arrays = decodeFor(mesh);
-			if (!arrays || arrays.vertexCount === 0) continue;
+			const decoded = decodeFor(mesh);
+			if (!decoded || decoded.arrays.vertexCount === 0) continue;
+			const { arrays, layout: vertexLayout } = decoded;
 
 			const indices = meshIndicesU16(body, renderable.indexBuffer, mesh);
 			// meshIndicesU16 returns a view into the body block. three.js's
@@ -203,7 +208,7 @@ function decodeOneRenderable(
 					resolved = materialCache.get(mesh.materialAssemblyId) ?? null;
 				} else {
 					try {
-						resolved = resolveMaterialTextures(buffer, bundle, mesh.materialAssemblyId, textureCache, secondarySources);
+						resolved = resolveMaterialTextures(buffer, bundle, mesh.materialAssemblyId, textureCache, secondarySources, shaderNames);
 					} catch {
 						resolved = null;
 					}
@@ -221,6 +226,7 @@ function decodeOneRenderable(
 				startIndex: mesh.startIndex,
 				primitiveType: mesh.primitiveType,
 				resolvedMaterial: resolved,
+				vertexLayout,
 			});
 		}
 
@@ -265,6 +271,7 @@ function decodeAllRenderables(
 	includeNonLOD0: boolean,
 	mode: DecodeMode,
 	secondarySources: TextureSourceBundle[] = [],
+	shaderNames: ShaderNameMap | null = null,
 ): { renderables: DecodedRenderable[]; totalMeshes: number; failed: number } {
 	const vdCache = new Map<bigint, ParsedVertexDescriptor | null>();
 	const textureCache = new Map<bigint, DecodedTexture | null>();
@@ -278,7 +285,7 @@ function decodeAllRenderables(
 	const nameFor = (r: ResourceEntry) => debugNames.get(idKeyOf(r)) ?? null;
 	const isLodN = (name: string | null) => name !== null && /_LOD[1-9]\d*$/.test(name);
 	const decodeAndPush = (r: ResourceEntry, locator?: RawLocator) => {
-		const decoded = decodeOneRenderable(buffer, bundle, r, nameFor(r), vdCache, textureCache, materialCache, secondarySources);
+		const decoded = decodeOneRenderable(buffer, bundle, r, nameFor(r), vdCache, textureCache, materialCache, secondarySources, shaderNames);
 		if (locator) decoded.partLocator = locator;
 		if (decoded.error) failed++;
 		totalMeshes += decoded.meshes.length;
@@ -511,9 +518,10 @@ function SceneEnvironment() {
 				varying vec3 vWorldPosition;
 				void main() {
 					float h = normalize(vWorldPosition).y;
-					// Sky: bright blue-white at top, warm grey at horizon, dark at bottom
-					vec3 sky = mix(vec3(0.6, 0.65, 0.7), vec3(0.4, 0.6, 0.9), max(h, 0.0));
-					vec3 ground = mix(vec3(0.3, 0.28, 0.25), vec3(0.15, 0.13, 0.1), max(-h, 0.0));
+					// Brighter environment for visible reflections on car body.
+					// Top: bright sky, horizon: warm bright, bottom: dark ground.
+					vec3 sky = mix(vec3(0.8, 0.85, 0.9), vec3(0.5, 0.7, 1.0), max(h, 0.0));
+					vec3 ground = mix(vec3(0.4, 0.35, 0.3), vec3(0.1, 0.08, 0.06), max(-h, 0.0));
 					vec3 color = h > 0.0 ? sky : ground;
 					gl_FragColor = vec4(color, 1.0);
 				}
@@ -654,62 +662,116 @@ function RenderableMeshes({
 					mat.map = tex;
 				}
 
-				// Detect glass materials heuristically:
-				// 1. No diffuse texture + cross-bundle misses → definitely glass
-				// 2. Small DXT5 diffuse (<=128px) from secondary → likely glass tint texture
-				//    DXT5 has alpha which the game uses for glass transparency
-				const isGlassNoTex = !rm.diffuse && !rm.diffuseFromSecondary && rm.crossBundleMisses > 0;
-				const isGlassSmallAlpha = rm.diffuse && rm.diffuseFromSecondary
-					&& rm.diffuse.header.format === 'DXT5'
-					&& rm.diffuse.header.width <= 128 && rm.diffuse.header.height <= 128;
-				const isGlass = isGlassNoTex || isGlassSmallAlpha;
-				if (isGlass) {
+				// ---- Shader-aware material setup ----
+				// Use the resolved shader name for precise material properties.
+				// Falls back to heuristics when shader name is unavailable.
+				const sn = rm.shaderName ?? '';
+
+				if (sn.includes('Window')) {
+					// Vehicle_Greyscale_Window_Textured — tinted glass.
+					// The diffuse texture (128x128 DXT5) is a tint color map.
 					mat.transparent = true;
-					mat.opacity = 0.3;
-					if (!isGlassSmallAlpha) {
-						mat.color.setRGB(0.15, 0.18, 0.22);
-					}
+					mat.opacity = rm.diffuse ? 0.35 : 0.25;
+					mat.color.setRGB(0.08, 0.1, 0.14);
 					mat.metalness = 0.95;
 					mat.roughness = 0.02;
-					mat.envMapIntensity = 2.0;
+					mat.envMapIntensity = 2.5;
 					mat.depthWrite = false;
-				}
-
-				// Apply paint color tint to body materials.
-				// Body materials: diffuse from secondary (not glass) or no diffuse (not glass).
-				const isBodyMaterial = !isGlass && (rm.diffuseFromSecondary || !rm.diffuse);
-				if (paintColor && isBodyMaterial) {
-					mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
-					const pearl = paintColor.pearl;
-					if (pearl) {
-						mat.emissive.setRGB(pearl.r * 0.25, pearl.g * 0.25, pearl.b * 0.25);
+				} else if (sn.includes('Chrome')) {
+					// Vehicle_Opaque_Chrome_Damaged — dark reflective chrome.
+					// Chrome reflects its environment; in a dark scene it looks
+					// dark silver, not bright white.
+					mat.color.setRGB(0.35, 0.35, 0.38);
+					mat.metalness = 1.0;
+					mat.roughness = 0.08;
+					mat.envMapIntensity = 2.5;
+				} else if (sn.includes('PaintGloss')) {
+					// Vehicle_Opaque_PaintGloss_Textured — glossy painted body
+					if (paintColor) {
+						mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
+						const pearl = paintColor.pearl;
+						if (pearl) {
+							mat.emissive.setRGB(pearl.r * 0.25, pearl.g * 0.25, pearl.b * 0.25);
+						} else {
+							mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
+						}
+						mat.emissiveIntensity = 1.0;
 					} else {
-						mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
+						mat.color.setRGB(0.18, 0.18, 0.20);
 					}
-					mat.emissiveIntensity = 1.0;
 					mat.metalness = 0.6;
-					mat.roughness = 0.25;
+					mat.roughness = 0.2;
+					mat.envMapIntensity = 1.5;
+				} else if (sn.includes('Light') && sn.includes('EnvMapped')) {
+					// Vehicle_GreyScale_Light_Textured_EnvMapped — headlights/taillights
+					mat.metalness = 0.8;
+					mat.roughness = 0.1;
+					mat.envMapIntensity = 2.0;
+				} else if (sn.includes('Metal') || sn.includes('SimpleMetal')) {
+					// Vehicle_Opaque_Metal_Textured, SimpleMetal_Textured
+					mat.metalness = 0.7;
+					mat.roughness = 0.3;
 					mat.envMapIntensity = 1.2;
-				} else if (isBodyMaterial) {
-					// Body panels without paint still get some env reflection
-					mat.metalness = 0.3;
-					mat.roughness = 0.4;
-					mat.envMapIntensity = 0.8;
+				} else if (sn.includes('Decal') && sn.includes('EnvMapped')) {
+					// Vehicle_Opaque_Decal_Textured_EnvMapped — decals with env reflection
+					mat.metalness = 0.4;
+					mat.roughness = 0.3;
+					mat.envMapIntensity = 1.5;
+				} else if (sn.includes('Decal')) {
+					// Vehicle_GreyScale_Decal_Textured — flat decals
+					mat.metalness = 0.1;
+					mat.roughness = 0.6;
+				} else if (sn.includes('CarGuts') || sn.includes('Livery')) {
+					// Vehicle_Livery_Alpha_CarGuts — interior
+					mat.metalness = 0.1;
+					mat.roughness = 0.8;
+				} else {
+					// Fallback: heuristic-based (no shader name)
+					const isGlassNoTex = !rm.diffuse && !rm.diffuseFromSecondary && rm.crossBundleMisses > 0;
+					const isGlassSmallAlpha = rm.diffuse && rm.diffuseFromSecondary
+						&& rm.diffuse.header.format === 'DXT5'
+						&& rm.diffuse.header.width <= 128 && rm.diffuse.header.height <= 128;
+					const isGlass = isGlassNoTex || isGlassSmallAlpha;
+					if (isGlass) {
+						mat.transparent = true;
+						mat.opacity = 0.3;
+						mat.color.setRGB(0.15, 0.18, 0.22);
+						mat.metalness = 0.95;
+						mat.roughness = 0.02;
+						mat.envMapIntensity = 2.0;
+						mat.depthWrite = false;
+					}
+					const isBodyMaterial = !isGlass && (rm.diffuseFromSecondary || rm.anyFromSecondary || !rm.diffuse);
+					if (paintColor && isBodyMaterial) {
+						mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
+						mat.metalness = 0.6;
+						mat.roughness = 0.25;
+						mat.envMapIntensity = 1.2;
+					} else if (isBodyMaterial) {
+						mat.color.setRGB(0.18, 0.18, 0.20);
+						mat.metalness = 0.5;
+						mat.roughness = 0.3;
+						mat.envMapIntensity = 1.5;
+					}
 				}
 
-				if (rm.normal) {
-					const tex = makeDataTexture(rm.normal, rm.samplerState, false);
-					mat.normalMap = tex;
-					mat.normalScale = new THREE.Vector2(1.0, 1.0);
-				}
-
+				// Apply specular intensity map (metalnessMap) if available
 				if (rm.specular) {
 					const tex = makeDataTexture(rm.specular, rm.samplerState, false);
-					mat.roughnessMap = tex;
-					// Specular maps: bright = shiny = low roughness. THREE.js
-					// roughnessMap reads luminance directly (bright = rough), so
-					// we invert by setting roughness to a low base.
-					mat.roughness = 0.95;
+					mat.metalnessMap = tex;
+				}
+
+				if (rm.emissive) {
+					const tex = makeDataTexture(rm.emissive, rm.samplerState);
+					mat.emissiveMap = tex;
+					mat.emissive.setRGB(1, 1, 1);
+					mat.emissiveIntensity = 2.0;
+				}
+
+				if (rm.ao) {
+					const tex = makeDataTexture(rm.ao, rm.samplerState, false);
+					mat.aoMap = tex;
+					mat.aoMapIntensity = 1.0;
 				}
 
 				map.set(key, mat);
@@ -840,6 +902,163 @@ function computeSceneBounds(renderables: DecodedRenderable[]): THREE.Sphere {
 	return sphere;
 }
 
+// =============================================================================
+// Texture thumbnail helper
+// =============================================================================
+
+/** Convert a DecodedTexture to a data URL for inline preview. Cached. */
+const texDataUrlCache = new WeakMap<import('../lib/core/texture').DecodedTexture, string>();
+function texToDataUrl(tex: import('../lib/core/texture').DecodedTexture): string {
+	if (texDataUrlCache.has(tex)) return texDataUrlCache.get(tex)!;
+	const { width, height } = tex.header;
+	const canvas = document.createElement('canvas');
+	canvas.width = width;
+	canvas.height = height;
+	const ctx = canvas.getContext('2d')!;
+	const imageData = new ImageData(new Uint8ClampedArray(tex.pixels.buffer, tex.pixels.byteOffset, tex.pixels.byteLength), width, height);
+	ctx.putImageData(imageData, 0, 0);
+	const url = canvas.toDataURL('image/png');
+	texDataUrlCache.set(tex, url);
+	return url;
+}
+
+/** Inline texture thumbnail + info. Click opens full-size in a new tab. */
+function TextureThumb({ tex, label, suffix }: {
+	tex: import('../lib/core/texture').DecodedTexture | null;
+	label: string;
+	suffix?: string;
+}) {
+	if (!tex) {
+		return (
+			<div className="flex items-center gap-2">
+				<span className="text-muted-foreground text-[10px] w-14">{label}</span>
+				<span className="text-muted-foreground text-[10px]">none</span>
+			</div>
+		);
+	}
+	const url = texToDataUrl(tex);
+	return (
+		<div className="flex items-center gap-2">
+			<span className="text-muted-foreground text-[10px] w-14 shrink-0">{label}</span>
+			<a
+				href={url}
+				target="_blank"
+				rel="noopener noreferrer"
+				title={`View full ${tex.header.width}x${tex.header.height} ${tex.header.format} texture`}
+				className="shrink-0 border border-border rounded hover:border-primary transition-colors"
+			>
+				<img src={url} alt={label} className="block" style={{ width: 48, height: 48, imageRendering: 'pixelated', objectFit: 'contain', background: '#111' }} />
+			</a>
+			<span className="font-mono text-[10px]">
+				{tex.header.width}x{tex.header.height}<br/>{tex.header.format}{suffix ? ` ${suffix}` : ''}
+			</span>
+		</div>
+	);
+}
+
+/** Material info sub-panel with texture thumbnails and classification. */
+function MaterialInfoSection({ rm }: { rm: ResolvedMaterial }) {
+	const sn = rm.shaderName ?? '';
+	const classification = sn.includes('Window') ? 'glass'
+		: sn.includes('Chrome') ? 'chrome'
+		: sn.includes('PaintGloss') ? 'paint'
+		: sn.includes('Light') ? 'light'
+		: sn.includes('Metal') ? 'metal'
+		: sn.includes('Decal') ? 'decal'
+		: sn.includes('CarGuts') ? 'interior'
+		: 'textured';
+
+	return (
+		<div className="mb-3">
+			<div className="text-muted-foreground mb-1">resolved textures</div>
+			<div className="space-y-1.5">
+				<TextureThumb tex={rm.diffuse} label="diffuse" suffix={rm.diffuseFromSecondary ? '(VT)' : rm.diffuse ? '(GR)' : undefined} />
+				<TextureThumb tex={rm.normal} label="normal" />
+				<TextureThumb tex={rm.specular} label="specular" />
+				<TextureThumb tex={rm.emissive} label="emissive" />
+				<TextureThumb tex={rm.ao} label="AO" />
+				{rm.unclassified.map((u, i) => (
+					<TextureThumb key={i} tex={u.texture} label={`ch=${u.channel}`} suffix="(?)" />
+				))}
+			</div>
+			<div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 font-mono text-[10px] mt-2">
+				{rm.shaderName && <>
+					<span className="text-muted-foreground">shader</span>
+					<span className="text-emerald-400 break-all">{rm.shaderName}</span>
+				</>}
+				<span className="text-muted-foreground">class</span>
+				<span className={
+					classification === 'chrome' ? 'text-gray-300' :
+					classification === 'glass' ? 'text-sky-400' :
+					classification === 'paint' ? 'text-amber-400' :
+					classification === 'light' ? 'text-yellow-300' :
+					classification === 'metal' ? 'text-gray-400' :
+					''
+				}>{classification}</span>
+				<span className="text-muted-foreground">flags</span>
+				<span>{[
+					rm.diffuseFromSecondary && 'diffVT',
+					rm.anyFromSecondary && 'anyVT',
+					rm.crossBundleMisses > 0 && `miss:${rm.crossBundleMisses}`,
+				].filter(Boolean).join(' ') || 'none'}</span>
+			</div>
+		</div>
+	);
+}
+
+/** Export all unclassified textures across all materials as a ZIP-like download.
+ *  Each texture is saved as mat_{materialId}_ch{channel}_{WxH}_{format}.png */
+function ExportUnclassifiedButton({ decoded }: { decoded: { renderables: DecodedRenderable[] } }) {
+	const handleExport = () => {
+		const seen = new Set<string>();
+		const exports: { name: string; url: string }[] = [];
+
+		for (const r of decoded.renderables) {
+			for (const m of r.meshes) {
+				const rm = m.resolvedMaterial;
+				if (!rm) continue;
+				const matId = rm.materialId.toString(16);
+
+				// Collect all textures with their role for context
+				const allSlots: { role: string; tex: import('../lib/core/texture').DecodedTexture }[] = [];
+				if (rm.diffuse) allSlots.push({ role: 'diffuse', tex: rm.diffuse });
+				if (rm.normal) allSlots.push({ role: 'normal', tex: rm.normal });
+				if (rm.specular) allSlots.push({ role: 'specular', tex: rm.specular });
+				for (const u of rm.unclassified) {
+					allSlots.push({ role: `ch${u.channel}_unknown`, tex: u.texture });
+				}
+
+				for (const { role, tex } of allSlots) {
+					const key = `${matId}_${role}_${tex.header.width}x${tex.header.height}`;
+					if (seen.has(key)) continue;
+					seen.add(key);
+					const name = `mat_${matId}_${role}_${tex.header.width}x${tex.header.height}_${tex.header.format}.png`;
+					exports.push({ name, url: texToDataUrl(tex) });
+				}
+			}
+		}
+
+		if (exports.length === 0) { alert('No textures to export.'); return; }
+
+		// Download each as individual files via temp anchor clicks
+		for (const { name, url } of exports) {
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = name;
+			a.click();
+		}
+	};
+
+	return (
+		<button
+			onClick={handleExport}
+			className="text-[10px] text-sky-400 hover:text-sky-300 underline cursor-pointer bg-transparent border-none p-0"
+		>
+			Export all textures as PNGs
+		</button>
+	);
+}
+
 /**
  * Right-side panel that shows details for the currently selected (or hovered)
  * mesh: parent Renderable id, debug name, mesh index, vertex/index counts,
@@ -925,12 +1144,14 @@ function PartInfoPanel({
 				<div className="font-mono break-all">{idHex(m.materialAssemblyId)}</div>
 			</div>
 
+			{m.resolvedMaterial && <MaterialInfoSection rm={m.resolvedMaterial} />}
+
 			<div className="mb-3">
 				<div className="text-muted-foreground mb-1">vertex descriptors</div>
 				{vdList.length === 0 ? (
 					<div className="font-mono text-muted-foreground">none</div>
 				) : (
-					<ul className="font-mono space-y-0.5">
+					<ul className="font-mono space-y-0.5 text-[10px]">
 						{m.vertexDescriptorIds.map((id, i) =>
 							id === null ? null : (
 								<li key={i}>
@@ -941,6 +1162,39 @@ function PartInfoPanel({
 					</ul>
 				)}
 			</div>
+
+			{m.vertexLayout && (() => {
+				const ATTR_NAMES: Record<number, string> = {
+					1: 'POSITION', 3: 'NORMAL', 5: 'TEXCOORD0', 6: 'TEXCOORD1',
+					13: 'BLENDIDX', 14: 'BLENDWT', 15: 'TANGENT',
+				};
+				const stride = m.vertexLayout[0]?.stride ?? 0;
+				return (
+					<div className="mb-3">
+						<div className="text-muted-foreground mb-1">vertex layout <span className="text-foreground">(stride {stride}B)</span></div>
+						<table className="font-mono text-[10px] w-full">
+							<thead>
+								<tr className="text-muted-foreground">
+									<td>attr</td><td className="text-right">off</td><td className="text-right">size</td>
+								</tr>
+							</thead>
+							<tbody>
+								{m.vertexLayout.map((a, i) => {
+									const nextOff = i + 1 < m.vertexLayout!.length ? m.vertexLayout![i + 1].offset : stride;
+									const size = nextOff - a.offset;
+									return (
+										<tr key={i}>
+											<td>{ATTR_NAMES[a.type] ?? `type_${a.type}`}</td>
+											<td className="text-right">+{a.offset}</td>
+											<td className="text-right">{size}B</td>
+										</tr>
+									);
+								})}
+							</tbody>
+						</table>
+					</div>
+				);
+			})()}
 
 			<div className="mb-3">
 				<div className="text-muted-foreground mb-1">part locator (Renderable)</div>
@@ -968,6 +1222,19 @@ const RenderablePage = () => {
 	const [hovered, setHovered] = useState<{ ri: number; mi: number } | null>(null);
 	const [textureBundles, setTextureBundles] = useState<TextureSourceBundle[]>([]);
 	const [textureBundleNames, setTextureBundleNames] = useState<string[]>([]);
+	const [shaderNameMap, setShaderNameMap] = useState<ShaderNameMap | null>(null);
+
+	// Auto-load SHADERS.BNDL from the example directory if available.
+	useEffect(() => {
+		fetch('/example/SHADERS.BNDL')
+			.then(r => { if (!r.ok) throw new Error('not found'); return r.arrayBuffer(); })
+			.then(ab => {
+				const map = parseShaderNameMap(ab);
+				setShaderNameMap(map);
+				console.debug(`[Shaders] Loaded ${map.size} shader names from SHADERS.BNDL`);
+			})
+			.catch(() => { /* SHADERS.BNDL not available, shader names will be null */ });
+	}, []);
 
 	// Load a secondary texture bundle file.
 	const handleLoadTexturePack = async () => {
@@ -1026,8 +1293,11 @@ const RenderablePage = () => {
 
 	const decoded = useMemo(() => {
 		if (!loadedBundle || !originalArrayBuffer) return null;
-		return decodeAllRenderables(originalArrayBuffer, loadedBundle, debugNames, includeNonLOD0, decodeMode, textureBundles);
-	}, [loadedBundle, originalArrayBuffer, debugNames, includeNonLOD0, decodeMode, textureBundles]);
+		const result = decodeAllRenderables(originalArrayBuffer, loadedBundle, debugNames, includeNonLOD0, decodeMode, textureBundles, shaderNameMap);
+		// Debug: expose for console inspection
+		(window as unknown as Record<string, unknown>).__decoded = result;
+		return result;
+	}, [loadedBundle, originalArrayBuffer, debugNames, includeNonLOD0, decodeMode, textureBundles, shaderNameMap]);
 
 	// Clear stale selection when the decoded set changes — the indices we
 	// captured may no longer point at the same mesh.
@@ -1206,10 +1476,15 @@ const RenderablePage = () => {
 					{decoded && (() => {
 						const texturedMeshes = decoded.renderables.flatMap(r => r.meshes).filter(m => m.resolvedMaterial?.diffuse);
 						const crossBundleMeshes = decoded.renderables.flatMap(r => r.meshes).filter(m => m.resolvedMaterial && m.resolvedMaterial.crossBundleMisses > 0);
+						const unclassifiedCount = decoded.renderables.flatMap(r => r.meshes).reduce((n, m) => n + (m.resolvedMaterial?.unclassified.length ?? 0), 0);
 						if (texturedMeshes.length > 0) {
 							return (
 								<div className="mt-2 text-xs text-green-400">
 									{texturedMeshes.length} mesh(es) with resolved textures.
+									{unclassifiedCount > 0 && (
+										<span className="text-amber-400 ml-2">{unclassifiedCount} unclassified slot(s).</span>
+									)}
+									<div className="mt-1"><ExportUnclassifiedButton decoded={decoded} /></div>
 								</div>
 							);
 						}
