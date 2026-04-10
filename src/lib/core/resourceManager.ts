@@ -124,7 +124,7 @@ export function decompressData(compressedData: Uint8Array): Uint8Array {
     }
 
     console.debug(`📖 Decompressing data: ${compressedData.length} bytes`);
-    const decompressed = pako.inflate(compressedData);
+    const decompressed = pako.inflate(compressedData) as Uint8Array<ArrayBuffer>;
     console.debug(`✅ Decompression complete: ${compressedData.length} -> ${decompressed.length} bytes (ratio: ${(decompressed.length / compressedData.length).toFixed(1)}x)`);
     return decompressed;
   } catch (error) {
