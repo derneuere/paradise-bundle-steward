@@ -53,6 +53,11 @@ export type ResolvedMaterial = {
 	samplerState: Pick<ParsedTextureState, 'addressU' | 'addressV'> | null;
 	/** Blend/cull/alpha properties from MaterialState. */
 	properties: MaterialProperties | null;
+	/** Whether the diffuse texture was resolved from a secondary bundle
+	 *  (e.g. VEHICLETEX) rather than the primary bundle. Materials with
+	 *  secondary-source diffuse are typically body/paint and should receive
+	 *  the vehicle color tint. */
+	diffuseFromSecondary: boolean;
 	/** Number of texture slots that couldn't resolve because the Texture
 	 *  resource lives in a different bundle. */
 	crossBundleMisses: number;
@@ -126,6 +131,7 @@ export function resolveMaterialTextures(
 	}
 
 	let crossBundleMisses = 0;
+	let diffuseFromSecondary = false;
 
 	const decodeSlot = (index: number): DecodedTexture | null => {
 		if (index >= textureStates.length) return null;
@@ -157,6 +163,7 @@ export function resolveMaterialTextures(
 				try {
 					const decoded = decodeTexture(src.buffer, src.bundle, secResource);
 					textureCache.set(textureId, decoded);
+					if (index === 0) diffuseFromSecondary = true;
 					return decoded;
 				} catch (err) {
 					console.warn(`Failed to decode texture ${textureId.toString(16)} from secondary:`, err);
@@ -178,6 +185,7 @@ export function resolveMaterialTextures(
 			? { addressU: textureStates[0].state.addressU, addressV: textureStates[0].state.addressV }
 			: null,
 		properties,
+		diffuseFromSecondary,
 		crossBundleMisses,
 	};
 }

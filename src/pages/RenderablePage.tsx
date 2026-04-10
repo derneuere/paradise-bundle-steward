@@ -43,6 +43,8 @@ import { extractResourceSize, isCompressed, decompressData } from '@/lib/core/re
 import { u64ToBigInt } from '@/lib/core/u64';
 import { resolveMaterialTextures, type ResolvedMaterial, type TextureSourceBundle } from '@/lib/core/materialChain';
 import { parseBundle } from '@/lib/core/bundle';
+import { parsePlayerCarColoursData, type PlayerCarColours, type PlayerCarColourPalette, PALETTE_TYPE_NAMES, PaletteType } from '@/lib/core/playerCarColors';
+import { extractResourceRaw } from '@/lib/core/registry/extract';
 import { D3DTextureAddress } from '@/lib/core/textureState';
 import type { DecodedTexture } from '@/lib/core/texture';
 import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
@@ -368,6 +370,114 @@ function locatorToMatrix4(locator: RawLocator | undefined): THREE.Matrix4 {
  * the user can see what they picked. r3f's raycaster handles the picking
  * for us — no manual raycasts needed.
  */
+// Built-in color palette for when PlayerCarColours resource isn't available.
+// Representative selection of common Burnout Paradise vehicle colors.
+const DEFAULT_PAINT_COLORS: { name: string; r: number; g: number; b: number }[] = [
+	{ name: 'White', r: 0.95, g: 0.95, b: 0.95 },
+	{ name: 'Silver', r: 0.75, g: 0.75, b: 0.78 },
+	{ name: 'Gunmetal', r: 0.35, g: 0.37, b: 0.40 },
+	{ name: 'Black', r: 0.05, g: 0.05, b: 0.05 },
+	{ name: 'Red', r: 0.85, g: 0.08, b: 0.08 },
+	{ name: 'Dark Red', r: 0.55, g: 0.02, b: 0.02 },
+	{ name: 'Orange', r: 0.95, g: 0.45, b: 0.05 },
+	{ name: 'Yellow', r: 0.95, g: 0.85, b: 0.05 },
+	{ name: 'Lime', r: 0.45, g: 0.85, b: 0.08 },
+	{ name: 'Green', r: 0.02, g: 0.55, b: 0.15 },
+	{ name: 'Teal', r: 0.05, g: 0.65, b: 0.65 },
+	{ name: 'Blue', r: 0.08, g: 0.35, b: 0.85 },
+	{ name: 'Dark Blue', r: 0.05, g: 0.12, b: 0.45 },
+	{ name: 'Purple', r: 0.45, g: 0.08, b: 0.75 },
+	{ name: 'Pink', r: 0.90, g: 0.20, b: 0.55 },
+	{ name: 'Gold', r: 0.75, g: 0.60, b: 0.15 },
+	{ name: 'Bronze', r: 0.55, g: 0.35, b: 0.15 },
+	{ name: 'Brown', r: 0.35, g: 0.18, b: 0.05 },
+];
+
+/** Color picker strip component for the Renderable Viewer. */
+function VehicleColorPicker({
+	carColours,
+	activePalette,
+	setActivePalette,
+	paintColor,
+	onSelectColor,
+}: {
+	carColours: PlayerCarColours | null;
+	activePalette: number;
+	setActivePalette: (p: number) => void;
+	paintColor: { r: number; g: number; b: number } | null;
+	onSelectColor: (color: { r: number; g: number; b: number } | null) => void;
+}) {
+	if (carColours) {
+		// Use actual PlayerCarColours data
+		const palette = carColours.palettes[activePalette];
+		return (
+			<div className="px-3 pb-2 space-y-1">
+				<div className="flex items-center gap-1 text-xs">
+					{carColours.palettes.map((p, i) => (
+						<button
+							key={i}
+							className={`px-2 py-0.5 rounded text-xs ${i === activePalette ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+							onClick={() => setActivePalette(i)}
+						>
+							{p.typeName}
+						</button>
+					))}
+					<button
+						className="px-2 py-0.5 rounded text-xs bg-muted hover:bg-muted/80 ml-2"
+						onClick={() => onSelectColor(null)}
+					>
+						reset
+					</button>
+				</div>
+				<div className="flex flex-wrap gap-1">
+					{palette.paintColours.map((c, i) => {
+						const rgb = { r: Math.max(0, Math.min(1, c.red)), g: Math.max(0, Math.min(1, c.green)), b: Math.max(0, Math.min(1, c.blue)) };
+						const isActive = paintColor && Math.abs(paintColor.r - rgb.r) < 0.01 && Math.abs(paintColor.g - rgb.g) < 0.01 && Math.abs(paintColor.b - rgb.b) < 0.01;
+						return (
+							<button
+								key={i}
+								className={`w-5 h-5 rounded-sm border ${isActive ? 'border-white ring-1 ring-white' : 'border-white/20'}`}
+								style={{ backgroundColor: c.rgbValue }}
+								title={`${c.hexValue}${c.isNeon ? ' (neon)' : ''}`}
+								onClick={() => onSelectColor(rgb)}
+							/>
+						);
+					})}
+				</div>
+			</div>
+		);
+	}
+
+	// Fallback: built-in default palette
+	return (
+		<div className="px-3 pb-2 space-y-1">
+			<div className="flex items-center gap-1 text-xs">
+				<span className="text-muted-foreground">paint color:</span>
+				<button
+					className="px-2 py-0.5 rounded text-xs bg-muted hover:bg-muted/80 ml-1"
+					onClick={() => onSelectColor(null)}
+				>
+					reset
+				</button>
+			</div>
+			<div className="flex flex-wrap gap-1">
+				{DEFAULT_PAINT_COLORS.map((c, i) => {
+					const isActive = paintColor && Math.abs(paintColor.r - c.r) < 0.01 && Math.abs(paintColor.g - c.g) < 0.01 && Math.abs(paintColor.b - c.b) < 0.01;
+					return (
+						<button
+							key={i}
+							className={`w-5 h-5 rounded-sm border ${isActive ? 'border-white ring-1 ring-white' : 'border-white/20'}`}
+							style={{ backgroundColor: `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})` }}
+							title={c.name}
+							onClick={() => onSelectColor({ r: c.r, g: c.g, b: c.b })}
+						/>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
 /** Create a THREE.DataTexture from decoded texture data. */
 function makeDataTexture(
 	decoded: DecodedTexture,
@@ -409,6 +519,7 @@ function applyWrapping(
 function RenderableMeshes({
 	renderables,
 	wireframe,
+	paintColor,
 	selected,
 	hovered,
 	onSelect,
@@ -416,14 +527,25 @@ function RenderableMeshes({
 }: {
 	renderables: DecodedRenderable[];
 	wireframe: boolean;
+	paintColor: { r: number; g: number; b: number } | null;
 	selected: { ri: number; mi: number } | null;
 	hovered: { ri: number; mi: number } | null;
 	onSelect: (sel: { ri: number; mi: number } | null) => void;
 	onHover: (sel: { ri: number; mi: number } | null) => void;
 }) {
 	const baseMaterial = useMemo(
-		() => new THREE.MeshStandardMaterial({ color: 0xb0b8c0, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide, wireframe }),
-		[wireframe],
+		() => {
+			const mat = new THREE.MeshStandardMaterial({ color: 0xb0b8c0, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide, wireframe });
+			if (paintColor) {
+				mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
+				mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
+				mat.emissiveIntensity = 1.0;
+				mat.metalness = 0.6;
+				mat.roughness = 0.25;
+			}
+			return mat;
+		},
+		[wireframe, paintColor],
 	);
 	const hoverMaterial = useMemo(
 		() => new THREE.MeshStandardMaterial({ color: 0x5fa8ff, metalness: 0.1, roughness: 0.5, side: THREE.DoubleSide, emissive: 0x113355, emissiveIntensity: 0.4 }),
@@ -470,6 +592,21 @@ function RenderableMeshes({
 					mat.map = tex;
 				}
 
+				// Apply paint color tint to body materials.
+				// Body materials are those whose diffuse came from a secondary
+				// bundle (e.g. VEHICLETEX) or that have no diffuse at all.
+				// The game's shader uses paint color as the primary surface color
+				// with the texture providing detail/variation. We achieve this by
+				// setting a strong color tint plus emissive to brighten dark textures.
+				const isBodyMaterial = rm.diffuseFromSecondary || !rm.diffuse;
+				if (paintColor && isBodyMaterial) {
+					mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
+					mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
+					mat.emissiveIntensity = 1.0;
+					mat.metalness = 0.6;
+					mat.roughness = 0.25;
+				}
+
 				if (rm.normal) {
 					const tex = makeDataTexture(rm.normal, rm.samplerState, false);
 					mat.normalMap = tex;
@@ -489,7 +626,7 @@ function RenderableMeshes({
 			}
 		}
 		return map;
-	}, [renderables, wireframe]);
+	}, [renderables, wireframe, paintColor]);
 
 	// Dispose materials and their textures when the decoded set changes.
 	useEffect(() => () => {
@@ -524,10 +661,9 @@ function RenderableMeshes({
 		<>
 			{renderables.map((r, ri) =>
 				r.meshes.map((m, mi) => {
-					const mat = matrices[ri][mi];
+					const mat = matrices[ri]?.[mi] ?? null;
 					const isSelected = selected !== null && selected.ri === ri && selected.mi === mi;
 					const isHovered = hovered !== null && hovered.ri === ri && hovered.mi === mi;
-					// Priority: selection highlight > hover highlight > textured material > flat gray fallback.
 					const texturedMat = m.materialAssemblyId
 						? texturedMaterials.get(m.materialAssemblyId.toString(16)) ?? null
 						: null;
@@ -736,6 +872,8 @@ const RenderablePage = () => {
 	const [includeNonLOD0, setIncludeNonLOD0] = useState(false);
 	const [decodeMode, setDecodeMode] = useState<DecodeMode>('graphics');
 	const [wireframe, setWireframe] = useState(false);
+	const [paintColor, setPaintColor] = useState<{ r: number; g: number; b: number } | null>(null);
+	const [activePalette, setActivePalette] = useState(0);
 	const [selected, setSelected] = useState<{ ri: number; mi: number } | null>(null);
 	const [hovered, setHovered] = useState<{ ri: number; mi: number } | null>(null);
 	const [textureBundles, setTextureBundles] = useState<TextureSourceBundle[]>([]);
@@ -760,6 +898,29 @@ const RenderablePage = () => {
 		};
 		input.click();
 	};
+
+	// Try to load PlayerCarColours (0x1001E) from the primary bundle or any
+	// secondary texture bundle. Falls back to a built-in default palette.
+	const carColours: PlayerCarColours | null = useMemo(() => {
+		const PLAYER_CAR_COLOURS_TYPE = 0x1001E;
+		const tryParse = (buf: ArrayBuffer, bun: ParsedBundle): PlayerCarColours | null => {
+			const res = bun.resources.find(r => r.resourceTypeId === PLAYER_CAR_COLOURS_TYPE);
+			if (!res) return null;
+			try {
+				const raw = extractResourceRaw(buf, bun, res);
+				return parsePlayerCarColoursData(raw);
+			} catch { return null; }
+		};
+		if (loadedBundle && originalArrayBuffer) {
+			const result = tryParse(originalArrayBuffer, loadedBundle);
+			if (result) return result;
+		}
+		for (const src of textureBundles) {
+			const result = tryParse(src.buffer, src.bundle);
+			if (result) return result;
+		}
+		return null;
+	}, [loadedBundle, originalArrayBuffer, textureBundles]);
 
 	// Build a debug-name lookup keyed by canonical (lowercase, no leading zeros)
 	// resource id. The RST stores ids as 8-char zero-padded lowercase hex; we
@@ -889,6 +1050,13 @@ const RenderablePage = () => {
 							</span>
 						)}
 					</div>
+					<VehicleColorPicker
+						carColours={carColours}
+						activePalette={activePalette}
+						setActivePalette={setActivePalette}
+						paintColor={paintColor}
+						onSelectColor={setPaintColor}
+					/>
 				</CardHeader>
 				<CardContent>
 					<div className="flex flex-row gap-3" style={{ height: '70vh' }}>
@@ -926,6 +1094,7 @@ const RenderablePage = () => {
 										<RenderableMeshes
 											renderables={decoded.renderables}
 											wireframe={wireframe}
+											paintColor={paintColor}
 											selected={selected}
 											hovered={hovered}
 											onSelect={setSelected}
