@@ -600,23 +600,28 @@ function RenderableMeshes({
 					mat.map = tex;
 				}
 
-				// Detect glass materials: no diffuse texture at all (cross-bundle miss),
-				// not a body panel. Glass parts in BP use alpha blending with a dark
-				// tint. Heuristic: material has texture slots that all missed AND it
-				// doesn't come from secondary (body paint).
-				const isGlass = !rm.diffuse && !rm.diffuseFromSecondary && rm.crossBundleMisses > 0;
+				// Detect glass materials heuristically:
+				// 1. No diffuse texture + cross-bundle misses → definitely glass
+				// 2. Small DXT5 diffuse (<=128px) from secondary → likely glass tint texture
+				//    DXT5 has alpha which the game uses for glass transparency
+				const isGlassNoTex = !rm.diffuse && !rm.diffuseFromSecondary && rm.crossBundleMisses > 0;
+				const isGlassSmallAlpha = rm.diffuse && rm.diffuseFromSecondary
+					&& rm.diffuse.header.format === 'DXT5'
+					&& rm.diffuse.header.width <= 128 && rm.diffuse.header.height <= 128;
+				const isGlass = isGlassNoTex || isGlassSmallAlpha;
 				if (isGlass) {
 					mat.transparent = true;
 					mat.opacity = 0.3;
-					mat.color.setRGB(0.15, 0.18, 0.22);
+					if (!isGlassSmallAlpha) {
+						mat.color.setRGB(0.15, 0.18, 0.22);
+					}
 					mat.metalness = 0.9;
 					mat.roughness = 0.05;
 					mat.depthWrite = false;
 				}
 
 				// Apply paint color tint to body materials.
-				// Body materials are those whose diffuse came from a secondary
-				// bundle (e.g. VEHICLETEX) or that have no diffuse at all (and not glass).
+				// Body materials: diffuse from secondary (not glass) or no diffuse (not glass).
 				const isBodyMaterial = !isGlass && (rm.diffuseFromSecondary || !rm.diffuse);
 				if (paintColor && isBodyMaterial) {
 					mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
