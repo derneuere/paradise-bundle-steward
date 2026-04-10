@@ -11,7 +11,7 @@
 // all of them in the scene.
 
 import { useEffect, useMemo, useState, Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -481,6 +481,60 @@ function VehicleColorPicker({
 	);
 }
 
+/**
+ * Generates a procedural environment cubemap for reflections.
+ * Creates a simple sky-ground gradient that gives materials something
+ * to reflect without needing external HDR files.
+ */
+function SceneEnvironment() {
+	const { gl, scene } = useThree();
+	useEffect(() => {
+		const pmrem = new THREE.PMREMGenerator(gl);
+		pmrem.compileCubemapShader();
+
+		// Create a simple gradient scene for the env map
+		const envScene = new THREE.Scene();
+		// Sky gradient: blue-white top to dark ground
+		const skyGeo = new THREE.SphereGeometry(50, 32, 16);
+		const skyMat = new THREE.ShaderMaterial({
+			side: THREE.BackSide,
+			uniforms: {},
+			vertexShader: `
+				varying vec3 vWorldPosition;
+				void main() {
+					vec4 worldPos = modelMatrix * vec4(position, 1.0);
+					vWorldPosition = worldPos.xyz;
+					gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+				}
+			`,
+			fragmentShader: `
+				varying vec3 vWorldPosition;
+				void main() {
+					float h = normalize(vWorldPosition).y;
+					// Sky: bright blue-white at top, warm grey at horizon, dark at bottom
+					vec3 sky = mix(vec3(0.6, 0.65, 0.7), vec3(0.4, 0.6, 0.9), max(h, 0.0));
+					vec3 ground = mix(vec3(0.3, 0.28, 0.25), vec3(0.15, 0.13, 0.1), max(-h, 0.0));
+					vec3 color = h > 0.0 ? sky : ground;
+					gl_FragColor = vec4(color, 1.0);
+				}
+			`,
+		});
+		envScene.add(new THREE.Mesh(skyGeo, skyMat));
+
+		const envMap = pmrem.fromScene(envScene, 0, 0.1, 100).texture;
+		scene.environment = envMap;
+
+		return () => {
+			envMap.dispose();
+			pmrem.dispose();
+			skyGeo.dispose();
+			skyMat.dispose();
+			scene.environment = null;
+		};
+	}, [gl, scene]);
+	return null;
+}
+
 /** Create a THREE.DataTexture from decoded texture data. */
 function makeDataTexture(
 	decoded: DecodedTexture,
@@ -615,8 +669,9 @@ function RenderableMeshes({
 					if (!isGlassSmallAlpha) {
 						mat.color.setRGB(0.15, 0.18, 0.22);
 					}
-					mat.metalness = 0.9;
-					mat.roughness = 0.05;
+					mat.metalness = 0.95;
+					mat.roughness = 0.02;
+					mat.envMapIntensity = 2.0;
 					mat.depthWrite = false;
 				}
 
@@ -634,6 +689,12 @@ function RenderableMeshes({
 					mat.emissiveIntensity = 1.0;
 					mat.metalness = 0.6;
 					mat.roughness = 0.25;
+					mat.envMapIntensity = 1.2;
+				} else if (isBodyMaterial) {
+					// Body panels without paint still get some env reflection
+					mat.metalness = 0.3;
+					mat.roughness = 0.4;
+					mat.envMapIntensity = 0.8;
 				}
 
 				if (rm.normal) {
@@ -1103,6 +1164,7 @@ const RenderablePage = () => {
 								onPointerMissed={() => setSelected(null)}
 							>
 								<color attach="background" args={['#1a1d23']} />
+								<SceneEnvironment />
 								<ambientLight intensity={0.5} />
 								<hemisphereLight args={['#b1c8e8', '#4a3f2f', 0.4]} />
 								<directionalLight position={[10, 10, 5]} intensity={1.2} />
