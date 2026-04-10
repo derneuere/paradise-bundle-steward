@@ -70,8 +70,8 @@ export function getResourceBlocks(
     const rel = resource.diskOffsets[i] >>> 0;
     const start = (base + rel) >>> 0;
     if (start + size > buffer.byteLength) continue;
-    let bytes = new Uint8Array(buffer, start, size);
-    if (isCompressed(bytes)) bytes = decompressData(bytes);
+    let bytes: Uint8Array = new Uint8Array(buffer, start, size);
+    if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
     blocks[i] = bytes;
   }
   return blocks;

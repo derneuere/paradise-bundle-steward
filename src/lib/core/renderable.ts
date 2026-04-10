@@ -222,8 +222,8 @@ export function getRenderableBlocks(
 		const rel = resource.diskOffsets[i] >>> 0;
 		const start = (base + rel) >>> 0;
 		if (start + size > buffer.byteLength) return null;
-		let bytes = new Uint8Array(buffer, start, size);
-		if (isCompressed(bytes)) bytes = decompressData(bytes);
+		let bytes: Uint8Array = new Uint8Array(buffer, start, size);
+		if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
 		return bytes;
 	};
 
