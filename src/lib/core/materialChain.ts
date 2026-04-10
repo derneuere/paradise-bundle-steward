@@ -176,44 +176,11 @@ export function resolveMaterialTextures(
 		return null;
 	};
 
-	// Decode all texture slots then classify by content rather than position.
-	// BP materials often have normal maps in slot [0] and diffuse in a later slot.
-	const allTextures: (DecodedTexture | null)[] = [];
-	for (let i = 0; i < textureStates.length; i++) {
-		allTextures.push(decodeSlot(i));
-	}
-
-	// Classify textures:
-	// - Normal maps: DXT5 with average RGB near (128,128,128) — flat normal in tangent space
-	// - Diffuse: largest non-normal texture, or DXT1 texture
-	// - Specular: remaining DXT5 texture that's not a normal map
-	let diffuse: DecodedTexture | null = null;
-	let normal: DecodedTexture | null = null;
-	let specular: DecodedTexture | null = null;
-
-	for (const tex of allTextures) {
-		if (!tex) continue;
-		const isLikelyNormal = tex.header.format === 'DXT5' && isNormalMap(tex);
-		if (isLikelyNormal && !normal) {
-			normal = tex;
-		} else if (!diffuse) {
-			diffuse = tex;
-		} else if (!specular) {
-			specular = tex;
-		}
-	}
-
-	// If we still have no diffuse but have extra textures, pick the largest one
-	if (!diffuse && allTextures.length > 0) {
-		let best: DecodedTexture | null = null;
-		let bestSize = 0;
-		for (const tex of allTextures) {
-			if (!tex || tex === normal || tex === specular) continue;
-			const size = tex.header.width * tex.header.height;
-			if (size > bestSize) { best = tex; bestSize = size; }
-		}
-		diffuse = best;
-	}
+	// Assign textures positionally: [0]=diffuse, [1]=normal, [2]=specular.
+	// This matches the C# BundleManager's MaterialEntry.cs approach.
+	const diffuse = decodeSlot(0);
+	const normal = decodeSlot(1);
+	const specular = decodeSlot(2);
 
 	return {
 		materialId,
