@@ -3,7 +3,10 @@
 import { BufferReader } from 'typed-binary';
 import {
   parseResourceEntries,
-  parseImportEntries
+  parseImportEntries,
+  getResourceImportSlice,
+  type ImportEntry as BundleImportEntry,
+  type ResourceEntry as BundleResourceEntry,
 } from './bundleEntry';
 import { parseHeader } from './bundleHeader';
 import { parseDebugDataFromBuffer } from './debugData';
@@ -525,23 +528,4 @@ export function getImportIds(
   const slice = getResourceImportSlice(imports, resources, resourceIndex) as import('./bundleEntry').ImportEntry[] | null;
   if (!slice) return [];
   return slice.map((entry: import('./bundleEntry').ImportEntry) => u64ToBigInt(entry.resourceId));
-}
-  buffer: ArrayBuffer,
-  bundle: ParsedBundle
-): ParsedResources {
-  const map = parseBundleResourcesViaRegistry(buffer, bundle);
-  const out: ParsedResources = {};
-  const vehicleList = map.get('vehicleList') as ParsedVehicleList | undefined;
-  if (vehicleList) out.vehicleList = vehicleList;
-  const playerCarColours = map.get('playerCarColours') as PlayerCarColours | undefined;
-  if (playerCarColours) out.playerCarColours = playerCarColours;
-  const iceTakeDictionary = map.get('iceTakeDictionary') as ParsedIceTakeDictionary | undefined;
-  if (iceTakeDictionary) out.iceTakeDictionary = iceTakeDictionary;
-  const triggerData = map.get('triggerData') as ParsedTriggerData | undefined;
-  if (triggerData) out.triggerData = triggerData;
-  const challengeList = map.get('challengeList') as ParsedChallengeList | undefined;
-  if (challengeList) out.challengeList = challengeList;
-  const streetData = map.get('streetData') as ParsedStreetData | undefined;
-  if (streetData) out.streetData = streetData;
-  return out;
 }
