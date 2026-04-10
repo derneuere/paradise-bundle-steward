@@ -250,6 +250,34 @@ export function findResourceById(bundle: ParsedBundle, id: bigint): ResourceEntr
 	return null;
 }
 
+/**
+ * Read the inline import table from a resource's header block.
+ * Each entry is 16 bytes: { u64 resourceId, u32 ptrOffset, u32 padding }.
+ * Returns a Map<ptrOffset, resourceId (bigint)>.
+ */
+export function readInlineImportTable(
+	header: Uint8Array,
+	resource: ResourceEntry,
+): Map<number, bigint> {
+	const map = new Map<number, bigint>();
+	if (resource.importCount === 0) return map;
+	const importOff = resource.importOffset >>> 0;
+	if (importOff + resource.importCount * 16 > header.byteLength) {
+		console.warn('readInlineImportTable: import table runs past header block');
+		return map;
+	}
+	const dv = new DataView(header.buffer, header.byteOffset, header.byteLength);
+	for (let i = 0; i < resource.importCount; i++) {
+		const p = importOff + i * 16;
+		const lo = dv.getUint32(p + 0, true) >>> 0;
+		const hi = dv.getUint32(p + 4, true) >>> 0;
+		const ptrOffset = dv.getUint32(p + 8, true);
+		const id = (BigInt(hi) << 32n) | BigInt(lo);
+		map.set(ptrOffset, id);
+	}
+	return map;
+}
+
 // -----------------------------------------------------------------------------
 // Header + body parsing
 // -----------------------------------------------------------------------------
@@ -419,7 +447,7 @@ export function decodeVertexArrays(
 	}
 	const vertexCount = Math.floor(vb.byteLength / vd.stride);
 	if (vertexCount === 0) {
-		return { positions: new Float32Array(0), normals: null, uv1: null, uv2: null, vertexCount: 0 };
+		return { positions: new Float32Array(0), normals: null, tangents: null, uv1: null, uv2: null, vertexCount: 0 };
 	}
 	if (vb.bodyOffset + vertexCount * vd.stride > body.byteLength) {
 		throw new BundleError(

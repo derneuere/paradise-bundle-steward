@@ -486,3 +486,62 @@ export function parseBundleResources(
   if (streetData) out.streetData = streetData;
   return out;
 }
+
+// ============================================================================
+// Import Helpers
+// ============================================================================
+
+import { u64ToBigInt } from '../u64';
+
+/**
+ * Build a Map<ptrOffset, resourceId (bigint)> for the imports belonging to
+ * a specific resource. Useful for resolving inline pointer references.
+ */
+export function getImportsByPtrOffset(
+  imports: import('./bundleEntry').ImportEntry[],
+  resources: import('./bundleEntry').ResourceEntry[],
+  resourceIndex: number,
+): Map<number, bigint> {
+  const { getResourceImportSlice } = require('./bundleEntry');
+  const slice = getResourceImportSlice(imports, resources, resourceIndex) as import('./bundleEntry').ImportEntry[] | null;
+  const map = new Map<number, bigint>();
+  if (!slice) return map;
+  for (const entry of slice) {
+    map.set(entry.offset, u64ToBigInt(entry.resourceId));
+  }
+  return map;
+}
+
+/**
+ * Returns all imported resource IDs (as bigint[]) for a specific resource,
+ * in the order they appear in the import table.
+ */
+export function getImportIds(
+  imports: import('./bundleEntry').ImportEntry[],
+  resources: import('./bundleEntry').ResourceEntry[],
+  resourceIndex: number,
+): bigint[] {
+  const { getResourceImportSlice } = require('./bundleEntry');
+  const slice = getResourceImportSlice(imports, resources, resourceIndex) as import('./bundleEntry').ImportEntry[] | null;
+  if (!slice) return [];
+  return slice.map((entry: import('./bundleEntry').ImportEntry) => u64ToBigInt(entry.resourceId));
+}
+  buffer: ArrayBuffer,
+  bundle: ParsedBundle
+): ParsedResources {
+  const map = parseBundleResourcesViaRegistry(buffer, bundle);
+  const out: ParsedResources = {};
+  const vehicleList = map.get('vehicleList') as ParsedVehicleList | undefined;
+  if (vehicleList) out.vehicleList = vehicleList;
+  const playerCarColours = map.get('playerCarColours') as PlayerCarColours | undefined;
+  if (playerCarColours) out.playerCarColours = playerCarColours;
+  const iceTakeDictionary = map.get('iceTakeDictionary') as ParsedIceTakeDictionary | undefined;
+  if (iceTakeDictionary) out.iceTakeDictionary = iceTakeDictionary;
+  const triggerData = map.get('triggerData') as ParsedTriggerData | undefined;
+  if (triggerData) out.triggerData = triggerData;
+  const challengeList = map.get('challengeList') as ParsedChallengeList | undefined;
+  if (challengeList) out.challengeList = challengeList;
+  const streetData = map.get('streetData') as ParsedStreetData | undefined;
+  if (streetData) out.streetData = streetData;
+  return out;
+}

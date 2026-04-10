@@ -26,7 +26,7 @@
 
 import type { ParsedBundle, ResourceEntry } from './types';
 import { findResourceById } from './renderable';
-import { getImportsByPtrOffset } from './bundle';
+import { getImportsByPtrOffset } from './bundle/index';
 import { getResourceBlocks } from './resourceManager';
 import { TEXTURE_STATE_TYPE_ID, decodeTextureState, type ParsedTextureState } from './textureState';
 import { TEXTURE_TYPE_ID, decodeTexture, type DecodedTexture } from './texture';
