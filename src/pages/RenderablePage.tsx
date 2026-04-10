@@ -41,7 +41,8 @@ import {
 import { getImportsByPtrOffset, getImportIds } from '@/lib/core/bundle';
 import { extractResourceSize, isCompressed, decompressData } from '@/lib/core/resourceManager';
 import { u64ToBigInt } from '@/lib/core/u64';
-import { resolveMaterialTextures, type ResolvedMaterial } from '@/lib/core/materialChain';
+import { resolveMaterialTextures, type ResolvedMaterial, type TextureSourceBundle } from '@/lib/core/materialChain';
+import { parseBundle } from '@/lib/core/bundle';
 import { D3DTextureAddress } from '@/lib/core/textureState';
 import type { DecodedTexture } from '@/lib/core/texture';
 import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
@@ -105,6 +106,7 @@ function decodeOneRenderable(
 	vdCache: Map<bigint, ParsedVertexDescriptor | null>,
 	textureCache: Map<bigint, DecodedTexture | null>,
 	materialCache: Map<bigint, ResolvedMaterial | null>,
+	secondarySources: TextureSourceBundle[] = [],
 ): DecodedRenderable {
 	const resourceId = u64ToBigInt(resource.resourceId);
 	try {
@@ -199,7 +201,7 @@ function decodeOneRenderable(
 					resolved = materialCache.get(mesh.materialAssemblyId) ?? null;
 				} else {
 					try {
-						resolved = resolveMaterialTextures(buffer, bundle, mesh.materialAssemblyId, textureCache);
+						resolved = resolveMaterialTextures(buffer, bundle, mesh.materialAssemblyId, textureCache, secondarySources);
 					} catch {
 						resolved = null;
 					}
@@ -260,6 +262,7 @@ function decodeAllRenderables(
 	debugNames: Map<string, string>,
 	includeNonLOD0: boolean,
 	mode: DecodeMode,
+	secondarySources: TextureSourceBundle[] = [],
 ): { renderables: DecodedRenderable[]; totalMeshes: number; failed: number } {
 	const vdCache = new Map<bigint, ParsedVertexDescriptor | null>();
 	const textureCache = new Map<bigint, DecodedTexture | null>();
@@ -273,7 +276,7 @@ function decodeAllRenderables(
 	const nameFor = (r: ResourceEntry) => debugNames.get(idKeyOf(r)) ?? null;
 	const isLodN = (name: string | null) => name !== null && /_LOD[1-9]\d*$/.test(name);
 	const decodeAndPush = (r: ResourceEntry, locator?: RawLocator) => {
-		const decoded = decodeOneRenderable(buffer, bundle, r, nameFor(r), vdCache, textureCache, materialCache);
+		const decoded = decodeOneRenderable(buffer, bundle, r, nameFor(r), vdCache, textureCache, materialCache, secondarySources);
 		if (locator) decoded.partLocator = locator;
 		if (decoded.error) failed++;
 		totalMeshes += decoded.meshes.length;
@@ -334,47 +337,17 @@ function decodeAllRenderables(
 // (not a transform), kept as a debugging aid — see docs/Renderable_findings.md
 // §5.1.
 //
-//   'none'      — ignore boundingMatrix (default; correct for rendering)
-//   'matrix'    — apply as full Matrix4 (visibly distorts; OBB squash)
-//   'translate' — apply only translation column (small offsets, OBB centers)
-type TransformMode = 'none' | 'matrix' | 'translate';
-
-// GraphicsSpec part-locator interpretation. The locator is 16 floats, stored
-// row-major in OpenGL/OpenTK convention (translation in the BOTTOM ROW, not
-// the right column). Two viewer modes:
-//
-//   'fromArray' — `Matrix4.fromArray(floats)` reads column-major, which
-//                 effectively transposes the on-disk row-major bytes into
-//                 the column-major three.js form. This is the correct mode
-//                 for stride-64 locators in BP PC bundles.
-//
-//   'rowSet'    — Use `Matrix4.set()` directly with row-major args. This is
-//                 INCORRECT for OpenTK-style data but kept as a debugging
-//                 toggle in case we hit a bundle with the alternate
-//                 (translation-in-right-column) layout.
-type LocatorMode = 'fromArray' | 'rowSet';
-
 /**
- * Build a THREE.Matrix4 from a 16-float locator. See LocatorMode comments.
- * Returns identity if locator is undefined.
+ * Build a THREE.Matrix4 from a 16-float GraphicsSpec part locator.
+ *
+ * The locator is stored row-major in OpenTK convention (translation in the
+ * bottom row). `Matrix4.fromArray()` reads column-major, which effectively
+ * transposes into the correct three.js form.
  */
-function locatorToMatrix4(locator: RawLocator | undefined, mode: LocatorMode): THREE.Matrix4 {
+function locatorToMatrix4(locator: RawLocator | undefined): THREE.Matrix4 {
 	const m = new THREE.Matrix4();
 	if (!locator || locator.length !== 16) return m;
-	if (mode === 'fromArray') {
-		// On-disk row-major + bottom-row translation → reading column-major
-		// gives the equivalent column-major matrix with right-column translation.
-		m.fromArray(Array.from(locator));
-		return m;
-	}
-	// rowSet: literal row-major interpretation. Translation is then in the
-	// 4th column of the on-disk data, which is wrong for OpenTK-style data.
-	m.set(
-		locator[0], locator[1], locator[2], locator[3],
-		locator[4], locator[5], locator[6], locator[7],
-		locator[8], locator[9], locator[10], locator[11],
-		locator[12], locator[13], locator[14], locator[15],
-	);
+	m.fromArray(Array.from(locator));
 	return m;
 }
 
@@ -435,24 +408,22 @@ function applyWrapping(
 
 function RenderableMeshes({
 	renderables,
-	transformMode,
-	locatorMode,
+	wireframe,
 	selected,
 	hovered,
 	onSelect,
 	onHover,
 }: {
 	renderables: DecodedRenderable[];
-	transformMode: TransformMode;
-	locatorMode: LocatorMode;
+	wireframe: boolean;
 	selected: { ri: number; mi: number } | null;
 	hovered: { ri: number; mi: number } | null;
 	onSelect: (sel: { ri: number; mi: number } | null) => void;
 	onHover: (sel: { ri: number; mi: number } | null) => void;
 }) {
 	const baseMaterial = useMemo(
-		() => new THREE.MeshStandardMaterial({ color: 0xb0b8c0, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide }),
-		[],
+		() => new THREE.MeshStandardMaterial({ color: 0xb0b8c0, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide, wireframe }),
+		[wireframe],
 	);
 	const hoverMaterial = useMemo(
 		() => new THREE.MeshStandardMaterial({ color: 0x5fa8ff, metalness: 0.1, roughness: 0.5, side: THREE.DoubleSide, emissive: 0x113355, emissiveIntensity: 0.4 }),
@@ -491,6 +462,7 @@ function RenderableMeshes({
 					transparent: props?.alphaBlendEnable ?? false,
 					alphaTest: props?.alphaTestEnable ? (props.alphaRef / 255) : 0,
 					depthWrite: !(props?.alphaBlendEnable),
+					wireframe,
 				});
 
 				if (rm.diffuse) {
@@ -517,7 +489,7 @@ function RenderableMeshes({
 			}
 		}
 		return map;
-	}, [renderables]);
+	}, [renderables, wireframe]);
 
 	// Dispose materials and their textures when the decoded set changes.
 	useEffect(() => () => {
@@ -538,37 +510,15 @@ function RenderableMeshes({
 	const matrices = useMemo(() => {
 		const out: (THREE.Matrix4 | null)[][] = [];
 		for (const r of renderables) {
-			// Per-Renderable part locator (from GraphicsSpec), built once per renderable.
-			const partMatrix = r.partLocator ? locatorToMatrix4(r.partLocator, locatorMode) : null;
+			const partMatrix = r.partLocator ? locatorToMatrix4(r.partLocator) : null;
 			const row: (THREE.Matrix4 | null)[] = [];
-			for (const m of r.meshes) {
-				let meshMatrix: THREE.Matrix4 | null = null;
-				if (transformMode !== 'none') {
-					meshMatrix = new THREE.Matrix4();
-					meshMatrix.fromArray(Array.from(m.boundingMatrix));
-					if (transformMode === 'translate') {
-						const tx = meshMatrix.elements[12];
-						const ty = meshMatrix.elements[13];
-						const tz = meshMatrix.elements[14];
-						meshMatrix.identity();
-						meshMatrix.setPosition(tx, ty, tz);
-					}
-				}
-				// Combine: world = part * mesh.
-				if (partMatrix && meshMatrix) {
-					row.push(new THREE.Matrix4().multiplyMatrices(partMatrix, meshMatrix));
-				} else if (partMatrix) {
-					row.push(partMatrix);
-				} else if (meshMatrix) {
-					row.push(meshMatrix);
-				} else {
-					row.push(null);
-				}
+			for (const _m of r.meshes) {
+				row.push(partMatrix);
 			}
 			out.push(row);
 		}
 		return out;
-	}, [renderables, transformMode, locatorMode]);
+	}, [renderables]);
 
 	return (
 		<>
@@ -784,11 +734,32 @@ function PartInfoPanel({
 const RenderablePage = () => {
 	const { loadedBundle, originalArrayBuffer, debugResources } = useBundle();
 	const [includeNonLOD0, setIncludeNonLOD0] = useState(false);
-	const [transformMode, setTransformMode] = useState<TransformMode>('none');
 	const [decodeMode, setDecodeMode] = useState<DecodeMode>('graphics');
-	const [locatorMode, setLocatorMode] = useState<LocatorMode>('fromArray');
+	const [wireframe, setWireframe] = useState(false);
 	const [selected, setSelected] = useState<{ ri: number; mi: number } | null>(null);
 	const [hovered, setHovered] = useState<{ ri: number; mi: number } | null>(null);
+	const [textureBundles, setTextureBundles] = useState<TextureSourceBundle[]>([]);
+	const [textureBundleNames, setTextureBundleNames] = useState<string[]>([]);
+
+	// Load a secondary texture bundle file.
+	const handleLoadTexturePack = async () => {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = '.BIN,.BNDL,.BUNDLE,.bin,.bndl,.bundle';
+		input.onchange = async () => {
+			const file = input.files?.[0];
+			if (!file) return;
+			const ab = await file.arrayBuffer();
+			try {
+				const bundle = parseBundle(ab);
+				setTextureBundles(prev => [...prev, { buffer: ab, bundle }]);
+				setTextureBundleNames(prev => [...prev, file.name]);
+			} catch (e) {
+				console.warn('Failed to parse texture bundle:', e);
+			}
+		};
+		input.click();
+	};
 
 	// Build a debug-name lookup keyed by canonical (lowercase, no leading zeros)
 	// resource id. The RST stores ids as 8-char zero-padded lowercase hex; we
@@ -804,8 +775,8 @@ const RenderablePage = () => {
 
 	const decoded = useMemo(() => {
 		if (!loadedBundle || !originalArrayBuffer) return null;
-		return decodeAllRenderables(originalArrayBuffer, loadedBundle, debugNames, includeNonLOD0, decodeMode);
-	}, [loadedBundle, originalArrayBuffer, debugNames, includeNonLOD0, decodeMode]);
+		return decodeAllRenderables(originalArrayBuffer, loadedBundle, debugNames, includeNonLOD0, decodeMode, textureBundles);
+	}, [loadedBundle, originalArrayBuffer, debugNames, includeNonLOD0, decodeMode, textureBundles]);
 
 	// Clear stale selection when the decoded set changes — the indices we
 	// captured may no longer point at the same mesh.
@@ -894,40 +865,29 @@ const RenderablePage = () => {
 						>
 							{includeNonLOD0 ? 'all LODs' : 'LOD0 only'}
 						</Button>
-						<span className="font-medium ml-2">locator:</span>
+						<span className="font-medium ml-2">display:</span>
 						<Button
-							variant={locatorMode === 'fromArray' ? 'default' : 'outline'}
+							variant={wireframe ? 'default' : 'outline'}
 							size="sm"
-							onClick={() => setLocatorMode('fromArray')}
-							title="Matrix4.fromArray (column-major reading of row-major OpenTK data)"
+							onClick={() => setWireframe(w => !w)}
+							title="Toggle wireframe rendering"
 						>
-							fromArray
+							wireframe
 						</Button>
+						<span className="font-medium ml-2">textures:</span>
 						<Button
-							variant={locatorMode === 'rowSet' ? 'default' : 'outline'}
+							variant="outline"
 							size="sm"
-							onClick={() => setLocatorMode('rowSet')}
-							title="Matrix4.set (literal row-major, debugging only)"
+							onClick={handleLoadTexturePack}
+							title="Load a secondary bundle containing textures (e.g. VEHICLETEX.BIN)"
 						>
-							rowSet
+							+ texture pack
 						</Button>
-						<span className="font-medium ml-2">mesh xform:</span>
-						<Button
-							variant={transformMode === 'none' ? 'default' : 'outline'}
-							size="sm"
-							onClick={() => setTransformMode('none')}
-							title="Ignore boundingMatrix"
-						>
-							none
-						</Button>
-						<Button
-							variant={transformMode === 'matrix' ? 'default' : 'outline'}
-							size="sm"
-							onClick={() => setTransformMode('matrix')}
-							title="Apply boundingMatrix as Matrix4 (OBB squash — debugging only)"
-						>
-							full
-						</Button>
+						{textureBundleNames.length > 0 && (
+							<span className="text-xs text-muted-foreground">
+								{textureBundleNames.join(', ')}
+							</span>
+						)}
 					</div>
 				</CardHeader>
 				<CardContent>
@@ -965,8 +925,7 @@ const RenderablePage = () => {
 									{decoded && (
 										<RenderableMeshes
 											renderables={decoded.renderables}
-											transformMode={transformMode}
-											locatorMode={locatorMode}
+											wireframe={wireframe}
 											selected={selected}
 											hovered={hovered}
 											onSelect={setSelected}

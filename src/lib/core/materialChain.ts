@@ -75,11 +75,18 @@ export type ResolvedMaterial = {
  *
  * Returns null if the Material resource can't be found.
  */
+/** A loaded secondary bundle used purely as a texture source. */
+export type TextureSourceBundle = {
+	buffer: ArrayBuffer;
+	bundle: ParsedBundle;
+};
+
 export function resolveMaterialTextures(
 	buffer: ArrayBuffer,
 	bundle: ParsedBundle,
 	materialId: bigint,
 	textureCache: Map<bigint, DecodedTexture | null>,
+	secondarySources: TextureSourceBundle[] = [],
 ): ResolvedMaterial | null {
 	const materialEntry = findResourceById(bundle, materialId);
 	if (!materialEntry) return null;
@@ -129,23 +136,37 @@ export function resolveMaterialTextures(
 			return textureCache.get(textureId) ?? null;
 		}
 
+		// Search primary bundle first, then secondary texture sources.
 		const texResource = findResourceById(bundle, textureId);
-		if (!texResource || texResource.resourceTypeId !== TEXTURE_TYPE_ID) {
-			// Texture is not in this bundle — cross-bundle reference.
-			crossBundleMisses++;
-			textureCache.set(textureId, null);
-			return null;
+		if (texResource && texResource.resourceTypeId === TEXTURE_TYPE_ID) {
+			try {
+				const decoded = decodeTexture(buffer, bundle, texResource);
+				textureCache.set(textureId, decoded);
+				return decoded;
+			} catch (err) {
+				console.warn(`Failed to decode texture ${textureId.toString(16)}:`, err);
+				textureCache.set(textureId, null);
+				return null;
+			}
 		}
 
-		try {
-			const decoded = decodeTexture(buffer, bundle, texResource);
-			textureCache.set(textureId, decoded);
-			return decoded;
-		} catch (err) {
-			console.warn(`Failed to decode texture ${textureId.toString(16)}:`, err);
-			textureCache.set(textureId, null);
-			return null;
+		// Search secondary bundles (e.g. VEHICLETEX.BIN).
+		for (const src of secondarySources) {
+			const secResource = findResourceById(src.bundle, textureId);
+			if (secResource && secResource.resourceTypeId === TEXTURE_TYPE_ID) {
+				try {
+					const decoded = decodeTexture(src.buffer, src.bundle, secResource);
+					textureCache.set(textureId, decoded);
+					return decoded;
+				} catch (err) {
+					console.warn(`Failed to decode texture ${textureId.toString(16)} from secondary:`, err);
+				}
+			}
 		}
+
+		crossBundleMisses++;
+		textureCache.set(textureId, null);
+		return null;
 	};
 
 	return {
