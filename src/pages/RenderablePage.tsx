@@ -600,13 +600,24 @@ function RenderableMeshes({
 					mat.map = tex;
 				}
 
+				// Detect glass materials: no diffuse texture at all (cross-bundle miss),
+				// not a body panel. Glass parts in BP use alpha blending with a dark
+				// tint. Heuristic: material has texture slots that all missed AND it
+				// doesn't come from secondary (body paint).
+				const isGlass = !rm.diffuse && !rm.diffuseFromSecondary && rm.crossBundleMisses > 0;
+				if (isGlass) {
+					mat.transparent = true;
+					mat.opacity = 0.3;
+					mat.color.setRGB(0.15, 0.18, 0.22);
+					mat.metalness = 0.9;
+					mat.roughness = 0.05;
+					mat.depthWrite = false;
+				}
+
 				// Apply paint color tint to body materials.
 				// Body materials are those whose diffuse came from a secondary
-				// bundle (e.g. VEHICLETEX) or that have no diffuse at all.
-				// The game's shader uses paint color as the primary surface color
-				// with the texture providing detail/variation. We achieve this by
-				// setting a strong color tint plus emissive to brighten dark textures.
-				const isBodyMaterial = rm.diffuseFromSecondary || !rm.diffuse;
+				// bundle (e.g. VEHICLETEX) or that have no diffuse at all (and not glass).
+				const isBodyMaterial = !isGlass && (rm.diffuseFromSecondary || !rm.diffuse);
 				if (paintColor && isBodyMaterial) {
 					mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
 					const pearl = paintColor.pearl;
