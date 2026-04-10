@@ -404,8 +404,8 @@ function VehicleColorPicker({
 	carColours: PlayerCarColours | null;
 	activePalette: number;
 	setActivePalette: (p: number) => void;
-	paintColor: { r: number; g: number; b: number } | null;
-	onSelectColor: (color: { r: number; g: number; b: number } | null) => void;
+	paintColor: { r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } } | null;
+	onSelectColor: (color: { r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } } | null) => void;
 }) {
 	if (carColours) {
 		// Use actual PlayerCarColours data
@@ -432,14 +432,17 @@ function VehicleColorPicker({
 				<div className="flex flex-wrap gap-1">
 					{palette.paintColours.map((c, i) => {
 						const rgb = { r: Math.max(0, Math.min(1, c.red)), g: Math.max(0, Math.min(1, c.green)), b: Math.max(0, Math.min(1, c.blue)) };
+						// Include pearl color from the same palette index
+						const pearlC = palette.pearlColours[i];
+						const pearl = pearlC ? { r: Math.max(0, Math.min(1, pearlC.red)), g: Math.max(0, Math.min(1, pearlC.green)), b: Math.max(0, Math.min(1, pearlC.blue)) } : undefined;
 						const isActive = paintColor && Math.abs(paintColor.r - rgb.r) < 0.01 && Math.abs(paintColor.g - rgb.g) < 0.01 && Math.abs(paintColor.b - rgb.b) < 0.01;
 						return (
 							<button
 								key={i}
 								className={`w-5 h-5 rounded-sm border ${isActive ? 'border-white ring-1 ring-white' : 'border-white/20'}`}
 								style={{ backgroundColor: c.rgbValue }}
-								title={`${c.hexValue}${c.isNeon ? ' (neon)' : ''}`}
-								onClick={() => onSelectColor(rgb)}
+								title={`[${i}] ${c.hexValue}${pearlC ? ' + pearl ' + pearlC.hexValue : ''}${c.isNeon ? ' (neon)' : ''}`}
+								onClick={() => onSelectColor({ ...rgb, pearl })}
 							/>
 						);
 					})}
@@ -527,7 +530,7 @@ function RenderableMeshes({
 }: {
 	renderables: DecodedRenderable[];
 	wireframe: boolean;
-	paintColor: { r: number; g: number; b: number } | null;
+	paintColor: { r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } } | null;
 	selected: { ri: number; mi: number } | null;
 	hovered: { ri: number; mi: number } | null;
 	onSelect: (sel: { ri: number; mi: number } | null) => void;
@@ -538,7 +541,12 @@ function RenderableMeshes({
 			const mat = new THREE.MeshStandardMaterial({ color: 0xb0b8c0, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide, wireframe });
 			if (paintColor) {
 				mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
-				mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
+				const pearl = paintColor.pearl;
+				if (pearl) {
+					mat.emissive.setRGB(pearl.r * 0.25, pearl.g * 0.25, pearl.b * 0.25);
+				} else {
+					mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
+				}
 				mat.emissiveIntensity = 1.0;
 				mat.metalness = 0.6;
 				mat.roughness = 0.25;
@@ -601,7 +609,12 @@ function RenderableMeshes({
 				const isBodyMaterial = rm.diffuseFromSecondary || !rm.diffuse;
 				if (paintColor && isBodyMaterial) {
 					mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
-					mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
+					const pearl = paintColor.pearl;
+					if (pearl) {
+						mat.emissive.setRGB(pearl.r * 0.25, pearl.g * 0.25, pearl.b * 0.25);
+					} else {
+						mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
+					}
 					mat.emissiveIntensity = 1.0;
 					mat.metalness = 0.6;
 					mat.roughness = 0.25;
@@ -872,7 +885,7 @@ const RenderablePage = () => {
 	const [includeNonLOD0, setIncludeNonLOD0] = useState(false);
 	const [decodeMode, setDecodeMode] = useState<DecodeMode>('graphics');
 	const [wireframe, setWireframe] = useState(false);
-	const [paintColor, setPaintColor] = useState<{ r: number; g: number; b: number } | null>(null);
+	const [paintColor, setPaintColor] = useState<{ r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } } | null>(null);
 	const [activePalette, setActivePalette] = useState(0);
 	const [selected, setSelected] = useState<{ ri: number; mi: number } | null>(null);
 	const [hovered, setHovered] = useState<{ ri: number; mi: number } | null>(null);
