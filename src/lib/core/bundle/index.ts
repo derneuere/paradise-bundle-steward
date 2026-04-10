@@ -501,12 +501,11 @@ import { u64ToBigInt } from '../u64';
  * a specific resource. Useful for resolving inline pointer references.
  */
 export function getImportsByPtrOffset(
-  imports: import('./bundleEntry').ImportEntry[],
-  resources: import('./bundleEntry').ResourceEntry[],
+  imports: BundleImportEntry[],
+  resources: BundleResourceEntry[],
   resourceIndex: number,
 ): Map<number, bigint> {
-  const { getResourceImportSlice } = require('./bundleEntry');
-  const slice = getResourceImportSlice(imports, resources, resourceIndex) as import('./bundleEntry').ImportEntry[] | null;
+  const slice = getResourceImportSlice(imports, resources, resourceIndex);
   const map = new Map<number, bigint>();
   if (!slice) return map;
   for (const entry of slice) {
@@ -520,12 +519,11 @@ export function getImportsByPtrOffset(
  * in the order they appear in the import table.
  */
 export function getImportIds(
-  imports: import('./bundleEntry').ImportEntry[],
-  resources: import('./bundleEntry').ResourceEntry[],
+  imports: BundleImportEntry[],
+  resources: BundleResourceEntry[],
   resourceIndex: number,
 ): bigint[] {
-  const { getResourceImportSlice } = require('./bundleEntry');
-  const slice = getResourceImportSlice(imports, resources, resourceIndex) as import('./bundleEntry').ImportEntry[] | null;
+  const slice = getResourceImportSlice(imports, resources, resourceIndex);
   if (!slice) return [];
-  return slice.map((entry: import('./bundleEntry').ImportEntry) => u64ToBigInt(entry.resourceId));
+  return slice.map((entry) => u64ToBigInt(entry.resourceId));
 }
