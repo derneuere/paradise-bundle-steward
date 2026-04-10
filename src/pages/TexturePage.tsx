@@ -22,7 +22,8 @@ function rgbaToDataUrl(pixels: Uint8Array, width: number, height: number): strin
 	canvas.width = width;
 	canvas.height = height;
 	const ctx = canvas.getContext('2d')!;
-	const imageData = new ImageData(new Uint8ClampedArray(pixels.buffer.slice(pixels.byteOffset, pixels.byteOffset + pixels.byteLength)), width, height);
+	const pixelsCopy = new Uint8Array(pixels.buffer.slice(pixels.byteOffset, pixels.byteOffset + pixels.byteLength));
+	const imageData = new ImageData(new Uint8ClampedArray(pixelsCopy.buffer), width, height);
 	ctx.putImageData(imageData, 0, 0);
 	return canvas.toDataURL('image/png');
 }

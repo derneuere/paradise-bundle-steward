@@ -915,7 +915,8 @@ function texToDataUrl(tex: import('../lib/core/texture').DecodedTexture): string
 	canvas.width = width;
 	canvas.height = height;
 	const ctx = canvas.getContext('2d')!;
-	const imageData = new ImageData(new Uint8ClampedArray(tex.pixels.buffer.slice(tex.pixels.byteOffset, tex.pixels.byteOffset + tex.pixels.byteLength)), width, height);
+	const pixelsCopy = new Uint8Array(tex.pixels.buffer.slice(tex.pixels.byteOffset, tex.pixels.byteOffset + tex.pixels.byteLength));
+	const imageData = new ImageData(new Uint8ClampedArray(pixelsCopy.buffer), width, height);
 	ctx.putImageData(imageData, 0, 0);
 	const url = canvas.toDataURL('image/png');
 	texDataUrlCache.set(tex, url);
