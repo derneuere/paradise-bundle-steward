@@ -131,7 +131,7 @@ export function resolveMaterialTextures(
 	}
 
 	let crossBundleMisses = 0;
-	let diffuseFromSecondary = false;
+	const secondaryTexIds = new Set<bigint>();
 
 	const decodeSlot = (index: number): DecodedTexture | null => {
 		if (index >= textureStates.length) return null;
@@ -163,7 +163,7 @@ export function resolveMaterialTextures(
 				try {
 					const decoded = decodeTexture(src.buffer, src.bundle, secResource);
 					textureCache.set(textureId, decoded);
-					if (index === 0) diffuseFromSecondary = true;
+					secondaryTexIds.add(textureId);
 					return decoded;
 				} catch (err) {
 					console.warn(`Failed to decode texture ${textureId.toString(16)} from secondary:`, err);
@@ -176,18 +176,91 @@ export function resolveMaterialTextures(
 		return null;
 	};
 
+	// Decode all texture slots then classify by content rather than position.
+	// BP materials often have normal maps in slot [0] and diffuse in a later slot.
+	const allTextures: (DecodedTexture | null)[] = [];
+	for (let i = 0; i < textureStates.length; i++) {
+		allTextures.push(decodeSlot(i));
+	}
+
+	// Classify textures:
+	// - Normal maps: DXT5 with average RGB near (128,128,128) — flat normal in tangent space
+	// - Diffuse: largest non-normal texture, or DXT1 texture
+	// - Specular: remaining DXT5 texture that's not a normal map
+	let diffuse: DecodedTexture | null = null;
+	let normal: DecodedTexture | null = null;
+	let specular: DecodedTexture | null = null;
+
+	for (const tex of allTextures) {
+		if (!tex) continue;
+		const isLikelyNormal = tex.header.format === 'DXT5' && isNormalMap(tex);
+		if (isLikelyNormal && !normal) {
+			normal = tex;
+		} else if (!diffuse) {
+			diffuse = tex;
+		} else if (!specular) {
+			specular = tex;
+		}
+	}
+
+	// If we still have no diffuse but have extra textures, pick the largest one
+	if (!diffuse && allTextures.length > 0) {
+		let best: DecodedTexture | null = null;
+		let bestSize = 0;
+		for (const tex of allTextures) {
+			if (!tex || tex === normal || tex === specular) continue;
+			const size = tex.header.width * tex.header.height;
+			if (size > bestSize) { best = tex; bestSize = size; }
+		}
+		diffuse = best;
+	}
+
 	return {
 		materialId,
-		diffuse: decodeSlot(0),
-		normal: decodeSlot(1),
-		specular: decodeSlot(2),
+		diffuse,
+		normal,
+		specular,
 		samplerState: textureStates.length > 0 && textureStates[0].state
 			? { addressU: textureStates[0].state.addressU, addressV: textureStates[0].state.addressV }
 			: null,
 		properties,
-		diffuseFromSecondary,
+		// Determine if the chosen diffuse came from a secondary bundle by checking
+		// if any of the TextureState's texture IDs that resolved to secondaries
+		// match the diffuse texture's pixel data pointer.
+		diffuseFromSecondary: diffuse !== null && [...secondaryTexIds].some(id => {
+			const cached = textureCache.get(id);
+			return cached === diffuse;
+		}),
 		crossBundleMisses,
 	};
+}
+
+/**
+ * Heuristic: detect if a decoded texture is likely a normal map by sampling
+ * pixel values. Normal maps in tangent space have average RGB near (128,128,128)
+ * because flat normals encode as (0.5, 0.5, 1.0) in RGB.
+ */
+function isNormalMap(tex: DecodedTexture): boolean {
+	const { pixels } = tex;
+	const { width, height } = tex.header;
+	const count = width * height;
+	if (count === 0) return false;
+
+	// Sample every 16th pixel for speed
+	let rSum = 0, gSum = 0, bSum = 0;
+	let samples = 0;
+	for (let i = 0; i < count; i += 16) {
+		rSum += pixels[i * 4];
+		gSum += pixels[i * 4 + 1];
+		bSum += pixels[i * 4 + 2];
+		samples++;
+	}
+	const avgR = rSum / samples;
+	const avgG = gSum / samples;
+	const avgB = bSum / samples;
+
+	// Normal maps average near (128, 128, 128) ± 30
+	return Math.abs(avgR - 128) < 30 && Math.abs(avgG - 128) < 30 && Math.abs(avgB - 128) < 30;
 }
 
 // =============================================================================
