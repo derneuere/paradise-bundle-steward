@@ -99,8 +99,8 @@ export function getGraphicsSpecHeader(
 	if (start + size > buffer.byteLength) {
 		throw new BundleError('GraphicsSpec block 0 runs past end of file', 'PARSE_ERROR');
 	}
-	let bytes = new Uint8Array(buffer, start, size);
-	if (isCompressed(bytes)) bytes = decompressData(bytes);
+	let bytes: Uint8Array = new Uint8Array(buffer, start, size);
+	if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
 	return bytes;
 }
 
@@ -262,8 +262,8 @@ export function getModelHeader(
 	const base = bundle.header.resourceDataOffsets[0] >>> 0;
 	const rel = resource.diskOffsets[0] >>> 0;
 	const start = (base + rel) >>> 0;
-	let bytes = new Uint8Array(buffer, start, size);
-	if (isCompressed(bytes)) bytes = decompressData(bytes);
+	let bytes: Uint8Array = new Uint8Array(buffer, start, size);
+	if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
 	return bytes;
 }
 

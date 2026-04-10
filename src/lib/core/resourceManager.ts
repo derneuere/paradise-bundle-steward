@@ -70,8 +70,8 @@ export function getResourceBlocks(
     const rel = resource.diskOffsets[i] >>> 0;
     const start = (base + rel) >>> 0;
     if (start + size > buffer.byteLength) continue;
-    let bytes = new Uint8Array(buffer, start, size);
-    if (isCompressed(bytes)) bytes = decompressData(bytes);
+    let bytes: Uint8Array = new Uint8Array(buffer, start, size);
+    if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
     blocks[i] = bytes;
   }
   return blocks;
@@ -124,7 +124,7 @@ export function decompressData(compressedData: Uint8Array): Uint8Array {
     }
 
     console.debug(`📖 Decompressing data: ${compressedData.length} bytes`);
-    const decompressed = pako.inflate(compressedData);
+    const decompressed = pako.inflate(compressedData) as Uint8Array<ArrayBuffer>;
     console.debug(`✅ Decompression complete: ${compressedData.length} -> ${decompressed.length} bytes (ratio: ${(decompressed.length / compressedData.length).toFixed(1)}x)`);
     return decompressed;
   } catch (error) {

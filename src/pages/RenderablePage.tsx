@@ -138,8 +138,8 @@ function decodeOneRenderable(
 				return null;
 			}
 			const start = (bundle.header.resourceDataOffsets[0] + entry.diskOffsets[0]) >>> 0;
-			let bytes = new Uint8Array(buffer, start, size);
-			if (isCompressed(bytes)) bytes = decompressData(bytes);
+			let bytes: Uint8Array = new Uint8Array(buffer, start, size);
+			if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
 			let parsed: ParsedVertexDescriptor | null = null;
 			try {
 				parsed = parseVertexDescriptor(bytes);
@@ -302,7 +302,7 @@ function decodeAllRenderables(
 				const gsHeader = getGraphicsSpecHeader(buffer, bundle, gsResource);
 				const gsIndex = bundle.resources.indexOf(gsResource);
 				const gsImportIds = getImportIds(bundle.imports, bundle.resources, gsIndex);
-				const gs = parseGraphicsSpec(gsHeader, gsImportIds);
+				const gs = parseGraphicsSpec(gsHeader, gsResource);
 				const parts = resolveGraphicsSpecParts(buffer, bundle, gs);
 				for (const part of parts) {
 					if (!part.renderableId) continue;
@@ -915,7 +915,8 @@ function texToDataUrl(tex: import('../lib/core/texture').DecodedTexture): string
 	canvas.width = width;
 	canvas.height = height;
 	const ctx = canvas.getContext('2d')!;
-	const imageData = new ImageData(new Uint8ClampedArray(tex.pixels.buffer, tex.pixels.byteOffset, tex.pixels.byteLength), width, height);
+	const ab = tex.pixels.buffer.slice(tex.pixels.byteOffset, tex.pixels.byteOffset + tex.pixels.byteLength) as ArrayBuffer;
+	const imageData = new ImageData(new Uint8ClampedArray(ab), width, height);
 	ctx.putImageData(imageData, 0, 0);
 	const url = canvas.toDataURL('image/png');
 	texDataUrlCache.set(tex, url);

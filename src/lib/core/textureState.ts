@@ -8,7 +8,7 @@
 
 import type { ParsedBundle, ResourceEntry } from './types';
 import { getResourceBlocks } from './resourceManager';
-import { getImportsByPtrOffset } from './bundle';
+import { getImportsByPtrOffset } from './bundle/index';
 import { BundleError } from './errors';
 
 // =============================================================================

@@ -297,8 +297,8 @@ function isCompressedLocal(data: Uint8Array): boolean {
   return data[1] === 0x01 || data[1] === 0x9C || data[1] === 0xDA || data[1] === 0x5E;
 }
 
-function decompressLocal(data: Uint8Array): Uint8Array {
-  return pako.inflate(data);
+function decompressLocal(data: Uint8Array): Uint8Array<ArrayBuffer> {
+  return pako.inflate(data) as Uint8Array<ArrayBuffer>;
 }
 
 /**
