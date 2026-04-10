@@ -48,6 +48,36 @@ export function extractResourceData(
 }
 
 /**
+ * Extract all three memory blocks of a resource, decompressing each
+ * independently. Returns an array of [block0, block1, block2] where each
+ * entry is either a Uint8Array or null if the block has zero size or
+ * extends beyond the buffer.
+ *
+ * This is a generalised version of getRenderableBlocks() from renderable.ts.
+ * Any resource type that stores data across multiple blocks (Renderable,
+ * Texture, etc.) can use it.
+ */
+export function getResourceBlocks(
+  buffer: ArrayBuffer,
+  bundle: ParsedBundle,
+  resource: ResourceEntry,
+): (Uint8Array | null)[] {
+  const blocks: (Uint8Array | null)[] = [null, null, null];
+  for (let i = 0; i < 3; i++) {
+    const size = extractResourceSize(resource.sizeAndAlignmentOnDisk[i]);
+    if (size <= 0) continue;
+    const base = bundle.header.resourceDataOffsets[i] >>> 0;
+    const rel = resource.diskOffsets[i] >>> 0;
+    const start = (base + rel) >>> 0;
+    if (start + size > buffer.byteLength) continue;
+    let bytes = new Uint8Array(buffer, start, size);
+    if (isCompressed(bytes)) bytes = decompressData(bytes);
+    blocks[i] = bytes;
+  }
+  return blocks;
+}
+
+/**
  * Extracts size from size and alignment packed value
  */
 export function extractResourceSize(sizeAndAlignment: number): number {

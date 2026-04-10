@@ -21,7 +21,6 @@ import {
 	RENDERABLE_TYPE_ID,
 	VERTEX_DESCRIPTOR_TYPE_ID,
 	getRenderableBlocks,
-	readInlineImportTable,
 	parseRenderable,
 	parseVertexDescriptor,
 	pickPrimaryVertexDescriptor,
@@ -39,8 +38,12 @@ import {
 	resolveGraphicsSpecParts,
 	type RawLocator,
 } from '@/lib/core/graphicsSpec';
+import { getImportsByPtrOffset, getImportIds } from '@/lib/core/bundle';
 import { extractResourceSize, isCompressed, decompressData } from '@/lib/core/resourceManager';
 import { u64ToBigInt } from '@/lib/core/u64';
+import { resolveMaterialTextures, type ResolvedMaterial } from '@/lib/core/materialChain';
+import { D3DTextureAddress } from '@/lib/core/textureState';
+import type { DecodedTexture } from '@/lib/core/texture';
 import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
 
 // =============================================================================
@@ -66,6 +69,9 @@ type DecodedMesh = {
 	// Per-mesh draw parameters (raw from the RenderableMesh struct).
 	startIndex: number;
 	primitiveType: number;
+	// Resolved textures for this mesh's material. Null if resolution failed
+	// or the material has no textures in this bundle.
+	resolvedMaterial: ResolvedMaterial | null;
 };
 
 type DecodedRenderable = {
@@ -97,6 +103,8 @@ function decodeOneRenderable(
 	resource: ResourceEntry,
 	debugName: string | null,
 	vdCache: Map<bigint, ParsedVertexDescriptor | null>,
+	textureCache: Map<bigint, DecodedTexture | null>,
+	materialCache: Map<bigint, ResolvedMaterial | null>,
 ): DecodedRenderable {
 	const resourceId = u64ToBigInt(resource.resourceId);
 	try {
@@ -104,7 +112,8 @@ function decodeOneRenderable(
 		if (!body) {
 			return { resourceId, debugName, meshes: [], error: 'no body block' };
 		}
-		const imports = readInlineImportTable(header, resource);
+		const resourceIndex = bundle.resources.indexOf(resource);
+		const imports = getImportsByPtrOffset(bundle.imports, bundle.resources, resourceIndex);
 		const renderable: ParsedRenderable = parseRenderable(header, imports);
 
 		// Resolve a VD by id, with caching since one VD is often shared across
@@ -172,6 +181,9 @@ function decodeOneRenderable(
 			if (arrays.normals) {
 				geometry.setAttribute('normal', new THREE.BufferAttribute(arrays.normals, 3));
 			}
+			if (arrays.tangents) {
+				geometry.setAttribute('tangent', new THREE.BufferAttribute(arrays.tangents, 4));
+			}
 			if (arrays.uv1) {
 				geometry.setAttribute('uv', new THREE.BufferAttribute(arrays.uv1, 2));
 			}
@@ -179,6 +191,21 @@ function decodeOneRenderable(
 			if (!arrays.normals) geometry.computeVertexNormals();
 			geometry.computeBoundingBox();
 			geometry.computeBoundingSphere();
+
+			// Resolve material textures (cached per materialAssemblyId).
+			let resolved: ResolvedMaterial | null = null;
+			if (mesh.materialAssemblyId) {
+				if (materialCache.has(mesh.materialAssemblyId)) {
+					resolved = materialCache.get(mesh.materialAssemblyId) ?? null;
+				} else {
+					try {
+						resolved = resolveMaterialTextures(buffer, bundle, mesh.materialAssemblyId, textureCache);
+					} catch {
+						resolved = null;
+					}
+					materialCache.set(mesh.materialAssemblyId, resolved);
+				}
+			}
 
 			meshes.push({
 				geometry,
@@ -189,6 +216,7 @@ function decodeOneRenderable(
 				vertexDescriptorIds: mesh.vertexDescriptorIds,
 				startIndex: mesh.startIndex,
 				primitiveType: mesh.primitiveType,
+				resolvedMaterial: resolved,
 			});
 		}
 
@@ -234,6 +262,8 @@ function decodeAllRenderables(
 	mode: DecodeMode,
 ): { renderables: DecodedRenderable[]; totalMeshes: number; failed: number } {
 	const vdCache = new Map<bigint, ParsedVertexDescriptor | null>();
+	const textureCache = new Map<bigint, DecodedTexture | null>();
+	const materialCache = new Map<bigint, ResolvedMaterial | null>();
 	const out: DecodedRenderable[] = [];
 	let totalMeshes = 0;
 	let failed = 0;
@@ -243,7 +273,7 @@ function decodeAllRenderables(
 	const nameFor = (r: ResourceEntry) => debugNames.get(idKeyOf(r)) ?? null;
 	const isLodN = (name: string | null) => name !== null && /_LOD[1-9]\d*$/.test(name);
 	const decodeAndPush = (r: ResourceEntry, locator?: RawLocator) => {
-		const decoded = decodeOneRenderable(buffer, bundle, r, nameFor(r), vdCache);
+		const decoded = decodeOneRenderable(buffer, bundle, r, nameFor(r), vdCache, textureCache, materialCache);
 		if (locator) decoded.partLocator = locator;
 		if (decoded.error) failed++;
 		totalMeshes += decoded.meshes.length;
@@ -258,7 +288,9 @@ function decodeAllRenderables(
 		if (gsResource) {
 			try {
 				const gsHeader = getGraphicsSpecHeader(buffer, bundle, gsResource);
-				const gs = parseGraphicsSpec(gsHeader, gsResource);
+				const gsIndex = bundle.resources.indexOf(gsResource);
+				const gsImportIds = getImportIds(bundle.imports, bundle.resources, gsIndex);
+				const gs = parseGraphicsSpec(gsHeader, gsImportIds);
 				const parts = resolveGraphicsSpecParts(buffer, bundle, gs);
 				for (const part of parts) {
 					if (!part.renderableId) continue;
@@ -363,6 +395,44 @@ function locatorToMatrix4(locator: RawLocator | undefined, mode: LocatorMode): T
  * the user can see what they picked. r3f's raycaster handles the picking
  * for us — no manual raycasts needed.
  */
+/** Create a THREE.DataTexture from decoded texture data. */
+function makeDataTexture(
+	decoded: DecodedTexture,
+	sampler: { addressU: number; addressV: number } | null,
+	srgb = true,
+): THREE.DataTexture {
+	const tex = new THREE.DataTexture(
+		decoded.pixels,
+		decoded.header.width,
+		decoded.header.height,
+		THREE.RGBAFormat,
+	);
+	tex.flipY = false;
+	tex.magFilter = THREE.LinearFilter;
+	tex.minFilter = THREE.LinearMipmapLinearFilter;
+	tex.generateMipmaps = true;
+	if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+	applyWrapping(tex, sampler);
+	tex.needsUpdate = true;
+	return tex;
+}
+
+/** Map D3DTEXTUREADDRESS → THREE.js wrapping mode. */
+function applyWrapping(
+	tex: THREE.DataTexture,
+	sampler: { addressU: number; addressV: number } | null,
+) {
+	const map: Record<number, THREE.Wrapping> = {
+		[D3DTextureAddress.WRAP]: THREE.RepeatWrapping,
+		[D3DTextureAddress.MIRROR]: THREE.MirroredRepeatWrapping,
+		[D3DTextureAddress.CLAMP]: THREE.ClampToEdgeWrapping,
+		[D3DTextureAddress.BORDER]: THREE.ClampToEdgeWrapping,
+		[D3DTextureAddress.MIRRORONCE]: THREE.MirroredRepeatWrapping,
+	};
+	tex.wrapS = map[sampler?.addressU ?? D3DTextureAddress.WRAP] ?? THREE.RepeatWrapping;
+	tex.wrapT = map[sampler?.addressV ?? D3DTextureAddress.WRAP] ?? THREE.RepeatWrapping;
+}
+
 function RenderableMeshes({
 	renderables,
 	transformMode,
@@ -392,11 +462,75 @@ function RenderableMeshes({
 		() => new THREE.MeshStandardMaterial({ color: 0xffaa33, metalness: 0.1, roughness: 0.5, side: THREE.DoubleSide, emissive: 0x664400, emissiveIntensity: 0.6 }),
 		[],
 	);
+
+	// Build per-material THREE.MeshStandardMaterial instances from resolved
+	// texture data. Keyed by materialAssemblyId to share across meshes.
+	const texturedMaterials = useMemo(() => {
+		const map = new Map<string, THREE.MeshStandardMaterial>();
+		for (const r of renderables) {
+			for (const m of r.meshes) {
+				if (!m.resolvedMaterial || !m.materialAssemblyId) continue;
+				const key = m.materialAssemblyId.toString(16);
+				if (map.has(key)) continue;
+
+				const rm = m.resolvedMaterial;
+
+				// Derive THREE.js side from cull mode.
+				const props = rm.properties;
+				let side: THREE.Side = THREE.DoubleSide;
+				if (props) {
+					// D3DCULL: 1=none→DoubleSide, 2=CW→FrontSide, 3=CCW→BackSide
+					if (props.cullMode === 2) side = THREE.FrontSide;
+					else if (props.cullMode === 3) side = THREE.BackSide;
+				}
+
+				const mat = new THREE.MeshStandardMaterial({
+					side,
+					metalness: 0.15,
+					roughness: 0.7,
+					transparent: props?.alphaBlendEnable ?? false,
+					alphaTest: props?.alphaTestEnable ? (props.alphaRef / 255) : 0,
+					depthWrite: !(props?.alphaBlendEnable),
+				});
+
+				if (rm.diffuse) {
+					const tex = makeDataTexture(rm.diffuse, rm.samplerState);
+					mat.map = tex;
+				}
+
+				if (rm.normal) {
+					const tex = makeDataTexture(rm.normal, rm.samplerState, false);
+					mat.normalMap = tex;
+					mat.normalScale = new THREE.Vector2(1.0, 1.0);
+				}
+
+				if (rm.specular) {
+					const tex = makeDataTexture(rm.specular, rm.samplerState, false);
+					mat.roughnessMap = tex;
+					// Specular maps: bright = shiny = low roughness. THREE.js
+					// roughnessMap reads luminance directly (bright = rough), so
+					// we invert by setting roughness to a low base.
+					mat.roughness = 0.95;
+				}
+
+				map.set(key, mat);
+			}
+		}
+		return map;
+	}, [renderables]);
+
+	// Dispose materials and their textures when the decoded set changes.
 	useEffect(() => () => {
 		baseMaterial.dispose();
 		hoverMaterial.dispose();
 		selectedMaterial.dispose();
-	}, [baseMaterial, hoverMaterial, selectedMaterial]);
+		for (const mat of texturedMaterials.values()) {
+			mat.map?.dispose();
+			mat.normalMap?.dispose();
+			mat.roughnessMap?.dispose();
+			mat.dispose();
+		}
+	}, [baseMaterial, hoverMaterial, selectedMaterial, texturedMaterials]);
 
 	// Build the per-mesh THREE.Matrix4 once per (renderables, transformMode,
 	// locatorMode) change. The matrix is `partLocator * meshMatrix` where
@@ -443,7 +577,11 @@ function RenderableMeshes({
 					const mat = matrices[ri][mi];
 					const isSelected = selected !== null && selected.ri === ri && selected.mi === mi;
 					const isHovered = hovered !== null && hovered.ri === ri && hovered.mi === mi;
-					const meshMaterial = isSelected ? selectedMaterial : isHovered ? hoverMaterial : baseMaterial;
+					// Priority: selection highlight > hover highlight > textured material > flat gray fallback.
+					const texturedMat = m.materialAssemblyId
+						? texturedMaterials.get(m.materialAssemblyId.toString(16)) ?? null
+						: null;
+					const meshMaterial = isSelected ? selectedMaterial : isHovered ? hoverMaterial : (texturedMat ?? baseMaterial);
 					return (
 						<mesh
 							key={`${r.resourceId.toString(16)}-${mi}`}
@@ -808,9 +946,11 @@ const RenderablePage = () => {
 								onPointerMissed={() => setSelected(null)}
 							>
 								<color attach="background" args={['#1a1d23']} />
-								<ambientLight intensity={0.4} />
-								<directionalLight position={[10, 10, 5]} intensity={1.0} />
-								<directionalLight position={[-8, 5, -10]} intensity={0.5} />
+								<ambientLight intensity={0.5} />
+								<hemisphereLight args={['#b1c8e8', '#4a3f2f', 0.4]} />
+								<directionalLight position={[10, 10, 5]} intensity={1.2} />
+								<directionalLight position={[-8, 5, -10]} intensity={0.6} />
+								<directionalLight position={[0, -5, 8]} intensity={0.3} />
 								<Grid
 									position={[center.x, center.y - radius, center.z]}
 									args={[Math.max(radius * 4, 4), Math.max(radius * 4, 4)]}
@@ -844,6 +984,25 @@ const RenderablePage = () => {
 						</div>
 						<PartInfoPanel decoded={decoded} selection={selected} hovered={hovered} />
 					</div>
+					{decoded && (() => {
+						const texturedMeshes = decoded.renderables.flatMap(r => r.meshes).filter(m => m.resolvedMaterial?.diffuse);
+						const crossBundleMeshes = decoded.renderables.flatMap(r => r.meshes).filter(m => m.resolvedMaterial && m.resolvedMaterial.crossBundleMisses > 0);
+						if (texturedMeshes.length > 0) {
+							return (
+								<div className="mt-2 text-xs text-green-400">
+									{texturedMeshes.length} mesh(es) with resolved textures.
+								</div>
+							);
+						}
+						if (crossBundleMeshes.length > 0) {
+							return (
+								<div className="mt-2 text-xs text-muted-foreground">
+									Textures are in companion bundles (e.g. GLOBALBACKDROPS, WORLDTEX). Load them alongside to see textured meshes.
+								</div>
+							);
+						}
+						return null;
+					})()}
 					{decoded && decoded.failed > 0 && (
 						<div className="mt-2 text-xs text-destructive">
 							{decoded.failed} renderable(s) failed to decode. See console for details.

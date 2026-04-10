@@ -15,6 +15,8 @@ import { vehicleListHandler } from './handlers/vehicleList';
 import { playerCarColoursHandler } from './handlers/playerCarColors';
 import { iceTakeDictionaryHandler } from './handlers/iceTakeDictionary';
 import { renderableHandler } from './handlers/renderable';
+import { textureHandler } from './handlers/texture';
+import { textureStateHandler } from './handlers/textureState';
 
 export const registry: ResourceHandler[] = [
 	streetDataHandler,
@@ -24,6 +26,8 @@ export const registry: ResourceHandler[] = [
 	playerCarColoursHandler,
 	iceTakeDictionaryHandler,
 	renderableHandler,
+	textureHandler,
+	textureStateHandler,
 ];
 
 const byTypeId = new Map<number, ResourceHandler>();

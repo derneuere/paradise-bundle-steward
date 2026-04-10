@@ -12,14 +12,9 @@
 // doc. This parser feeds a three.js viewer that renders positions with a
 // flat material.
 //
-// Note: this module reads its own import table from the decompressed header
-// block via readInlineImportTable() rather than going through bundle.imports.
-// That's a deliberate ergonomic choice — the inline reader returns a
-// Map<ptrOffset, resourceId> keyed by where the pointer lives in the header,
-// which is exactly what the mesh parser needs to resolve material/VD
-// references. parseImportEntries() is correct (as of the fix in
-// bundle/bundleEntry.ts) but returns a flat ImportEntry[] that's harder to
-// use here. Both paths produce identical data — see scripts/verify-imports-fix.ts.
+// Import resolution: callers pass a Map<ptrOffset, resourceId> built by
+// getImportsByPtrOffset() (from bundle/bundleEntry.ts) on top of the
+// bundle-level parseImportEntries() data.
 
 import type { ParsedBundle, ResourceEntry } from './types';
 import { extractResourceSize, isCompressed, decompressData } from './resourceManager';
@@ -243,41 +238,6 @@ export function getRenderableBlocks(
 }
 
 /**
- * Read the inline import table from the decompressed header block at
- * resource.importOffset. Returns a map from header-block ptrOffset to target
- * resource ID — this matches how BundleManager's GetDependencies() builds its
- * lookup (EntryPointerOffset → EntryID).
- *
- * Entry layout (16 bytes, LE): { u64 resourceId, u32 ptrOffset, u32 padding }.
- * See docs/Renderable_findings.md §3 for why this lives in the header block
- * and not in a separate file region.
- */
-export function readInlineImportTable(
-	header: Uint8Array,
-	resource: ResourceEntry,
-): Map<number, bigint> {
-	const out = new Map<number, bigint>();
-	if (resource.importCount === 0) return out;
-	const dv = new DataView(header.buffer, header.byteOffset, header.byteLength);
-	const base = resource.importOffset >>> 0;
-	for (let i = 0; i < resource.importCount; i++) {
-		const p = base + i * 16;
-		if (p + 16 > header.byteLength) {
-			throw new BundleError(
-				`Renderable import table entry ${i} out of bounds (offset ${p}, header ${header.byteLength})`,
-				'PARSE_ERROR',
-			);
-		}
-		const lo = BigInt(dv.getUint32(p + 0x00, true));
-		const hi = BigInt(dv.getUint32(p + 0x04, true));
-		const id = (hi << 32n) | (lo & 0xFFFFFFFFn);
-		const ptrOffset = dv.getUint32(p + 0x08, true);
-		out.set(ptrOffset >>> 0, id);
-	}
-	return out;
-}
-
-/**
  * Look up a resource by its u64 id across the parsed bundle's flat resource
  * list. Linear scan — fine for bundles with a few hundred entries. Called
  * from the Renderable handler to resolve imported VertexDescriptor and
@@ -435,6 +395,7 @@ export function parseRenderable(header: Uint8Array, imports: Map<number, bigint>
 export type DecodedVertexArrays = {
 	positions: Float32Array;    // xyz × vertexCount
 	normals: Float32Array | null;
+	tangents: Float32Array | null; // xyzw × vertexCount (w = handedness)
 	uv1: Float32Array | null;
 	uv2: Float32Array | null;
 	vertexCount: number;
@@ -445,9 +406,8 @@ export type DecodedVertexArrays = {
  * VertexDescriptor describes. Output arrays are tightly packed (not
  * interleaved), ready to hand to THREE.BufferAttribute.
  *
- * Only Positions / Normals / UV1 / UV2 are decoded. Tangents / BoneIndexes /
- * BoneWeights are ignored in this first pass — the three.js viewer does flat
- * shading and doesn't skin. Add them here when needed.
+ * Positions / Normals / Tangents / UV1 / UV2 are decoded. BoneIndexes /
+ * BoneWeights are ignored — the viewer doesn't skin.
  */
 export function decodeVertexArrays(
 	body: Uint8Array,
@@ -492,13 +452,29 @@ export function decodeVertexArrays(
 	const normAttr = findAttr(VertexAttributeType.Normals);
 	const normals = normAttr ? readFloatAttr(normAttr, 3) : null;
 
+	// Tangents are stored as 3-component (xyz) in the vertex buffer. THREE.js
+	// expects 4-component (xyzw) where w is the bitangent handedness sign.
+	// We expand to 4 components and default w to 1.0 (right-handed).
+	const tanAttr = findAttr(VertexAttributeType.Tangents);
+	let tangents: Float32Array | null = null;
+	if (tanAttr) {
+		const raw3 = readFloatAttr(tanAttr, 3);
+		tangents = new Float32Array(vertexCount * 4);
+		for (let v = 0; v < vertexCount; v++) {
+			tangents[v * 4]     = raw3[v * 3];
+			tangents[v * 4 + 1] = raw3[v * 3 + 1];
+			tangents[v * 4 + 2] = raw3[v * 3 + 2];
+			tangents[v * 4 + 3] = 1.0; // handedness
+		}
+	}
+
 	const uv1Attr = findAttr(VertexAttributeType.UV1);
 	const uv1 = uv1Attr ? readFloatAttr(uv1Attr, 2) : null;
 
 	const uv2Attr = findAttr(VertexAttributeType.UV2);
 	const uv2 = uv2Attr ? readFloatAttr(uv2Attr, 2) : null;
 
-	return { positions, normals, uv1, uv2, vertexCount };
+	return { positions, normals, tangents, uv1, uv2, vertexCount };
 }
 
 /**

@@ -18,4 +18,5 @@ export const EDITOR_PAGES: Record<string, ComponentType<unknown>> = {
 	playerCarColours: lazy(() => import('@/pages/ColorsPage')),
 	iceTakeDictionary: lazy(() => import('@/pages/IcePage')),
 	renderable: lazy(() => import('@/pages/RenderablePage')),
+	texture: lazy(() => import('@/pages/TexturePage')),
 };
