@@ -320,3 +320,35 @@ export function getResourceImportSlice(
   if (count === 0) return null;
   return imports.slice(start, start + count);
 }
+
+/**
+ * Build a Map<ptrOffset, resourceId (bigint)> for the imports belonging to
+ * a specific resource.
+ */
+export function getImportsByPtrOffset(
+  imports: ImportEntry[],
+  resources: ResourceEntry[],
+  resourceIndex: number,
+): Map<number, bigint> {
+  const slice = getResourceImportSlice(imports, resources, resourceIndex);
+  const map = new Map<number, bigint>();
+  if (!slice) return map;
+  for (const entry of slice) {
+    const id = (BigInt(entry.resourceId.high) << 32n) | BigInt(entry.resourceId.low);
+    map.set(entry.offset, id);
+  }
+  return map;
+}
+
+/**
+ * Returns all imported resource IDs (as bigint[]) for a specific resource.
+ */
+export function getImportIds(
+  imports: ImportEntry[],
+  resources: ResourceEntry[],
+  resourceIndex: number,
+): bigint[] {
+  const slice = getResourceImportSlice(imports, resources, resourceIndex);
+  if (!slice) return [];
+  return slice.map((entry) => (BigInt(entry.resourceId.high) << 32n) | BigInt(entry.resourceId.low));
+}
