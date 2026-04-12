@@ -8,6 +8,7 @@ import {
   type ImportEntry as BundleImportEntry,
   type ResourceEntry as BundleResourceEntry,
 } from './bundleEntry';
+export { getImportsByPtrOffset, getImportIds } from './bundleEntry';
 import { parseHeader } from './bundleHeader';
 import { parseDebugDataFromBuffer } from './debugData';
 import {
@@ -491,39 +492,5 @@ export function parseBundleResources(
 }
 
 // ============================================================================
-// Import Helpers
-// ============================================================================
-
-import { u64ToBigInt } from '../u64';
-
-/**
- * Build a Map<ptrOffset, resourceId (bigint)> for the imports belonging to
- * a specific resource. Useful for resolving inline pointer references.
- */
-export function getImportsByPtrOffset(
-  imports: BundleImportEntry[],
-  resources: BundleResourceEntry[],
-  resourceIndex: number,
-): Map<number, bigint> {
-  const slice = getResourceImportSlice(imports, resources, resourceIndex);
-  const map = new Map<number, bigint>();
-  if (!slice) return map;
-  for (const entry of slice) {
-    map.set(entry.offset, u64ToBigInt(entry.resourceId));
-  }
-  return map;
-}
-
-/**
- * Returns all imported resource IDs (as bigint[]) for a specific resource,
- * in the order they appear in the import table.
- */
-export function getImportIds(
-  imports: BundleImportEntry[],
-  resources: BundleResourceEntry[],
-  resourceIndex: number,
-): bigint[] {
-  const slice = getResourceImportSlice(imports, resources, resourceIndex);
-  if (!slice) return [];
-  return slice.map((entry) => u64ToBigInt(entry.resourceId));
-}
+// Import helpers are re-exported from bundleEntry.ts at the top of this file:
+// getImportsByPtrOffset, getImportIds
