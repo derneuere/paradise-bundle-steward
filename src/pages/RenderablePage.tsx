@@ -302,7 +302,7 @@ function decodeAllRenderables(
 				const gsHeader = getGraphicsSpecHeader(buffer, bundle, gsResource);
 				const gsIndex = bundle.resources.indexOf(gsResource);
 				const gsImportIds = getImportIds(bundle.imports, bundle.resources, gsIndex);
-				const gs = parseGraphicsSpec(gsHeader, gsResource);
+				const gs = parseGraphicsSpec(gsHeader, gsImportIds);
 				const parts = resolveGraphicsSpecParts(buffer, bundle, gs);
 				for (const part of parts) {
 					if (!part.renderableId) continue;

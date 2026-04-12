@@ -12,7 +12,7 @@ import {
 import { BufferReader } from 'typed-binary';
 import * as pako from 'pako';
 import { BundleError } from '../errors';
-import { bigIntToU64, u64 } from '../u64';
+import { bigIntToU64, u64, u64ToBigInt } from '../u64';
 
 // ============================================================================
 // Resource Entry Schema (80 bytes)
