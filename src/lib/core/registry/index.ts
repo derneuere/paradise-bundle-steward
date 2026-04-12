@@ -17,8 +17,10 @@ import { iceTakeDictionaryHandler } from './handlers/iceTakeDictionary';
 import { renderableHandler } from './handlers/renderable';
 import { textureHandler } from './handlers/texture';
 import { textureStateHandler } from './handlers/textureState';
+import { aiSectionsHandler } from './handlers/aiSections';
 
 export const registry: ResourceHandler[] = [
+	aiSectionsHandler,
 	streetDataHandler,
 	triggerDataHandler,
 	challengeListHandler,

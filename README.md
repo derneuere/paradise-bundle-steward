@@ -6,6 +6,7 @@ A modern web-based tool for exploring and modifying Burnout Paradise bundle file
 
 ### Fully supported (read + write + editor)
 
+- **AI Sections** — editor for the AI navigation mesh: 8,780+ sections with portals, boundary lines, corners, speed tiers, flags, and section reset pairs. Writer round-trips **byte-exact** against the reference fixture. Includes 7 stress scenarios and passes 200+ fuzz iterations cleanly.
 - **Challenge List** — visual editor for all 500 freeburn challenges, with difficulty, player requirements, actions, and locations.
 - **Trigger Data** — complete editor for world trigger regions: landmarks, generic regions, blackspots, VFX regions, killzones, roaming and spawn locations.
 - **Vehicle List** — editor for all 284+ vehicles with gameplay stats, audio config, flags, and unlock metadata. Writer round-trips **byte-exact** against the reference fixture.
@@ -89,6 +90,7 @@ npm run bundle -- dump example/VEHICLELIST.BUNDLE out.json --type vehicleList
 npm run bundle -- pack out.json patched.BUNDLE --type vehicleList
 
 # Full read → write → re-read check
+npm run bundle -- roundtrip example/AI.DAT
 npm run bundle -- roundtrip example/ONLINECHALLENGES.BNDL
 npm run bundle -- roundtrip example/TRIGGERS.DAT
 
@@ -98,6 +100,7 @@ npm run bundle -- stress example/VEHICLELIST.BUNDLE --type vehicleList
 npm run bundle -- stress example/VEHICLELIST.BUNDLE --type vehicleList --scenario add-vehicle
 
 # Seeded random structural fuzzing
+npm run bundle -- fuzz example/AI.DAT --iterations 200
 npm run bundle -- fuzz example/BTTSTREETDATA.DAT --iterations 100 --seed 1
 npm run bundle -- fuzz example/VEHICLELIST.BUNDLE --type playerCarColours
 ```
@@ -108,6 +111,7 @@ npm run bundle -- fuzz example/VEHICLELIST.BUNDLE --type playerCarColours
 
 Today's coverage:
 
+- **AISections**: `baseline`, `edit-first-section-speed`, `toggle-first-section-flags`, `remove-last-section`, `remove-last-reset-pair`, `edit-first-section-id`, `swap-first-two-sections` (7 scenarios)
 - **StreetData**: `baseline`, `remove-last-street`, `remove-last-road-and-challenge`, `edit-road-debug-name`, `zero-all-challenge-scores` (5 scenarios)
 - **VehicleList**: `baseline`, `edit-first-name`, `toggle-first-flags`, `swap-first-two`, `bulk-zero-colors`, `add-vehicle`, `remove-last-vehicle` (7 scenarios)
 - **TriggerData**: `baseline`, `remove-last-landmark`, `remove-last-generic-region`, `remove-last-blackspot`, `remove-last-spawn-location`, `edit-first-landmark-id`, `zero-first-spawn-position`, `bulk-pop-every-array` (8 scenarios)
@@ -236,6 +240,7 @@ src/lib/core/
     handlers/          # one file per resource type
     registry.test.ts   # auto-generated fixture suite
   bundle/              # low-level bundle parser (header, entries, debug data)
+  aiSections.ts        # parseRaw/writeRaw for AI Sections (byte-exact)
   streetData.ts        # parseRaw/writeRaw for StreetData
   triggerData.ts
   challengeList.ts
@@ -278,7 +283,7 @@ src/pages/
 - **Editor-side coverage for PlayerCarColours writes** — the writer is live and byte-exact, but the `ColorsPage` edit flow should grow explicit "add/remove color" affordances
 - **Verify Renderable viewer on non-CARBRWDS vehicles** — every locator we've tested has identity rotation. Need a bundle where some part has a non-identity rotation (likely a wheel or a tilted spoiler) to confirm the `fromArray` matrix conversion is correct in the general case.
 - **Wheels.** Wheel geometry isn't visibly distinct from body parts in our CARBRWDS sample. Need to confirm wheels come through the GraphicsSpec parts table on a vehicle that has visually obvious wheel geometry.
-- **Migrate Renderable / GraphicsSpec / Model handlers off `readInlineImportTable`** — the bundle-level `parseImportEntries` was fixed in this batch and now produces correct data. The per-resource readers in `renderable.ts` and `graphicsSpec.ts` still read the inline import block themselves (because the `Map<ptrOffset, id>` shape is more ergonomic than a flat slice). Either keep both paths and document why, or build a `getImportsByPtrOffset(bundle, resourceIndex)` helper on top of `bundle.imports` and converge.
+
 
 ### Renderable viewer follow-ups
 
