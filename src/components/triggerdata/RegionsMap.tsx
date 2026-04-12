@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Filter } from 'lucide-react';
+import { BoxFieldsGrid } from './BoxFieldsGrid';
 
 type PolyData = {
   kind: 'landmark';
@@ -364,30 +365,7 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
                   <div><b>Enabled:</b> {b.enabled === 1 ? '✅ Yes' : '❌ No'}</div>
                   
                   <div className="border-t pt-1 mt-1">
-                    <div className="font-semibold">Position:</div>
-                    <div className="pl-2">
-                      X: {box.positionX.toFixed(2)}, 
-                      Y: {box.positionY.toFixed(2)}, 
-                      Z: {box.positionZ.toFixed(2)}
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="font-semibold">Rotation:</div>
-                    <div className="pl-2">
-                      X: {box.rotationX.toFixed(2)}, 
-                      Y: {box.rotationY.toFixed(2)}, 
-                      Z: {box.rotationZ.toFixed(2)}
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="font-semibold">Dimensions:</div>
-                    <div className="pl-2">
-                      X: {box.dimensionX.toFixed(2)}, 
-                      Y: {box.dimensionY.toFixed(2)}, 
-                      Z: {box.dimensionZ.toFixed(2)}
-                    </div>
+                    <BoxFieldsGrid box={box} />
                   </div>
                   
                   {b.kind === 'landmark' && (

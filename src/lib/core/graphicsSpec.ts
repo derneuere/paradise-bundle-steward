@@ -17,7 +17,7 @@ import type { ParsedBundle, ResourceEntry } from './types';
 import { extractResourceSize, isCompressed, decompressData } from './resourceManager';
 import { u64ToBigInt } from './u64';
 import { BundleError } from './errors';
-import { readInlineImportTable } from './renderable';
+import { getImportIds } from './bundle';
 
 export const GRAPHICS_SPEC_TYPE_ID = 0x10006;
 export const MODEL_TYPE_ID = 0x2A;
@@ -133,7 +133,7 @@ export function getGraphicsSpecHeader(
  */
 export function parseGraphicsSpec(
 	header: Uint8Array,
-	resource: ResourceEntry,
+	importIds: bigint[],
 ): ParsedGraphicsSpec {
 	if (header.byteLength < 0x24) {
 		throw new BundleError(
@@ -189,20 +189,6 @@ export function parseGraphicsSpec(
 		});
 	}
 
-	// Resolve the inline import table (header-block-relative). Re-uses the
-	// renderable module's reader since the format is identical.
-	const importMap = readInlineImportTable(header, resource);
-	// We need the imports as an INDEXED list (not by ptrOffset). The order in
-	// the map iterator matches insertion order which matches the on-disk import
-	// order, so just collect values.
-	const imports = Array.from(importMap.values());
-
-	if (imports.length < resource.importCount) {
-		console.warn(
-			`GraphicsSpec import count mismatch: read ${imports.length} from inline table, ResourceEntry says ${resource.importCount}`,
-		);
-	}
-
 	return {
 		version,
 		partsCount,
@@ -212,7 +198,7 @@ export function parseGraphicsSpec(
 		mpPartVolumeIDs,
 		mpNumRigidBodiesForPart,
 		mppRigidBodyToSkinMatrixTransforms,
-		imports,
+		imports: importIds,
 	};
 }
 
@@ -267,7 +253,7 @@ export function getModelHeader(
 	return bytes;
 }
 
-export function parseModel(header: Uint8Array, resource: ResourceEntry): ParsedModel {
+export function parseModel(header: Uint8Array, renderableIds: bigint[]): ParsedModel {
 	if (header.byteLength < 0x14) {
 		throw new BundleError(
 			`Model header too small (${header.byteLength} bytes)`,
@@ -293,10 +279,6 @@ export function parseModel(header: Uint8Array, resource: ResourceEntry): ParsedM
 		// Fallback: if we can't read the state map, assume identity (state i → renderable i).
 		for (let i = 0; i < numStates; i++) stateToRenderable.push(i);
 	}
-
-	// Resolve renderable references via the inline import table.
-	const importMap = readInlineImportTable(header, resource);
-	const renderableIds = Array.from(importMap.values());
 
 	return { numRenderables, numStates, flags, renderableIds, stateToRenderable };
 }
@@ -347,7 +329,9 @@ export function resolveGraphicsSpecParts(
 		}
 		try {
 			const modelHeader = getModelHeader(buffer, bundle, modelEntry);
-			const model = parseModel(modelHeader, modelEntry);
+			const modelIndex = bundle.resources.indexOf(modelEntry);
+			const modelImportIds = getImportIds(bundle.imports, bundle.resources, modelIndex);
+			const model = parseModel(modelHeader, modelImportIds);
 			out.push({ modelId, renderableId: lod0RenderableId(model), locator: part.locator });
 		} catch (err) {
 			console.warn(`Failed to parse Model ${modelId.toString(16)}:`, err);

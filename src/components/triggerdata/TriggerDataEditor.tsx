@@ -16,6 +16,7 @@ import { KillzonesList } from './KillzonesList';
 import { RoamingList } from './RoamingList';
 import { SpawnsList } from './SpawnsList';
 import { RegionsMap } from './RegionsMap';
+import { BoxFieldsGrid } from './BoxFieldsGrid';
 
 type TriggerDataEditorProps = {
   data: ParsedTriggerData;
@@ -388,25 +389,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
             {currentArray.length === 0 ? (
               <div className="text-sm text-muted-foreground">No items to edit.</div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {(['positionX','positionZ','positionY','rotationX','rotationZ','rotationY','dimensionX','dimensionZ','dimensionY'] as BoxField[]).map((f) => (
-                  <div key={f} className="flex flex-col gap-1">
-                    <label className="text-sm font-medium capitalize">{f}</label>
-                    <input
-                      type="number"
-                      step="any"
-                      className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-                      value={currentBox ? (currentBox[f] ?? 0) : 0}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === '' || val === '-') return;
-                        updateCurrentBox(f, Number.parseFloat(val));
-                      }}
-                      disabled={!currentBox}
-                    />
-                  </div>
-                ))}
-              </div>
+              <BoxFieldsGrid box={currentBox ?? null} onChange={updateCurrentBox} />
             )}
           </div>
         </DialogContent>
