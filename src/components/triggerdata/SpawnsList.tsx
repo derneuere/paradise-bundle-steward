@@ -36,7 +36,8 @@ export const SpawnsList: React.FC<{
                 <Input value={sp.type} type="number" onChange={e => onChange({ ...data, spawnLocations: data.spawnLocations.map((x, j) => j===i ? { ...sp, type: Number.parseInt(e.target.value)||0 } : x) })} />
               </div>
             </div>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => onChange({ ...data, spawnLocations: [...data.spawnLocations.slice(0, i+1), { ...sp, position: { ...sp.position }, direction: { ...sp.direction } }, ...data.spawnLocations.slice(i+1)] })}>Clone</Button>
               <Button variant="outline" size="sm" onClick={() => onChange({ ...data, spawnLocations: data.spawnLocations.filter((_, j) => j!==i) })}>Remove</Button>
             </div>
           </div>

@@ -26,7 +26,8 @@ export const RoamingList: React.FC<{
               <Label>District</Label>
               <Input value={rl.districtIndex} type="number" onChange={e => onChange({ ...data, roamingLocations: data.roamingLocations.map((x, j) => j===i ? { ...rl, districtIndex: Number.parseInt(e.target.value)||0 } : x) })} />
             </div>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => onChange({ ...data, roamingLocations: [...data.roamingLocations.slice(0, i+1), { ...rl, position: { ...rl.position } }, ...data.roamingLocations.slice(i+1)] })}>Clone</Button>
               <Button variant="outline" size="sm" onClick={() => onChange({ ...data, roamingLocations: data.roamingLocations.filter((_, j) => j!==i) })}>Remove</Button>
             </div>
           </div>

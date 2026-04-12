@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Copy } from 'lucide-react';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { numberField } from './utils';
 
@@ -14,7 +15,8 @@ export const BlackspotsListComp: React.FC<{
   ensureUniqueRegionIndex: (value: number, exclude: { kind: 'landmark'|'generic'|'blackspot'|'vfx'; index: number }) => number;
   scrollPosRef: React.MutableRefObject<{ landmarks: number; generic: number; blackspots: number; vfx: number }>;
   onEditBox: (kind: 'landmark'|'generic'|'blackspot'|'vfx', index: number) => void;
-}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex: _ensureUniqueRegionIndex, scrollPosRef, onEditBox }) => {
+  onClone: (index: number) => void;
+}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex: _ensureUniqueRegionIndex, scrollPosRef, onEditBox, onClone }) => {
   const parentRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: data.blackspots.length,
@@ -80,8 +82,11 @@ export const BlackspotsListComp: React.FC<{
                   <Label>Enabled</Label>
                   <Switch checked={bs.enabled === 1} onCheckedChange={checked => onChange({ ...data, blackspots: data.blackspots.map((x, j) => j===i ? { ...bs, enabled: checked ? 1 : 0 } : x) })} />
                 </div>
-                <div className="flex items-end">
+                <div className="flex items-end gap-2">
                   <Button variant="secondary" size="sm" onClick={() => onEditBox('blackspot', i)}>Edit Box</Button>
+                  <Button variant="outline" size="sm" onClick={() => onClone(i)} title="Clone">
+                    <Copy className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </div>

@@ -26,7 +26,8 @@ export const KillzonesList: React.FC<{
               <Label>Region IDs (CgsID list)</Label>
               <Input value={kz.regionIds.map(v => String(v)).join(',')} onChange={e => onChange({ ...data, killzones: data.killzones.map((x, j) => j===i ? { ...kz, regionIds: parseBigIntArray(e.target.value) } : x) })} />
             </div>
-            <div className="sm:col-span-2 flex justify-end">
+            <div className="sm:col-span-2 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => onChange({ ...data, killzones: [...data.killzones.slice(0, i+1), { triggerIds: [...kz.triggerIds], regionIds: [...kz.regionIds] }, ...data.killzones.slice(i+1)] })}>Clone</Button>
               <Button variant="outline" size="sm" onClick={() => onChange({ ...data, killzones: data.killzones.filter((_, j) => j!==i) })}>Remove</Button>
             </div>
           </div>

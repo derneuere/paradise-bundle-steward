@@ -178,6 +178,34 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
     onChange({ ...data, vfxBoxRegions: [...data.vfxBoxRegions, v] });
   };
 
+  const cloneLandmark = (index: number) => {
+    const src = data.landmarks[index];
+    if (!src) return;
+    const clone = { ...src, box: { ...src.box }, startingGrids: [...src.startingGrids], id: src.id + 1, regionIndex: nextFreeRegionIndex() };
+    onChange({ ...data, landmarks: [...data.landmarks.slice(0, index + 1), clone, ...data.landmarks.slice(index + 1)] });
+  };
+
+  const cloneGeneric = (index: number) => {
+    const src = data.genericRegions[index];
+    if (!src) return;
+    const clone = { ...src, box: { ...src.box }, id: src.id + 1, regionIndex: nextFreeRegionIndex() };
+    onChange({ ...data, genericRegions: [...data.genericRegions.slice(0, index + 1), clone, ...data.genericRegions.slice(index + 1)] });
+  };
+
+  const cloneBlackspot = (index: number) => {
+    const src = data.blackspots[index];
+    if (!src) return;
+    const clone = { ...src, box: { ...src.box }, id: src.id + 1, regionIndex: nextFreeRegionIndex() };
+    onChange({ ...data, blackspots: [...data.blackspots.slice(0, index + 1), clone, ...data.blackspots.slice(index + 1)] });
+  };
+
+  const cloneVfx = (index: number) => {
+    const src = data.vfxBoxRegions[index];
+    if (!src) return;
+    const clone = { ...src, box: { ...src.box }, id: src.id + 1, regionIndex: nextFreeRegionIndex() };
+    onChange({ ...data, vfxBoxRegions: [...data.vfxBoxRegions.slice(0, index + 1), clone, ...data.vfxBoxRegions.slice(index + 1)] });
+  };
+
   const addSignatureStunt = () => {
     const st: SignatureStunt = { id: 0n, camera: 0n, stuntElementRegionIds: [] };
     onChange({ ...data, signatureStunts: [...data.signatureStunts, st] });
@@ -268,6 +296,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 ensureUniqueRegionIndex={() => 0}
                 scrollPosRef={scrollPosRef}
                 onEditBox={(kind, index) => openBoxEditor(kind, index)}
+                onClone={cloneLandmark}
               />
             </CardContent>
           </Card>
@@ -287,6 +316,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 ensureUniqueRegionIndex={() => 0}
                 scrollPosRef={scrollPosRef}
                 onEditBox={(kind, index) => openBoxEditor(kind, index)}
+                onClone={cloneGeneric}
               />
             </CardContent>
           </Card>
@@ -306,6 +336,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 ensureUniqueRegionIndex={() => 0}
                 scrollPosRef={scrollPosRef}
                 onEditBox={(kind, index) => openBoxEditor(kind, index)}
+                onClone={cloneBlackspot}
               />
             </CardContent>
           </Card>
@@ -325,6 +356,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 ensureUniqueRegionIndex={() => 0}
                 scrollPosRef={scrollPosRef}
                 onEditBox={(kind, index) => openBoxEditor(kind, index)}
+                onClone={cloneVfx}
               />
             </CardContent>
           </Card>

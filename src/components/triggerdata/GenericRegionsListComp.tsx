@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Copy } from 'lucide-react';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { StuntCameraType } from '@/lib/core/triggerData';
 import { numberField } from './utils';
@@ -23,7 +23,8 @@ export const GenericRegionsListComp: React.FC<{
   ensureUniqueRegionIndex: (value: number, exclude: { kind: 'landmark'|'generic'|'blackspot'|'vfx'; index: number }) => number;
   scrollPosRef: React.MutableRefObject<{ landmarks: number; generic: number; blackspots: number; vfx: number }>;
   onEditBox: (kind: 'landmark'|'generic'|'blackspot'|'vfx', index: number) => void;
-}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex: _ensureUniqueRegionIndex, scrollPosRef, onEditBox }) => {
+  onClone: (index: number) => void;
+}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex: _ensureUniqueRegionIndex, scrollPosRef, onEditBox, onClone }) => {
   const parentRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: data.genericRegions.length,
@@ -134,9 +135,12 @@ export const GenericRegionsListComp: React.FC<{
                 </div>
                 <div className="flex items-end gap-2">
                   <Button variant="secondary" size="sm" onClick={() => onEditBox('generic', i)}>Edit Box</Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button variant="outline" size="sm" onClick={() => onClone(i)} title="Clone">
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => onChange({ ...data, genericRegions: data.genericRegions.filter((_, j) => j !== i) })}
                     className="text-destructive hover:text-destructive"
                   >

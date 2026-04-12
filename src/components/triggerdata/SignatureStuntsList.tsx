@@ -30,7 +30,8 @@ export const SignatureStuntsList: React.FC<{
               <Label>Stunt Element Region IDs (comma-separated)</Label>
               <Input value={st.stuntElementRegionIds.join(',')} onChange={e => onChange({ ...data, signatureStunts: data.signatureStunts.map((x, j) => j===i ? { ...st, stuntElementRegionIds: parseNumberArray(e.target.value) } : x) })} />
             </div>
-            <div className="sm:col-span-4 flex justify-end">
+            <div className="sm:col-span-4 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => onChange({ ...data, signatureStunts: [...data.signatureStunts.slice(0, i+1), { ...st, id: st.id + 1n }, ...data.signatureStunts.slice(i+1)] })}>Clone</Button>
               <Button variant="outline" size="sm" onClick={() => onChange({ ...data, signatureStunts: data.signatureStunts.filter((_, j) => j!==i) })}>Remove</Button>
             </div>
           </div>

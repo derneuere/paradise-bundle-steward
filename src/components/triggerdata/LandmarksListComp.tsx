@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Copy } from 'lucide-react';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { numberField } from './utils';
 
@@ -15,7 +15,8 @@ export const LandmarksListComp: React.FC<{
   ensureUniqueRegionIndex: (value: number, exclude: { kind: 'landmark'|'generic'|'blackspot'|'vfx'; index: number }) => number;
   scrollPosRef: React.MutableRefObject<{ landmarks: number; generic: number; blackspots: number; vfx: number }>;
   onEditBox: (kind: 'landmark'|'generic'|'blackspot'|'vfx', index: number) => void;
-}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex: _ensureUniqueRegionIndex, scrollPosRef, onEditBox }) => {
+  onClone: (index: number) => void;
+}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex: _ensureUniqueRegionIndex, scrollPosRef, onEditBox, onClone }) => {
   const parentRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: data.landmarks.length,
@@ -87,9 +88,12 @@ export const LandmarksListComp: React.FC<{
                 </div>
                 <div className="flex items-end gap-2">
                   <Button variant="secondary" size="sm" onClick={() => onEditBox('landmark', i)}>Edit Box</Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button variant="outline" size="sm" onClick={() => onClone(i)} title="Clone">
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => onChange({ ...data, landmarks: data.landmarks.filter((_, j) => j !== i) })}
                     className="text-destructive hover:text-destructive"
                   >
