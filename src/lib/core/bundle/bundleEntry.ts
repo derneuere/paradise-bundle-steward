@@ -352,13 +352,3 @@ export function getImportIds(
   if (!slice) return [];
   return slice.map((entry) => (BigInt(entry.resourceId.high) << 32n) | BigInt(entry.resourceId.low));
 }
-  imports: ImportEntry[],
-  resources: ResourceEntry[],
-  resourceIndex: number,
-): ImportEntry[] | null {
-  let start = 0;
-  for (let i = 0; i < resourceIndex; i++) start += resources[i].importCount;
-  const count = resources[resourceIndex].importCount;
-  if (count === 0) return null;
-  return imports.slice(start, start + count);
-}
