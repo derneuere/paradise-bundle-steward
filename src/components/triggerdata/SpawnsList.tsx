@@ -9,14 +9,17 @@ export const SpawnsList: React.FC<{
   data: ParsedTriggerData;
   onChange: (next: ParsedTriggerData) => void;
   onAdd: () => void;
-}> = ({ data, onChange, onAdd }) => {
+  filteredIndices: number[];
+}> = ({ data, onChange, onAdd, filteredIndices }) => {
   return (
     <div className="space-y-3">
       {data.spawnLocations.length === 0 ? (
         <div className="text-sm text-muted-foreground p-2">No spawn locations</div>
+      ) : filteredIndices.length === 0 ? (
+        <div className="text-sm text-muted-foreground p-2">No matching spawn locations</div>
       ) : null}
       <div className="space-y-3">
-        {data.spawnLocations.map((sp, i) => (
+        {filteredIndices.map(i => { const sp = data.spawnLocations[i]; return (
           <div key={i} className="border rounded p-3 space-y-2 bg-background">
             <div>
               <Label>Position (x, y, z, w)</Label>
@@ -41,7 +44,7 @@ export const SpawnsList: React.FC<{
               <Button variant="outline" size="sm" onClick={() => onChange({ ...data, spawnLocations: data.spawnLocations.filter((_, j) => j!==i) })}>Remove</Button>
             </div>
           </div>
-        ))}
+        ); })}
       </div>
       <div className="flex justify-end">
         <Button size="sm" onClick={onAdd}>Add Spawn</Button>

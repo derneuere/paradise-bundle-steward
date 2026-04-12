@@ -16,28 +16,31 @@ export const BlackspotsListComp: React.FC<{
   scrollPosRef: React.MutableRefObject<{ landmarks: number; generic: number; blackspots: number; vfx: number }>;
   onEditBox: (kind: 'landmark'|'generic'|'blackspot'|'vfx', index: number) => void;
   onClone: (index: number) => void;
-}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex: _ensureUniqueRegionIndex, scrollPosRef, onEditBox, onClone }) => {
+  filteredIndices: number[];
+}> = ({ data, onChange, duplicateRegionIndexSet, ensureUniqueRegionIndex: _ensureUniqueRegionIndex, scrollPosRef, onEditBox, onClone, filteredIndices }) => {
   const parentRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
-    count: data.blackspots.length,
+    count: filteredIndices.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 96,
     overscan: 12,
-    getItemKey: (index) => index,
+    getItemKey: (index) => filteredIndices[index],
   });
   const items = rowVirtualizer.getVirtualItems();
   useLayoutEffect(() => {
     const el = parentRef.current;
     if (el) el.scrollTop = scrollPosRef.current.blackspots;
-  }, [items.length, data.blackspots, scrollPosRef]);
+  }, [items.length, filteredIndices, scrollPosRef]);
   return (
     <div ref={parentRef} className="h-[60vh] overflow-auto pr-2" onScroll={e => { scrollPosRef.current.blackspots = e.currentTarget.scrollTop; }}>
       {data.blackspots.length === 0 ? (
         <div className="text-sm text-muted-foreground p-4">No blackspots</div>
+      ) : filteredIndices.length === 0 ? (
+        <div className="text-sm text-muted-foreground p-4">No matching blackspots</div>
       ) : null}
       <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
         {items.map(vi => {
-          const i = vi.index;
+          const i = filteredIndices[vi.index];
           const bs = data.blackspots[i];
           return (
             <div

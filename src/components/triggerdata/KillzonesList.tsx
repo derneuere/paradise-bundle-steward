@@ -9,14 +9,17 @@ export const KillzonesList: React.FC<{
   data: ParsedTriggerData;
   onChange: (next: ParsedTriggerData) => void;
   onAdd: () => void;
-}> = ({ data, onChange, onAdd }) => {
+  filteredIndices: number[];
+}> = ({ data, onChange, onAdd, filteredIndices }) => {
   return (
     <div className="space-y-3">
       {data.killzones.length === 0 ? (
         <div className="text-sm text-muted-foreground p-2">No killzones</div>
+      ) : filteredIndices.length === 0 ? (
+        <div className="text-sm text-muted-foreground p-2">No matching killzones</div>
       ) : null}
       <div className="space-y-3">
-        {data.killzones.map((kz, i) => (
+        {filteredIndices.map(i => { const kz = data.killzones[i]; return (
           <div key={i} className="border rounded p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 items-center bg-background">
             <div>
               <Label>Trigger IDs (Generic Region mId list)</Label>
@@ -31,7 +34,7 @@ export const KillzonesList: React.FC<{
               <Button variant="outline" size="sm" onClick={() => onChange({ ...data, killzones: data.killzones.filter((_, j) => j!==i) })}>Remove</Button>
             </div>
           </div>
-        ))}
+        ); })}
       </div>
       <div className="flex justify-end">
         <Button size="sm" onClick={onAdd}>Add Killzone</Button>

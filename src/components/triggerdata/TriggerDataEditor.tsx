@@ -2,6 +2,8 @@ import React, { useMemo, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Search } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { ParsedTriggerData, Landmark, GenericRegion, Blackspot, VFXBoxRegion, TriggerRegionType, GenericRegionType, BlackspotScoreType, StuntCameraType, Vector4, SignatureStunt, Killzone, RoamingLocation, SpawnLocation } from '@/lib/core/triggerData';
@@ -25,9 +27,40 @@ type TriggerDataEditorProps = {
 
 export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onChange }) => {
   const [activeTab, setActiveTab] = useState<'header'|'map'|'landmarks'|'generic'|'blackspots'|'vfx'|'stunts'|'killzones'|'roaming'|'spawns'>('landmarks');
+  const [filterQuery, setFilterQuery] = useState('');
   const scrollPosRef = useRef<{ landmarks: number; generic: number; blackspots: number; vfx: number }>(
     { landmarks: 0, generic: 0, blackspots: 0, vfx: 0 }
   );
+
+  function matchesFilter(item: Record<string, unknown>, query: string): boolean {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    for (const v of Object.values(item)) {
+      if (v == null) continue;
+      if (typeof v === 'number' || typeof v === 'bigint') { if (String(v).includes(q)) return true; }
+      else if (typeof v === 'string') { if (v.toLowerCase().includes(q)) return true; }
+      else if (Array.isArray(v)) { if (v.some(x => String(x).toLowerCase().includes(q))) return true; }
+      else if (typeof v === 'object') {
+        // match vector/box sub-objects
+        if (Object.values(v as Record<string, unknown>).some(sv => typeof sv === 'number' && String(sv).includes(q))) return true;
+      }
+    }
+    return false;
+  }
+
+  function buildFilteredIndices<T extends Record<string, unknown>>(arr: T[]): number[] {
+    if (!filterQuery) return arr.map((_, i) => i);
+    return arr.reduce<number[]>((acc, item, i) => { if (matchesFilter(item, filterQuery)) acc.push(i); return acc; }, []);
+  }
+
+  const filteredLandmarkIndices = useMemo(() => buildFilteredIndices(data.landmarks), [data.landmarks, filterQuery]);
+  const filteredGenericIndices = useMemo(() => buildFilteredIndices(data.genericRegions), [data.genericRegions, filterQuery]);
+  const filteredBlackspotIndices = useMemo(() => buildFilteredIndices(data.blackspots), [data.blackspots, filterQuery]);
+  const filteredVfxIndices = useMemo(() => buildFilteredIndices(data.vfxBoxRegions), [data.vfxBoxRegions, filterQuery]);
+  const filteredStuntIndices = useMemo(() => buildFilteredIndices(data.signatureStunts as unknown as Record<string, unknown>[]), [data.signatureStunts, filterQuery]);
+  const filteredKillzoneIndices = useMemo(() => buildFilteredIndices(data.killzones as unknown as Record<string, unknown>[]), [data.killzones, filterQuery]);
+  const filteredRoamingIndices = useMemo(() => buildFilteredIndices(data.roamingLocations as unknown as Record<string, unknown>[]), [data.roamingLocations, filterQuery]);
+  const filteredSpawnIndices = useMemo(() => buildFilteredIndices(data.spawnLocations as unknown as Record<string, unknown>[]), [data.spawnLocations, filterQuery]);
 
   const allRegionIndexes = useMemo(() => {
     return [
@@ -181,28 +214,32 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
   const cloneLandmark = (index: number) => {
     const src = data.landmarks[index];
     if (!src) return;
-    const clone = { ...src, box: { ...src.box }, startingGrids: [...src.startingGrids], id: src.id + 1, regionIndex: nextFreeRegionIndex() };
+    const nextId = data.landmarks.reduce((mx, x) => Math.max(mx, x.id), 0) + 1;
+    const clone = { ...src, box: { ...src.box }, startingGrids: [...src.startingGrids], id: nextId, regionIndex: nextFreeRegionIndex() };
     onChange({ ...data, landmarks: [...data.landmarks.slice(0, index + 1), clone, ...data.landmarks.slice(index + 1)] });
   };
 
   const cloneGeneric = (index: number) => {
     const src = data.genericRegions[index];
     if (!src) return;
-    const clone = { ...src, box: { ...src.box }, id: src.id + 1, regionIndex: nextFreeRegionIndex() };
+    const nextId = data.genericRegions.reduce((mx, x) => Math.max(mx, x.id), 0) + 1;
+    const clone = { ...src, box: { ...src.box }, id: nextId, regionIndex: nextFreeRegionIndex() };
     onChange({ ...data, genericRegions: [...data.genericRegions.slice(0, index + 1), clone, ...data.genericRegions.slice(index + 1)] });
   };
 
   const cloneBlackspot = (index: number) => {
     const src = data.blackspots[index];
     if (!src) return;
-    const clone = { ...src, box: { ...src.box }, id: src.id + 1, regionIndex: nextFreeRegionIndex() };
+    const nextId = data.blackspots.reduce((mx, x) => Math.max(mx, x.id), 0) + 1;
+    const clone = { ...src, box: { ...src.box }, id: nextId, regionIndex: nextFreeRegionIndex() };
     onChange({ ...data, blackspots: [...data.blackspots.slice(0, index + 1), clone, ...data.blackspots.slice(index + 1)] });
   };
 
   const cloneVfx = (index: number) => {
     const src = data.vfxBoxRegions[index];
     if (!src) return;
-    const clone = { ...src, box: { ...src.box }, id: src.id + 1, regionIndex: nextFreeRegionIndex() };
+    const nextId = data.vfxBoxRegions.reduce((mx, x) => Math.max(mx, x.id), 0) + 1;
+    const clone = { ...src, box: { ...src.box }, id: nextId, regionIndex: nextFreeRegionIndex() };
     onChange({ ...data, vfxBoxRegions: [...data.vfxBoxRegions.slice(0, index + 1), clone, ...data.vfxBoxRegions.slice(index + 1)] });
   };
 
@@ -284,9 +321,15 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
 
         <TabsContent value="landmarks">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle>Landmarks</CardTitle>
-              <Button size="sm" onClick={addLandmark}>Add</Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input className="pl-8 h-8 w-48" placeholder="Filter…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+                </div>
+                <Button size="sm" onClick={addLandmark}>Add</Button>
+              </div>
             </CardHeader>
             <CardContent>
               <LandmarksListComp
@@ -297,6 +340,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 scrollPosRef={scrollPosRef}
                 onEditBox={(kind, index) => openBoxEditor(kind, index)}
                 onClone={cloneLandmark}
+                filteredIndices={filteredLandmarkIndices}
               />
             </CardContent>
           </Card>
@@ -304,9 +348,15 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
 
         <TabsContent value="generic">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle>Generic Regions</CardTitle>
-              <Button size="sm" onClick={addGeneric}>Add</Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input className="pl-8 h-8 w-48" placeholder="Filter…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+                </div>
+                <Button size="sm" onClick={addGeneric}>Add</Button>
+              </div>
             </CardHeader>
             <CardContent>
               <GenericRegionsListComp
@@ -317,6 +367,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 scrollPosRef={scrollPosRef}
                 onEditBox={(kind, index) => openBoxEditor(kind, index)}
                 onClone={cloneGeneric}
+                filteredIndices={filteredGenericIndices}
               />
             </CardContent>
           </Card>
@@ -324,9 +375,15 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
 
         <TabsContent value="blackspots">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle>Blackspots</CardTitle>
-              <Button size="sm" onClick={addBlackspot}>Add</Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input className="pl-8 h-8 w-48" placeholder="Filter…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+                </div>
+                <Button size="sm" onClick={addBlackspot}>Add</Button>
+              </div>
             </CardHeader>
             <CardContent>
               <BlackspotsListComp
@@ -337,6 +394,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 scrollPosRef={scrollPosRef}
                 onEditBox={(kind, index) => openBoxEditor(kind, index)}
                 onClone={cloneBlackspot}
+                filteredIndices={filteredBlackspotIndices}
               />
             </CardContent>
           </Card>
@@ -344,9 +402,15 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
 
         <TabsContent value="vfx">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle>VFX Regions</CardTitle>
-              <Button size="sm" onClick={addVfx}>Add</Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input className="pl-8 h-8 w-48" placeholder="Filter…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+                </div>
+                <Button size="sm" onClick={addVfx}>Add</Button>
+              </div>
             </CardHeader>
             <CardContent>
               <VfxListComp
@@ -357,6 +421,7 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
                 scrollPosRef={scrollPosRef}
                 onEditBox={(kind, index) => openBoxEditor(kind, index)}
                 onClone={cloneVfx}
+                filteredIndices={filteredVfxIndices}
               />
             </CardContent>
           </Card>
@@ -364,48 +429,72 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
 
         <TabsContent value="stunts">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle>Signature Stunts</CardTitle>
-              <Button size="sm" onClick={addSignatureStunt}>Add</Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input className="pl-8 h-8 w-48" placeholder="Filter…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+                </div>
+                <Button size="sm" onClick={addSignatureStunt}>Add</Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <SignatureStuntsList data={data} onChange={onChange} onAdd={addSignatureStunt} />
+              <SignatureStuntsList data={data} onChange={onChange} onAdd={addSignatureStunt} filteredIndices={filteredStuntIndices} />
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="killzones">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle>Killzones</CardTitle>
-              <Button size="sm" onClick={addKillzone}>Add</Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input className="pl-8 h-8 w-48" placeholder="Filter…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+                </div>
+                <Button size="sm" onClick={addKillzone}>Add</Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <KillzonesList data={data} onChange={onChange} onAdd={addKillzone} />
+              <KillzonesList data={data} onChange={onChange} onAdd={addKillzone} filteredIndices={filteredKillzoneIndices} />
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="roaming">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle>Roaming Locations</CardTitle>
-              <Button size="sm" onClick={addRoaming}>Add</Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input className="pl-8 h-8 w-48" placeholder="Filter…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+                </div>
+                <Button size="sm" onClick={addRoaming}>Add</Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <RoamingList data={data} onChange={onChange} onAdd={addRoaming} />
+              <RoamingList data={data} onChange={onChange} onAdd={addRoaming} filteredIndices={filteredRoamingIndices} />
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="spawns">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle>Spawn Locations</CardTitle>
-              <Button size="sm" onClick={addSpawn}>Add</Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input className="pl-8 h-8 w-48" placeholder="Filter…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+                </div>
+                <Button size="sm" onClick={addSpawn}>Add</Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <SpawnsList data={data} onChange={onChange} onAdd={addSpawn} />
+              <SpawnsList data={data} onChange={onChange} onAdd={addSpawn} filteredIndices={filteredSpawnIndices} />
             </CardContent>
           </Card>
         </TabsContent>
