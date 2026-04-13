@@ -180,7 +180,13 @@ export function writeBundleFresh(
   // Pack each block sequentially
   for (let bi = 0; bi < 3; bi++) {
     const blockSegments = segmentsByBlock[bi];
-    if (blockSegments.length === 0) { resourceDataOffsets[bi] = 0; continue; }
+    if (blockSegments.length === 0) {
+      // Empty pools point to the current cursor (end of previous pool's data),
+      // matching retail bundles where dataOffset[1]==dataOffset[2]==end-of-pool-0.
+      // The game may use adjacent offsets to compute pool extents.
+      resourceDataOffsets[bi] = cursor >>> 0;
+      continue;
+    }
 
     // Set base for this memory block
     resourceDataOffsets[bi] = cursor >>> 0;
