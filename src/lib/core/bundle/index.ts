@@ -105,6 +105,7 @@ export function writeBundleFresh(
     resourceIndex: number;
     blockIndex: number; // 0..2
     alignment: number;
+    uncompAlignment: number; // alignment from uncompressedSizeAndAlignment (may differ from disk alignment)
     bytes: Uint8Array; // compressed or raw, exactly what will be written
     uncompSize?: number; // uncompressed size when we know it (for overrides)
   };
@@ -131,6 +132,7 @@ export function writeBundleFresh(
       const rawOriginal = new Uint8Array(originalBuffer, start, size);
       const wasCompressed = isCompressed(rawOriginal);
       const align = extractAlignment(resource.sizeAndAlignmentOnDisk[bi]);
+      const uncompAlign = extractAlignment(resource.uncompressedSizeAndAlignment[bi]);
 
       let finalBytes: Uint8Array;
       let uncompressedSize: number | undefined;
@@ -150,7 +152,7 @@ export function writeBundleFresh(
         finalBytes = rawOriginal;
       }
 
-      segmentsByBlock[bi].push({ resourceIndex: ri, blockIndex: bi, alignment: align, bytes: finalBytes, uncompSize: uncompressedSize });
+      segmentsByBlock[bi].push({ resourceIndex: ri, blockIndex: bi, alignment: align, uncompAlignment: uncompAlign, bytes: finalBytes, uncompSize: uncompressedSize });
     }
   }
 
@@ -194,7 +196,9 @@ export function writeBundleFresh(
       newDiskOffsets[seg.resourceIndex][bi] = relative;
       newSizeAndAlignOnDisk[seg.resourceIndex][bi] = packSizeAndAlignment(seg.bytes.length >>> 0, seg.alignment);
       if (seg.uncompSize != null) {
-        newUncompSizeAndAlign[seg.resourceIndex][bi] = packSizeAndAlignment(seg.uncompSize >>> 0, seg.alignment);
+        // Use the original uncompressed alignment (e.g. 16 for AI Sections),
+        // not the on-disk alignment (which is 1 for compressed data).
+        newUncompSizeAndAlign[seg.resourceIndex][bi] = packSizeAndAlignment(seg.uncompSize >>> 0, seg.uncompAlignment);
       }
 
       writePlans.push({ offset: absolute, bytes: seg.bytes });
