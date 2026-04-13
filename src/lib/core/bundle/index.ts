@@ -211,8 +211,9 @@ export function writeBundleFresh(
       cursor += seg.bytes.length;
     }
 
-    // Add minimal alignment between blocks
-    cursor = ((cursor + 15) >>> 4) << 4;
+    // Align to 0x80 between memory pools (matches Bundle-Manager / YAP behaviour).
+    // Pool boundaries are always 0x80-aligned in retail bundles.
+    cursor = ((cursor + 0x7F) >>> 7) << 7;
   }
 
   reportProgress(progressCallback, 'write', 0.5, 'Packed resource data');
