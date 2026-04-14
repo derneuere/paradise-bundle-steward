@@ -20,4 +20,5 @@ export const EDITOR_PAGES: Record<string, ComponentType<unknown>> = {
 	iceTakeDictionary: lazy(() => import('@/pages/IcePage')),
 	renderable: lazy(() => import('@/pages/RenderablePage')),
 	texture: lazy(() => import('@/pages/TexturePage')),
+	trafficData: lazy(() => import('@/pages/TrafficDataPage')),
 };
