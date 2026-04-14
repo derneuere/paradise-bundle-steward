@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,6 +11,7 @@ import type {
 	Road,
 	ChallengeParScores,
 } from '@/lib/core/streetData';
+import { StreetDataViewport, type StreetDataSelection } from './StreetDataViewport';
 
 // Simple editable table components. Each row maps directly onto its model
 // entry, and onChange produces a new array, matching the pattern used by the
@@ -487,6 +488,16 @@ const ChallengesTab: React.FC<Props> = ({ data, onChange }) => {
 
 export const StreetDataEditor: React.FC<Props> = ({ data, onChange }) => {
 	const [tab, setTab] = useState<'streets' | 'junctions' | 'roads' | 'challenges'>('streets');
+	const [showViewport, setShowViewport] = useState(true);
+	const [selected, setSelected] = useState<StreetDataSelection>(null);
+
+	// When a 3D object is selected, switch to the matching tab
+	useEffect(() => {
+		if (!selected) return;
+		if (selected.type === 'street') setTab('streets');
+		else if (selected.type === 'junction') setTab('junctions');
+		else if (selected.type === 'road') setTab('roads');
+	}, [selected]);
 
 	const summary = useMemo(
 		() => ({
@@ -502,8 +513,11 @@ export const StreetDataEditor: React.FC<Props> = ({ data, onChange }) => {
 	return (
 		<div className="space-y-4">
 			<Card>
-				<CardHeader>
+				<CardHeader className="flex flex-row items-center justify-between">
 					<CardTitle>Street Data Overview</CardTitle>
+					<Button size="sm" variant="outline" onClick={() => setShowViewport((v) => !v)}>
+						{showViewport ? 'Hide 3D' : 'Show 3D'}
+					</Button>
 				</CardHeader>
 				<CardContent className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
 					<div>Version: <b>{summary.version}</b></div>
@@ -513,6 +527,15 @@ export const StreetDataEditor: React.FC<Props> = ({ data, onChange }) => {
 					<div>Challenges: <b>{summary.challenges}</b></div>
 				</CardContent>
 			</Card>
+
+			{showViewport && (
+				<StreetDataViewport
+					data={data}
+					onChange={onChange}
+					selected={selected}
+					onSelect={setSelected}
+				/>
+			)}
 
 			<Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="w-full">
 				<TabsList className="grid grid-cols-4 w-full gap-1">

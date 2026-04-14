@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import 'leaflet/dist/leaflet.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import { RoamingList } from './RoamingList';
 import { SpawnsList } from './SpawnsList';
 import { RegionsMap } from './RegionsMap';
 import { BoxFieldsGrid } from './BoxFieldsGrid';
+import { TriggerDataViewport, type TriggerSelection } from './TriggerDataViewport';
 
 type TriggerDataEditorProps = {
   data: ParsedTriggerData;
@@ -26,8 +27,20 @@ type TriggerDataEditorProps = {
 };
 
 export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onChange }) => {
-  const [activeTab, setActiveTab] = useState<'header'|'map'|'landmarks'|'generic'|'blackspots'|'vfx'|'stunts'|'killzones'|'roaming'|'spawns'>('landmarks');
+  const [activeTab, setActiveTab] = useState<'header'|'map'|'map3d'|'landmarks'|'generic'|'blackspots'|'vfx'|'stunts'|'killzones'|'roaming'|'spawns'>('landmarks');
   const [filterQuery, setFilterQuery] = useState('');
+  const [triggerSel, setTriggerSel] = useState<TriggerSelection>(null);
+
+  // When 3D viewport selection changes, switch to the matching tab
+  useEffect(() => {
+    if (!triggerSel) return;
+    const tabMap: Record<string, typeof activeTab> = {
+      landmark: 'landmarks', generic: 'generic', blackspot: 'blackspots',
+      vfx: 'vfx', spawn: 'spawns', roaming: 'roaming', playerStart: 'header',
+    };
+    const target = tabMap[triggerSel.kind];
+    if (target) setActiveTab(target);
+  }, [triggerSel]);
   const scrollPosRef = useRef<{ landmarks: number; generic: number; blackspots: number; vfx: number }>(
     { landmarks: 0, generic: 0, blackspots: 0, vfx: 0 }
   );
@@ -285,9 +298,10 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
       </Card>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="w-full">
-        <TabsList className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-9 w-full gap-1">
+        <TabsList className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 w-full gap-1">
           <TabsTrigger value="header">Header</TabsTrigger>
-          <TabsTrigger value="map">Map</TabsTrigger>
+          <TabsTrigger value="map">Map 2D</TabsTrigger>
+          <TabsTrigger value="map3d">Map 3D</TabsTrigger>
           <TabsTrigger value="landmarks">Landmarks</TabsTrigger>
           <TabsTrigger value="generic">Generic Regions</TabsTrigger>
           <TabsTrigger value="blackspots">Blackspots</TabsTrigger>
@@ -300,10 +314,29 @@ export const TriggerDataEditor: React.FC<TriggerDataEditorProps> = ({ data, onCh
         <TabsContent value="map">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Region Map</CardTitle>
+              <CardTitle>Region Map (2D)</CardTitle>
             </CardHeader>
             <CardContent>
               <RegionsMap data={data} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="map3d">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Region Map (3D)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TriggerDataViewport
+                data={data}
+                onChange={onChange}
+                selected={triggerSel}
+                onSelect={setTriggerSel}
+              />
+              <div className="mt-2 text-xs text-muted-foreground">
+                Click regions to select. Colors: <span style={{color:'#44cc44'}}>Landmarks</span> | <span style={{color:'#4488cc'}}>Shops</span> | <span style={{color:'#9944cc'}}>Stunts/Jumps</span> | <span style={{color:'#cc4444'}}>Blackspots/Crash</span> | <span style={{color:'#cc44cc'}}>VFX</span> | <span style={{color:'#ffcc00'}}>Player Start</span>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

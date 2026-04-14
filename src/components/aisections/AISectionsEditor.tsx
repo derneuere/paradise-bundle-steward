@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,6 +11,7 @@ import { SPEED_LABELS, FLAG_NAMES, RESET_SPEED_LABELS } from './constants';
 import { SectionsList } from './SectionsList';
 import { AddSectionDialog } from './AddSectionDialog';
 import { SectionDetailDialog } from './SectionDetailDialog';
+import { AISectionsViewport, type AISectionSelection } from './AISectionsViewport';
 
 type Props = {
 	data: ParsedAISections;
@@ -204,12 +205,24 @@ const ResetPairsTab: React.FC<Props> = ({ data, onChange }) => {
 export const AISectionsEditor: React.FC<Props> = ({ data, onChange }) => {
 	const [addDialogOpen, setAddDialogOpen] = useState(false);
 	const [detailIndex, setDetailIndex] = useState<number | null>(null);
+	const [showViewport, setShowViewport] = useState(true);
+	const [selected, setSelected] = useState<AISectionSelection>(null);
+	const [tab, setTab] = useState('overview');
 	const scrollToIndexRef = useRef<((index: number) => void) | null>(null);
+
+	// When a section is selected in the 3D viewport, switch to sections tab
+	// and scroll to it
+	useEffect(() => {
+		if (!selected) return;
+		setTab('sections');
+		requestAnimationFrame(() => {
+			scrollToIndexRef.current?.(selected.sectionIndex);
+		});
+	}, [selected]);
 
 	const handleAddSection = (section: AISection) => {
 		const newIndex = data.sections.length;
 		onChange({ ...data, sections: [...data.sections, section] });
-		// Scroll to new section after React re-renders
 		requestAnimationFrame(() => {
 			scrollToIndexRef.current?.(newIndex);
 		});
@@ -222,7 +235,22 @@ export const AISectionsEditor: React.FC<Props> = ({ data, onChange }) => {
 
 	return (
 		<>
-			<Tabs defaultValue="overview">
+			<div className="flex items-center justify-end mb-2">
+				<Button size="sm" variant="outline" onClick={() => setShowViewport((v) => !v)}>
+					{showViewport ? 'Hide 3D' : 'Show 3D'}
+				</Button>
+			</div>
+
+			{showViewport && (
+				<AISectionsViewport
+					data={data}
+					onChange={onChange}
+					selected={selected}
+					onSelect={setSelected}
+				/>
+			)}
+
+			<Tabs value={tab} onValueChange={setTab} className="mt-4">
 				<TabsList>
 					<TabsTrigger value="overview">Overview</TabsTrigger>
 					<TabsTrigger value="sections">Sections ({data.sections.length})</TabsTrigger>
@@ -236,7 +264,7 @@ export const AISectionsEditor: React.FC<Props> = ({ data, onChange }) => {
 						data={data}
 						onChange={onChange}
 						onAddClick={() => setAddDialogOpen(true)}
-						onDetailClick={setDetailIndex}
+						onDetailClick={(i) => { setDetailIndex(i); setSelected({ sectionIndex: i }); }}
 						scrollToIndexRef={scrollToIndexRef}
 					/>
 				</TabsContent>
