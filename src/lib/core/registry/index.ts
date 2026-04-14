@@ -19,10 +19,12 @@ import { textureHandler } from './handlers/texture';
 import { textureStateHandler } from './handlers/textureState';
 import { aiSectionsHandler } from './handlers/aiSections';
 import { trafficDataHandler } from './handlers/trafficData';
+import { attribSysVaultHandler } from './handlers/attribSysVault';
 
 export const registry: ResourceHandler[] = [
 	aiSectionsHandler,
 	trafficDataHandler,
+	attribSysVaultHandler,
 	streetDataHandler,
 	triggerDataHandler,
 	challengeListHandler,
