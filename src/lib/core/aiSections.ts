@@ -62,6 +62,7 @@ export enum EResetSpeedType {
 	E_RESET_SPEED_TYPE_WEST_AND_IGNORE = 17,
 	E_RESET_SPEED_TYPE_REVERSE_AND_IGNORE = 18,
 	E_RESET_SPEED_TYPE_REVERSE_AND_IGNORE_SLOW = 19,
+	E_RESET_SPEED_TYPE_EAST_AND_IGNORE = 20,
 }
 
 // =============================================================================
