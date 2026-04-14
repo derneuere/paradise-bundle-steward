@@ -40,6 +40,7 @@ export const RESET_SPEED_LABELS: Record<number, string> = {
 	[EResetSpeedType.E_RESET_SPEED_TYPE_WEST_AND_IGNORE]: 'W+Ign',
 	[EResetSpeedType.E_RESET_SPEED_TYPE_REVERSE_AND_IGNORE]: 'Rev+Ign',
 	[EResetSpeedType.E_RESET_SPEED_TYPE_REVERSE_AND_IGNORE_SLOW]: 'RevSlow+Ign',
+	[EResetSpeedType.E_RESET_SPEED_TYPE_EAST_AND_IGNORE]: 'E+Ign',
 };
 
 export const HEX = (v: number) => `0x${(v >>> 0).toString(16).toUpperCase()}`;
