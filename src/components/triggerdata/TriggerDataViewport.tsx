@@ -7,7 +7,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Grid, Html, Line } from '@react-three/drei';
+import { OrbitControls, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import type {
 	ParsedTriggerData, BoxRegion, Vector4,
@@ -408,17 +408,6 @@ export const TriggerDataViewport: React.FC<Props> = ({ data, onChange, selected,
 				<hemisphereLight args={['#b1c8e8', '#4a3f2f', 0.3]} />
 				<directionalLight position={[10, 20, 5]} intensity={0.9} />
 				<directionalLight position={[-8, 15, -10]} intensity={0.4} />
-				<Grid
-					position={[center.x, center.y - radius, center.z]}
-					args={[Math.max(radius * 4, 200), Math.max(radius * 4, 200)]}
-					cellSize={50}
-					cellThickness={0.5}
-					sectionSize={200}
-					sectionThickness={1}
-					fadeDistance={camDistance * 4}
-					infiniteGrid
-				/>
-
 				{/* All box regions — single InstancedMesh draw call */}
 				<BatchedRegionBoxes
 					regions={regions}
