@@ -18,11 +18,11 @@ export const HeaderEditor: React.FC<{ data: ParsedTriggerData; onChange: (next: 
         </div>
       </div>
       <div className="space-y-2">
-        <Label>Player Start Position (x, y, z, w)</Label>
+        <Label>Player Start Position (X, Y, Z, W)</Label>
         {vectorField(data.playerStartPosition, (nv) => onChange({ ...data, playerStartPosition: nv }))}
       </div>
       <div className="space-y-2">
-        <Label>Player Start Direction (x, y, z, w)</Label>
+        <Label>Player Start Direction (X, Y, Z, W)</Label>
         {vectorField(data.playerStartDirection, (nv) => onChange({ ...data, playerStartDirection: nv }))}
       </div>
     </div>

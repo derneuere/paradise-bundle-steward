@@ -22,11 +22,11 @@ export const SpawnsList: React.FC<{
         {filteredIndices.map(i => { const sp = data.spawnLocations[i]; return (
           <div key={i} className="border rounded p-3 space-y-2 bg-background">
             <div>
-              <Label>Position (x, y, z, w)</Label>
+              <Label>Position (X, Y, Z, W)</Label>
               {vectorField(sp.position, (nv) => onChange({ ...data, spawnLocations: data.spawnLocations.map((x, j) => j===i ? { ...sp, position: nv } : x) }))}
             </div>
             <div>
-              <Label>Direction (x, y, z, w)</Label>
+              <Label>Direction (X, Y, Z, W)</Label>
               {vectorField(sp.direction, (nv) => onChange({ ...data, spawnLocations: data.spawnLocations.map((x, j) => j===i ? { ...sp, direction: nv } : x) }))}
             </div>
             <div className="grid grid-cols-2 gap-2 items-center">

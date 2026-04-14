@@ -22,7 +22,7 @@ export const RoamingList: React.FC<{
         {filteredIndices.map(i => { const rl = data.roamingLocations[i]; return (
           <div key={i} className="border rounded p-3 space-y-2 bg-background">
             <div>
-              <Label>Position (x, y, z, w)</Label>
+              <Label>Position (X, Y, Z, W)</Label>
               {vectorField(rl.position, (nv) => onChange({ ...data, roamingLocations: data.roamingLocations.map((x, j) => j===i ? { ...rl, position: nv } : x) }))}
             </div>
             <div>

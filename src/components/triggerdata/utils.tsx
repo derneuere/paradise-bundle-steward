@@ -12,12 +12,19 @@ export function numberField<T extends object>(obj: T, path: (keyof any)[], value
   return next as T;
 }
 
+// Game stores Y-up (XZY community convention). Display as XYZ where:
+//   display X = game x (east-west)
+//   display Y = game z (north-south, ground plane)
+//   display Z = game y (vertical / up)
+//   W = unchanged
+// Inputs are swapped so the user edits in comfortable XYZ order,
+// matching the BoxFieldsGrid convention used for trigger boxes.
 export const vectorField = (v: Vector4, onVec: (nv: Vector4) => void) => (
   <div className="grid grid-cols-4 gap-2">
-    <Input value={v.x} type="number" step="0.01" onChange={e => onVec({ ...v, x: parseFloat(e.target.value)||0 })} />
-    <Input value={v.y} type="number" step="0.01" onChange={e => onVec({ ...v, y: parseFloat(e.target.value)||0 })} />
-    <Input value={v.z} type="number" step="0.01" onChange={e => onVec({ ...v, z: parseFloat(e.target.value)||0 })} />
-    <Input value={v.w} type="number" step="0.01" onChange={e => onVec({ ...v, w: parseFloat(e.target.value)||0 })} />
+    <Input placeholder="X" value={v.x} type="number" step="0.01" onChange={e => onVec({ ...v, x: parseFloat(e.target.value)||0 })} />
+    <Input placeholder="Y" value={v.z} type="number" step="0.01" onChange={e => onVec({ ...v, z: parseFloat(e.target.value)||0 })} />
+    <Input placeholder="Z" value={v.y} type="number" step="0.01" onChange={e => onVec({ ...v, y: parseFloat(e.target.value)||0 })} />
+    <Input placeholder="W" value={v.w} type="number" step="0.01" onChange={e => onVec({ ...v, w: parseFloat(e.target.value)||0 })} />
   </div>
 );
 

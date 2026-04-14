@@ -203,7 +203,10 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
       const world: Array<[number, number]> = local.map(([lx, lz]) => {
         const x = cx + lx * cos + lz * sin;
         const z = cz - lx * sin + lz * cos;
-        return [z, x];
+        // Negate Z so the 2D map matches the 3D top-down view.
+        // Three.js Y-up: +Z = toward camera = south on screen.
+        // Leaflet CRS.Simple: +lat = up. So lat = -Z to align.
+        return [-z, x];
       });
       return { ...b, world };
     });

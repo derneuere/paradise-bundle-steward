@@ -318,7 +318,7 @@ const RoadsTab: React.FC<Props> = ({ data, onChange }) => {
 							<TableHead>Debug Name</TableHead>
 							<TableHead>Ref X</TableHead>
 							<TableHead>Ref Y</TableHead>
-							<TableHead>Ref Z</TableHead>
+							<TableHead>Ref Z (up)</TableHead>
 							<TableHead>Challenge</TableHead>
 							<TableHead>Id</TableHead>
 							<TableHead>Limit 0</TableHead>
@@ -351,9 +351,9 @@ const RoadsTab: React.FC<Props> = ({ data, onChange }) => {
 									<NumberCell
 										int={false}
 										step={0.01}
-										value={r.mReferencePosition.y}
+										value={r.mReferencePosition.z}
 										onChange={(v) =>
-											update(i, { mReferencePosition: { ...r.mReferencePosition, y: v } })
+											update(i, { mReferencePosition: { ...r.mReferencePosition, z: v } })
 										}
 									/>
 								</TableCell>
@@ -361,9 +361,9 @@ const RoadsTab: React.FC<Props> = ({ data, onChange }) => {
 									<NumberCell
 										int={false}
 										step={0.01}
-										value={r.mReferencePosition.z}
+										value={r.mReferencePosition.y}
 										onChange={(v) =>
-											update(i, { mReferencePosition: { ...r.mReferencePosition, z: v } })
+											update(i, { mReferencePosition: { ...r.mReferencePosition, y: v } })
 										}
 									/>
 								</TableCell>

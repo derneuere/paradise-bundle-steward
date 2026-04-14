@@ -128,8 +128,8 @@ const PortalsTab: React.FC<{ section: AISection; onUpdate: (s: AISection) => voi
 					</div>
 					<div className="flex gap-2 flex-wrap">
 						<FloatInput label="Position X" value={portal.positionX} onChange={(v) => updatePortal(pi, { positionX: v })} />
-						<FloatInput label="Position Y" value={portal.positionY} onChange={(v) => updatePortal(pi, { positionY: v })} />
-						<FloatInput label="Position Z" value={portal.positionZ} onChange={(v) => updatePortal(pi, { positionZ: v })} />
+						<FloatInput label="Position Y" value={portal.positionZ} onChange={(v) => updatePortal(pi, { positionZ: v })} />
+						<FloatInput label="Position Z (up)" value={portal.positionY} onChange={(v) => updatePortal(pi, { positionY: v })} />
 						<IntInput label="Link Section" value={portal.linkSection} onChange={(v) => updatePortal(pi, { linkSection: v })} />
 					</div>
 					{portal.boundaryLines.length > 0 && (
