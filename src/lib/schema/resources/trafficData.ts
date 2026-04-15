@@ -156,7 +156,8 @@ function staticVehicleLabel(sv: unknown, index: number): string {
 	if (!sv || typeof sv !== 'object') return `#${index}`;
 	const v = sv as { mTransform?: number[]; mFlowTypeID?: number };
 	const m = v.mTransform;
-	const pos = m ? `(${m[12]?.toFixed(0) ?? 0}, ${m[13]?.toFixed(0) ?? 0}, ${m[14]?.toFixed(0) ?? 0})` : '?';
+	// Display Z-up to match Matrix44Field: editor Y = matrix slot 14, editor Z = slot 13.
+	const pos = m ? `(${m[12]?.toFixed(0) ?? 0}, ${m[14]?.toFixed(0) ?? 0}, ${m[13]?.toFixed(0) ?? 0})` : '?';
 	return `#${index} · FlowType #${v.mFlowTypeID ?? '?'} · ${pos}`;
 }
 
@@ -331,7 +332,7 @@ const TrafficStaticVehicle: RecordSchema = {
 		_pad43: fixedList(u8(), 12),
 	},
 	fieldMetadata: {
-		mTransform: { label: 'Transform (4x4)' },
+		mTransform: { label: 'Transform (4x4)', swapYZ: true },
 		mExistsAtAllChance: { description: '0–255 probability' },
 		_pad43: { hidden: true },
 	},

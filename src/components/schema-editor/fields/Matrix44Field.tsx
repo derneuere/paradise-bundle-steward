@@ -5,6 +5,15 @@ import { FieldShell, type FieldRendererProps } from './common';
 // vehicles the meaningful editable parts are the translation row (indices
 // 12, 13, 14) — we expose that prominently and fold the rotation matrix
 // into a collapsed raw-grid view so users can see it's there.
+//
+// Spatial swap: for world-space affine transforms the game's vertical
+// component lands in slot 13 (row-major translation row is ty), but the
+// editor presents "Z" as the up/down axis. When `meta.swapYZ` is set the
+// UI "Y" field binds to slot 14 and UI "Z" binds to slot 13 — mirroring
+// how Vec3Field / Vec4Field handle the same convention for positional
+// vec3/vec4 fields. Matrices without the flag (e.g. renderable's
+// boundingMatrix, which is column-major and not world-space) are rendered
+// verbatim. The raw 4×4 view always shows the matrix in storage order.
 export function Matrix44Field({
 	label,
 	value,
@@ -12,9 +21,13 @@ export function Matrix44Field({
 	meta,
 }: FieldRendererProps<number[]>) {
 	const m = value ?? new Array(16).fill(0);
-	const tx = m[12] ?? 0;
-	const ty = m[13] ?? 0;
-	const tz = m[14] ?? 0;
+	const swap = meta?.swapYZ ?? false;
+	// Editor X / Y / Z → matrix slot. Swapped mode puts slot 13 (vertical)
+	// under the Z label and slot 14 under Y.
+	const translationSlots = swap ? ([12, 14, 13] as const) : ([12, 13, 14] as const);
+	const tx = m[translationSlots[0]] ?? 0;
+	const ty = m[translationSlots[1]] ?? 0;
+	const tz = m[translationSlots[2]] ?? 0;
 
 	const setSlot = (slot: number, v: number) => {
 		const next = m.slice();
@@ -22,15 +35,21 @@ export function Matrix44Field({
 		onChange(next);
 	};
 
+	const defaultDescription = swap
+		? 'Matrix44Affine. Translation row is the most commonly edited. Z is up/down.'
+		: 'Matrix44Affine. Translation row is the most commonly edited.';
+
 	return (
 		<FieldShell
 			label={label}
-			description={meta?.description ?? 'Matrix44Affine. Translation row is the most commonly edited.'}
+			description={meta?.description ?? defaultDescription}
 			warning={meta?.warning}
 		>
 			<div className="space-y-2">
 				<div>
-					<div className="text-[10px] text-muted-foreground mb-1">Translation (X / Y / Z)</div>
+					<div className="text-[10px] text-muted-foreground mb-1">
+						{swap ? 'Translation (X / Y / Z, Z is up)' : 'Translation (X / Y / Z)'}
+					</div>
 					<div className="grid grid-cols-3 gap-2">
 						{(['X', 'Y', 'Z'] as const).map((axis, i) => {
 							const current = [tx, ty, tz][i];
@@ -45,7 +64,7 @@ export function Matrix44Field({
 										value={Number.isFinite(current) ? current : 0}
 										onChange={(e) => {
 											const v = parseFloat(e.target.value);
-											if (Number.isFinite(v)) setSlot(12 + i, v);
+											if (Number.isFinite(v)) setSlot(translationSlots[i], v);
 										}}
 									/>
 								</div>
