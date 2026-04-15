@@ -10,7 +10,6 @@ import { BundleProvider } from "./context/BundleContext";
 import BundleLayout from "./layouts/BundleLayout";
 import ResourcesPage from "./pages/ResourcesPage";
 import HexViewPage from "./pages/HexViewPage";
-import VehicleEditorPage from "./pages/VehicleEditorPage";
 import ResourceInspectorPage from "./pages/ResourceInspectorPage";
 import { registry } from "@/lib/core/registry";
 import { EDITOR_PAGES } from "@/lib/core/registry/editors";
@@ -47,9 +46,6 @@ const App = () => (
               <Route path="/resources" element={<ResourcesPage />} />
               <Route path="/hexview" element={<HexViewPage />} />
               <Route path="/inspect" element={<ResourceInspectorPage />} />
-              {/* Vehicle editor keeps its nested :id route; the list page is
-                  generated from the registry like the other editors. */}
-              <Route path="/vehicleList/:id" element={<VehicleEditorPage />} />
               {handlerRoutes}
             </Route>
             {/* Legacy index route kept if needed */}
