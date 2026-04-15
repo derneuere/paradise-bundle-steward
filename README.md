@@ -1,22 +1,28 @@
 # Online Bundle Manager
 
-A modern web-based tool for exploring and modifying Burnout Paradise bundle files. Built with React and TypeScript, Online Bundle Manager provides an intuitive interface for viewing and editing game resources including challenges, trigger data, vehicles, street data, and more.
+A modern web-based tool for exploring and modifying Burnout Paradise bundle files. Built with React and TypeScript, Online Bundle Manager provides an intuitive interface for viewing and editing game resources through a **schema-driven editor framework** with a Unity-style 3-pane layout (hierarchy tree, 3D / 2D viewport, inspector).
 
 ## Features
 
-### Fully supported (read + write + editor)
+Every editor in the app is powered by the same schema-driven framework (see [Schema-driven editor](#schema-driven-editor)): a hand-written schema per resource declares record types, enums, flags, refs, and tree labels; the framework handles navigation, primitive editing, structural-sharing mutation, and tab layout automatically. Rich legacy tables (traffic flows, vehicle cards, challenge action editors, …) are preserved as **extensions** — React components registered in the schema that slot into `propertyGroups` or `customRenderer` fields without being rewritten.
 
-- **AI Sections** — editor for the AI navigation mesh: 8,780+ sections with portals, boundary lines, corners, speed tiers, flags, and section reset pairs. Writer round-trips **byte-exact** against the reference fixture. Includes 7 stress scenarios and passes 200+ fuzz iterations cleanly.
-- **Challenge List** — visual editor for all 500 freeburn challenges, with difficulty, player requirements, actions, and locations.
-- **Trigger Data** — complete editor for world trigger regions: landmarks, generic regions, blackspots, VFX regions, killzones, roaming and spawn locations.
-- **Vehicle List** — editor for all 284+ vehicles with gameplay stats, audio config, flags, and unlock metadata. Writer round-trips **byte-exact** against the reference fixture.
-- **Street Data** — tabbed editor for streets, junctions, roads, and challenge par scores used by the road network. Writer is lossy-but-idempotent: the first write drops the retail spans/exits tail (which the game ignores due to a FixUp bug), subsequent writes are stable.
-- **Player Car Colours** — editor for all color palettes (Gloss, Metallic, Pearlescent, Special, Party) with paint and pearl Vector4 color values. Writer round-trips **byte-exact** against the reference fixture. 32-bit PC layout.
+### Fully supported (read + write + schema editor)
+
+- **AI Sections** (0x10001) — editor for the AI navigation mesh: 8,780+ sections with portals, boundary lines, corners, speed tiers, flags, and section reset pairs. Includes a Unity-style 3D viewport with section selection, section-speed color coding, and instanced portal rendering. Writer round-trips **byte-exact** against the reference fixture. 7 stress scenarios, clean 200+ fuzz iterations.
+- **Traffic Data** (0x10002) — editor for the traffic simulation graph: 14 resource types (hulls, sections, rungs, junctions, section flows, flow types, kill zones, vehicle types/assets/traits, traffic lights, light triggers, static vehicles, paint colours). Was the first resource ported to the schema editor and is the reference implementation for `propertyGroups` + extension-preserved tabs.
+- **Trigger Data** (0x10003) — editor for world trigger regions: landmarks, generic regions, blackspots, VFX regions, killzones, roaming and spawn locations. 3D viewport with InstancedMesh-batched region gizmos for responsive pan/zoom on real data.
+- **Vehicle List** (0x10005) — editor for all 284+ vehicles with gameplay stats, audio config, flags, and unlock metadata. Selecting a vehicle in the tree drills into the full vehicle card (appearance / audio / gameplay / performance / technical sections) via an extension. Writer round-trips **byte-exact**.
+- **Street Data** (0x10018) — editor for streets, junctions, roads, and challenge par scores used by the road network. 3D viewport renders the road graph. Writer is lossy-but-idempotent: the first write drops the retail spans/exits tail (which the game ignores due to a FixUp bug), subsequent writes are stable.
+- **Challenge List** (0x1001F) — editor for all 500 freeburn challenges, with difficulty, player requirements, two goal actions each, and up to 4 locations per action. Type-aware tree labels surface each challenge's primary action as a short label (`#0 · Near Miss · FBCT_599594`).
+- **Player Car Colours** (0x1001E) — editor for all color palettes (Gloss, Metallic, Pearlescent, Special, Party) with paint and pearl Vector4 color values. Writer round-trips **byte-exact**. 32-bit PC layout.
+- **PolygonSoup List** (0x43) — editor for world collision polygon soups (WORLDCOL.BIN: 850+ polygon soups, 1.5M triangles total). Dedicated batched 3D viewport, page-level resource picker for multi-resource bundles, and `byResourceId` export support for bundles with hundreds of same-typed resources. Writer round-trips **byte-exact** across the entire fixture.
+- **AttribSys Vault** — typed vehicle-attribute writer used by vehicle bundles. Integrated into the CLI roundtrip suite; no dedicated editor page yet.
 
 ### Read-only
 
-- **Renderable + GraphicsSpec viewer** — three.js-powered 3D viewer for vehicle bundles. Walks the GraphicsSpec → Model → Renderable chain, applies per-part `mpPartLocators` Matrix44 transforms, decodes vertex/index data from each Renderable's secondary block, and renders the assembled car in-browser. Click any mesh to see its parent Renderable id, RST debug name, vertex/index/triangle counts, resolved Material + VertexDescriptor imports, part locator status, and the per-mesh OBB matrix dump. LOD0 filter, GraphicsSpec vs all-Renderables source toggle, locator-interpretation toggle, and a debugging boundingMatrix-as-transform toggle. See [Renderable viewer](#renderable-viewer) for details.
-- **ICE Take Dictionary** — partial support for the in-game camera editor take dictionary. Spec incomplete on the Burnout Wiki.
+- **Renderable + GraphicsSpec viewer** — three.js-powered 3D viewer for vehicle bundles, now integrated as a schema-editor viewport. The left pane lists meshes, materials, and vertex descriptors via the schema tree; the center pane runs the r3f scene with click-to-select; the right pane inspects per-mesh draw parameters, resolved Material / VertexDescriptor imports, part locator status, and the per-mesh OBB matrix. Walks the GraphicsSpec → Model → Renderable chain, applies per-part `mpPartLocators` Matrix44 transforms, and decodes vertex/index data from each Renderable's secondary block. See [Renderable viewer](#renderable-viewer) for details.
+- **Texture** — schema editor with a dedicated 2D texture viewport showing the decoded pixel data alongside the header metadata (format, dimensions, mip count, flags). Pixel blobs are marked as opaque in the schema to keep them out of the walker.
+- **ICE Take Dictionary** — schema editor over the in-game camera editor take dictionary. Spec still incomplete on the Burnout Wiki; fields beyond the header are mirrored as-is from the parser.
 
 ### Tools
 
@@ -227,6 +233,25 @@ The core of the app is the **resource handler registry** at `src/lib/core/regist
 
 The registry is the single source of truth for which resources exist and how they behave. `src/lib/resourceTypes.ts`, `src/lib/capabilities.ts`, `src/context/BundleContext.tsx` state, `src/pages/ResourcesPage.tsx` NavLinks, and `src/App.tsx` routes are all **derived from the registry** — adding a new resource type requires editing exactly one new file in `registry/handlers/` plus one line in `registry/index.ts`.
 
+### Schema-driven editor
+
+Above the registry sits a second layer: a **schema-driven editor framework** at `src/lib/schema/` and `src/components/schema-editor/`. Every page that edits a parsed model (11 resources as of April 2026) goes through the same React provider + 3-pane layout; no resource-specific page plumbing survives.
+
+The schema is a plain TypeScript declaration — one file per resource at `src/lib/schema/resources/<key>.ts`. It enumerates record types, their fields, field kinds (`u8` / `u16` / `u32` / `i8` / `i16` / `i32` / `f32` / `bigint` / `bool` / `string` / `enum` / `flags` / `vec2` / `vec3` / `vec4` / `matrix44` / `ref` / `record` / `list` / `custom`), `fieldMetadata` (label, description, hidden, readOnly, derivedFrom), `propertyGroups` for tab layout, tree-label callbacks, and cross-field validation hooks. The schema **is the contract** — a coverage test walks the parsed data against the schema in both directions and fails the build on drift in either.
+
+On top of that, `src/lib/schema/walk.ts` provides immutable, structural-sharing `getAtPath` / `updateAtPath` / `insertListItem` / `removeListItem` / `resolveSchemaAtPath` / `walkResource` helpers. The editor's mutation plumbing is one line per action: the inspector calls `setAtPath(path, value)` and the provider hands back a new root with only the touched branch rewritten.
+
+The editor UI lives at `src/components/schema-editor/`:
+
+- **`SchemaEditor.tsx`** — the top-level 3-pane layout (hierarchy / viewport / inspector) used by every editable page.
+- **`HierarchyTree.tsx`** — virtualized tree (for 5k+ list items without click latency) that walks the schema to build collapsible nodes and runs the per-record `label()` callback at render time.
+- **`InspectorPanel.tsx`** — renders the selected record as a form grouped by `propertyGroups`, with each group showing either raw fields or a `component:` extension.
+- **`ViewportPane.tsx`** — dispatches by `resource.key` to one of the viewport modules (PolygonSoupList, Renderable, Texture, …) or shows "no viewport available" for resources without spatial data.
+- **`fields/`** — 15 renderer components, one per field kind, dispatched by `FieldRenderer.tsx`. The default renderers cover every kind in `types.ts`; complex lists opt out via `customRenderer` and slot a Phase 1/2 tab back in unchanged.
+- **`extensions/<key>Extensions.tsx`** — adapters that wrap legacy tables as `SchemaExtensionProps` components (`{ path, value, setValue, setData, data, resource }`) so Phase 1/2 UI code survives the migration with no rewrite.
+
+**Why this exists**: the pre-schema pattern was one bespoke editor page per resource, each wiring its own tabs, lists, and mutation callbacks. Every new resource meant a full page rewrite and a fresh chance to forget something the parser cares about. The schema flips that: the coverage test enforces completeness, tree navigation and mutation come for free, and the only code a new resource needs is the schema declaration (plus extensions for any preserved legacy tables). The ChallengeList migration was 4 schema records + 3 extension wrappers + a 50-line page; the StreetData and TriggerData migrations reused their entire existing tab stacks via extensions.
+
 ### Directory layout
 
 ```
@@ -249,21 +274,44 @@ src/lib/core/
   iceTakeDictionary.ts # read-only, partial
   renderable.ts        # read-only Renderable (0xC) + VertexDescriptor (0xA)
   graphicsSpec.ts      # read-only GraphicsSpec (0x10006) + Model (0x2A)
+  polygonSoupList.ts   # parseRaw/writeRaw for PolygonSoup (byte-exact)
+  texture.ts           # read-only Texture (DXT1/DXT5 decode)
+  trafficData.ts       # parseRaw/writeRaw for TrafficData
   binTools.ts          # BinReader / BinWriter primitives
   resourceManager.ts   # extractResourceData, compress/decompress
+src/lib/schema/
+  types.ts             # FieldSchema / RecordSchema / ResourceSchema / FieldMetadata
+  walk.ts              # getAtPath / updateAtPath / walkResource / resolveSchemaAtPath
+  resources/           # one <key>.ts schema + <key>.test.ts coverage test per resource
+src/components/schema-editor/
+  SchemaEditor.tsx     # 3-pane layout (hierarchy / viewport / inspector)
+  HierarchyTree.tsx    # virtualized tree navigating the schema + per-record labels
+  InspectorPanel.tsx   # record form with propertyGroups + tabs + extension slots
+  ViewportPane.tsx     # dispatches to per-key 3D / 2D viewports
+  context.tsx          # SchemaEditorProvider + useSchemaEditor (selection + mutation)
+  fields/              # 15 FieldRenderer dispatches (Int, Vec3, Enum, Flags, Ref, …)
+  viewports/           # PolygonSoupListViewport, RenderableViewport, TextureViewport
+  extensions/          # per-resource React adapters wrapping legacy tabs
 src/pages/
-  RenderablePage.tsx   # three.js + react-three-fiber viewer
+  TrafficDataPage.tsx     # 50-line SchemaEditorProvider wrappers (same shape for every resource)
+  ChallengeListPage.tsx
+  AISectionsPage.tsx
+  … (one per schema-driven resource)
 ```
 
 ### Adding a new resource type
 
 1. Write the binary parser and writer in `src/lib/core/<key>.ts` with `parse*Data(bytes)` and `write*Data(model)` functions. Use `BinReader` / `BinWriter` from `binTools.ts`.
-2. Create `src/lib/core/registry/handlers/<key>.ts` exporting a `ResourceHandler<Model>`.
+2. Create `src/lib/core/registry/handlers/<key>.ts` exporting a `ResourceHandler<Model>` with `caps`, `describe`, `parseRaw`, `writeRaw`, and at least one `fixtures` entry.
 3. Add one import and one array entry in `src/lib/core/registry/index.ts`.
-4. (If editable) add a lazy `<key>: lazy(() => import('@/pages/<Key>Page'))` entry in `registry/editors.ts` and drop a `src/pages/<Key>Page.tsx` that reads via `useBundle().getResource<T>(key)` and writes via `setResource(key, next)`.
-5. (Optional) add a `HANDLER_META` entry in `src/lib/capabilities.ts` for notes and wiki URLs.
+4. (If editable) write `src/lib/schema/resources/<key>.ts` — a `ResourceSchema` with one `RecordSchema` per nested struct in the parser, `fieldMetadata` for hidden / derived fields, `propertyGroups` for the tab layout, and `label()` callbacks on any user-navigable list. Copy the shape of [`src/lib/schema/resources/trafficData.ts`](src/lib/schema/resources/trafficData.ts) (complex, extensions-first) or [`playerCarColours.ts`](src/lib/schema/resources/playerCarColours.ts) (minimal, schema-first).
+5. (If editable) write `src/lib/schema/resources/<key>.test.ts` modeled after `trafficData.test.ts`: assert `walkResource` coverage in both directions, `resolveSchemaAtPath` on a deep path, structural-sharing mutation, and writer idempotence against the fixture (byte-exact or `stableWriter` per the handler's declared expectation).
+6. (If preserving rich legacy tabs) write `src/components/schema-editor/extensions/<key>Extensions.tsx` with one adapter per legacy tab that translates between the schema editor's `SchemaExtensionProps` contract and the existing component props. Reference the adapter from the schema via `propertyGroups: [{ component: 'TabName' }]` or `list: { customRenderer: 'TabName' }`.
+7. Add a lazy `<key>: lazy(() => import('@/pages/<Key>Page'))` entry in `registry/editors.ts` and drop a `src/pages/<Key>Page.tsx` that's ~50 lines: a `SchemaEditorProvider` around `<SchemaEditor />` passing the schema, the data from `useBundle().getResource<T>(key)`, `setResource(key, …)` as the onChange, and the extension registry.
+8. (If a 3D / 2D viewport exists) add a branch in `ViewportPane.tsx` keyed on `resource.key === '<key>'`, and drop the viewport component under `viewports/`. Simple viewports consume `useSchemaEditor()` directly; multi-resource pages (PolygonSoupList) use a dedicated context to share state with the page.
+9. (Optional) add a `HANDLER_META` entry in `src/lib/capabilities.ts` for notes and wiki URLs that aren't machine-derivable.
 
-`types.ts`, `resourceTypes.ts`, `capabilities.ts` (except meta), `BundleContext.tsx`, `ResourcesPage.tsx`, and `App.tsx` are **never touched**.
+`types.ts`, `resourceTypes.ts`, `capabilities.ts` (except meta), `BundleContext.tsx`, `ResourcesPage.tsx`, and `App.tsx` are **never touched**. The migration prompts at [`docs/schema-editor-migration.md`](docs/schema-editor-migration.md) contain copy-pasteable per-resource briefs with the gotchas each one hit.
 
 ### Technical details
 
@@ -279,15 +327,16 @@ src/pages/
 
 ### Short term
 
-- **More handler-level fuzz coverage** — the generic array walker only touches top-level arrays; nested per-entry arrays (road spans, junction exits, challenge actions) are still out of reach
-- **Editor-side coverage for PlayerCarColours writes** — the writer is live and byte-exact, but the `ColorsPage` edit flow should grow explicit "add/remove color" affordances
+- **More handler-level fuzz coverage** — the generic array walker only touches top-level arrays; nested per-entry arrays (road spans, junction exits, challenge actions) are still out of reach.
+- **Schema-driven validation surface** — `RecordSchema.validate` already exists and a couple of resources use it, but the inspector doesn't yet show warnings/errors inline. TriggerData's drive-thru v1.0/v1.9 limit check is the canonical first use case.
+- **Count-field reconciliation helper** — writers that reject `muNum* !== array.length` mismatches currently require the editor to update both. A `derivedFrom` hook on the schema mutation pipeline could patch them automatically.
 - **Verify Renderable viewer on non-CARBRWDS vehicles** — every locator we've tested has identity rotation. Need a bundle where some part has a non-identity rotation (likely a wheel or a tilted spoiler) to confirm the `fromArray` matrix conversion is correct in the general case.
 - **Wheels.** Wheel geometry isn't visibly distinct from body parts in our CARBRWDS sample. Need to confirm wheels come through the GraphicsSpec parts table on a vehicle that has visually obvious wheel geometry.
 
 
 ### Renderable viewer follow-ups
 
-- **Texture decoding.** Material → TextureState → Texture chain resolves but textures aren't loaded. Needs a DXT1/DXT5 decoder with mip-swizzle handling, plus a way to feed the result into a `THREE.Texture`. Multi-day workstream — the DXT decode itself is well-known, but hooking up Material slots to the right shader uniforms (diffuse / normal / specular) requires reading the Material struct properly.
+- **Texture wiring on vehicle meshes.** The DXT1/DXT5 decoder already exists (the standalone Texture resource editor uses it to paint its preview), but the Renderable viewer doesn't yet push decoded textures into the per-mesh `THREE.MeshStandardMaterial`. Every vehicle mesh still renders as a flat-shaded surface. Hooking Material → TextureState → Texture → `THREE.Texture` and mapping the right slots onto `map` / `normalMap` / `roughnessMap` is the next step.
 - **Skinning / bone weights.** `BoneIndexes` and `BoneWeights` vertex attributes are decoded by `decodeVertexArrays()` but not exposed. A future skeletal pose viewer could light them up.
 - **ShatteredGlassParts.** Parsed by `parseGraphicsSpec` (count + table offset) but not rendered. Each entry maps a Model to a body part index for hot-swap on collision.
 - **Per-mesh OBB visualization.** The `boundingMatrix` is a confirmed OBB. A future "show bounds" toggle could draw the OBBs as wireframe boxes for debugging mesh placement.
@@ -326,6 +375,7 @@ Online Bundle Manager modernizes the Burnout Paradise modding experience with th
 
 - **Typed models make editors trivial** — once `ResourceHandler<Model>` is defined, the React components practically write themselves via shadcn/ui primitives.
 - **CLI-driven iteration** — the registry is the single source of truth, so the CLI is the primary surface for debugging parsers. `bundle -- roundtrip` catches regressions in seconds; `bundle -- stress` catches edge cases AI assistants tend to miss when writing writers.
+- **Schema-driven editor framework** — the hand-written `ResourceSchema` per resource describes the whole model in one place, and the framework handles tree navigation, inspector forms, structural-sharing mutation, virtualized lists, and tab layout uniformly. A new resource now ships as roughly 300 lines of schema declaration + a 50-line page wrapper, and the coverage test enforces that the schema tracks the parser forever. Legacy tables from the pre-schema era (vehicle cards, challenge action editors, traffic flow tables) survive unchanged as `extensions` slotted into schema `propertyGroups` — no rewrite tax for the migration.
 
 ## Contributing
 
