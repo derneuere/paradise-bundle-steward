@@ -303,3 +303,98 @@ export function walkResource(
 
 	walkRecord([], root, rootRecord);
 }
+
+// ---------------------------------------------------------------------------
+// Derived-field reconciliation
+// ---------------------------------------------------------------------------
+
+// Walks the ancestors of a mutated path in BOTH the previous and next root
+// and, for each enclosing record that has a `derive` callback declared on
+// its schema, calls derive(prev, next) and merges the returned patch into
+// the record at that path in the next root.
+//
+// Example: editing `hulls[3].sectionSpans[7].muMaxVehicles` from 10 to 20
+// calls `TrafficSectionSpan.derive` with the span's previous and next
+// values, which returns `{ mfMaxVehicleRecip: 1/20 }`. The helper then
+// updates the span at that path in the next root.
+//
+// Only enclosing RECORDS are considered — not lists. The walker starts from
+// the deepest record containing the mutation and walks OUTWARD, so cascading
+// derives (e.g., a hull record derives summary counts from a span edit)
+// would be possible. For TrafficData specifically only the SectionSpan case
+// uses this today.
+export function applyDerives<T>(
+	prev: T,
+	next: T,
+	path: NodePath,
+	resource: ResourceSchema,
+): T {
+	if (prev === next) return next;
+	let result = next;
+
+	// Walk the path from the deepest record up to the root, collecting each
+	// record's path + schema. A record is any path that resolves to a record
+	// schema (the synthetic root is one such). For each, call derive() with
+	// the values at that path in prev vs result.
+	const rootRecord = resource.registry[resource.rootType];
+	if (!rootRecord) return result;
+
+	// Collect ancestor records deepest-first.
+	const ancestors: { path: NodePath; record: RecordSchema }[] = [];
+	// Always include the root record itself.
+	ancestors.unshift({ path: [], record: rootRecord });
+
+	let currentRecord: RecordSchema = rootRecord;
+	let currentRecordPath: NodePath = [];
+	for (let i = 0; i < path.length; i++) {
+		const seg = path[i];
+		if (typeof seg === 'string') {
+			const field = currentRecord.fields[seg];
+			if (!field) break;
+			if (field.kind === 'record') {
+				const nested = resource.registry[field.type];
+				if (!nested) break;
+				currentRecord = nested;
+				currentRecordPath = path.slice(0, i + 1);
+				ancestors.unshift({ path: currentRecordPath, record: currentRecord });
+			} else if (field.kind === 'list' && field.item.kind === 'record') {
+				// The next segment is numeric; consume it.
+				if (i + 1 < path.length && typeof path[i + 1] === 'number') {
+					const itemType = field.item.type;
+					const nested = resource.registry[itemType];
+					if (!nested) break;
+					currentRecord = nested;
+					currentRecordPath = path.slice(0, i + 2);
+					ancestors.unshift({ path: currentRecordPath, record: currentRecord });
+					i++;
+				} else {
+					break;
+				}
+			} else {
+				break;
+			}
+		}
+	}
+
+	// Apply derives deepest-first. Each derive sees the previous and next
+	// values at its own record path; the patch is merged into result at
+	// that path. Cascading through ancestors is intentional — a parent
+	// record's derive can react to a nested mutation.
+	for (const { path: recordPath, record } of ancestors) {
+		if (!record.derive) continue;
+		const prevValue = getAtPath(prev, recordPath) as Record<string, unknown> | undefined;
+		const nextValue = getAtPath(result, recordPath) as Record<string, unknown> | undefined;
+		if (!prevValue || !nextValue || typeof prevValue !== 'object' || typeof nextValue !== 'object') {
+			continue;
+		}
+		const patch = record.derive(prevValue, nextValue);
+		if (patch && Object.keys(patch).length > 0) {
+			result = updateAtPath(result, recordPath, (cur) => ({
+				...(cur as Record<string, unknown>),
+				...patch,
+			}));
+		}
+	}
+
+	return result;
+}

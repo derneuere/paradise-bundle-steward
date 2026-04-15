@@ -1,33 +1,36 @@
-// Phase C — adapters that wrap the existing Phase 1/2 TrafficData tabs as
-// schema-editor extensions. Each adapter translates between:
+// Adapters that wrap Phase 1/2 TrafficData tabs as schema-editor extensions.
+// Each adapter translates between:
 //   - the schema editor's `(path, value, setValue, setData, data, resource)`
 //     extension contract, and
 //   - the tabs' original `(data, hullIndex?, onChange, selection?, ...)` props.
 //
-// This is how we reuse ~1500 lines of Phase 1/2 UI code without rewriting
-// anything. The schema stays the source of truth for navigation + simple
-// fields; the tabs remain the source of truth for complex list editors
-// where the default form would be a regression.
+// We only keep extensions that offer something the default schema-driven
+// form genuinely can't:
+//   - virtualization for lists with thousands of items (Sections, LaneRungs)
+//   - paired-array coupling the schema can't express on its own (KillZones,
+//     Vehicles, TrafficLights)
+//   - aggregate views the schema can't synthesize (Overview, FlowTypes refs)
+//   - visualization-heavy UI (PaintColours swatches, FlowTypes cards)
+//
+// Extensions for Junctions, SectionFlows, StaticVehicles, Neighbours,
+// SectionSpans, and LightTriggers were removed in favor of the default form
+// because they were pure re-skins of what the generic renderer produces.
+// SectionSpans specifically was replaced by a schema-level `derive` hook on
+// TrafficSectionSpan that re-computes mfMaxVehicleRecip from muMaxVehicles
+// at mutation time.
 
-import React, { useMemo, useRef } from 'react';
+import React, { useRef } from 'react';
 import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
 import type { TrafficDataSelection } from '@/components/trafficdata/useTrafficSelection';
 import { useSchemaEditor } from '../context';
 import type { NodePath } from '@/lib/schema/walk';
 
-// Phase 1/2 tab imports.
+// Kept tabs — these still carry weight.
 import { FlowTypesTab } from '@/components/trafficdata/FlowTypesTab';
 import { PaintColoursTab } from '@/components/trafficdata/PaintColoursTab';
 import { SectionsTab } from '@/components/trafficdata/SectionsTab';
 import { LaneRungsTab } from '@/components/trafficdata/LaneRungsTab';
-import { JunctionsTab } from '@/components/trafficdata/JunctionsTab';
-import { SectionFlowsTab } from '@/components/trafficdata/SectionFlowsTab';
-import { StaticVehiclesTab } from '@/components/trafficdata/StaticVehiclesTab';
-import { NeighboursTab } from '@/components/trafficdata/NeighboursTab';
-import { SectionSpansTab } from '@/components/trafficdata/SectionSpansTab';
-import { LightTriggersTab } from '@/components/trafficdata/LightTriggersTab';
-// Root-level extension tabs (Part 1 of Phase C migration).
 import { OverviewTab } from '@/components/trafficdata/OverviewTab';
 import { KillZonesTab } from '@/components/trafficdata/KillZonesTab';
 import { VehiclesTab } from '@/components/trafficdata/VehiclesTab';
@@ -70,13 +73,9 @@ function selectionToPath(sel: TrafficDataSelection): NodePath {
 	}
 }
 
-// Hook that bridges the schema editor's selection state to the
-// TrafficDataSelection shape Phase 1/2 tabs expect. `scrollToIndexRef` is
-// returned as a throwaway; tabs write to it after add/detail-click but
-// nothing in adapter mode reads it back.
 function useTabSelectionBridge() {
 	const { selectedPath, selectPath } = useSchemaEditor();
-	const selected = useMemo(() => pathToSelection(selectedPath), [selectedPath]);
+	const selected = React.useMemo(() => pathToSelection(selectedPath), [selectedPath]);
 	const onSelect = (sel: TrafficDataSelection) => selectPath(selectionToPath(sel));
 	const scrollToIndexRef = useRef<((index: number) => void) | null>(null);
 	return { selected, onSelect, scrollToIndexRef };
@@ -85,11 +84,6 @@ function useTabSelectionBridge() {
 // ---------------------------------------------------------------------------
 // Root-level adapters — tab owns full ParsedTrafficData
 // ---------------------------------------------------------------------------
-
-// Pattern: the tab takes `data + onChange(data)`. Extension owns a specific
-// list path. We pass `setData` through as `onChange` so the tab can edit
-// whichever fields of the root it wants; Phase 1/2 tabs only ever edit
-// their own list, so behavior is identical to the pre-schema editor.
 
 export const FlowTypesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
 	<FlowTypesTab
@@ -105,9 +99,8 @@ export const PaintColoursExtension: React.FC<SchemaExtensionProps> = ({ data, se
 	/>
 );
 
-// Overview — the tab has an onHullClick callback that the classic editor
-// used to switch active hull. In the schema editor we route it through the
-// tree selection so clicking a hull in the summary jumps to that hull node.
+// Overview — onHullClick routes through the schema editor's tree selection
+// so clicking a hull in the summary jumps to that hull node.
 export const OverviewExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
 	const { selectPath } = useSchemaEditor();
 	return (
@@ -144,9 +137,6 @@ export const TrafficLightsExtension: React.FC<SchemaExtensionProps> = ({ data, s
 // Per-hull adapters — path is ['hulls', N, '<field>']
 // ---------------------------------------------------------------------------
 
-// Helper: extract hullIndex from an extension path. All hull-level
-// extensions are registered on a specific hulls[N].<field> list, so
-// path[1] is guaranteed to be the hull index.
 function hullIndexFromPath(path: NodePath): number {
 	const idx = path[1];
 	if (typeof idx !== 'number') {
@@ -183,100 +173,17 @@ export const LaneRungsExtension: React.FC<SchemaExtensionProps> = ({ path, data,
 	);
 };
 
-export const JunctionsExtension: React.FC<SchemaExtensionProps> = ({ path, data, setData }) => {
-	const hullIndex = hullIndexFromPath(path);
-	const { selected, onSelect, scrollToIndexRef } = useTabSelectionBridge();
-	return (
-		<JunctionsTab
-			data={data as ParsedTrafficData}
-			hullIndex={hullIndex}
-			onChange={setData as (next: ParsedTrafficData) => void}
-			selected={selected}
-			onSelect={onSelect}
-			scrollToIndexRef={scrollToIndexRef}
-		/>
-	);
-};
-
-export const SectionFlowsExtension: React.FC<SchemaExtensionProps> = ({ path, data, setData }) => {
-	const hullIndex = hullIndexFromPath(path);
-	return (
-		<SectionFlowsTab
-			data={data as ParsedTrafficData}
-			hullIndex={hullIndex}
-			onChange={setData as (next: ParsedTrafficData) => void}
-		/>
-	);
-};
-
-export const StaticVehiclesExtension: React.FC<SchemaExtensionProps> = ({ path, data, setData }) => {
-	const hullIndex = hullIndexFromPath(path);
-	const { selected, onSelect, scrollToIndexRef } = useTabSelectionBridge();
-	return (
-		<StaticVehiclesTab
-			data={data as ParsedTrafficData}
-			hullIndex={hullIndex}
-			onChange={setData as (next: ParsedTrafficData) => void}
-			selected={selected}
-			onSelect={onSelect}
-			scrollToIndexRef={scrollToIndexRef}
-		/>
-	);
-};
-
-export const NeighboursExtension: React.FC<SchemaExtensionProps> = ({ path, data, setData }) => {
-	const hullIndex = hullIndexFromPath(path);
-	return (
-		<NeighboursTab
-			data={data as ParsedTrafficData}
-			hullIndex={hullIndex}
-			onChange={setData as (next: ParsedTrafficData) => void}
-		/>
-	);
-};
-
-export const SectionSpansExtension: React.FC<SchemaExtensionProps> = ({ path, data, setData }) => {
-	const hullIndex = hullIndexFromPath(path);
-	return (
-		<SectionSpansTab
-			data={data as ParsedTrafficData}
-			hullIndex={hullIndex}
-			onChange={setData as (next: ParsedTrafficData) => void}
-		/>
-	);
-};
-
-export const LightTriggersExtension: React.FC<SchemaExtensionProps> = ({ path, data, setData }) => {
-	const hullIndex = hullIndexFromPath(path);
-	const { selected, onSelect, scrollToIndexRef } = useTabSelectionBridge();
-	return (
-		<LightTriggersTab
-			data={data as ParsedTrafficData}
-			hullIndex={hullIndex}
-			onChange={setData as (next: ParsedTrafficData) => void}
-			selected={selected}
-			onSelect={onSelect}
-			scrollToIndexRef={scrollToIndexRef}
-		/>
-	);
-};
-
 // ---------------------------------------------------------------------------
 // Registry bundle — hand this map to SchemaEditorProvider.
 // ---------------------------------------------------------------------------
 
 export const trafficDataExtensions: ExtensionRegistry = {
-	FlowTypesTab: FlowTypesExtension,
-	PaintColoursTab: PaintColoursExtension,
+	// Per-hull lists worth specializing.
 	SectionsTab: SectionsExtension,
 	LaneRungsTab: LaneRungsExtension,
-	JunctionsTab: JunctionsExtension,
-	SectionFlowsTab: SectionFlowsExtension,
-	StaticVehiclesTab: StaticVehiclesExtension,
-	NeighboursTab: NeighboursExtension,
-	SectionSpansTab: SectionSpansExtension,
-	LightTriggersTab: LightTriggersExtension,
-	// Root-level propertyGroup extensions.
+	// Root-level aggregate / paired-array / visualization tabs.
+	FlowTypesTab: FlowTypesExtension,
+	PaintColoursTab: PaintColoursExtension,
 	OverviewTab: OverviewExtension,
 	KillZonesTab: KillZonesExtension,
 	VehiclesTab: VehiclesExtension,

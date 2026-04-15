@@ -25,6 +25,7 @@ import {
 
 import { trafficDataResourceSchema } from './trafficData';
 import {
+	applyDerives,
 	getAtPath,
 	setAtPath,
 	updateAtPath,
@@ -385,7 +386,77 @@ describe('count-field reconciliation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. Label callbacks
+// 6. Schema-level derive hook (TrafficSectionSpan.mfMaxVehicleRecip)
+// ---------------------------------------------------------------------------
+
+describe('schema derive hook', () => {
+	it('recomputes mfMaxVehicleRecip when muMaxVehicles changes', () => {
+		const hullIdx = parsedTraffic.hulls.findIndex((h) => h.sectionSpans.length > 0);
+		if (hullIdx < 0) return;
+		const spanPath: NodePath = ['hulls', hullIdx, 'sectionSpans', 0];
+		const field: NodePath = [...spanPath, 'muMaxVehicles'];
+
+		const originalMax = parsedTraffic.hulls[hullIdx].sectionSpans[0].muMaxVehicles;
+		const newMax = Math.max(1, originalMax + 5);
+
+		// Simulate a field-level edit exactly the way SchemaEditorContext
+		// does: apply the primitive set, then run derive against the
+		// enclosing record path.
+		const next = setAtPath(parsedTraffic, field, newMax);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		const patched = reconciled.hulls[hullIdx].sectionSpans[0];
+		expect(patched.muMaxVehicles).toBe(newMax);
+		// Derive recomputed the cached reciprocal — should match 1/newMax
+		// within f32 precision.
+		expect(patched.mfMaxVehicleRecip).toBeCloseTo(1 / newMax, 5);
+		// Other spans in the same hull were NOT touched.
+		if (parsedTraffic.hulls[hullIdx].sectionSpans.length > 1) {
+			expect(reconciled.hulls[hullIdx].sectionSpans[1]).toBe(
+				parsedTraffic.hulls[hullIdx].sectionSpans[1],
+			);
+		}
+	});
+
+	it('leaves unrelated records untouched when no derive runs', () => {
+		// Editing a field on a record with NO derive hook (TrafficSection)
+		// should not invoke any derive — reconciliation is a no-op.
+		const hullIdx = parsedTraffic.hulls.findIndex((h) => h.sections.length > 0);
+		if (hullIdx < 0) return;
+		const path: NodePath = ['hulls', hullIdx, 'sections', 0, 'mfSpeed'];
+
+		const next = setAtPath(parsedTraffic, path, 42);
+		const reconciled = applyDerives(parsedTraffic, next, path, trafficDataResourceSchema);
+
+		// The section's speed is updated; nothing else should change.
+		expect(reconciled.hulls[hullIdx].sections[0].mfSpeed).toBe(42);
+		// And structural sharing holds for sibling sections.
+		if (parsedTraffic.hulls[hullIdx].sections.length > 1) {
+			expect(reconciled.hulls[hullIdx].sections[1]).toBe(
+				parsedTraffic.hulls[hullIdx].sections[1],
+			);
+		}
+	});
+
+	it('skips derive when muMaxVehicles is unchanged', () => {
+		// If derive compared prev vs next with a no-op edit (same value),
+		// it should return `{}` and not touch mfMaxVehicleRecip.
+		const hullIdx = parsedTraffic.hulls.findIndex((h) => h.sectionSpans.length > 0);
+		if (hullIdx < 0) return;
+		const field: NodePath = ['hulls', hullIdx, 'sectionSpans', 0, 'muMaxVehicles'];
+		const originalMax = parsedTraffic.hulls[hullIdx].sectionSpans[0].muMaxVehicles;
+		const originalRecip = parsedTraffic.hulls[hullIdx].sectionSpans[0].mfMaxVehicleRecip;
+
+		const next = setAtPath(parsedTraffic, field, originalMax);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		// No-op write returns the same recip the original file stored.
+		expect(reconciled.hulls[hullIdx].sectionSpans[0].mfMaxVehicleRecip).toBe(originalRecip);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 7. Label callbacks
 // ---------------------------------------------------------------------------
 
 describe('schema labels', () => {

@@ -837,6 +837,12 @@ function writeNeighbour(w: BinWriter, n: TrafficNeighbour) {
 function writeSectionSpan(w: BinWriter, span: TrafficSectionSpan) {
   w.writeU16(span.muMaxVehicles);
   writeBytes(w, span._pad02, 2);
+  // mfMaxVehicleRecip is semantically `1 / muMaxVehicles` but retail
+  // bundles store values that don't round-trip through JS's `1/N` for
+  // non-power-of-2 N (different FP rounding path in the original
+  // generator). Pass through verbatim and keep the two in sync at
+  // mutation time via the schema-level derive hook — see
+  // TrafficSectionSpan in src/lib/schema/resources/trafficData.ts.
   w.writeF32(span.mfMaxVehicleRecip);
 }
 

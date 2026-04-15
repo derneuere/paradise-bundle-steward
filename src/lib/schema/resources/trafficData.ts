@@ -298,7 +298,22 @@ const TrafficSectionSpan: RecordSchema = {
 	},
 	fieldMetadata: {
 		_pad02: { hidden: true },
-		mfMaxVehicleRecip: { readOnly: true, derivedFrom: 'muMaxVehicles', description: '1 / muMaxVehicles' },
+		// The recip is derived from muMaxVehicles via the schema-level
+		// derive hook below. Hidden from the default form so the user
+		// edits only the source field; the derive keeps the cache in sync.
+		mfMaxVehicleRecip: { readOnly: true, hidden: true, derivedFrom: 'muMaxVehicles', description: 'Derived from muMaxVehicles at mutation time.' },
+	},
+	// Re-compute mfMaxVehicleRecip whenever muMaxVehicles changes. The
+	// writer passes the stored recip through verbatim, so bundles where
+	// the user never touches muMaxVehicles round-trip byte-exact. When
+	// the user does edit it, this hook updates the cache in the parsed
+	// model so the exported bundle stays internally consistent.
+	derive: (prev, next) => {
+		if (prev.muMaxVehicles !== next.muMaxVehicles) {
+			const max = next.muMaxVehicles as number;
+			return { mfMaxVehicleRecip: max > 0 ? 1 / max : 0 };
+		}
+		return {};
 	},
 };
 
@@ -338,12 +353,36 @@ const TrafficLightController: RecordSchema = {
 	},
 };
 
+// Fixed 16-entry u16/u8 arrays render as a 4×4 CSS grid to match the
+// semantic layout (4 timing rows × 4 state columns in retail junctions).
+const junctionTimingsGrid: FieldSchema = {
+	kind: 'list',
+	item: u16(),
+	minLength: 16,
+	maxLength: 16,
+	addable: false,
+	removable: false,
+	displayAs: 'grid',
+	gridCols: 4,
+};
+
+const junctionLightStatesGrid: FieldSchema = {
+	kind: 'list',
+	item: u8(),
+	minLength: 16,
+	maxLength: 16,
+	addable: false,
+	removable: false,
+	displayAs: 'grid',
+	gridCols: 4,
+};
+
 const TrafficJunctionLogicBox: RecordSchema = {
 	name: 'TrafficJunctionLogicBox',
 	fields: {
 		muID: u32(),
-		mauStateTimings: fixedList(u16(), 16),
-		mauStoppedLightStates: fixedList(u8(), 16),
+		mauStateTimings: junctionTimingsGrid,
+		mauStoppedLightStates: junctionLightStatesGrid,
 		muNumStates: u8(),
 		muNumLights: u8(),
 		_pad36: fixedList(u8(), 2),
@@ -437,13 +476,34 @@ const TrafficHull: RecordSchema = {
 		sections: recordList('TrafficSection', sectionLabel, 'SectionsTab'),
 		rungs: recordList('TrafficLaneRung', undefined, 'LaneRungsTab'),
 		cumulativeRungLengths: primList(f32()),
-		neighbours: recordList('TrafficNeighbour', neighbourLabel, 'NeighboursTab'),
-		sectionSpans: recordList('TrafficSectionSpan', undefined, 'SectionSpansTab'),
-		staticTrafficVehicles: recordList('TrafficStaticVehicle', staticVehicleLabel, 'StaticVehiclesTab'),
-		sectionFlows: recordList('TrafficSectionFlow', sectionFlowLabel, 'SectionFlowsTab'),
-		junctions: recordList('TrafficJunctionLogicBox', junctionLabel, 'JunctionsTab'),
+		neighbours: recordList('TrafficNeighbour', neighbourLabel),
+		sectionSpans: recordList('TrafficSectionSpan'),
+		// Non-zero factory — all-zero mTransform is a degenerate 4×4 that
+		// renders at origin with no valid orientation. Identity matrix
+		// gives a sane default.
+		staticTrafficVehicles: {
+			kind: 'list',
+			item: record('TrafficStaticVehicle'),
+			addable: true,
+			removable: true,
+			itemLabel: staticVehicleLabel,
+			makeEmpty: () => ({
+				mTransform: [
+					1, 0, 0, 0,
+					0, 1, 0, 0,
+					0, 0, 1, 0,
+					0, 0, 0, 1,
+				],
+				mFlowTypeID: 0,
+				mExistsAtAllChance: 255,
+				muFlags: 0,
+				_pad43: new Array(12).fill(0),
+			}),
+		},
+		sectionFlows: recordList('TrafficSectionFlow', sectionFlowLabel),
+		junctions: recordList('TrafficJunctionLogicBox', junctionLabel),
 		stopLines: recordList('TrafficStopLine'),
-		lightTriggers: recordList('TrafficLightTrigger', lightTriggerLabel, 'LightTriggersTab'),
+		lightTriggers: recordList('TrafficLightTrigger', lightTriggerLabel),
 		lightTriggerStartData: recordList('TrafficLightTriggerStartData'),
 		lightTriggerJunctionLookup: primList(u8()),
 		mauVehicleAssets: fixedList(u8(), 16),

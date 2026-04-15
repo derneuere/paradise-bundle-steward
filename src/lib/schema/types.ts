@@ -119,6 +119,15 @@ export type ListFieldSchema = {
 	// ListNavField / PrimListField. Use this to reuse pre-existing tabs
 	// (e.g., FlowTypesTab) without rewriting them schema-first.
 	customRenderer?: string;
+	/**
+	 * Layout hint for primitive lists. `'grid'` renders items as a CSS
+	 * grid with `gridCols` columns — useful for fixed-length primitive
+	 * arrays that represent a 2D matrix (e.g., `mauStateTimings: u16[16]`
+	 * displayed as a 4×4 grid). Ignored by ListNavField (only applies to
+	 * primitive-item lists handled by PrimListField).
+	 */
+	displayAs?: 'grid';
+	gridCols?: number;
 };
 
 // Escape hatch — a named custom renderer registered at the editor level.
@@ -194,6 +203,24 @@ export type RecordSchema = {
 	label?: (value: Record<string, unknown>, index: number | null, ctx: SchemaContext) => string;
 	// Cross-field validation. Called on the record's value + schema context.
 	validate?: (value: Record<string, unknown>, ctx: SchemaContext) => ValidationResult[];
+	/**
+	 * Derived-field hook. Called after any mutation that affects this
+	 * record — compares `prev` vs `next` and returns a partial patch
+	 * that gets merged on top of `next`. Use it to keep redundant cache
+	 * fields in sync with their source of truth (e.g., `mfMaxVehicleRecip
+	 * = 1/muMaxVehicles` on `TrafficSectionSpan`).
+	 *
+	 * The hook MUST be pure and should only update derived fields — never
+	 * touch independent fields. If no change is needed, return `{}`.
+	 *
+	 * Fires at mutation time, not at write time. Bundles round-trip
+	 * byte-exact if the user never touches the source field, because the
+	 * derived field is passed through the writer verbatim.
+	 */
+	derive?: (
+		prev: Record<string, unknown>,
+		next: Record<string, unknown>,
+	) => Record<string, unknown>;
 };
 
 // ---------------------------------------------------------------------------

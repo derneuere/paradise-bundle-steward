@@ -3,6 +3,7 @@ import { Trash2, Plus } from 'lucide-react';
 import { FieldShell, type FieldRendererProps } from './common';
 import { FieldRenderer } from './FieldRenderer';
 import type { ListFieldSchema } from '@/lib/schema/types';
+import { useSchemaEditor } from '../context';
 
 type Props = FieldRendererProps<unknown[]> & {
 	schema: ListFieldSchema;
@@ -15,12 +16,20 @@ type Props = FieldRendererProps<unknown[]> & {
 // Lists of records (e.g., `hulls: TrafficHull[]`) never reach this renderer —
 // they're handled by ListNavField (summary with "go to" buttons) because the
 // item editors are too large to nest inline.
+//
+// When `schema.displayAs === 'grid'`, items render as a CSS grid with
+// `gridCols` columns — useful for fixed-length primitive arrays that
+// represent a 2D matrix (e.g., `mauStateTimings: u16[16]` as 4×4).
 export function PrimListField({ label, value, onChange, meta, schema }: Props) {
+	const { data, resource } = useSchemaEditor();
 	const items = value ?? [];
 	const fixedLength =
 		schema.minLength != null && schema.maxLength != null && schema.minLength === schema.maxLength;
 	const canAdd = (schema.addable ?? true) && !fixedLength && !meta?.readOnly;
 	const canRemove = (schema.removable ?? true) && !fixedLength && !meta?.readOnly;
+
+	const isGrid = schema.displayAs === 'grid';
+	const gridCols = schema.gridCols ?? 4;
 
 	const updateItem = (idx: number, nextItem: unknown) => {
 		const next = items.slice();
@@ -34,9 +43,47 @@ export function PrimListField({ label, value, onChange, meta, schema }: Props) {
 
 	const addItem = () => {
 		const next = items.slice();
-		next.push(defaultFor(schema.item));
+		// Prefer the schema-level makeEmpty factory when present — mirrors
+		// the ListNavField behavior so callers can supply non-zero defaults
+		// for primitive lists too.
+		const fresh = schema.makeEmpty
+			? schema.makeEmpty({ root: data, resource })
+			: defaultFor(schema.item);
+		next.push(fresh);
 		onChange(next);
 	};
+
+	// Grid layout — fixed-length primitive arrays that represent a 2D
+	// matrix (e.g., junction state timings as 4×4). No index prefix, no
+	// per-cell remove. Only applies when the schema explicitly asks for it.
+	if (isGrid) {
+		return (
+			<FieldShell
+				label={`${label} (${items.length})`}
+				description={meta?.description}
+				warning={meta?.warning}
+			>
+				<div
+					className="grid gap-1 border rounded p-2 bg-background/40"
+					style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
+				>
+					{items.map((item, i) => (
+						<div key={i} className="flex flex-col gap-0.5">
+							<span className="text-[9px] font-mono text-muted-foreground text-center">{i}</span>
+							<FieldRenderer
+								label=""
+								field={schema.item}
+								value={item}
+								onChange={(next) => updateItem(i, next)}
+								meta={{ readOnly: meta?.readOnly }}
+								hideLabel
+							/>
+						</div>
+					))}
+				</div>
+			</FieldShell>
+		);
+	}
 
 	return (
 		<FieldShell

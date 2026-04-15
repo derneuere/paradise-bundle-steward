@@ -51,10 +51,13 @@ export function ListNavField({ label, value, schema, path, meta }: Props) {
 	};
 
 	const addItem = () => {
-		// List nav add creates a shallow-empty record by walking the schema.
-		// Good enough for most types; callers that need richer defaults
-		// should register a custom extension.
-		const fresh = makeEmptyRecord(recordSchema, resource);
+		// Prefer the schema-level makeEmpty factory when present — it can
+		// supply non-zero defaults (sentinel values, identity matrices,
+		// etc.) that a generic schema walk can't produce. Falls back to
+		// the generic walker when no factory is set.
+		const fresh = schema.makeEmpty
+			? schema.makeEmpty({ root: data, resource })
+			: makeEmptyRecord(recordSchema, resource);
 		insertAt(path, fresh);
 	};
 

@@ -8,6 +8,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ResourceSchema } from '@/lib/schema/types';
 import {
+	applyDerives,
 	getAtPath,
 	insertListItem as insertListItemWalk,
 	removeListItem as removeListItemWalk,
@@ -113,17 +114,23 @@ export function SchemaEditorProvider({
 	const setAtPath = useCallback(
 		(path: NodePath, value: unknown) => {
 			const next = setAtPathWalk(data, path, value);
-			onChange(next);
+			// Run schema-declared derive hooks on the ancestors of the
+			// mutated path so cached fields (e.g., mfMaxVehicleRecip) stay
+			// in sync with their source of truth without the mutator
+			// having to know about them.
+			const reconciled = applyDerives(data, next, path, resource);
+			onChange(reconciled);
 		},
-		[data, onChange],
+		[data, onChange, resource],
 	);
 
 	const updateAtPath = useCallback(
 		(path: NodePath, updater: (current: unknown) => unknown) => {
 			const next = updateAtPathWalk(data, path, updater);
-			onChange(next);
+			const reconciled = applyDerives(data, next, path, resource);
+			onChange(reconciled);
 		},
-		[data, onChange],
+		[data, onChange, resource],
 	);
 
 	const insertAt = useCallback(
