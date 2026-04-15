@@ -22,6 +22,7 @@ import {
 import { useSchemaEditor } from './context';
 import type { NodePath } from '@/lib/schema/walk';
 import { PolygonSoupListViewport } from './viewports/PolygonSoupListViewport';
+import { RenderableViewport } from './viewports/RenderableViewport';
 
 // ---------------------------------------------------------------------------
 // Path ↔ TrafficDataSelection translation
@@ -177,6 +178,15 @@ export function ViewportPane() {
 	}
 	if (resource.key === 'polygonSoupList') {
 		return <PolygonSoupListViewport />;
+	}
+	if (resource.key === 'renderable') {
+		// Renderable's 3D preview is the main user-facing value of the
+		// resource — a full three.js scene that decodes every 0xC record in
+		// the bundle. It pulls its own state from useBundle + the
+		// RenderableDecodedProvider supplied by RenderablePage, and wires
+		// click events back to the schema editor via useSchemaEditor.
+		// No path-shim layer needed here.
+		return <RenderableViewport />;
 	}
 	return (
 		<div className="h-full flex items-center justify-center text-xs text-muted-foreground">
