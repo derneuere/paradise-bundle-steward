@@ -1,32 +1,49 @@
+// Challenge List editor — schema-driven hierarchy + inspector.
+//
+// The old tab editor lives on as custom-renderer extensions: the
+// Overview statistics card on the root, plus Action 1 / Action 2 tabs
+// on each ChallengeListEntry. General and Advanced are rendered by the
+// default schema form via propertyGroups.
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBundle } from '@/context/BundleContext';
-import { ChallengeListEditor } from '@/components/challangelist';
+import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
+import { SchemaEditorProvider } from '@/components/schema-editor/context';
+import { challengeListExtensions } from '@/components/schema-editor/extensions/challengeListExtensions';
+import { challengeListResourceSchema } from '@/lib/schema/resources/challengeList';
 import type { ParsedChallengeList } from '@/lib/core/challengeList';
 
 const ChallengeListPage = () => {
-  const { getResource, setResource } = useBundle();
-  const challengeList = getResource<ParsedChallengeList>('challengeList');
+	const { getResource, setResource } = useBundle();
+	const data = getResource<ParsedChallengeList>('challengeList');
 
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Challenge List</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {challengeList ? (
-            <ChallengeListEditor data={challengeList} onChange={(next) => setResource('challengeList', next)} />
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              No Challenge List found in this bundle.
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
+	if (!data) {
+		return (
+			<Card>
+				<CardHeader>
+					<CardTitle>Challenge List</CardTitle>
+				</CardHeader>
+				<CardContent>
+					<div className="text-sm text-muted-foreground">
+						Load a bundle containing a challenge list to begin.
+					</div>
+				</CardContent>
+			</Card>
+		);
+	}
+
+	return (
+		<div className="h-full min-h-0">
+			<SchemaEditorProvider
+				resource={challengeListResourceSchema}
+				data={data}
+				onChange={(next) => setResource('challengeList', next as ParsedChallengeList)}
+				extensions={challengeListExtensions}
+			>
+				<SchemaEditor />
+			</SchemaEditorProvider>
+		</div>
+	);
 };
 
 export default ChallengeListPage;
-
-
