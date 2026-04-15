@@ -20,6 +20,7 @@ import { textureStateHandler } from './handlers/textureState';
 import { aiSectionsHandler } from './handlers/aiSections';
 import { trafficDataHandler } from './handlers/trafficData';
 import { attribSysVaultHandler } from './handlers/attribSysVault';
+import { polygonSoupListHandler } from './handlers/polygonSoupList';
 
 export const registry: ResourceHandler[] = [
 	aiSectionsHandler,
@@ -34,6 +35,7 @@ export const registry: ResourceHandler[] = [
 	renderableHandler,
 	textureHandler,
 	textureStateHandler,
+	polygonSoupListHandler,
 ];
 
 const byTypeId = new Map<number, ResourceHandler>();

@@ -54,6 +54,34 @@ export const SectionsTab: React.FC<Props> = ({ data, hullIndex, onChange, select
 		));
 	};
 
+	const addSection = () => {
+		const empty: TrafficSection = {
+			muRungOffset: 0,
+			muNumRungs: 0,
+			muStopLineOffset: 0,
+			muNumStopLines: 0,
+			muSpanIndex: 0,
+			mauForwardHulls: [0xFFFF, 0xFFFF, 0xFFFF],
+			mauBackwardHulls: [0xFFFF, 0xFFFF, 0xFFFF],
+			mauForwardSections: [0xFF, 0xFF, 0xFF],
+			mauBackwardSections: [0xFF, 0xFF, 0xFF],
+			muTurnLeftProb: 0,
+			muTurnRightProb: 0,
+			muNeighbourOffset: 0,
+			muLeftNeighbourCount: 0,
+			muRightNeighbourCount: 0,
+			muChangeLeftProb: 0,
+			muChangeRightProb: 0,
+			_pad22: [0, 0],
+			mfSpeed: 13.4, // ~30 mph in m/s
+			mfLength: 0,
+			_pad2C: [0, 0, 0, 0],
+		};
+		const newIndex = hull.sections.length;
+		onChange(updateHullField(data, hullIndex, 'sections', (arr) => [...arr, empty]));
+		requestAnimationFrame(() => scrollToIndexRef.current?.(newIndex));
+	};
+
 	const selectedSectionIndex = selected?.hullIndex === hullIndex && selected.sub?.type === 'section'
 		? selected.sub.index : -1;
 
@@ -69,6 +97,7 @@ export const SectionsTab: React.FC<Props> = ({ data, hullIndex, onChange, select
 					value={search}
 					onChange={(e) => setSearch(e.target.value)}
 				/>
+				<Button size="sm" variant="outline" className="h-7" onClick={addSection}>Add Section</Button>
 				<span className="text-xs text-muted-foreground ml-auto">{filtered.length} / {hull.sections.length}</span>
 			</div>
 

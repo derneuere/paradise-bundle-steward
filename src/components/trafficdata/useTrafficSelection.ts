@@ -22,8 +22,8 @@ const SUB_TYPE_TO_TAB: Record<string, string> = {
 	section: 'sections',
 	rung: 'rungs',
 	junction: 'junctions',
-	lightTrigger: 'lights',
-	staticVehicle: 'sections',
+	lightTrigger: 'lightTriggers',
+	staticVehicle: 'staticVehicles',
 };
 
 // ---------------------------------------------------------------------------

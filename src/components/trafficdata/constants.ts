@@ -75,3 +75,42 @@ export const VEHICLE_FLAG_NAMES: { flag: number; label: string }[] = [
 	{ flag: 0x10, label: 'Bike' },
 	{ flag: 0x20, label: 'Truck' },
 ];
+
+// ---------------------------------------------------------------------------
+// Vehicle class labels (BrnTraffic::VehicleClass)
+// ---------------------------------------------------------------------------
+
+export const VEHICLE_CLASS_LABELS: Record<number, string> = {
+	0: 'Car',
+	1: 'Van',
+	2: 'Bus',
+	3: 'Big Rig',
+};
+
+// ---------------------------------------------------------------------------
+// Flow type reference counts
+// ---------------------------------------------------------------------------
+
+export type FlowTypeReferences = {
+	sectionFlows: number;
+	staticVehicles: number;
+	trailers: number;
+};
+
+export function countFlowTypeReferences(data: ParsedTrafficData, flowTypeIndex: number): FlowTypeReferences {
+	let sectionFlows = 0;
+	let staticVehicles = 0;
+	for (const hull of data.hulls) {
+		for (const sf of hull.sectionFlows) {
+			if (sf.muFlowTypeId === flowTypeIndex) sectionFlows++;
+		}
+		for (const sv of hull.staticTrafficVehicles) {
+			if (sv.mFlowTypeID === flowTypeIndex) staticVehicles++;
+		}
+	}
+	let trailers = 0;
+	for (const vt of data.vehicleTypes) {
+		if (vt.muTrailerFlowTypeId === flowTypeIndex) trailers++;
+	}
+	return { sectionFlows, staticVehicles, trailers };
+}

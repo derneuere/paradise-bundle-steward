@@ -97,7 +97,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const h = { ...hulls[idx] };
 				h.sections = h.sections.slice(0, -1);
 				h.sectionFlows = h.sectionFlows.slice(0, -1);
-				h.muNumSections = h.sections.length;
+				// muNumSections is derived from sections.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},
@@ -120,7 +120,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const h = { ...hulls[idx] };
 				h.rungs = h.rungs.slice(0, -1);
 				h.cumulativeRungLengths = h.cumulativeRungLengths.slice(0, -1);
-				h.muNumRungs = h.rungs.length;
+				// muNumRungs is derived from rungs.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},
@@ -142,7 +142,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const hulls = m.hulls.slice();
 				const h = { ...hulls[idx] };
 				h.neighbours = h.neighbours.slice(0, -1);
-				h.muNumNeighbours = h.neighbours.length;
+				// muNumNeighbours is derived from neighbours.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},
@@ -158,7 +158,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const hulls = m.hulls.slice();
 				const h = { ...hulls[idx] };
 				h.staticTrafficVehicles = h.staticTrafficVehicles.slice(0, -1);
-				h.muNumStaticTraffic = h.staticTrafficVehicles.length;
+				// muNumStaticTraffic is derived from staticTrafficVehicles.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},
@@ -174,7 +174,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const hulls = m.hulls.slice();
 				const h = { ...hulls[idx] };
 				h.junctions = h.junctions.slice(0, -1);
-				h.muNumJunctions = h.junctions.length;
+				// muNumJunctions is derived from junctions.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},
@@ -190,7 +190,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const hulls = m.hulls.slice();
 				const h = { ...hulls[idx] };
 				h.stopLines = h.stopLines.slice(0, -1);
-				h.muNumStoplines = h.stopLines.length;
+				// muNumStoplines is derived from stopLines.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},
@@ -207,7 +207,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const h = { ...hulls[idx] };
 				h.lightTriggers = h.lightTriggers.slice(0, -1);
 				h.lightTriggerJunctionLookup = h.lightTriggerJunctionLookup.slice(0, -1);
-				h.muNumLightTriggers = h.lightTriggers.length;
+				// muNumLightTriggers is derived from lightTriggers.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},
@@ -223,7 +223,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const hulls = m.hulls.slice();
 				const h = { ...hulls[idx] };
 				h.lightTriggerStartData = h.lightTriggerStartData.slice(0, -1);
-				h.muNumLightTriggersStartData = h.lightTriggerStartData.length;
+				// muNumLightTriggersStartData is derived from lightTriggerStartData.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},
@@ -239,7 +239,7 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 				const hulls = m.hulls.slice();
 				const h = { ...hulls[idx] };
 				h.sectionSpans = h.sectionSpans.slice(0, -1);
-				h.muNumSectionSpans = h.sectionSpans.length;
+				// muNumSectionSpans is derived from sectionSpans.length at write time.
 				hulls[idx] = h;
 				return { ...m, hulls };
 			},

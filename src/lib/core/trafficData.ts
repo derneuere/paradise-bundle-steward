@@ -912,22 +912,31 @@ function writeLightType(w: BinWriter, lt: TrafficLightType) {
  * Write a Hull header (0x50 bytes) + all its sub-arrays, with 16-byte
  * alignment between blocks. Always sets pointers even for empty arrays
  * (matching the original game writer which points them at the next block).
+ *
+ * Count fields are DERIVED from the actual array lengths — the `muNum*`
+ * fields on the parsed model are only used during reading and the writer
+ * ignores them. This makes it impossible for an editor to produce a
+ * corrupt bundle by mutating arrays without updating the matching count.
+ *
+ * `muNumVehicleAssets` is preserved as-is: semantically it's "how many of
+ * the fixed-16-entry `mauVehicleAssets` slots are populated", not the
+ * array length (the array is always 16).
  */
 function writeHullBlock(w: BinWriter, hull: TrafficHull, hullOff: number) {
-  // Header (0x00 - 0x0F)
-  w.writeU8(hull.muNumSections);
-  w.writeU8(hull.muNumSectionSpans);
-  w.writeU8(hull.muNumJunctions);
-  w.writeU8(hull.muNumStoplines);
-  w.writeU8(hull.muNumNeighbours);
-  w.writeU8(hull.muNumStaticTraffic);
-  w.writeU8(hull.muNumVehicleAssets);
+  // Header (0x00 - 0x0F) — counts derived from array lengths
+  w.writeU8(hull.sections.length);
+  w.writeU8(hull.sectionSpans.length);
+  w.writeU8(hull.junctions.length);
+  w.writeU8(hull.stopLines.length);
+  w.writeU8(hull.neighbours.length);
+  w.writeU8(hull.staticTrafficVehicles.length);
+  w.writeU8(hull.muNumVehicleAssets); // NOT derivable — see doc comment above
   w.writeU8(hull._pad07);
-  w.writeU16(hull.muNumRungs);
+  w.writeU16(hull.rungs.length);
   w.writeU16(hull.muFirstTrafficLight);
   w.writeU16(hull.muLastTrafficLight);
-  w.writeU8(hull.muNumLightTriggers);
-  w.writeU8(hull.muNumLightTriggersStartData);
+  w.writeU8(hull.lightTriggers.length);
+  w.writeU8(hull.lightTriggerStartData.length);
   // 12 pointer placeholders (0x10 - 0x3F)
   for (let i = 0; i < 12; i++) w.writeU32(0);
   // Inline vehicle assets (0x40 - 0x4F)
@@ -989,15 +998,22 @@ function writeHullBlock(w: BinWriter, hull: TrafficHull, hullOff: number) {
 /**
  * Write a FlowType header (0xC bytes) + sub-arrays. Original game writes
  * cumulativeProbs before vehicleTypeIds in memory.
+ *
+ * `muNumVehicleTypes` is derived from `vehicleTypeIds.length` (the parser
+ * sets both to the same value, so byte round-trip is preserved). This
+ * avoids drift when editors mutate `vehicleTypeIds` without touching the
+ * redundant count field.
  */
 function writeFlowTypeBlock(w: BinWriter, ft: TrafficFlowType, ftOff: number) {
+  const numVehicleTypes = ft.vehicleTypeIds.length;
+
   // Header (0xC bytes) — pointers as 0
   w.writeU32(0); // mpauVehicleTypeIds
   w.writeU32(0); // mpauCumulativeProb
-  w.writeU8(ft.muNumVehicleTypes);
+  w.writeU8(numVehicleTypes);
   w.writeU8(0); w.writeU8(0); w.writeU8(0); // padding
 
-  if (ft.muNumVehicleTypes > 0) {
+  if (numVehicleTypes > 0) {
     // CumulativeProbs first (offset 0x4 in header)
     w.align16();
     w.setU32(ftOff + 0x4, w.offset);

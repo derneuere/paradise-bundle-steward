@@ -13,6 +13,11 @@ import { KillZonesTab } from './KillZonesTab';
 import { VehiclesTab } from './VehiclesTab';
 import { TrafficLightsTab } from './TrafficLightsTab';
 import { PaintColoursTab } from './PaintColoursTab';
+import { SectionFlowsTab } from './SectionFlowsTab';
+import { StaticVehiclesTab } from './StaticVehiclesTab';
+import { NeighboursTab } from './NeighboursTab';
+import { SectionSpansTab } from './SectionSpansTab';
+import { LightTriggersTab } from './LightTriggersTab';
 import { TrafficDataViewport } from './TrafficDataViewport';
 
 type Props = {
@@ -25,7 +30,10 @@ export const TrafficDataEditor: React.FC<Props> = ({ data, onChange }) => {
 	const [showViewport, setShowViewport] = useState(true);
 
 	const hull = data.hulls[activeHullIndex];
-	const perHullTabs = ['sections', 'rungs', 'junctions'];
+	const perHullTabs = [
+		'sections', 'rungs', 'junctions',
+		'sectionFlows', 'staticVehicles', 'neighbours', 'sectionSpans', 'lightTriggers',
+	];
 	const isPerHull = perHullTabs.includes(tab);
 
 	return (
@@ -75,6 +83,11 @@ export const TrafficDataEditor: React.FC<Props> = ({ data, onChange }) => {
 					<TabsTrigger value="sections">Sections{hull ? ` (${hull.sections.length})` : ''}</TabsTrigger>
 					<TabsTrigger value="rungs">Rungs{hull ? ` (${hull.rungs.length})` : ''}</TabsTrigger>
 					<TabsTrigger value="junctions">Junctions{hull ? ` (${hull.junctions.length})` : ''}</TabsTrigger>
+					<TabsTrigger value="sectionFlows">Section Flows{hull ? ` (${hull.sectionFlows.length})` : ''}</TabsTrigger>
+					<TabsTrigger value="staticVehicles">Static Vehicles{hull ? ` (${hull.staticTrafficVehicles.length})` : ''}</TabsTrigger>
+					<TabsTrigger value="neighbours">Neighbours{hull ? ` (${hull.neighbours.length})` : ''}</TabsTrigger>
+					<TabsTrigger value="sectionSpans">Spans{hull ? ` (${hull.sectionSpans.length})` : ''}</TabsTrigger>
+					<TabsTrigger value="lightTriggers">Light Triggers{hull ? ` (${hull.lightTriggers.length})` : ''}</TabsTrigger>
 					<TabsTrigger value="flowTypes">Flow Types ({data.flowTypes.length})</TabsTrigger>
 					<TabsTrigger value="killZones">Kill Zones ({data.killZones.length})</TabsTrigger>
 					<TabsTrigger value="vehicles">Vehicles ({data.vehicleTypes.length})</TabsTrigger>
@@ -110,6 +123,57 @@ export const TrafficDataEditor: React.FC<Props> = ({ data, onChange }) => {
 				<TabsContent value="junctions">
 					{hull && (
 						<JunctionsTab
+							data={data}
+							hullIndex={activeHullIndex}
+							onChange={onChange}
+							selected={selected}
+							onSelect={select}
+							scrollToIndexRef={scrollToIndexRef}
+						/>
+					)}
+				</TabsContent>
+				<TabsContent value="sectionFlows">
+					{hull && (
+						<SectionFlowsTab
+							data={data}
+							hullIndex={activeHullIndex}
+							onChange={onChange}
+						/>
+					)}
+				</TabsContent>
+				<TabsContent value="staticVehicles">
+					{hull && (
+						<StaticVehiclesTab
+							data={data}
+							hullIndex={activeHullIndex}
+							onChange={onChange}
+							selected={selected}
+							onSelect={select}
+							scrollToIndexRef={scrollToIndexRef}
+						/>
+					)}
+				</TabsContent>
+				<TabsContent value="neighbours">
+					{hull && (
+						<NeighboursTab
+							data={data}
+							hullIndex={activeHullIndex}
+							onChange={onChange}
+						/>
+					)}
+				</TabsContent>
+				<TabsContent value="sectionSpans">
+					{hull && (
+						<SectionSpansTab
+							data={data}
+							hullIndex={activeHullIndex}
+							onChange={onChange}
+						/>
+					)}
+				</TabsContent>
+				<TabsContent value="lightTriggers">
+					{hull && (
+						<LightTriggersTab
 							data={data}
 							hullIndex={activeHullIndex}
 							onChange={onChange}

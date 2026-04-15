@@ -1,12 +1,39 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { ParsedTrafficData, TrafficJunctionLogicBox, TrafficLightController } from '@/lib/core/trafficData';
 import type { TrafficDataSelection } from './useTrafficSelection';
 import { updateHullField } from './constants';
+
+function makeEmptyJunction(): TrafficJunctionLogicBox {
+	const zeros16 = Array.from({ length: 16 }, () => 0);
+	const controllers: TrafficLightController[] = Array.from({ length: 8 }, () => ({
+		mauTrafficLightIds: [0, 0],
+		mauStopLineIds: [0, 0, 0, 0, 0, 0],
+		mauStopLineHulls: [0, 0, 0, 0, 0, 0],
+		muNumStopLines: 0,
+		muNumTrafficLights: 0,
+	}));
+	return {
+		muID: 0,
+		mauStateTimings: zeros16.slice(),
+		mauStoppedLightStates: zeros16.slice(),
+		muNumStates: 0,
+		muNumLights: 0,
+		_pad36: [0, 0],
+		muEventJunctionID: 0,
+		miOfflineStartDataIndex: -1,
+		miOnlineStartDataIndex: -1,
+		miBikeStartDataIndex: -1,
+		maTrafficLightControllers: controllers,
+		_pad108: [0, 0, 0, 0, 0, 0, 0, 0],
+		mPosition: { x: 0, y: 0, z: 0, w: 1 },
+	};
+}
 
 type Props = {
 	data: ParsedTrafficData;
@@ -46,6 +73,50 @@ function JunctionDetailDialog({
 		onUpdate(index, { ...junction, mauStoppedLightStates: states });
 	};
 
+	const patch = (p: Partial<TrafficJunctionLogicBox>) => onUpdate(index, { ...junction, ...p });
+
+	const intInput = (
+		label: string,
+		value: number,
+		onSet: (v: number) => void,
+		opts: { min?: number; max?: number; width?: string } = {},
+	) => (
+		<div>
+			<Label className="text-[10px] text-muted-foreground">{label}</Label>
+			<Input
+				type="number"
+				min={opts.min}
+				max={opts.max}
+				className={`h-7 ${opts.width ?? 'w-24'} text-xs`}
+				value={value}
+				onChange={(e) => {
+					const v = parseInt(e.target.value, 10);
+					if (Number.isFinite(v)) onSet(v);
+				}}
+			/>
+		</div>
+	);
+
+	const floatInput = (
+		label: string,
+		value: number,
+		onSet: (v: number) => void,
+	) => (
+		<div>
+			<Label className="text-[10px] text-muted-foreground">{label}</Label>
+			<Input
+				type="number"
+				step="any"
+				className="h-7 w-24 text-xs font-mono"
+				value={Number.isFinite(value) ? value : 0}
+				onChange={(e) => {
+					const v = parseFloat(e.target.value);
+					if (Number.isFinite(v)) onSet(v);
+				}}
+			/>
+		</div>
+	);
+
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-w-3xl max-h-[80vh] overflow-auto">
@@ -54,10 +125,23 @@ function JunctionDetailDialog({
 				</DialogHeader>
 
 				<div className="space-y-4">
+					{/* Editable header fields */}
+					<div className="flex flex-wrap gap-3">
+						{intInput('Junction ID', junction.muID, (v) => patch({ muID: v >>> 0 }))}
+						{intInput('Event Junction ID', junction.muEventJunctionID, (v) => patch({ muEventJunctionID: v >>> 0 }))}
+						{intInput('Num States', junction.muNumStates, (v) => patch({ muNumStates: Math.max(0, Math.min(16, v)) }), { min: 0, max: 16, width: 'w-16' })}
+						{intInput('Num Lights', junction.muNumLights, (v) => patch({ muNumLights: Math.max(0, Math.min(8, v)) }), { min: 0, max: 8, width: 'w-16' })}
+						{intInput('Offline Start', junction.miOfflineStartDataIndex, (v) => patch({ miOfflineStartDataIndex: v | 0 }))}
+						{intInput('Online Start', junction.miOnlineStartDataIndex, (v) => patch({ miOnlineStartDataIndex: v | 0 }))}
+						{intInput('Bike Start', junction.miBikeStartDataIndex, (v) => patch({ miBikeStartDataIndex: v | 0 }))}
+					</div>
+
 					{/* Position */}
-					<div className="text-sm">
-						<span className="text-muted-foreground">Position:</span>{' '}
-						({junction.mPosition.x.toFixed(2)}, {junction.mPosition.y.toFixed(2)}, {junction.mPosition.z.toFixed(2)})
+					<div className="flex items-end gap-2">
+						<span className="text-xs text-muted-foreground pb-2">Position</span>
+						{floatInput('X', junction.mPosition.x, (v) => patch({ mPosition: { ...junction.mPosition, x: v } }))}
+						{floatInput('Y', junction.mPosition.y, (v) => patch({ mPosition: { ...junction.mPosition, y: v } }))}
+						{floatInput('Z', junction.mPosition.z, (v) => patch({ mPosition: { ...junction.mPosition, z: v } }))}
 					</div>
 
 					{/* State Timings */}
@@ -176,11 +260,21 @@ export const JunctionsTab: React.FC<Props> = ({ data, hullIndex, onChange, selec
 		));
 	};
 
+	const addJunction = () => {
+		const newIndex = hull.junctions.length;
+		onChange(updateHullField(data, hullIndex, 'junctions', (arr) => [...arr, makeEmptyJunction()]));
+		requestAnimationFrame(() => scrollToIndexRef.current?.(newIndex));
+	};
+
+	const removeJunction = (junctionIndex: number) => {
+		onChange(updateHullField(data, hullIndex, 'junctions', (arr) => arr.filter((_, i) => i !== junctionIndex)));
+	};
+
 	const selectedJunctionIndex = selected?.hullIndex === hullIndex && selected.sub?.type === 'junction'
 		? selected.sub.index : -1;
 
 	const items = rowVirtualizer.getVirtualItems();
-	const gridCols = 'grid-cols-[3rem_5rem_8rem_4rem_4rem_5rem_3rem]';
+	const gridCols = 'grid-cols-[3rem_5rem_8rem_4rem_4rem_5rem_3rem_2rem]';
 
 	return (
 		<div className="space-y-2">
@@ -191,6 +285,7 @@ export const JunctionsTab: React.FC<Props> = ({ data, hullIndex, onChange, selec
 					value={search}
 					onChange={(e) => setSearch(e.target.value)}
 				/>
+				<Button size="sm" variant="outline" className="h-7" onClick={addJunction}>Add Junction</Button>
 				<span className="text-xs text-muted-foreground ml-auto">{filtered.length} / {hull.junctions.length}</span>
 			</div>
 
@@ -202,6 +297,7 @@ export const JunctionsTab: React.FC<Props> = ({ data, hullIndex, onChange, selec
 				<span>States</span>
 				<span>Lights</span>
 				<span>Event Jnc</span>
+				<span />
 				<span />
 			</div>
 
@@ -236,6 +332,14 @@ export const JunctionsTab: React.FC<Props> = ({ data, hullIndex, onChange, selec
 										onClick={(e) => { e.stopPropagation(); setDetailIndex(i); }}
 									>
 										...
+									</Button>
+									<Button
+										size="sm"
+										variant="ghost"
+										className="h-6 px-1 text-xs text-destructive"
+										onClick={(e) => { e.stopPropagation(); removeJunction(i); }}
+									>
+										X
 									</Button>
 								</div>
 							</div>

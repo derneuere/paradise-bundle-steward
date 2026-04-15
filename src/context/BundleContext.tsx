@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { parseBundle, writeBundleFresh, getPlatformName, getFlagNames, formatResourceId } from '@/lib/core/bundle';
-import { parseBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
+import { parseBundleResourcesViaRegistry, parseAllBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
 import { u64ToBigInt } from '@/lib/core/u64';
 import { getResourceType } from '@/lib/resourceTypes';
 import { extractResourceSize, getMemoryTypeName } from '@/lib/core/resourceManager';
@@ -35,10 +35,28 @@ type BundleContextValue = {
   /**
    * Generic handler-key → parsed model map. Editor pages consume this via
    * getResource<T>('streetData') and push edits back via setResource('streetData', model).
+   *
+   * For keys whose bundle has multiple resources of the same type (e.g.
+   * polygonSoupList inside WORLDCOL.BIN), this holds the FIRST one. See
+   * `parsedResourcesAll` / `getResources` for the full list.
    */
   parsedResources: Map<string, unknown>;
+  /**
+   * All parsed models per key, preserving `bundle.resources` order. Entries
+   * that failed to parse are `null` so indexes stay aligned with the bundle.
+   */
+  parsedResourcesAll: Map<string, (unknown | null)[]>;
   getResource: <T>(key: string) => T | null;
+  /** All parsed models of a type; empty array when the bundle has none. */
+  getResources: <T>(key: string) => (T | null)[];
   setResource: (key: string, next: unknown | null) => void;
+  /**
+   * Replace the Nth parsed model of a type. `setResource(key, v)` is the
+   * same as `setResourceAt(key, 0, v)` — it keeps the first-resource
+   * shortcut in sync so legacy editors that use getResource still see
+   * edits made through the multi-resource UI.
+   */
+  setResourceAt: (key: string, index: number, next: unknown | null) => void;
   loadBundleFromFile: (file: File) => Promise<void>;
   exportBundle: () => Promise<void>;
 };
@@ -53,6 +71,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
   const [resources, setResources] = useState<UIResource[]>([]);
   const [debugResources, setDebugResources] = useState<DebugResource[]>([]);
   const [parsedResources, setParsedResources] = useState<Map<string, unknown>>(() => new Map());
+  const [parsedResourcesAll, setParsedResourcesAll] = useState<Map<string, (unknown | null)[]>>(() => new Map());
 
   const convertResourceToUI = useMemo(() => {
     return (resource: any, bundle: ParsedBundle, debugData: DebugResource[]): UIResource => {
@@ -104,8 +123,10 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
 
       const uiResources = bundle.resources.map((resource) => convertResourceToUI(resource, bundle, debugData));
       const modelMap = parseBundleResourcesViaRegistry(arrayBuffer, bundle);
+      const modelMapAll = parseAllBundleResourcesViaRegistry(arrayBuffer, bundle);
 
       setParsedResources(modelMap);
+      setParsedResourcesAll(modelMapAll);
       setLoadedBundle(bundle);
       setResources(uiResources);
       setDebugResources(debugData);
@@ -130,15 +151,42 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     [parsedResources],
   );
 
-  const setResource = useCallback((key: string, next: unknown | null) => {
-    setParsedResources((prev) => {
+  const getResources = useCallback(
+    <T,>(key: string): (T | null)[] => {
+      const list = parsedResourcesAll.get(key);
+      return (list as (T | null)[] | undefined) ?? [];
+    },
+    [parsedResourcesAll],
+  );
+
+  const setResourceAt = useCallback((key: string, index: number, next: unknown | null) => {
+    setParsedResourcesAll((prev) => {
       const copy = new Map(prev);
-      if (next == null) copy.delete(key);
-      else copy.set(key, next);
+      const list = copy.get(key)?.slice() ?? [];
+      // Pad with nulls if caller pokes past the end — shouldn't happen for
+      // normal edits, but safer than throwing mid-render.
+      while (list.length <= index) list.push(null);
+      list[index] = next;
+      copy.set(key, list);
       return copy;
     });
+    // Keep the first-resource shortcut in sync so legacy editors that use
+    // getResource still observe edits made through setResourceAt.
+    if (index === 0) {
+      setParsedResources((prev) => {
+        const copy = new Map(prev);
+        if (next == null) copy.delete(key);
+        else copy.set(key, next);
+        return copy;
+      });
+    }
     setIsModified(true);
   }, []);
+
+  const setResource = useCallback(
+    (key: string, next: unknown | null) => setResourceAt(key, 0, next),
+    [setResourceAt],
+  );
 
   const exportBundle = async () => {
     if (!loadedBundle || !originalArrayBuffer) {
@@ -187,8 +235,11 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     resources,
     debugResources,
     parsedResources,
+    parsedResourcesAll,
     getResource,
+    getResources,
     setResource,
+    setResourceAt,
     loadBundleFromFile,
     exportBundle
   };

@@ -1,8 +1,10 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
-import type { ParsedTrafficData, Vec4 } from '@/lib/core/trafficData';
-import { updateHullField, buildRungToSectionMap } from './constants';
+import { Button } from '@/components/ui/button';
+import { Trash2 } from 'lucide-react';
+import type { ParsedTrafficData, TrafficHull, Vec4 } from '@/lib/core/trafficData';
+import { updateHull, buildRungToSectionMap } from './constants';
 
 type Props = {
 	data: ParsedTrafficData;
@@ -10,6 +12,18 @@ type Props = {
 	onChange: (next: ParsedTrafficData) => void;
 	scrollToIndexRef: React.MutableRefObject<((index: number) => void) | null>;
 };
+
+// Keep cumulativeRungLengths sized to the rung array. We don't know the true
+// lengths on fresh rungs, so we leave the existing entries alone and pad/trim
+// using the last known cumulative value.
+function recomputeCumLengths(rungs: TrafficHull['rungs'], current: number[]): number[] {
+	const out = rungs.map((_, i) => current[i] ?? 0);
+	if (out.length > current.length) {
+		const tail = current.length > 0 ? current[current.length - 1] : 0;
+		for (let i = current.length; i < out.length; i++) out[i] = tail;
+	}
+	return out;
+}
 
 function V4Cell({ value, onChange }: { value: Vec4; onChange: (v: Vec4) => void }) {
 	const set = (key: keyof Vec4, raw: string) => {
@@ -62,14 +76,46 @@ export const LaneRungsTab: React.FC<Props> = ({ data, hullIndex, onChange, scrol
 	};
 
 	const updateRung = (index: number, pointIdx: 0 | 1, value: Vec4) => {
-		onChange(updateHullField(data, hullIndex, 'rungs', (arr) =>
-			arr.map((r, i) => {
-				if (i !== index) return r;
-				const pts: [Vec4, Vec4] = [r.maPoints[0], r.maPoints[1]];
-				pts[pointIdx] = value;
-				return { maPoints: pts };
-			}),
-		));
+		const hullNow = data.hulls[hullIndex];
+		const rungs = hullNow.rungs.map((r, i) => {
+			if (i !== index) return r;
+			const pts: [Vec4, Vec4] = [r.maPoints[0], r.maPoints[1]];
+			pts[pointIdx] = value;
+			return { maPoints: pts };
+		});
+		onChange(updateHull(data, hullIndex, {
+			rungs,
+			cumulativeRungLengths: recomputeCumLengths(rungs, hullNow.cumulativeRungLengths),
+			muNumRungs: rungs.length,
+		}));
+	};
+
+	const addRung = () => {
+		const hullNow = data.hulls[hullIndex];
+		const zero: Vec4 = { x: 0, y: 0, z: 0, w: 0 };
+		// Clone the last rung if present so new rows show up near existing geometry.
+		const lastRung = hullNow.rungs[hullNow.rungs.length - 1];
+		const rungs = [
+			...hullNow.rungs,
+			lastRung
+				? { maPoints: [{ ...lastRung.maPoints[0] }, { ...lastRung.maPoints[1] }] as [Vec4, Vec4] }
+				: { maPoints: [zero, { ...zero }] as [Vec4, Vec4] },
+		];
+		onChange(updateHull(data, hullIndex, {
+			rungs,
+			cumulativeRungLengths: recomputeCumLengths(rungs, hullNow.cumulativeRungLengths),
+			muNumRungs: rungs.length,
+		}));
+	};
+
+	const removeRung = (index: number) => {
+		const hullNow = data.hulls[hullIndex];
+		const rungs = hullNow.rungs.filter((_, i) => i !== index);
+		onChange(updateHull(data, hullIndex, {
+			rungs,
+			cumulativeRungLengths: recomputeCumLengths(rungs, hullNow.cumulativeRungLengths),
+			muNumRungs: rungs.length,
+		}));
 	};
 
 	const items = rowVirtualizer.getVirtualItems();
@@ -83,16 +129,18 @@ export const LaneRungsTab: React.FC<Props> = ({ data, hullIndex, onChange, scrol
 					value={search}
 					onChange={(e) => setSearch(e.target.value)}
 				/>
+				<Button size="sm" variant="outline" className="h-7" onClick={addRung}>Add Rung</Button>
 				<span className="text-xs text-muted-foreground ml-auto">{filtered.length} / {hull.rungs.length}</span>
 			</div>
 
 			{/* Header */}
-			<div className="grid grid-cols-[3rem_1fr_1fr_4rem_5rem] gap-1 text-xs text-muted-foreground px-2 border-b pb-1">
+			<div className="grid grid-cols-[3rem_1fr_1fr_4rem_5rem_2rem] gap-1 text-xs text-muted-foreground px-2 border-b pb-1">
 				<span>#</span>
 				<span>Point A (x, y, z, w)</span>
 				<span>Point B (x, y, z, w)</span>
 				<span>Sec</span>
 				<span>Cum Len</span>
+				<span />
 			</div>
 
 			{/* Virtualized rows */}
@@ -108,12 +156,20 @@ export const LaneRungsTab: React.FC<Props> = ({ data, hullIndex, onChange, scrol
 								className="absolute left-0 right-0 px-2 py-1 border-b border-border/30 hover:bg-muted/30"
 								style={{ transform: `translateY(${vi.start}px)` }}
 							>
-								<div className="grid grid-cols-[3rem_1fr_1fr_4rem_5rem] gap-1 items-center">
+								<div className="grid grid-cols-[3rem_1fr_1fr_4rem_5rem_2rem] gap-1 items-center">
 									<span className="font-mono text-xs">{i}</span>
 									<V4Cell value={r.maPoints[0]} onChange={(v) => updateRung(i, 0, v)} />
 									<V4Cell value={r.maPoints[1]} onChange={(v) => updateRung(i, 1, v)} />
 									<span className="text-xs text-center">{rungToSection[i] >= 0 ? rungToSection[i] : '—'}</span>
 									<span className="text-xs font-mono">{hull.cumulativeRungLengths[i]?.toFixed(2) ?? '—'}</span>
+									<Button
+										size="sm"
+										variant="ghost"
+										className="h-6 px-1 text-destructive"
+										onClick={() => removeRung(i)}
+									>
+										<Trash2 className="h-3 w-3" />
+									</Button>
 								</div>
 							</div>
 						);

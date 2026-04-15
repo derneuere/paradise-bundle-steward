@@ -72,6 +72,36 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 /**
+ * Pick a specific resource of the handler's type out of the bundle. Defaults
+ * to the first match; `--index N` (0-based) picks the N-th. Throws with a
+ * helpful range message if N is out of bounds or no resources of that type
+ * exist.
+ *
+ * This exists because some bundles (notably WORLDCOL.BIN) contain hundreds
+ * of resources of the same type, and the first is often a degenerate stub —
+ * for stress/fuzz to be meaningful you need to target a real one.
+ */
+function pickResource(
+	bundle: ReturnType<typeof parseBundle>,
+	handler: ResourceHandler,
+	args: CliArgs,
+) {
+	const matching = bundle.resources.filter((r) => r.resourceTypeId === handler.typeId);
+	if (matching.length === 0) {
+		throw new Error(`Bundle has no resource of type ${handler.key} (0x${handler.typeId.toString(16)}).`);
+	}
+	const raw = args.options.get('index');
+	if (raw === undefined) return { resource: matching[0], typedIndex: 0, typedCount: matching.length };
+	const idx = Number(raw);
+	if (!Number.isInteger(idx) || idx < 0 || idx >= matching.length) {
+		throw new Error(
+			`--index ${raw} out of range: ${handler.key} has ${matching.length} resource(s) (valid 0..${matching.length - 1}).`,
+		);
+	}
+	return { resource: matching[idx], typedIndex: idx, typedCount: matching.length };
+}
+
+/**
  * Pick the handler for an operation. If --type is provided, look it up by key.
  * Otherwise fall back to the bundle's resources: if exactly one known handler
  * matches, use it; otherwise error with a helpful list.
@@ -165,26 +195,26 @@ function cmdList(args: CliArgs) {
 
 function cmdParse(args: CliArgs) {
 	const [bundlePath] = args.positional;
-	if (!bundlePath) throw new Error('Usage: parse <bundle> [--type <key>]');
+	if (!bundlePath) throw new Error('Usage: parse <bundle> [--type <key>] [--index <n>]');
 	const { buffer } = loadBundleBytes(bundlePath);
 	const bundle = parseBundle(buffer);
 	const handler = pickHandler(bundle, args);
-	const resource = bundle.resources.find((r) => r.resourceTypeId === handler.typeId)!;
+	const { resource, typedIndex, typedCount } = pickResource(bundle, handler, args);
 	const ctx = resourceCtxFromBundle(bundle);
 	const raw = extractResourceRaw(buffer, bundle, resource);
 	const model = handler.parseRaw(raw, ctx);
 
-	console.log(`${handler.name} [${handler.key}]: ${handler.describe(model)}`);
+	console.log(`${handler.name} [${handler.key}] (index ${typedIndex} / ${typedCount}): ${handler.describe(model)}`);
 	console.log(`  raw: ${raw.byteLength} bytes, sha1 ${sha1(raw)}`);
 }
 
 function cmdDump(args: CliArgs) {
 	const [bundlePath, outPath] = args.positional;
-	if (!bundlePath || !outPath) throw new Error('Usage: dump <bundle> <out.json> [--type <key>]');
+	if (!bundlePath || !outPath) throw new Error('Usage: dump <bundle> <out.json> [--type <key>] [--index <n>]');
 	const { buffer, bytes } = loadBundleBytes(bundlePath);
 	const bundle = parseBundle(buffer);
 	const handler = pickHandler(bundle, args);
-	const resource = bundle.resources.find((r) => r.resourceTypeId === handler.typeId)!;
+	const { resource } = pickResource(bundle, handler, args);
 	const ctx = resourceCtxFromBundle(bundle);
 	const raw = extractResourceRaw(buffer, bundle, resource);
 	const model = handler.parseRaw(raw, ctx);
@@ -229,57 +259,62 @@ function cmdPack(args: CliArgs) {
 
 function cmdRoundtrip(args: CliArgs) {
 	const [bundlePath] = args.positional;
-	if (!bundlePath) throw new Error('Usage: roundtrip <bundle> [--type <key>]');
+	if (!bundlePath) throw new Error('Usage: roundtrip <bundle> [--type <key>] [--index <n>]');
 	const { buffer, bytes } = loadBundleBytes(bundlePath);
 	const bundle = parseBundle(buffer);
 	const handler = pickHandler(bundle, args);
+	const { resource, typedIndex, typedCount } = pickResource(bundle, handler, args);
+	const ctx = resourceCtxFromBundle(bundle);
+	const raw = extractResourceRaw(buffer, bundle, resource);
+
 	if (!handler.caps.write) {
 		console.log(`${handler.name} is read-only (no writer registered). Parse-only check:`);
-		const resource = bundle.resources.find((r) => r.resourceTypeId === handler.typeId)!;
-		const ctx = resourceCtxFromBundle(bundle);
-		const raw = extractResourceRaw(buffer, bundle, resource);
 		const model = handler.parseRaw(raw, ctx);
 		console.log(`  ${handler.describe(model)}`);
 		return;
 	}
 
-	const resource = bundle.resources.find((r) => r.resourceTypeId === handler.typeId)!;
-	const ctx = resourceCtxFromBundle(bundle);
-	const raw = extractResourceRaw(buffer, bundle, resource);
 	const model1 = handler.parseRaw(raw, ctx);
+	console.log(`${handler.name} [${handler.key}] (index ${typedIndex} / ${typedCount})`);
 	console.log(`Parse (before): ${handler.describe(model1)}`);
 	console.log(`  original raw: ${raw.byteLength} bytes, sha1 ${sha1(raw)}`);
 
 	const write1 = handler.writeRaw!(model1, ctx);
 	console.log(`  re-encoded raw: ${write1.byteLength} bytes, sha1 ${sha1(write1)}`);
 
-	// Repack into a fresh bundle and re-parse to exercise the full pipeline.
-	const outBuffer = writeBundleFresh(bundle, buffer, {
-		overrides: { resources: { [handler.typeId]: write1 } },
-	});
-	console.log(`  repacked bundle: ${outBuffer.byteLength} bytes (was ${bytes.byteLength})`);
-
-	const newBundle = parseBundle(outBuffer);
-	const newResource = newBundle.resources.find((r) => r.resourceTypeId === handler.typeId)!;
-	const rawAfter = extractResourceRaw(outBuffer, newBundle, newResource);
-	const model2 = handler.parseRaw(rawAfter, ctx);
+	// Per-resource round-trip: parse the re-encoded bytes directly and
+	// re-write. Avoids the full bundle repack, which isn't meaningful for
+	// multi-instance bundles where it would clobber every resource of the
+	// type with the same payload.
+	const model2 = handler.parseRaw(write1, ctx);
 	console.log(`Parse (after):  ${handler.describe(model2)}`);
-	console.log(`  parsed-back raw: ${rawAfter.byteLength} bytes, sha1 ${sha1(rawAfter)}`);
 
-	// Idempotence check: writing the re-parsed model should yield the same
-	// bytes we just re-parsed from. A drift here is a writer bug.
 	const write2 = handler.writeRaw!(model2, ctx);
 	if (sha1(write2) !== sha1(write1)) {
 		console.log(`ROUNDTRIP FAILED — writer not idempotent (write2 sha1 ${sha1(write2)})`);
 		process.exitCode = 1;
 		return;
 	}
-	console.log('ROUNDTRIP OK — writer is idempotent, re-parse succeeded');
+
+	// Additional byte-exact check against the raw input when possible.
+	if (sha1(write1) === sha1(raw)) {
+		console.log('ROUNDTRIP OK — byte-exact with original + writer is idempotent');
+	} else {
+		console.log('ROUNDTRIP OK — writer is idempotent (not byte-exact with original)');
+	}
+
+	// Full pipeline repack only makes sense for single-instance bundles.
+	if (typedCount === 1 && typedIndex === 0) {
+		const outBuffer = writeBundleFresh(bundle, buffer, {
+			overrides: { resources: { [handler.typeId]: write1 } },
+		});
+		console.log(`  full repacked bundle: ${outBuffer.byteLength} bytes (was ${bytes.byteLength})`);
+	}
 }
 
 function cmdStress(args: CliArgs) {
 	const [bundlePath] = args.positional;
-	if (!bundlePath) throw new Error('Usage: stress <bundle> [--type <key>] [--scenario <name>]');
+	if (!bundlePath) throw new Error('Usage: stress <bundle> [--type <key>] [--index <n>] [--scenario <name>]');
 	const scenarioFilter = args.options.get('scenario');
 
 	const { buffer } = loadBundleBytes(bundlePath);
@@ -302,10 +337,10 @@ function cmdStress(args: CliArgs) {
 	}
 
 	const ctx = resourceCtxFromBundle(bundle);
-	const resource = bundle.resources.find((r) => r.resourceTypeId === handler.typeId)!;
+	const { resource, typedIndex, typedCount } = pickResource(bundle, handler, args);
 	const raw = extractResourceRaw(buffer, bundle, resource);
 	const baseline = handler.parseRaw(raw, ctx);
-	console.log(`${handler.name} [${handler.key}]: ${handler.describe(baseline)}`);
+	console.log(`${handler.name} [${handler.key}] (index ${typedIndex} / ${typedCount}): ${handler.describe(baseline)}`);
 	console.log(`  original raw: ${raw.byteLength} bytes, sha1 ${sha1(raw)}`);
 
 	// Bigint-safe deep clone — reuse the same replacer/reviver the dump/pack
@@ -480,7 +515,7 @@ function formatTrace(trace: MutationOp[]): string {
 
 function cmdFuzz(args: CliArgs) {
 	const [bundlePath] = args.positional;
-	if (!bundlePath) throw new Error('Usage: fuzz <bundle> [--type <key>] [--iterations N] [--seed S]');
+	if (!bundlePath) throw new Error('Usage: fuzz <bundle> [--type <key>] [--index <n>] [--iterations N] [--seed S]');
 
 	const iterations = Number(args.options.get('iterations') ?? 50);
 	if (!Number.isFinite(iterations) || iterations <= 0) {
@@ -502,11 +537,11 @@ function cmdFuzz(args: CliArgs) {
 	}
 
 	const ctx = resourceCtxFromBundle(bundle);
-	const resource = bundle.resources.find((r) => r.resourceTypeId === handler.typeId)!;
+	const { resource, typedIndex, typedCount } = pickResource(bundle, handler, args);
 	const raw = extractResourceRaw(buffer, bundle, resource);
 	const baseline = handler.parseRaw(raw, ctx);
 
-	console.log(`Fuzzing ${handler.name} [${handler.key}]: ${handler.describe(baseline)}`);
+	console.log(`Fuzzing ${handler.name} [${handler.key}] (index ${typedIndex} / ${typedCount}): ${handler.describe(baseline)}`);
 	console.log(`  original raw: ${raw.byteLength} bytes, sha1 ${sha1(raw)}`);
 	console.log(`  seed: ${seed}, iterations: ${iterations}`);
 

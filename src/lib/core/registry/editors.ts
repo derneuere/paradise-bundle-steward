@@ -21,4 +21,5 @@ export const EDITOR_PAGES: Record<string, ComponentType<unknown>> = {
 	renderable: lazy(() => import('@/pages/RenderablePage')),
 	texture: lazy(() => import('@/pages/TexturePage')),
 	trafficData: lazy(() => import('@/pages/TrafficDataPage')),
+	polygonSoupList: lazy(() => import('@/pages/PolygonSoupListPage')),
 };
