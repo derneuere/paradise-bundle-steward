@@ -1,14 +1,19 @@
 // Center pane — hosts the resource's 3D viewport.
 //
-// Phase B only knows how to render TrafficData, because that's our only
-// resource schema so far. The shim translates between the schema editor's
-// path-based selection and the TrafficDataViewport's older {hullIndex, sub}
-// model so we can reuse 700 lines of viewport code without porting it.
+// Each resource key has its own branch here. The shims translate between the
+// schema editor's path-based selection model and each viewport's native
+// selection shape so we can reuse the existing viewport components without
+// porting them into the schema editor.
 
 import { useMemo } from 'react';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
 import { TrafficDataViewport } from '@/components/trafficdata/TrafficDataViewport';
 import type { TrafficDataSelection } from '@/components/trafficdata/useTrafficSelection';
+import type { ParsedStreetData } from '@/lib/core/streetData';
+import {
+	StreetDataViewport,
+	type StreetDataSelection,
+} from '@/components/streetdata/StreetDataViewport';
 import { useSchemaEditor } from './context';
 import type { NodePath } from '@/lib/schema/walk';
 import { PolygonSoupListViewport } from './viewports/PolygonSoupListViewport';
@@ -83,6 +88,32 @@ function selectionToActiveTab(sel: TrafficDataSelection): string {
 }
 
 // ---------------------------------------------------------------------------
+// Path ↔ StreetDataSelection translation
+// ---------------------------------------------------------------------------
+
+// StreetData paths are flat: ['streets' | 'junctions' | 'roads', N]. Anything
+// outside those three lists collapses to no selection.
+function pathToStreetDataSelection(path: NodePath): StreetDataSelection {
+	if (path.length < 2) return null;
+	const list = path[0];
+	const idx = path[1];
+	if (typeof list !== 'string' || typeof idx !== 'number') return null;
+	if (list === 'streets') return { type: 'street', index: idx };
+	if (list === 'junctions') return { type: 'junction', index: idx };
+	if (list === 'roads') return { type: 'road', index: idx };
+	return null;
+}
+
+function streetDataSelectionToPath(sel: StreetDataSelection): NodePath {
+	if (!sel) return [];
+	switch (sel.type) {
+		case 'street':   return ['streets', sel.index];
+		case 'junction': return ['junctions', sel.index];
+		case 'road':     return ['roads', sel.index];
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -91,6 +122,9 @@ export function ViewportPane() {
 
 	if (resource.key === 'trafficData') {
 		return <TrafficDataViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
+	}
+	if (resource.key === 'streetData') {
+		return <StreetDataViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
 	}
 	if (resource.key === 'polygonSoupList') {
 		return <PolygonSoupListViewport />;
@@ -126,6 +160,34 @@ function TrafficDataViewportShim({
 				selected={selection}
 				onSelect={(sel) => selectPath(selectionToPath(sel))}
 				activeTab={activeTab}
+			/>
+		</div>
+	);
+}
+
+// StreetData viewport shim. StreetDataViewport takes a `{ data, onChange,
+// selected, onSelect }` API — we forward the schema editor's data and
+// translate the selection shape.
+function StreetDataViewportShim({
+	data,
+	selectedPath,
+	selectPath,
+}: {
+	data: unknown;
+	selectedPath: NodePath;
+	selectPath: (path: NodePath) => void;
+}) {
+	const { setAtPath } = useSchemaEditor();
+	const streetData = data as ParsedStreetData;
+	const selection = useMemo(() => pathToStreetDataSelection(selectedPath), [selectedPath]);
+
+	return (
+		<div className="h-full">
+			<StreetDataViewport
+				data={streetData}
+				onChange={(next) => setAtPath([], next)}
+				selected={selection}
+				onSelect={(sel) => selectPath(streetDataSelectionToPath(sel))}
 			/>
 		</div>
 	);
