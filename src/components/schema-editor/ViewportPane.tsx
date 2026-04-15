@@ -14,6 +14,11 @@ import {
 	StreetDataViewport,
 	type StreetDataSelection,
 } from '@/components/streetdata/StreetDataViewport';
+import type { ParsedTriggerData } from '@/lib/core/triggerData';
+import {
+	TriggerDataViewport,
+	type TriggerSelection,
+} from '@/components/triggerdata/TriggerDataViewport';
 import { useSchemaEditor } from './context';
 import type { NodePath } from '@/lib/schema/walk';
 import { PolygonSoupListViewport } from './viewports/PolygonSoupListViewport';
@@ -114,6 +119,47 @@ function streetDataSelectionToPath(sel: StreetDataSelection): NodePath {
 }
 
 // ---------------------------------------------------------------------------
+// Path ↔ TriggerSelection translation
+// ---------------------------------------------------------------------------
+//
+// The TriggerDataViewport was designed around a flat { kind, index } tuple
+// where `kind` is one of landmark / generic / blackspot / vfx / spawn /
+// roaming / playerStart. Map each top-level list path onto that shape.
+// Anything deeper than the first list index is ignored — clicking a box
+// sub-field in the tree still highlights the parent region in 3D.
+function pathToTriggerSelection(path: NodePath): TriggerSelection {
+	if (path.length === 0) return null;
+	const head = path[0];
+	if (head === 'playerStartPosition' || head === 'playerStartDirection') {
+		return { kind: 'playerStart', index: 0 };
+	}
+	if (typeof path[1] !== 'number') return null;
+	const idx = path[1] as number;
+	switch (head) {
+		case 'landmarks':        return { kind: 'landmark', index: idx };
+		case 'genericRegions':   return { kind: 'generic', index: idx };
+		case 'blackspots':       return { kind: 'blackspot', index: idx };
+		case 'vfxBoxRegions':    return { kind: 'vfx', index: idx };
+		case 'spawnLocations':   return { kind: 'spawn', index: idx };
+		case 'roamingLocations': return { kind: 'roaming', index: idx };
+		default:                 return null;
+	}
+}
+
+function triggerSelectionToPath(sel: TriggerSelection): NodePath {
+	if (!sel) return [];
+	switch (sel.kind) {
+		case 'landmark':    return ['landmarks', sel.index];
+		case 'generic':     return ['genericRegions', sel.index];
+		case 'blackspot':   return ['blackspots', sel.index];
+		case 'vfx':         return ['vfxBoxRegions', sel.index];
+		case 'spawn':       return ['spawnLocations', sel.index];
+		case 'roaming':     return ['roamingLocations', sel.index];
+		case 'playerStart': return ['playerStartPosition'];
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -125,6 +171,9 @@ export function ViewportPane() {
 	}
 	if (resource.key === 'streetData') {
 		return <StreetDataViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
+	}
+	if (resource.key === 'triggerData') {
+		return <TriggerDataViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
 	}
 	if (resource.key === 'polygonSoupList') {
 		return <PolygonSoupListViewport />;
@@ -188,6 +237,37 @@ function StreetDataViewportShim({
 				onChange={(next) => setAtPath([], next)}
 				selected={selection}
 				onSelect={(sel) => selectPath(streetDataSelectionToPath(sel))}
+			/>
+		</div>
+	);
+}
+
+// TriggerData viewport shim. TriggerDataViewport takes a
+// `{ data, onChange, selected, onSelect }` API — forward the schema
+// editor's data and translate selection via the helpers above.
+function TriggerDataViewportShim({
+	data,
+	selectedPath,
+	selectPath,
+}: {
+	data: unknown;
+	selectedPath: NodePath;
+	selectPath: (path: NodePath) => void;
+}) {
+	const { setAtPath } = useSchemaEditor();
+	const triggerData = data as ParsedTriggerData;
+	const selection = useMemo(() => pathToTriggerSelection(selectedPath), [selectedPath]);
+
+	return (
+		<div className="h-full">
+			<TriggerDataViewport
+				data={triggerData}
+				// The viewport is read-only today but takes an onChange for
+				// future in-scene edits. Route it through the schema editor's
+				// root setter so any mutation participates in structural sharing.
+				onChange={(next) => setAtPath([], next)}
+				selected={selection}
+				onSelect={(sel) => selectPath(triggerSelectionToPath(sel))}
 			/>
 		</div>
 	);
