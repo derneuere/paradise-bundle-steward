@@ -1,158 +1,220 @@
-// Texture viewer page.
+// Schema-driven editor for Texture resources (type 0x0).
 //
-// Lists all Texture resources (type 0x0) in the loaded bundle and renders
-// each one as a decoded image preview. Uses decodeTexture() to extract the
-// RGBA pixel data, then paints it onto an offscreen canvas to produce a
-// data URL for display.
+// Bundles like VEH_CARBRWDS_GR.BIN hold hundreds of Texture resources — the
+// old gallery page showed every one at once, but the schema editor is
+// per-resource. This page follows the same pattern as PolygonSoupListPage:
+//
+//   - `getResources<ParsedTextureHeader>('texture')` lists every parsed
+//     header in the loaded bundle, indexed in resource-order.
+//   - A dropdown above the 3-pane SchemaEditor picks which one the editor
+//     should open. The preview viewport re-decodes pixel data for the
+//     selected texture on every selection change.
+//   - TextureContext carries the decoded RGBA payload + the active index
+//     into TextureViewport (the center pane), which is where the 2D
+//     preview lives. The schema editor's left tree is minimal (single
+//     record) and the inspector shows the header fields.
+//
+// Edits to the schema's header fields are kept in memory (setResourceAt),
+// but the texture handler is read-only so they're silently dropped on
+// export. Every field is marked readOnly in the schema to make that
+// behavior visible in the UI — users see a rendered value rather than an
+// editable input.
 
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/components/ui/select';
 import { useBundle } from '@/context/BundleContext';
-import { TEXTURE_TYPE_ID, decodeTexture, parseTextureHeader, type DecodedTexture, type ParsedTextureHeader } from '@/lib/core/texture';
-import { getResourceBlocks } from '@/lib/core/resourceManager';
+import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
+import { SchemaEditorProvider } from '@/components/schema-editor/context';
+import { textureResourceSchema } from '@/lib/schema/resources/texture';
+import {
+	TEXTURE_TYPE_ID,
+	decodeTexture,
+	type ParsedTextureHeader,
+} from '@/lib/core/texture';
+import {
+	TextureContext,
+	type TextureContextValue,
+	type TextureDecodeResult,
+} from '@/components/schema-editor/viewports/textureContext';
 import { u64ToBigInt } from '@/lib/core/u64';
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-/** Convert RGBA pixel data to a data:image/png URL via an offscreen canvas. */
-function rgbaToDataUrl(pixels: Uint8Array, width: number, height: number): string {
-	const canvas = document.createElement('canvas');
-	canvas.width = width;
-	canvas.height = height;
-	const ctx = canvas.getContext('2d')!;
-	const ab = pixels.buffer.slice(pixels.byteOffset, pixels.byteOffset + pixels.byteLength) as ArrayBuffer;
-	const imageData = new ImageData(new Uint8ClampedArray(ab), width, height);
-	ctx.putImageData(imageData, 0, 0);
-	return canvas.toDataURL('image/png');
+// Build a dropdown label for one texture resource. Shows the bundle index,
+// resource id (hex), dimensions, and format so the user can tell similar
+// textures apart (`64x64 DXT1 · body base` vs `128x128 DXT5 · body normal`
+// etc.). Only the header is available here — the pre-migration page surfaced
+// the same fields in its grid metadata strip.
+function textureLabel(
+	header: ParsedTextureHeader | null,
+	resourceIdHex: string,
+	index: number,
+): string {
+	if (header == null) {
+		return `#${index} · ${resourceIdHex} · parse failed`;
+	}
+	return `#${index} · ${resourceIdHex} · ${header.width}×${header.height} · ${header.format}`;
 }
 
-type DecodedTextureEntry = {
-	resourceId: string;
-	header: ParsedTextureHeader;
-	dataUrl: string;
-	error?: undefined;
-} | {
-	resourceId: string;
-	header?: undefined;
-	dataUrl?: undefined;
-	error: string;
-};
-
-// =============================================================================
-// Page
-// =============================================================================
-
 const TexturePage = () => {
-	const { loadedBundle, originalArrayBuffer } = useBundle();
+	const { getResources, setResourceAt, loadedBundle, originalArrayBuffer } = useBundle();
+	const headers = getResources<ParsedTextureHeader>('texture');
 
-	const textures = useMemo(() => {
-		if (!loadedBundle || !originalArrayBuffer) return [];
+	// The resources the UI dropdown maps onto. `getResources('texture')`
+	// gives us one model per resource in bundle order, but we also need the
+	// ResourceEntry itself so `decodeTexture` can find block 1 (the pixel
+	// block) on demand.
+	const textureResources = useMemo(() => {
+		if (!loadedBundle) return [];
+		return loadedBundle.resources.filter((r) => r.resourceTypeId === TEXTURE_TYPE_ID);
+	}, [loadedBundle]);
 
-		const out: DecodedTextureEntry[] = [];
-		for (const resource of loadedBundle.resources) {
-			if (resource.resourceTypeId !== TEXTURE_TYPE_ID) continue;
-			const id = u64ToBigInt(resource.resourceId).toString(16);
-			try {
-				const decoded = decodeTexture(originalArrayBuffer, loadedBundle, resource);
-				out.push({
-					resourceId: id,
-					header: decoded.header,
-					dataUrl: rgbaToDataUrl(decoded.pixels, decoded.header.width, decoded.header.height),
-				});
-			} catch (err) {
-				// Capture raw header hex for debugging format issues.
-				let hexDump = '';
-				try {
-					const blocks = getResourceBlocks(originalArrayBuffer, loadedBundle, resource);
-					if (blocks[0]) {
-						const h = blocks[0];
-						hexDump = ' | header[0..31]: ' + Array.from(h.slice(0, 32)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-					}
-				} catch { /* ignore */ }
-				out.push({
-					resourceId: id,
-					error: (err instanceof Error ? err.message : String(err)) + hexDump,
-				});
-			}
+	// Pre-format the resource ids once — 16-char upper-hex strings match the
+	// byResourceId keys used elsewhere in the codebase, which makes the
+	// dropdown values stable across sessions even if bundle order changes.
+	const resourceIdHex = useMemo(
+		() =>
+			textureResources.map((r) =>
+				u64ToBigInt(r.resourceId).toString(16).toUpperCase().padStart(16, '0'),
+			),
+		[textureResources],
+	);
+
+	// Default to the first successfully-parsed texture so the inspector opens
+	// on something renderable instead of a parse-error stub.
+	const firstParsed = useMemo(() => {
+		for (let i = 0; i < headers.length; i++) {
+			if (headers[i] != null) return i;
 		}
-		return out;
-	}, [loadedBundle, originalArrayBuffer]);
+		return 0;
+	}, [headers]);
 
-	if (!loadedBundle || !originalArrayBuffer) {
+	const [selectedIndex, setSelectedIndex] = useState<number>(firstParsed);
+
+	const currentModel = headers[selectedIndex] ?? null;
+
+	// Re-decode pixel data whenever the selection or source bundle changes.
+	// Edits to header fields (via the schema editor) do NOT invalidate this
+	// — we're intentionally keying on (bundle, resourceIndex), not on the
+	// header object identity, so the preview doesn't flicker while the user
+	// fiddles with width/height/etc. in the inspector.
+	const decoded: TextureDecodeResult = useMemo(() => {
+		if (!loadedBundle || !originalArrayBuffer) {
+			return { status: 'error', error: 'No bundle loaded.' };
+		}
+		const resource = textureResources[selectedIndex];
+		if (!resource) {
+			return { status: 'error', error: `No texture at index ${selectedIndex}.` };
+		}
+		try {
+			const d = decodeTexture(originalArrayBuffer, loadedBundle, resource);
+			return {
+				status: 'ok',
+				pixels: d.pixels,
+				width: d.header.width,
+				height: d.header.height,
+			};
+		} catch (err) {
+			return {
+				status: 'error',
+				error: err instanceof Error ? err.message : String(err),
+			};
+		}
+	}, [loadedBundle, originalArrayBuffer, textureResources, selectedIndex]);
+
+	const handleChange = useCallback(
+		(next: unknown) => setResourceAt('texture', selectedIndex, next),
+		[setResourceAt, selectedIndex],
+	);
+
+	if (headers.length === 0 || !loadedBundle) {
 		return (
-			<Card>
-				<CardHeader><CardTitle>Texture Viewer</CardTitle></CardHeader>
-				<CardContent>
-					<div className="text-sm text-muted-foreground">
-						Load a bundle that contains Texture resources to view them.
-					</div>
-				</CardContent>
-			</Card>
-		);
-	}
-
-	if (textures.length === 0) {
-		return (
-			<Card>
-				<CardHeader><CardTitle>Texture Viewer</CardTitle></CardHeader>
-				<CardContent>
-					<div className="text-sm text-muted-foreground">
-						No Texture resources (type 0x0) found in this bundle.
-					</div>
-				</CardContent>
-			</Card>
-		);
-	}
-
-	return (
-		<div className="space-y-4">
 			<Card>
 				<CardHeader>
-					<CardTitle>Texture Viewer</CardTitle>
-					<p className="text-sm text-muted-foreground">
-						{textures.length} texture(s) in bundle
-					</p>
+					<CardTitle>Texture</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-						{textures.map((tex) => (
-							<div
-								key={tex.resourceId}
-								className="border rounded-lg overflow-hidden bg-muted/30"
-							>
-								{tex.error ? (
-									<div className="aspect-square flex items-center justify-center bg-destructive/10 text-destructive text-xs p-2">
-										{tex.error}
-									</div>
-								) : (
-									<div className="aspect-square flex items-center justify-center bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)] bg-[length:16px_16px]">
-										<img
-											src={tex.dataUrl}
-											alt={`Texture ${tex.resourceId}`}
-											className="max-w-full max-h-full object-contain"
-											style={{ imageRendering: tex.header.width <= 64 ? 'pixelated' : 'auto' }}
-										/>
-									</div>
-								)}
-								<div className="p-2 text-xs space-y-0.5">
-									<div className="font-mono text-muted-foreground truncate" title={tex.resourceId}>
-										{tex.resourceId}
-									</div>
-									{tex.header && (
-										<div className="flex gap-2 flex-wrap">
-											<span>{tex.header.width}×{tex.header.height}</span>
-											<span className="text-muted-foreground">{tex.header.format}</span>
-											<span className="text-muted-foreground">{tex.header.mipLevels} mips</span>
-										</div>
-									)}
-								</div>
-							</div>
-						))}
+					<div className="text-sm text-muted-foreground">
+						Load a bundle containing a Texture resource (type 0x0) to begin.
 					</div>
 				</CardContent>
 			</Card>
+		);
+	}
+
+	if (!currentModel) {
+		return (
+			<Card>
+				<CardHeader>
+					<CardTitle>Texture</CardTitle>
+				</CardHeader>
+				<CardContent>
+					<div className="text-sm text-muted-foreground">
+						Texture #{selectedIndex} failed to parse — pick a different one from
+						the dropdown above.
+					</div>
+				</CardContent>
+			</Card>
+		);
+	}
+
+	const textureCtxValue: TextureContextValue = {
+		headers,
+		selectedIndex,
+		decoded,
+	};
+
+	return (
+		<div className="h-full min-h-0 flex flex-col gap-3">
+			<div className="flex items-center gap-4 shrink-0">
+				<div className="flex-1">
+					<h2 className="text-lg font-semibold">Texture</h2>
+					<p className="text-xs text-muted-foreground">
+						{headers.length === 1
+							? '1 texture in bundle · header is read-only'
+							: `${headers.length} textures in bundle · headers are read-only`}
+					</p>
+				</div>
+				{headers.length > 1 && (
+					<div className="flex items-center gap-2">
+						<span className="text-xs text-muted-foreground">Texture</span>
+						<Select
+							value={String(selectedIndex)}
+							onValueChange={(v) => setSelectedIndex(Number(v))}
+						>
+							<SelectTrigger className="h-8 w-96">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent className="max-h-[60vh]">
+								{headers.map((h, i) => (
+									<SelectItem key={i} value={String(i)}>
+										{textureLabel(h, resourceIdHex[i] ?? '', i)}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+				)}
+			</div>
+			<div className="flex-1 min-h-0">
+				<TextureContext.Provider value={textureCtxValue}>
+					<SchemaEditorProvider
+						// Remount on selection change so initialPath is reset and any
+						// editor-local state (expanded nodes, focused input) clears.
+						key={`texture-${selectedIndex}`}
+						resource={textureResourceSchema}
+						data={currentModel}
+						onChange={handleChange}
+					>
+						<SchemaEditor />
+					</SchemaEditorProvider>
+				</TextureContext.Provider>
+			</div>
 		</div>
 	);
 };

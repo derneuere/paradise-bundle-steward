@@ -23,6 +23,7 @@ import { useSchemaEditor } from './context';
 import type { NodePath } from '@/lib/schema/walk';
 import { PolygonSoupListViewport } from './viewports/PolygonSoupListViewport';
 import { RenderableViewport } from './viewports/RenderableViewport';
+import { TextureViewport } from './viewports/TextureViewport';
 
 // ---------------------------------------------------------------------------
 // Path ↔ TrafficDataSelection translation
@@ -187,6 +188,12 @@ export function ViewportPane() {
 		// click events back to the schema editor via useSchemaEditor.
 		// No path-shim layer needed here.
 		return <RenderableViewport />;
+	}
+	if (resource.key === 'texture') {
+		// 2D preview: the schema's root is just the ParsedTextureHeader, but
+		// TextureViewport pulls decoded RGBA pixels from TextureContext
+		// (provided by TexturePage) so the center pane can show the image.
+		return <TextureViewport />;
 	}
 	return (
 		<div className="h-full flex items-center justify-center text-xs text-muted-foreground">
