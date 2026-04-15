@@ -1,15 +1,28 @@
 // Decoded view of BrnWorld::CollisionTag — the u32 stored in every
 // PolygonSoupPoly.collisionTag slot. Pure module: no React, no imports.
 //
-// Layout (per docs/PolygonSoupList.md, "Collision tag"):
+// Layout — empirical, NOT what the wiki paragraph says on first read:
 //
-//   Material tag (u16) is at offset 0x0, group tag (u16) is at offset 0x2,
-//   and the whole thing is byteswapped as a 32-bit field on little-endian
-//   systems — i.e. when the parser reads the 4 bytes with readU32 LE, the
-//   material half lands in bits 0-15 of the u32 and the group half lands
-//   in bits 16-31.
+//   When the parser calls readU32LE on the 4 bytes of a polygon's collision
+//   tag, the GROUP tag (AI section index) lands in bits 0-15 of the u32,
+//   and the MATERIAL tag (flags / surface / traffic) lands in bits 16-31.
 //
-//   Material (low u16):
+//   This was verified empirically against example/WORLDCOL.BIN (920,928
+//   polygons, 428 PolygonSoupList resources). The HIGH u16 clusters into a
+//   handful of material-tag patterns (0x8420, 0x8480, 0xA020, 0xC420, ...)
+//   — the top few are the wiki example's "wreck" (FATAL + surface 2) and
+//   driveable road variants. The LOW u16 yields 8614 distinct values that
+//   each map 1:1 to AI section references; e.g. section 7756 (which sits
+//   at the OTN-tunnel BSI per the game data) appears as lo=0x9E4C on 47
+//   polygons, and every section index 7714-7800 shows up densely.
+//
+//   The wiki's docs/PolygonSoupList.md "Collision tag" section uses the
+//   opposite convention ("material at offset 0x0, group at 0x2, byteswapped
+//   as 32-bit field") and its own worked example `84 20 95 C1` can't be
+//   reconstructed from those bytes under any byte ordering — treat the
+//   bit-field tables as correct but ignore the half placement and example.
+//
+//   Material (HIGH u16, bits 16-31):
 //     bit 15         Highest bit (always set — preserved verbatim)
 //     bit 14  0x4000 Flag: Fatal          (KU_COLLISION_FLAG_FATAL, legacy "wreck")
 //     bit 13  0x2000 Flag: Driveable      (KU_COLLISION_FLAG_DRIVEABLE)
@@ -18,9 +31,10 @@
 //     bits 9-4       Surface ID (0-63)
 //     bits 3-0       Traffic info (0-15)
 //
-//   Group (high u16):
+//   Group (LOW u16, bits 0-15):
 //     bit 15         Highest bit (always set — preserved verbatim)
-//     bits 14-0      AI section index (0-32767)
+//     bits 14-0      AI section index (0-32767). 0x7FFF is a sentinel "no
+//                    section" used by ~436k polygons in vanilla WORLDCOL.
 //
 // Round-trip contract: `encodeCollisionTag(decodeCollisionTag(raw)) === raw`
 // for every raw u32. The per-field setters are surgical — they only touch
@@ -64,18 +78,18 @@ export const AI_SECTION_INDEX_MASK = 0x7FFF;
 export const AI_SECTION_INDEX_MAX = 0x7FFF;
 
 // =============================================================================
-// u32-level masks (material in bits 0-15, group in bits 16-31)
+// u32-level masks (group in bits 0-15, material in bits 16-31)
 // =============================================================================
 
-const M = (mask: number) => mask >>> 0;             // material field at bits 0-15
-const G = (mask: number) => (mask << 16) >>> 0;     // group field at bits 16-31
+const LO = (mask: number) => mask >>> 0;          // low  u16 = bits 0-15  (group)
+const HI = (mask: number) => (mask << 16) >>> 0;  // high u16 = bits 16-31 (material)
 
-const U32_FLAG_FATAL        = M(FLAG_FATAL);
-const U32_FLAG_DRIVEABLE    = M(FLAG_DRIVEABLE);
-const U32_FLAG_SUPERFATAL   = M(FLAG_SUPERFATAL);
-const U32_SURFACE_ID_MASK   = M(SURFACE_ID_MASK);
-const U32_TRAFFIC_INFO_MASK = M(TRAFFIC_INFO_MASK);
-const U32_AI_SECTION_MASK   = G(AI_SECTION_INDEX_MASK);
+const U32_FLAG_FATAL        = HI(FLAG_FATAL);
+const U32_FLAG_DRIVEABLE    = HI(FLAG_DRIVEABLE);
+const U32_FLAG_SUPERFATAL   = HI(FLAG_SUPERFATAL);
+const U32_SURFACE_ID_MASK   = HI(SURFACE_ID_MASK);
+const U32_TRAFFIC_INFO_MASK = HI(TRAFFIC_INFO_MASK);
+const U32_AI_SECTION_MASK   = LO(AI_SECTION_INDEX_MASK);
 
 // =============================================================================
 // Types
@@ -109,8 +123,8 @@ export type DecodedCollisionTag = {
 
 export function decodeCollisionTag(raw: number): DecodedCollisionTag {
 	const r = raw >>> 0;
-	const material = r & 0xFFFF;
-	const group = (r >>> 16) & 0xFFFF;
+	const group    = r & 0xFFFF;
+	const material = (r >>> 16) & 0xFFFF;
 	return {
 		materialHighestBit: (material & MATERIAL_HIGHEST_BIT) !== 0,
 		fatal:              (material & FLAG_FATAL) !== 0,
@@ -136,7 +150,7 @@ export function encodeCollisionTag(d: DecodedCollisionTag): number {
 	const group =
 		(d.groupHighestBit ? GROUP_HIGHEST_BIT : 0) |
 		(d.aiSectionIndex & AI_SECTION_INDEX_MASK);
-	return (((group & 0xFFFF) << 16) | (material & 0xFFFF)) >>> 0;
+	return (((material & 0xFFFF) << 16) | (group & 0xFFFF)) >>> 0;
 }
 
 // =============================================================================
@@ -150,17 +164,22 @@ export function encodeCollisionTag(d: DecodedCollisionTag): number {
 
 export function setAiSectionIndex(raw: number, value: number): number {
 	const clamped = (value & AI_SECTION_INDEX_MASK) >>> 0;
-	return (((raw >>> 0) & ~U32_AI_SECTION_MASK) | (clamped << 16)) >>> 0;
+	// Group is the LOW u16 — write the index at bit 0.
+	return (((raw >>> 0) & ~U32_AI_SECTION_MASK) | clamped) >>> 0;
 }
 
 export function setSurfaceId(raw: number, value: number): number {
 	const clamped = value & SURFACE_ID_MAX;
-	return (((raw >>> 0) & ~U32_SURFACE_ID_MASK) | (clamped << SURFACE_ID_SHIFT)) >>> 0;
+	// Material is the HIGH u16 — position the field within the u16, then
+	// shift the whole thing up by 16 into bits 16-31 of the u32.
+	return (((raw >>> 0) & ~U32_SURFACE_ID_MASK) | ((clamped << SURFACE_ID_SHIFT) << 16)) >>> 0;
 }
 
 export function setTrafficInfo(raw: number, value: number): number {
 	const clamped = value & TRAFFIC_INFO_MAX;
-	return (((raw >>> 0) & ~U32_TRAFFIC_INFO_MASK) | clamped) >>> 0;
+	// Material traffic field sits at bits 3-0 of the material u16, i.e.
+	// bits 19-16 of the u32 — just shift up by 16.
+	return (((raw >>> 0) & ~U32_TRAFFIC_INFO_MASK) | (clamped << 16)) >>> 0;
 }
 
 export function setFlagFatal(raw: number, value: boolean): number {

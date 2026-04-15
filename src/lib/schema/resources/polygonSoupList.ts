@@ -76,10 +76,10 @@ function polyLabel(poly: unknown, index: number): string {
 	const p = poly as { collisionTag?: number; vertexIndices?: number[] };
 	const isTri = p.vertexIndices?.[3] === 0xFF;
 	if (p.collisionTag == null) return `#${index} · ${isTri ? 'tri' : 'quad'}`;
-	// Pull the AI section index out of the high 15 bits of the group half
-	// (bits 30-16 of the u32). Cheaper than importing from collisionTag.ts
-	// and keeps the schema module's import surface unchanged.
-	const aiSection = ((p.collisionTag >>> 16) & 0x7FFF);
+	// Pull the AI section index out of the group half (LOW u16, bits 14-0).
+	// Cheaper than importing from collisionTag.ts and keeps the schema
+	// module's import surface unchanged.
+	const aiSection = (p.collisionTag & 0x7FFF);
 	return `#${index} · AI ${aiSection} · ${isTri ? 'tri' : 'quad'}`;
 }
 

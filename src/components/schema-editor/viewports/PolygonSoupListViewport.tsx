@@ -38,15 +38,16 @@ function s16(v: number): number {
 // ---------------------------------------------------------------------------
 
 // Hash the u32 collisionTag into a deterministic HSL and convert to linear
-// RGB floats. Uses the low 16 bits ("material" half) for hue and a mild
-// variation in lightness so nearby tags are visually distinct but surfaces
-// with the same material read as a consistent color.
+// RGB floats. Uses the HIGH 16 bits (material half: flags/surface/traffic)
+// for hue so surfaces with the same material read as a consistent color,
+// and the LOW 16 bits (group half: AI section index) for a mild variation
+// in lightness so polys in adjacent AI sections stay visually distinct.
 function tagToColor(tag: number, out: [number, number, number]): void {
-	const lo = tag & 0xFFFF;
-	const hi = (tag >>> 16) & 0xFFFF;
+	const group    = tag & 0xFFFF;
+	const material = (tag >>> 16) & 0xFFFF;
 	// Cheap but decent hash — scramble with a Knuth multiplicative constant.
-	const h = ((lo * 2654435761) >>> 0) / 0xFFFFFFFF;
-	const l = 0.45 + (((hi * 2246822519) >>> 0) / 0xFFFFFFFF) * 0.2;
+	const h = ((material * 2654435761) >>> 0) / 0xFFFFFFFF;
+	const l = 0.45 + (((group * 2246822519) >>> 0) / 0xFFFFFFFF) * 0.2;
 	hslToRgb(h, 0.6, l, out);
 }
 
