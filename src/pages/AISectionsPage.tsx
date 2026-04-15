@@ -1,26 +1,48 @@
+// AI Sections editor — schema-driven hierarchy + inspector + 3D viewport.
+//
+// The old tab-based editor (AISectionsEditor.tsx + inlined OverviewTab /
+// ResetPairsTab) has been replaced by the schema-driven framework. The
+// Overview and Reset Pairs tabs are registered as extensions; the sections
+// table is a customRenderer on the root.sections list; everything else
+// flows through the default schema form renderers.
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBundle } from '@/context/BundleContext';
-import { AISectionsEditor } from '@/components/aisections/AISectionsEditor';
+import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
+import { SchemaEditorProvider } from '@/components/schema-editor/context';
+import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
+import { aiSectionsResourceSchema } from '@/lib/schema/resources/aiSections';
 import type { ParsedAISections } from '@/lib/core/aiSections';
 
 const AISectionsPage = () => {
 	const { getResource, setResource } = useBundle();
-	const aiData = getResource<ParsedAISections>('aiSections');
+	const data = getResource<ParsedAISections>('aiSections');
 
-	return (
-		<div className="space-y-4">
+	if (!data) {
+		return (
 			<Card>
-				<CardHeader className="flex flex-row items-center justify-between">
+				<CardHeader>
 					<CardTitle>AI Sections</CardTitle>
 				</CardHeader>
 				<CardContent>
-					{aiData ? (
-						<AISectionsEditor data={aiData} onChange={(next) => setResource('aiSections', next)} />
-					) : (
-						<div className="text-sm text-muted-foreground">Load a bundle containing AI sections to begin.</div>
-					)}
+					<div className="text-sm text-muted-foreground">
+						Load a bundle containing AI sections to begin.
+					</div>
 				</CardContent>
 			</Card>
+		);
+	}
+
+	return (
+		<div className="h-full min-h-0">
+			<SchemaEditorProvider
+				resource={aiSectionsResourceSchema}
+				data={data}
+				onChange={(next) => setResource('aiSections', next as ParsedAISections)}
+				extensions={aiSectionsExtensions}
+			>
+				<SchemaEditor />
+			</SchemaEditorProvider>
 		</div>
 	);
 };

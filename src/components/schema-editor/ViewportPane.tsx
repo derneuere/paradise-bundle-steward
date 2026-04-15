@@ -24,6 +24,11 @@ import type { NodePath } from '@/lib/schema/walk';
 import { PolygonSoupListViewport } from './viewports/PolygonSoupListViewport';
 import { RenderableViewport } from './viewports/RenderableViewport';
 import { TextureViewport } from './viewports/TextureViewport';
+import type { ParsedAISections } from '@/lib/core/aiSections';
+import {
+	AISectionsViewport,
+	type AISectionSelection,
+} from '@/components/aisections/AISectionsViewport';
 
 // ---------------------------------------------------------------------------
 // Path ↔ TrafficDataSelection translation
@@ -162,6 +167,57 @@ function triggerSelectionToPath(sel: TriggerSelection): NodePath {
 }
 
 // ---------------------------------------------------------------------------
+// Path ↔ AISectionSelection translation
+// ---------------------------------------------------------------------------
+//
+// Recognized shapes:
+//   ["sections", i]                                         → { sectionIndex: i }
+//   ["sections", i, "portals", p]                           → { ..., sub: portal }
+//   ["sections", i, "portals", p, "boundaryLines", l]       → { ..., sub: boundaryLine }
+//   ["sections", i, "noGoLines", l]                         → { ..., sub: noGoLine }
+function pathToAISelection(path: NodePath): AISectionSelection {
+	if (path.length < 2 || path[0] !== 'sections') return null;
+	const sectionIndex = path[1];
+	if (typeof sectionIndex !== 'number') return null;
+	if (path.length === 2) return { sectionIndex };
+	const list = path[2];
+	if (list === 'portals' && typeof path[3] === 'number') {
+		const portalIndex = path[3] as number;
+		if (path.length === 4) {
+			return { sectionIndex, sub: { type: 'portal', portalIndex } };
+		}
+		if (path[4] === 'boundaryLines' && typeof path[5] === 'number') {
+			return {
+				sectionIndex,
+				sub: { type: 'boundaryLine', portalIndex, lineIndex: path[5] as number },
+			};
+		}
+		return { sectionIndex, sub: { type: 'portal', portalIndex } };
+	}
+	if (list === 'noGoLines' && typeof path[3] === 'number') {
+		return { sectionIndex, sub: { type: 'noGoLine', lineIndex: path[3] as number } };
+	}
+	return { sectionIndex };
+}
+
+function aiSelectionToPath(sel: AISectionSelection): NodePath {
+	if (!sel) return [];
+	const base: NodePath = ['sections', sel.sectionIndex];
+	if (!sel.sub) return base;
+	switch (sel.sub.type) {
+		case 'portal':
+			return sel.sub.portalIndex != null ? [...base, 'portals', sel.sub.portalIndex] : base;
+		case 'boundaryLine':
+			if (sel.sub.portalIndex != null && sel.sub.lineIndex != null) {
+				return [...base, 'portals', sel.sub.portalIndex, 'boundaryLines', sel.sub.lineIndex];
+			}
+			return base;
+		case 'noGoLine':
+			return sel.sub.lineIndex != null ? [...base, 'noGoLines', sel.sub.lineIndex] : base;
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -176,6 +232,9 @@ export function ViewportPane() {
 	}
 	if (resource.key === 'triggerData') {
 		return <TriggerDataViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
+	}
+	if (resource.key === 'aiSections') {
+		return <AISectionsViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
 	}
 	if (resource.key === 'polygonSoupList') {
 		return <PolygonSoupListViewport />;
@@ -285,6 +344,38 @@ function TriggerDataViewportShim({
 				onChange={(next) => setAtPath([], next)}
 				selected={selection}
 				onSelect={(sel) => selectPath(triggerSelectionToPath(sel))}
+			/>
+		</div>
+	);
+}
+
+// AISections viewport shim. The existing AISectionsViewport was written
+// around a `{ sectionIndex, sub }` selection shape — we translate that to
+// and from schema paths so clicking a section in the 3D viewport drives the
+// hierarchy tree and vice versa.
+function AISectionsViewportShim({
+	data,
+	selectedPath,
+	selectPath,
+}: {
+	data: unknown;
+	selectedPath: NodePath;
+	selectPath: (path: NodePath) => void;
+}) {
+	const { setAtPath } = useSchemaEditor();
+	const aiData = data as ParsedAISections;
+	const selection = useMemo(() => pathToAISelection(selectedPath), [selectedPath]);
+
+	return (
+		<div className="h-full">
+			<AISectionsViewport
+				data={aiData}
+				// The 3D viewport exposes an onChange for future in-scene edits
+				// (e.g. dragging a portal). Route it through the schema editor's
+				// root setter so the mutation participates in structural sharing.
+				onChange={(next) => setAtPath([], next)}
+				selected={selection}
+				onSelect={(sel) => selectPath(aiSelectionToPath(sel))}
 			/>
 		</div>
 	);
