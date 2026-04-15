@@ -131,7 +131,10 @@ describe('polygonSoupList path resolution', () => {
 			polygonSoupListResourceSchema,
 			['soups', 0, 'polygons', 0, 'collisionTag'],
 		);
-		expect(loc?.field?.kind).toBe('u32');
+		// The collisionTag field is declared as a custom extension so the
+		// schema editor delegates rendering to the decoded CollisionTag
+		// inspector. The raw u32 is still preserved byte-for-byte on the model.
+		expect(loc?.field?.kind).toBe('custom');
 	});
 
 	it('resolves soups[0].vertices[0].x', () => {
@@ -209,10 +212,13 @@ describe('polygonSoupList labels', () => {
 		expect(label).toMatch(/^#0 · \d+v · \d+p \(\d+q\/\d+t\)$/);
 	});
 
-	it('poly label uses hex collision tag', () => {
+	it('poly label shows AI section index', () => {
+		// Since the collision-tag editor landed, poly labels surface the
+		// decoded AI section index from the high 15 bits of the u32 group
+		// half rather than the opaque raw hex tag.
 		const schema = polygonSoupListResourceSchema.registry.PolygonSoupPoly;
 		const poly0 = parsedPsl.soups[0].polygons[0];
 		const label = schema.label?.(poly0 as unknown as Record<string, unknown>, 0, ctx);
-		expect(label).toMatch(/^#0 · 0x[0-9A-F]+ · (tri|quad)$/);
+		expect(label).toMatch(/^#0 · AI \d+ · (tri|quad)$/);
 	});
 });

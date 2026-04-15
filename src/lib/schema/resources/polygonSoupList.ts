@@ -74,9 +74,13 @@ function soupLabel(soup: unknown, index: number): string {
 function polyLabel(poly: unknown, index: number): string {
 	if (!poly || typeof poly !== 'object') return `#${index}`;
 	const p = poly as { collisionTag?: number; vertexIndices?: number[] };
-	const tag = p.collisionTag != null ? `0x${(p.collisionTag >>> 0).toString(16).toUpperCase()}` : '?';
 	const isTri = p.vertexIndices?.[3] === 0xFF;
-	return `#${index} · ${tag} · ${isTri ? 'tri' : 'quad'}`;
+	if (p.collisionTag == null) return `#${index} · ${isTri ? 'tri' : 'quad'}`;
+	// Pull the AI section index out of the high 15 bits of the group half
+	// (bits 30-16 of the u32). Cheaper than importing from collisionTag.ts
+	// and keeps the schema module's import surface unchanged.
+	const aiSection = ((p.collisionTag >>> 16) & 0x7FFF);
+	return `#${index} · AI ${aiSection} · ${isTri ? 'tri' : 'quad'}`;
 }
 
 function vertexLabel(v: unknown, index: number): string {
@@ -103,12 +107,15 @@ const PolygonSoupPoly: RecordSchema = {
 	name: 'PolygonSoupPoly',
 	description: 'One polygon — triangle when vertexIndices[3] = 0xFF, quad otherwise.',
 	fields: {
-		collisionTag: u32(),
+		collisionTag: { kind: 'custom', component: 'collisionTag' },
 		vertexIndices: fixedList(u8(), 4),
 		edgeCosines: fixedList(u8(), 4),
 	},
 	fieldMetadata: {
-		collisionTag: { description: 'Raw u32 — material/group halves are byteswapped relative to BrnWorld::CollisionTag.' },
+		collisionTag: {
+			label: 'Collision tag',
+			description: 'Decoded view of BrnWorld::CollisionTag — AI section index, surface ID, flags, and traffic info. The raw u32 is preserved byte-for-byte; edits touch only the field being changed.',
+		},
 		vertexIndices: { label: 'Vertex indices', description: '[3] = 0xFF means triangle, otherwise quad.' },
 		edgeCosines: { label: 'Edge cosines', description: 'u8-compressed per-edge cosines.' },
 	},
@@ -148,6 +155,8 @@ const PolygonSoup: RecordSchema = {
 		comprGranularity: { description: 'Opaque f32 — semantics TBD on the wiki.' },
 		numQuads: { description: 'Number of polygons that are quads (remainder are triangles).' },
 		padding: { hidden: true },
+		min: { label: 'Bounds min', swapYZ: true },
+		max: { label: 'Bounds max', swapYZ: true },
 		offset: { hidden: true, readOnly: true, description: 'Absolute byte offset within the resource. Patched by the writer.' },
 		verticesOffset: { hidden: true, readOnly: true, description: 'Absolute byte offset of the packed vertex block.' },
 		polygonsOffset: { hidden: true, readOnly: true, description: 'Absolute byte offset of the polygon block.' },
@@ -173,8 +182,8 @@ const PolygonSoupList: RecordSchema = {
 		boxListStart: u32(),
 	},
 	fieldMetadata: {
-		overallMin: { label: 'Bounding box min' },
-		overallMax: { label: 'Bounding box max' },
+		overallMin: { label: 'Bounding box min', swapYZ: true },
+		overallMax: { label: 'Bounding box max', swapYZ: true },
 		overallMinPadding: { hidden: true },
 		overallMaxPadding: { hidden: true },
 		rowValidMasks: {

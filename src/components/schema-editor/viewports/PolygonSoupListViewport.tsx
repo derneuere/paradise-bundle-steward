@@ -23,7 +23,7 @@ import * as THREE from 'three';
 import { useBundle } from '@/context/BundleContext';
 import { parseAllBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
 import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
-import { usePolygonSoupListContext } from './polygonSoupListContext';
+import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
 
 // ---------------------------------------------------------------------------
 // Vertex unpacking — u16 → i16 sign-extend + `(packed + offset) * scale`
@@ -251,26 +251,56 @@ function buildGeometry(
 }
 
 // Apply a highlight tint to the colors attribute for the currently-selected
-// model's triangle range. Called after picking changes; avoids rebuilding
-// the whole geometry.
+// model's triangle range, plus a stronger per-poly emphasis for any polygons
+// in the bulk selection. Called after picking changes; avoids rebuilding the
+// whole geometry.
 function applyHighlight(
 	geometry: THREE.BufferGeometry,
 	ranges: { start: number; count: number }[],
 	baseColors: Float32Array,
+	faceToLocation: Int32Array,
 	selectedModelIndex: number,
+	selectedPolysInCurrentModel: ReadonlySet<number>,
 ): void {
 	const attr = geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
 	if (!attr) return;
 	const colors = attr.array as Float32Array;
 	// Reset to base.
 	colors.set(baseColors);
-	// Boost the selected range.
+	// Boost the currently-edited resource's range so the user can tell which
+	// model the schema editor is pointed at.
 	const sel = ranges[selectedModelIndex];
 	if (sel && sel.count > 0) {
 		const from = sel.start * 9;
 		const to = from + sel.count * 9;
 		for (let i = from; i < to; i++) {
 			colors[i] = Math.min(1, colors[i] * 1.6 + 0.15);
+		}
+	}
+	// Brighten every triangle whose (soup, poly) is in the bulk selection
+	// — and whose model matches the currently-edited resource. The page
+	// clears the bulk set on resource switch so cross-model entries don't
+	// appear in practice, but guarding on modelIndex keeps the behavior
+	// correct even if a stale entry slips through.
+	if (selectedPolysInCurrentModel.size > 0 && sel && sel.count > 0) {
+		const from = sel.start;
+		const to = from + sel.count;
+		for (let tri = from; tri < to; tri++) {
+			const s = faceToLocation[tri * 3 + 1];
+			const p = faceToLocation[tri * 3 + 2];
+			if (!selectedPolysInCurrentModel.has(encodeSoupPoly(s, p))) continue;
+			const base = tri * 9;
+			// Shift toward amber so selected polys really stand out — matches
+			// the amber accent on bulk-selected rows in the tree.
+			colors[base + 0] = 1.0;
+			colors[base + 1] = 0.72;
+			colors[base + 2] = 0.2;
+			colors[base + 3] = 1.0;
+			colors[base + 4] = 0.72;
+			colors[base + 5] = 0.2;
+			colors[base + 6] = 1.0;
+			colors[base + 7] = 0.72;
+			colors[base + 8] = 0.2;
 		}
 	}
 	attr.needsUpdate = true;
@@ -318,12 +348,15 @@ function useFallbackModels(): (ParsedPolygonSoupList | null)[] {
 // Component
 // ---------------------------------------------------------------------------
 
+const EMPTY_POLY_SELECTION: ReadonlySet<number> = new Set();
+
 export function PolygonSoupListViewport() {
 	const ctx = usePolygonSoupListContext();
 	const fallback = useFallbackModels();
 	const models = ctx?.models ?? fallback;
 	const selectedModelIndex = ctx?.selectedModelIndex ?? 0;
 	const onSelect = ctx?.onSelect;
+	const selectedPolysInCurrentModel = ctx?.selectedPolysInCurrentModel ?? EMPTY_POLY_SELECTION;
 
 	const batched = useMemo(() => buildGeometry(models), [models]);
 
@@ -336,16 +369,24 @@ export function PolygonSoupListViewport() {
 		baseColorsRef.current = (attr.array as Float32Array).slice();
 	}, [batched.geometry]);
 
-	// Apply highlight on selection change.
+	// Apply highlight on selection change (resource swap or bulk-selection change).
 	useEffect(() => {
 		if (!baseColorsRef.current) return;
 		applyHighlight(
 			batched.geometry,
 			batched.triangleRangesByModel,
 			baseColorsRef.current,
+			batched.faceToLocation,
 			selectedModelIndex,
+			selectedPolysInCurrentModel,
 		);
-	}, [batched.geometry, batched.triangleRangesByModel, selectedModelIndex]);
+	}, [
+		batched.geometry,
+		batched.triangleRangesByModel,
+		batched.faceToLocation,
+		selectedModelIndex,
+		selectedPolysInCurrentModel,
+	]);
 
 	// Dispose GPU memory when the geometry changes or the component unmounts.
 	useEffect(() => {
@@ -361,8 +402,9 @@ export function PolygonSoupListViewport() {
 		if (faceIdx * 3 + 2 >= map.length) return;
 		const modelIndex = map[faceIdx * 3 + 0];
 		const soupIndex = map[faceIdx * 3 + 1];
+		const polyIndex = map[faceIdx * 3 + 2];
 		event.stopPropagation();
-		onSelect(modelIndex, soupIndex);
+		onSelect(modelIndex, soupIndex, polyIndex);
 	};
 
 	if (batched.triangleCount === 0) {
@@ -396,6 +438,11 @@ export function PolygonSoupListViewport() {
 			<div className="absolute top-2 left-2 text-[10px] font-mono text-white/80 bg-black/50 px-2 py-1 rounded pointer-events-none">
 				{batched.modelCount} resources · {batched.soupCount} soups · {batched.triangleCount.toLocaleString()} triangles
 				{onSelect && <div className="opacity-70">selected resource #{selectedModelIndex}</div>}
+				{selectedPolysInCurrentModel.size > 0 && (
+					<div className="opacity-70 text-amber-300">
+						{selectedPolysInCurrentModel.size} poly{selectedPolysInCurrentModel.size === 1 ? '' : 's'} in bulk selection
+					</div>
+				)}
 			</div>
 		</div>
 	);

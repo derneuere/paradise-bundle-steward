@@ -33,6 +33,7 @@ import type {
 	SchemaContext,
 } from '@/lib/schema/types';
 import { useSchemaEditor } from './context';
+import { useSchemaBulkSelection } from './bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 
 // ---------------------------------------------------------------------------
@@ -213,6 +214,9 @@ function visitList(
 
 export function HierarchyTree() {
 	const { resource, data, selectedPath, selectPath } = useSchemaEditor();
+	const bulk = useSchemaBulkSelection();
+	const bulkPathKeys = bulk?.bulkPathKeys;
+	const onBulkToggle = bulk?.onBulkToggle;
 
 	const rootRecord = resource.registry[resource.rootType];
 
@@ -308,6 +312,7 @@ export function HierarchyTree() {
 						!isSelected &&
 						isPathAncestor(node.path, selectedPath) &&
 						node.path.length < selectedPath.length;
+					const isInBulk = bulkPathKeys?.has(node.pathKey) ?? false;
 					return (
 						<div
 							key={vi.key}
@@ -320,8 +325,10 @@ export function HierarchyTree() {
 								node={node}
 								isSelected={isSelected}
 								isOnPath={isOnPath}
+								isInBulk={isInBulk}
 								onSelect={selectPath}
 								onToggle={toggle}
+								onBulkToggle={onBulkToggle}
 							/>
 						</div>
 					);
@@ -340,28 +347,42 @@ type TreeRowProps = {
 	node: FlatNode;
 	isSelected: boolean;
 	isOnPath: boolean;
+	isInBulk: boolean;
 	onSelect: (path: NodePath) => void;
 	onToggle: (path: NodePath) => void;
+	onBulkToggle?: (path: NodePath) => void;
 };
 
 const TreeRow = React.memo(function TreeRow({
 	node,
 	isSelected,
 	isOnPath,
+	isInBulk,
 	onSelect,
 	onToggle,
+	onBulkToggle,
 }: TreeRowProps) {
 	return (
 		<div
 			className={cn(
-				'flex items-center gap-1 py-0.5 pr-1 cursor-pointer rounded',
+				// border-l-2 transparent by default keeps the amber accent from
+				// shifting the layout when a row enters the bulk selection.
+				'flex items-center gap-1 py-0.5 pr-1 cursor-pointer rounded border-l-2 border-transparent',
+				isInBulk && 'border-amber-500',
 				isSelected && 'bg-primary/15 text-primary font-medium',
-				!isSelected && isOnPath && 'bg-muted/30',
+				!isSelected && isInBulk && 'bg-amber-500/10',
+				!isSelected && !isInBulk && isOnPath && 'bg-muted/30',
 				!isSelected && 'hover:bg-muted/40',
 			)}
 			style={{ paddingLeft: node.depth * 12 + 4 }}
 			onClick={(e) => {
 				e.stopPropagation();
+				// Ctrl/Cmd (Strg) click: toggle this row in the bulk selection
+				// without moving the inspector focus, if a bulk context is active.
+				if ((e.ctrlKey || e.metaKey) && onBulkToggle) {
+					onBulkToggle(node.path);
+					return;
+				}
 				onSelect(node.path);
 			}}
 		>
