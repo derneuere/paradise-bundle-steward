@@ -1,4 +1,4 @@
-import { Suspense, createElement, lazy } from "react";
+import { Suspense, createElement } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -14,10 +14,6 @@ import VehicleEditorPage from "./pages/VehicleEditorPage";
 import ResourceInspectorPage from "./pages/ResourceInspectorPage";
 import { registry } from "@/lib/core/registry";
 import { EDITOR_PAGES } from "@/lib/core/registry/editors";
-
-// Schema-driven editor (Phase B preview). Side-by-side with the classic
-// TrafficDataPage until parity is reached.
-const TrafficDataEditorV2Page = lazy(() => import('./pages/TrafficDataEditorV2Page'));
 
 const queryClient = new QueryClient();
 
@@ -54,16 +50,6 @@ const App = () => (
               {/* Vehicle editor keeps its nested :id route; the list page is
                   generated from the registry like the other editors. */}
               <Route path="/vehicleList/:id" element={<VehicleEditorPage />} />
-              {/* Schema editor preview — must come BEFORE handlerRoutes
-                  so it isn't shadowed by a generic /trafficdata-v2 handler. */}
-              <Route
-                path="/trafficData-v2"
-                element={
-                  <Suspense fallback={<div className="p-6 text-muted-foreground">Loading schema editor…</div>}>
-                    <TrafficDataEditorV2Page />
-                  </Suspense>
-                }
-              />
               {handlerRoutes}
             </Route>
             {/* Legacy index route kept if needed */}
