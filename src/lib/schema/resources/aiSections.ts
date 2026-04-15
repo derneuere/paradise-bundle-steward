@@ -31,6 +31,7 @@ const u32 = (): FieldSchema => ({ kind: 'u32' });
 const i16 = (): FieldSchema => ({ kind: 'i16' });
 const f32 = (): FieldSchema => ({ kind: 'f32' });
 const vec2 = (): FieldSchema => ({ kind: 'vec2' });
+const vec3 = (): FieldSchema => ({ kind: 'vec3' });
 const vec4 = (): FieldSchema => ({ kind: 'vec4' });
 const record = (type: string): FieldSchema => ({ kind: 'record', type });
 
@@ -196,16 +197,16 @@ const Portal: RecordSchema = {
 	name: 'Portal',
 	description: 'Connection between two AI sections — a 3D anchor point plus a list of boundary lines bounding the portal opening.',
 	fields: {
-		positionX: f32(),
-		positionY: f32(),
-		positionZ: f32(),
+		position: vec3(),
 		boundaryLines: recordList('BoundaryLine', boundaryLineLabel),
 		linkSection: u16(),
 	},
 	fieldMetadata: {
-		positionX: { label: 'Position X' },
-		positionY: { label: 'Position Y (up in world space)' },
-		positionZ: { label: 'Position Z' },
+		position: {
+			label: 'Position',
+			description: '3D anchor point of the portal in world space (Y-up display).',
+			swapYZ: true,
+		},
 		linkSection: { description: 'Index of the section this portal leads to.' },
 	},
 	label: (value, index) => portalLabel(value, index ?? 0),

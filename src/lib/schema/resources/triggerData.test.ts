@@ -210,10 +210,10 @@ describe('resolveSchemaAtPath', () => {
 		if (parsedTrigger.landmarks.length === 0) return;
 		const loc = resolveSchemaAtPath(
 			triggerDataResourceSchema,
-			['landmarks', 0, 'box', 'positionX'],
+			['landmarks', 0, 'box', 'position'],
 		);
 		expect(loc).not.toBeNull();
-		expect(loc!.field?.kind).toBe('f32');
+		expect(loc!.field?.kind).toBe('vec3');
 	});
 
 	it('resolves a primitive list item (killzones[0].triggerIds[0])', () => {
@@ -276,16 +276,16 @@ describe('getAtPath / updateAtPath', () => {
 		if (parsedTrigger.landmarks.length === 0) return;
 		const next = updateAtPath(
 			parsedTrigger,
-			['landmarks', 0, 'box', 'positionX'],
+			['landmarks', 0, 'box', 'position', 'x'],
 			() => 9999,
 		);
-		expect(next.landmarks[0].box.positionX).toBe(9999);
+		expect(next.landmarks[0].box.position.x).toBe(9999);
 		// Un-edited landmarks share references (structural sharing proof).
 		for (let i = 1; i < parsedTrigger.landmarks.length; i++) {
 			expect(next.landmarks[i]).toBe(parsedTrigger.landmarks[i]);
 		}
 		// Original untouched.
-		expect(parsedTrigger.landmarks[0].box.positionX).not.toBe(9999);
+		expect(parsedTrigger.landmarks[0].box.position.x).not.toBe(9999);
 	});
 
 	it('insertListItem appends and removeListItem removes', () => {
@@ -414,7 +414,11 @@ describe('drive-thru buffer validation', () => {
 	it('warns when drive-thru count exceeds v1.0 but not v1.9', () => {
 		// Build a synthetic generic region list with exactly 47 drive-thrus.
 		const gr47 = Array.from({ length: 47 }, (_, i) => ({
-			box: { positionX: 0, positionY: 0, positionZ: 0, rotationX: 0, rotationY: 0, rotationZ: 0, dimensionX: 1, dimensionY: 1, dimensionZ: 1 },
+			box: {
+				position: { x: 0, y: 0, z: 0 },
+				rotation: { x: 0, y: 0, z: 0 },
+				dimensions: { x: 1, y: 1, z: 1 },
+			},
 			id: i,
 			regionIndex: i,
 			type: 2,

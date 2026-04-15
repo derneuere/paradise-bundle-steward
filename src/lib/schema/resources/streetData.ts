@@ -228,6 +228,11 @@ const Road: RecordSchema = {
 		padding: fixedList(u8(), 4),
 	},
 	fieldMetadata: {
+		mReferencePosition: {
+			label: 'Reference position',
+			description: 'World-space reference point for the road (Y-up display).',
+			swapYZ: true,
+		},
 		mpaSpans: {
 			hidden: true,
 			readOnly: true,

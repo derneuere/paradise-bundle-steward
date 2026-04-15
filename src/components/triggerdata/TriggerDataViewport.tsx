@@ -93,7 +93,7 @@ function buildRegionList(data: ParsedTriggerData): RegionEntry[] {
 function computeBounds(data: ParsedTriggerData): { center: THREE.Vector3; radius: number } {
 	const box = new THREE.Box3();
 	let hasPoints = false;
-	const addBox = (b: BoxRegion) => { box.expandByPoint(new THREE.Vector3(b.positionX, b.positionY, b.positionZ)); hasPoints = true; };
+	const addBox = (b: BoxRegion) => { box.expandByPoint(new THREE.Vector3(b.position.x, b.position.y, b.position.z)); hasPoints = true; };
 	const addVec = (v: Vector4) => { box.expandByPoint(new THREE.Vector3(v.x, v.y, v.z)); hasPoints = true; };
 	for (const lm of data.landmarks) addBox(lm.box);
 	for (const gr of data.genericRegions) addBox(gr.box);
@@ -156,9 +156,9 @@ function BatchedRegionBoxes({
 		if (!mesh || count === 0) return;
 		for (let i = 0; i < count; i++) {
 			const r = regions[i];
-			_dummy.position.set(r.box.positionX, r.box.positionY, r.box.positionZ);
-			_dummy.rotation.set(r.box.rotationX, r.box.rotationY, r.box.rotationZ);
-			_dummy.scale.set(r.box.dimensionX || 1, r.box.dimensionY || 1, r.box.dimensionZ || 1);
+			_dummy.position.set(r.box.position.x, r.box.position.y, r.box.position.z);
+			_dummy.rotation.set(r.box.rotation.x, r.box.rotation.y, r.box.rotation.z);
+			_dummy.scale.set(r.box.dimensions.x || 1, r.box.dimensions.y || 1, r.box.dimensions.z || 1);
 			_dummy.updateMatrix();
 			mesh.setMatrixAt(i, _dummy.matrix);
 
@@ -216,9 +216,9 @@ const hovEdgeMat = new THREE.LineBasicMaterial({ color: '#66aaff' });
 function BoxOverlay({ box, material }: { box: BoxRegion; material: THREE.LineBasicMaterial }) {
 	return (
 		<group
-			position={[box.positionX, box.positionY, box.positionZ]}
-			rotation={[box.rotationX, box.rotationY, box.rotationZ]}
-			scale={[box.dimensionX || 1, box.dimensionY || 1, box.dimensionZ || 1]}
+			position={[box.position.x, box.position.y, box.position.z]}
+			rotation={[box.rotation.x, box.rotation.y, box.rotation.z]}
+			scale={[box.dimensions.x || 1, box.dimensions.y || 1, box.dimensions.z || 1]}
 		>
 			<lineSegments geometry={wireBoxEdges} material={material} />
 		</group>
@@ -228,7 +228,7 @@ function BoxOverlay({ box, material }: { box: BoxRegion; material: THREE.LineBas
 function BoxLabel({ box, label, color }: { box: BoxRegion; label: string; color: string }) {
 	return (
 		<Html
-			position={[box.positionX, box.positionY + (box.dimensionY || 1) * 0.6, box.positionZ]}
+			position={[box.position.x, box.position.y + (box.dimensions.y || 1) * 0.6, box.position.z]}
 			center distanceFactor={300}
 			style={{ pointerEvents: 'none' }}
 		>

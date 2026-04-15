@@ -229,8 +229,10 @@ const TrafficPvs: RecordSchema = {
 		hullPvsSets: recordList('PvsHullSet'),
 	},
 	fieldMetadata: {
+		mGridMin: { label: 'Grid min (world)', swapYZ: true },
+		mCellSize: { label: 'Cell size', swapYZ: true },
+		mRecipCellSize: { description: 'Reciprocal of cell size — derived from mCellSize.', swapYZ: true },
 		muNumCells: { label: 'Num cells (total)', readOnly: true, derivedFrom: 'muNumCells_X · muNumCells_Z' },
-		mRecipCellSize: { description: 'Reciprocal of cell size — derived from mCellSize.' },
 	},
 };
 
@@ -275,7 +277,9 @@ const TrafficLaneRung: RecordSchema = {
 		maPoints: fixedList(vec4(), 2),
 	},
 	fieldMetadata: {
-		maPoints: { label: 'Points (A, B)' },
+		// A rung is a line segment across a traffic lane — two world-space
+		// endpoints packed as vec4 (w is typically 1 or 0, not semantic).
+		maPoints: { label: 'Points (A, B)', swapYZ: true },
 	},
 };
 
@@ -397,6 +401,7 @@ const TrafficJunctionLogicBox: RecordSchema = {
 	fieldMetadata: {
 		_pad36: { hidden: true },
 		_pad108: { hidden: true },
+		mPosition: { label: 'Position', swapYZ: true },
 		miOfflineStartDataIndex: { description: '-1 if unused' },
 		miOnlineStartDataIndex: { description: '-1 if unused' },
 		miBikeStartDataIndex: { description: '-1 if unused' },
@@ -435,7 +440,10 @@ const TrafficLightTrigger: RecordSchema = {
 		mPosPlusYRot: vec4(),
 	},
 	fieldMetadata: {
-		mPosPlusYRot: { label: 'Position + Y rotation' },
+		mDimensions: { label: 'Dimensions', swapYZ: true },
+		// `.w` is yaw (rotation around the up axis) — preserved as-is;
+		// only the x/y/z position sub-components participate in the swap.
+		mPosPlusYRot: { label: 'Position + yaw', swapYZ: true },
 	},
 };
 
@@ -452,6 +460,8 @@ const TrafficLightTriggerStartData: RecordSchema = {
 		_pad193: fixedList(u8(), 13),
 	},
 	fieldMetadata: {
+		maStartingPositions: { label: 'Starting positions (8 × Vector4)', swapYZ: true },
+		maStartingDirections: { label: 'Starting directions (8 × Vector4)', swapYZ: true },
 		_pad193: { hidden: true },
 	},
 };
@@ -640,6 +650,11 @@ const TrafficLightCollection: RecordSchema = {
 		instanceHashToIndexLookup: primList(u16()),
 	},
 	fieldMetadata: {
+		// World-space position per instance; `.w` packs a Y-axis rotation
+		// (yaw) that stays untouched by the swap.
+		posAndYRotations: { label: 'Position + yaw (per instance)', swapYZ: true },
+		// Corona world positions — `.w` is typically the radius/intensity.
+		coronaPositions: { label: 'Corona positions', swapYZ: true },
 		mauInstanceHashOffsets: { hidden: true, description: 'Fixed 129-entry hash bucket offset table.' },
 		instanceHashTable: { hidden: true, description: 'Hash table — regenerated at write time.' },
 		instanceHashToIndexLookup: { hidden: true },

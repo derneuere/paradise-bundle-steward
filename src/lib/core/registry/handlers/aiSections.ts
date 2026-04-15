@@ -133,9 +133,7 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 			mutate: (m) => {
 				const bl: BoundaryLine = { verts: { x: 1.0, y: 2.0, z: 3.0, w: 4.0 } };
 				const portal: Portal = {
-					positionX: -100.5,
-					positionY: 50.25,
-					positionZ: -200.75,
+					position: { x: -100.5, y: 50.25, z: -200.75 },
 					boundaryLines: [bl],
 					linkSection: 0,
 				};
@@ -171,7 +169,7 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 				if (s.corners.length !== 4) problems.push(`corners.length = ${s.corners.length}`);
 				if (s.portals.length === 1) {
 					const p = s.portals[0];
-					if (p.positionX !== -100.5) problems.push(`portal.posX = ${p.positionX}`);
+					if (p.position.x !== -100.5) problems.push(`portal.pos.x = ${p.position.x}`);
 					if (p.boundaryLines.length !== 1) problems.push(`portal.BLs = ${p.boundaryLines.length}`);
 					if (p.linkSection !== 0) problems.push(`portal.link = ${p.linkSection}`);
 				}

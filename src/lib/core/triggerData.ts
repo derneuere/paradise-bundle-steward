@@ -12,6 +12,12 @@ import { BinReader, BinWriter } from './binTools';
 // typed-binary Schemas (for header and basic structs)
 // =============================================================================
 
+export const Vector3Schema = object({
+  x: f32,
+  y: f32,
+  z: f32
+});
+
 export const Vector4Schema = object({
   x: f32,
   y: f32,
@@ -20,15 +26,9 @@ export const Vector4Schema = object({
 });
 
 export const BoxRegionSchema = object({
-  positionX: f32,
-  positionY: f32,
-  positionZ: f32,
-  rotationX: f32,
-  rotationY: f32,
-  rotationZ: f32,
-  dimensionX: f32,
-  dimensionY: f32,
-  dimensionZ: f32,
+  position: Vector3Schema,
+  rotation: Vector3Schema,
+  dimensions: Vector3Schema,
 });
 
 // TriggerRegion base (miRegionIndex is technically signed short; read as u16 for hex-view friendliness)
@@ -104,12 +104,18 @@ export const TriggerDataHeaderSchema = object({
 // Types
 // =============================================================================
 
+export type Vector3 = { x: number; y: number; z: number };
 export type Vector4 = { x: number; y: number; z: number; w: number };
 
+// Box region — a positioned, oriented, box-shaped trigger volume. The binary
+// layout is nine contiguous f32s (pos.xyz, rot.xyz, dim.xyz), same as before;
+// the model groups them into three Vector3s so the schema can tag each vec3
+// with `swapYZ` and the inspector renders Y-up-swapped vec3 inputs instead of
+// nine flat fields.
 export type BoxRegion = {
-	positionX: number; positionY: number; positionZ: number;
-	rotationX: number; rotationY: number; rotationZ: number;
-	dimensionX: number; dimensionY: number; dimensionZ: number;
+	position: Vector3;
+	rotation: Vector3;
+	dimensions: Vector3;
 };
 
 export enum TriggerRegionType {
@@ -260,18 +266,26 @@ function writeVector4(w: BinWriter, v: Vector4) {
 	w.writeF32(v.x); w.writeF32(v.y); w.writeF32(v.z); w.writeF32(v.w);
 }
 
+function readVector3(r: BinReader): Vector3 {
+	return { x: r.readF32(), y: r.readF32(), z: r.readF32() };
+}
+
+function writeVector3(w: BinWriter, v: Vector3) {
+	w.writeF32(v.x); w.writeF32(v.y); w.writeF32(v.z);
+}
+
 function readBox(r: BinReader): BoxRegion {
 	return {
-		positionX: r.readF32(), positionY: r.readF32(), positionZ: r.readF32(),
-		rotationX: r.readF32(), rotationY: r.readF32(), rotationZ: r.readF32(),
-		dimensionX: r.readF32(), dimensionY: r.readF32(), dimensionZ: r.readF32(),
+		position: readVector3(r),
+		rotation: readVector3(r),
+		dimensions: readVector3(r),
 	};
 }
 
 function writeBox(w: BinWriter, b: BoxRegion) {
-	w.writeF32(b.positionX); w.writeF32(b.positionY); w.writeF32(b.positionZ);
-	w.writeF32(b.rotationX); w.writeF32(b.rotationY); w.writeF32(b.rotationZ);
-	w.writeF32(b.dimensionX); w.writeF32(b.dimensionY); w.writeF32(b.dimensionZ);
+	writeVector3(w, b.position);
+	writeVector3(w, b.rotation);
+	writeVector3(w, b.dimensions);
 }
 
 function readTriggerRegionBase(r: BinReader): TriggerRegion {

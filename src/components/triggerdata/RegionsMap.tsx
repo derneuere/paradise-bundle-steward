@@ -187,11 +187,13 @@ export const RegionsMap: React.FC<{ data: ParsedTriggerData; }> = ({ data }) => 
   // Pre-compute rotated polygon corners for each box in [lat(z), lng(x)] order
   const polys = useMemo(() => {
     return boxes.map(b => {
-      const halfX = Math.abs(b.box.dimensionX) / 2;
-      const halfZ = Math.abs(b.box.dimensionZ) / 2;
-      const cx = b.box.positionX;
-      const cz = b.box.positionZ;
-      const yaw = toYawRadians(b.box.rotationY ?? 0);
+      // Game Z = up, Y = depth. The 2D map is a top-down view, so the
+      // ground-plane axes we need are X (east/west) and Z (north/south).
+      const halfX = Math.abs(b.box.dimensions.x) / 2;
+      const halfZ = Math.abs(b.box.dimensions.z) / 2;
+      const cx = b.box.position.x;
+      const cz = b.box.position.z;
+      const yaw = toYawRadians(b.box.rotation.y ?? 0);
       const cos = Math.cos(yaw);
       const sin = Math.sin(yaw);
       const local: Array<[number, number]> = [

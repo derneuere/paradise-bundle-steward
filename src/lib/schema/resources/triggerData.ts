@@ -37,6 +37,7 @@ const i8 = (): FieldSchema => ({ kind: 'i8' });
 const i16 = (): FieldSchema => ({ kind: 'i16' });
 const i32 = (): FieldSchema => ({ kind: 'i32' });
 const f32 = (): FieldSchema => ({ kind: 'f32' });
+const vec3 = (): FieldSchema => ({ kind: 'vec3' });
 const vec4 = (): FieldSchema => ({ kind: 'vec4' });
 const record = (type: string): FieldSchema => ({ kind: 'record', type });
 
@@ -209,10 +210,12 @@ function validateTriggerData(value: Record<string, unknown>): ValidationResult[]
 
 function boxPos(box: unknown): string {
 	if (!box || typeof box !== 'object') return '?';
-	const b = box as { positionX?: number; positionY?: number; positionZ?: number };
-	const x = Math.round(b.positionX ?? 0);
-	const y = Math.round(b.positionY ?? 0);
-	const z = Math.round(b.positionZ ?? 0);
+	const b = box as { position?: { x?: number; y?: number; z?: number } };
+	const p = b.position;
+	if (!p) return '?';
+	const x = Math.round(p.x ?? 0);
+	const y = Math.round(p.y ?? 0);
+	const z = Math.round(p.z ?? 0);
 	return `(${x}, ${y}, ${z})`;
 }
 
@@ -333,38 +336,23 @@ function startingGridLabel(_value: unknown, index: number): string {
 // Record schemas
 // ---------------------------------------------------------------------------
 
-// BoxRegion — 9 flat floats. Origin is the box center; rotation is in
-// radians around each axis; dimensions are half-extents on each axis.
+// BoxRegion — three Vector3s packed contiguously (9 f32s on disk). Origin
+// is the box center; rotation is radians around each axis; dimensions are
+// half-extents on each axis. All three fields are world-space spatial,
+// so they get the Y-up display swap.
 const BoxRegion: RecordSchema = {
 	name: 'BoxRegion',
 	description: 'Axis-aligned box with rotation and dimensions. Origin is the box center.',
 	fields: {
-		positionX: f32(),
-		positionY: f32(),
-		positionZ: f32(),
-		rotationX: f32(),
-		rotationY: f32(),
-		rotationZ: f32(),
-		dimensionX: f32(),
-		dimensionY: f32(),
-		dimensionZ: f32(),
+		position: vec3(),
+		rotation: vec3(),
+		dimensions: vec3(),
 	},
 	fieldMetadata: {
-		positionX: { label: 'Position X' },
-		positionY: { label: 'Position Y' },
-		positionZ: { label: 'Position Z' },
-		rotationX: { label: 'Rotation X (rad)' },
-		rotationY: { label: 'Rotation Y (rad)' },
-		rotationZ: { label: 'Rotation Z (rad)' },
-		dimensionX: { label: 'Dimension X' },
-		dimensionY: { label: 'Dimension Y' },
-		dimensionZ: { label: 'Dimension Z' },
+		position: { label: 'Position', swapYZ: true },
+		rotation: { label: 'Rotation (rad)', swapYZ: true },
+		dimensions: { label: 'Dimensions', swapYZ: true },
 	},
-	propertyGroups: [
-		{ title: 'Position', properties: ['positionX', 'positionY', 'positionZ'] },
-		{ title: 'Rotation', properties: ['rotationX', 'rotationY', 'rotationZ'] },
-		{ title: 'Dimension', properties: ['dimensionX', 'dimensionY', 'dimensionZ'] },
-	],
 };
 
 // StartingGrid — 8 starting positions + 8 starting directions. The parser
@@ -378,8 +366,14 @@ const StartingGrid: RecordSchema = {
 		startingDirections: fixedList(vec4(), 8),
 	},
 	fieldMetadata: {
-		startingPositions: { label: 'Starting positions (8 × Vector4)' },
-		startingDirections: { label: 'Starting directions (8 × Vector4)' },
+		startingPositions: {
+			label: 'Starting positions (8 × Vector4)',
+			swapYZ: true,
+		},
+		startingDirections: {
+			label: 'Starting directions (8 × Vector4)',
+			swapYZ: true,
+		},
 	},
 	label: (_value, index) => startingGridLabel(_value, index ?? 0),
 };
@@ -577,7 +571,7 @@ const RoamingLocation: RecordSchema = {
 		districtIndex: u8(),
 	},
 	fieldMetadata: {
-		position: { label: 'Position (Vector4)' },
+		position: { label: 'Position (Vector4)', swapYZ: true },
 		districtIndex: {
 			label: 'District index',
 			description: 'muDistrictIndex — identifies which district the location belongs to.',
@@ -596,8 +590,8 @@ const SpawnLocation: RecordSchema = {
 		type: { kind: 'enum', storage: 'u8', values: SPAWN_TYPE_VALUES },
 	},
 	fieldMetadata: {
-		position: { label: 'Position (Vector4)' },
-		direction: { label: 'Direction (Vector4)' },
+		position: { label: 'Position (Vector4)', swapYZ: true },
+		direction: { label: 'Direction (Vector4)', swapYZ: true },
 		junkyardId: {
 			label: 'Junkyard ID (CgsID)',
 			description: 'mJunkyardId — GameDB hash of the junkyard this spawn belongs to.',
@@ -663,10 +657,12 @@ const TriggerData: RecordSchema = {
 		playerStartPosition: {
 			label: 'Player start position',
 			description: 'mPlayerStartPosition — dev start position (Vector4).',
+			swapYZ: true,
 		},
 		playerStartDirection: {
 			label: 'Player start direction',
 			description: 'mPlayerStartDirection — dev start direction (Vector4).',
+			swapYZ: true,
 		},
 		landmarks: {
 			description: 'Landmarks — listed before online landmarks in the binary. miLandmarkCount is derived from this array\'s length at write time.',

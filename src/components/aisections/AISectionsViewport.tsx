@@ -341,7 +341,7 @@ function SelectedSectionDetail({
 		<>
 			{/* Portals */}
 			{sec.portals.map((portal, pi) => {
-				const pos: [number, number, number] = [portal.positionX, portal.positionY, portal.positionZ];
+				const pos: [number, number, number] = [portal.position.x, portal.position.y, portal.position.z];
 				const isSel = selected?.sub?.type === 'portal' && selected.sub.portalIndex === pi;
 				return (
 					<group key={`portal-${pi}`} position={pos}>
@@ -365,8 +365,8 @@ function SelectedSectionDetail({
 			{/* Portal boundary lines (red) */}
 			{sec.portals.map((portal, pi) =>
 				portal.boundaryLines.map((bl, li) => {
-					const start: [number, number, number] = [bl.verts.x, portal.positionY + 0.5, bl.verts.y];
-					const end: [number, number, number] = [bl.verts.z, portal.positionY + 0.5, bl.verts.w];
+					const start: [number, number, number] = [bl.verts.x, portal.position.y + 0.5, bl.verts.y];
+					const end: [number, number, number] = [bl.verts.z, portal.position.y + 0.5, bl.verts.w];
 					const isSel = selected?.sub?.type === 'boundaryLine' &&
 						selected.sub.portalIndex === pi && selected.sub.lineIndex === li;
 					return (
@@ -435,10 +435,10 @@ function SelectedSectionDetail({
 			{sec.portals.map((portal, pi) => {
 				const target = data.sections[portal.linkSection];
 				if (!target || target.corners.length < 4) return null;
-				const from: [number, number, number] = [portal.positionX, portal.positionY + 1, portal.positionZ];
+				const from: [number, number, number] = [portal.position.x, portal.position.y + 1, portal.position.z];
 				const to: [number, number, number] = [
 					(target.corners[0].x + target.corners[2].x) / 2,
-					portal.positionY + 1,
+					portal.position.y + 1,
 					(target.corners[0].y + target.corners[2].y) / 2,
 				];
 				return (

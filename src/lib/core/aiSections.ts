@@ -70,6 +70,7 @@ export enum EResetSpeedType {
 // =============================================================================
 
 export type Vector2 = { x: number; y: number };
+export type Vector3 = { x: number; y: number; z: number };
 export type Vector4 = { x: number; y: number; z: number; w: number };
 
 export type BoundaryLine = {
@@ -77,9 +78,12 @@ export type BoundaryLine = {
 };
 
 export type Portal = {
-	positionX: number;
-	positionY: number;
-	positionZ: number;
+	// 3D anchor point in world space. Binary layout is still three contiguous
+	// floats (positionX / positionY / positionZ at offset 0/4/8 inside the
+	// portal header); the parser groups them into a Vector3 so the schema can
+	// tag it with `swapYZ` and the editor can render a single swapped vec3
+	// input instead of three flat float fields.
+	position: Vector3;
 	boundaryLines: BoundaryLine[];
 	linkSection: number;   // u16 section index
 };
@@ -197,9 +201,7 @@ export function parseAISectionsData(raw: Uint8Array, littleEndian: boolean = tru
 				boundaryLines.push({ verts: { x: r.readF32(), y: r.readF32(), z: r.readF32(), w: r.readF32() } });
 			}
 			portals.push({
-				positionX: ph.px,
-				positionY: ph.py,
-				positionZ: ph.pz,
+				position: { x: ph.px, y: ph.py, z: ph.pz },
 				boundaryLines,
 				linkSection: ph.link,
 			});
@@ -305,9 +307,9 @@ export function writeAISectionsData(model: ParsedAISections, littleEndian: boole
 		w.setU32(slot.portalsPos, w.offset);
 		const portalBLSlots: { pos: number; lines: BoundaryLine[] }[] = [];
 		for (const portal of s.portals) {
-			w.writeF32(portal.positionX);
-			w.writeF32(portal.positionY);
-			w.writeF32(portal.positionZ);
+			w.writeF32(portal.position.x);
+			w.writeF32(portal.position.y);
+			w.writeF32(portal.position.z);
 			const blPos = w.offset; w.writeU32(0); // mpaBoundaryLines placeholder
 			w.writeU16(portal.linkSection);
 			w.writeU8(portal.boundaryLines.length);

@@ -45,14 +45,23 @@ export function Vec2Field({ label, value, onChange, meta }: Vec2Props) {
 	);
 }
 
+// Spatial swap: Burnout files store Z-up (game X=east, Y=depth, Z=up), but
+// the editor presents Y-up (display X=east, Y=up, Z=depth). When `meta.swapYZ`
+// is set the label "Y" binds to `value.z` and label "Z" binds to `value.y`,
+// while the underlying model is left untouched so round-trip stays byte-exact.
 export function Vec3Field({ label, value, onChange, meta }: Vec3Props) {
 	const current = value ?? { x: 0, y: 0, z: 0 };
+	const swap = meta?.swapYZ;
 	return (
 		<FieldShell label={label} description={meta?.description} warning={meta?.warning}>
 			<div className="grid grid-cols-3 gap-2">
 				{axisInput('X', current.x, (v) => onChange({ ...current, x: v }), meta?.readOnly)}
-				{axisInput('Y', current.y, (v) => onChange({ ...current, y: v }), meta?.readOnly)}
-				{axisInput('Z', current.z, (v) => onChange({ ...current, z: v }), meta?.readOnly)}
+				{swap
+					? axisInput('Y', current.z, (v) => onChange({ ...current, z: v }), meta?.readOnly)
+					: axisInput('Y', current.y, (v) => onChange({ ...current, y: v }), meta?.readOnly)}
+				{swap
+					? axisInput('Z', current.y, (v) => onChange({ ...current, y: v }), meta?.readOnly)
+					: axisInput('Z', current.z, (v) => onChange({ ...current, z: v }), meta?.readOnly)}
 			</div>
 		</FieldShell>
 	);
@@ -60,12 +69,17 @@ export function Vec3Field({ label, value, onChange, meta }: Vec3Props) {
 
 export function Vec4Field({ label, value, onChange, meta }: Vec4Props) {
 	const current = value ?? { x: 0, y: 0, z: 0, w: 0 };
+	const swap = meta?.swapYZ;
 	return (
 		<FieldShell label={label} description={meta?.description} warning={meta?.warning}>
 			<div className="grid grid-cols-4 gap-2">
 				{axisInput('X', current.x, (v) => onChange({ ...current, x: v }), meta?.readOnly)}
-				{axisInput('Y', current.y, (v) => onChange({ ...current, y: v }), meta?.readOnly)}
-				{axisInput('Z', current.z, (v) => onChange({ ...current, z: v }), meta?.readOnly)}
+				{swap
+					? axisInput('Y', current.z, (v) => onChange({ ...current, z: v }), meta?.readOnly)
+					: axisInput('Y', current.y, (v) => onChange({ ...current, y: v }), meta?.readOnly)}
+				{swap
+					? axisInput('Z', current.y, (v) => onChange({ ...current, y: v }), meta?.readOnly)
+					: axisInput('Z', current.z, (v) => onChange({ ...current, z: v }), meta?.readOnly)}
 				{axisInput('W', current.w, (v) => onChange({ ...current, w: v }), meta?.readOnly)}
 			</div>
 		</FieldShell>

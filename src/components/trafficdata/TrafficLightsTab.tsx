@@ -46,6 +46,10 @@ const InstancesTable: React.FC<Props> = ({ data, onChange }) => {
 
 	return (
 		<div className="max-h-[55vh] overflow-auto border rounded">
+			{/* Display Y↔Z swapped: column "Y" binds to game-Z (up) and
+			    column "Z" binds to game-Y (depth), matching the Y-up
+			    convention used everywhere else in the editor. `.w` is the
+			    yaw angle around the up axis and is not affected by the swap. */}
 			<Table>
 				<TableHeader>
 					<TableRow>
@@ -53,7 +57,7 @@ const InstancesTable: React.FC<Props> = ({ data, onChange }) => {
 						<TableHead>X</TableHead>
 						<TableHead>Y</TableHead>
 						<TableHead>Z</TableHead>
-						<TableHead>Y Rot</TableHead>
+						<TableHead>Yaw</TableHead>
 						<TableHead>Instance ID</TableHead>
 						<TableHead>Instance Type</TableHead>
 					</TableRow>
@@ -63,8 +67,8 @@ const InstancesTable: React.FC<Props> = ({ data, onChange }) => {
 						<TableRow key={i}>
 							<TableCell className="font-mono text-xs">{i}</TableCell>
 							<TableCell><NumCell value={tl.posAndYRotations[i].x} onChange={(v) => updatePos(i, { x: v })} float /></TableCell>
-							<TableCell><NumCell value={tl.posAndYRotations[i].y} onChange={(v) => updatePos(i, { y: v })} float /></TableCell>
 							<TableCell><NumCell value={tl.posAndYRotations[i].z} onChange={(v) => updatePos(i, { z: v })} float /></TableCell>
+							<TableCell><NumCell value={tl.posAndYRotations[i].y} onChange={(v) => updatePos(i, { y: v })} float /></TableCell>
 							<TableCell><NumCell value={tl.posAndYRotations[i].w} onChange={(v) => updatePos(i, { w: v })} float /></TableCell>
 							<TableCell className="font-mono text-xs">{tl.instanceIDs[i] ?? '—'}</TableCell>
 							<TableCell className="font-mono text-xs">{tl.instanceTypes[i] ?? '—'}</TableCell>
@@ -117,6 +121,8 @@ const CoronasTable: React.FC<Props> = ({ data, onChange }) => {
 
 	return (
 		<div className="max-h-[55vh] overflow-auto border rounded">
+			{/* Display Y↔Z swapped to match the Y-up editor convention.
+			    `.w` is an auxiliary scalar (radius/intensity) and stays put. */}
 			<Table>
 				<TableHeader>
 					<TableRow>
@@ -134,8 +140,8 @@ const CoronasTable: React.FC<Props> = ({ data, onChange }) => {
 							<TableCell className="font-mono text-xs">{i}</TableCell>
 							<TableCell className="font-mono text-xs">{tl.coronaTypes[i] ?? '—'}</TableCell>
 							<TableCell className="font-mono text-xs">{tl.coronaPositions[i].x.toFixed(2)}</TableCell>
-							<TableCell className="font-mono text-xs">{tl.coronaPositions[i].y.toFixed(2)}</TableCell>
 							<TableCell className="font-mono text-xs">{tl.coronaPositions[i].z.toFixed(2)}</TableCell>
+							<TableCell className="font-mono text-xs">{tl.coronaPositions[i].y.toFixed(2)}</TableCell>
 							<TableCell className="font-mono text-xs">{tl.coronaPositions[i].w.toFixed(2)}</TableCell>
 						</TableRow>
 					))}

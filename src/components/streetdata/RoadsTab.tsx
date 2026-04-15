@@ -69,8 +69,8 @@ export const RoadsTab: React.FC<Props> = ({ data, onChange }) => {
 							<TableHead>#</TableHead>
 							<TableHead>Debug Name</TableHead>
 							<TableHead>Ref X</TableHead>
-							<TableHead>Ref Y</TableHead>
-							<TableHead>Ref Z (up)</TableHead>
+							<TableHead>Ref Y (up)</TableHead>
+							<TableHead>Ref Z</TableHead>
 							<TableHead>Challenge</TableHead>
 							<TableHead>Id</TableHead>
 							<TableHead>Limit 0</TableHead>

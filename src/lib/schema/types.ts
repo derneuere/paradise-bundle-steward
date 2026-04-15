@@ -172,6 +172,13 @@ export type FieldMetadata = {
 	// Fields whose value is derived from another field. Not used by Phase A
 	// itself, but Phase B's mutation helper can re-derive on edit.
 	derivedFrom?: string;
+	// Spatial vec3/vec4 flag. When true, the renderer displays axes in
+	// Y-up order: label "Y" reads `value.z` and label "Z" reads `value.y`,
+	// so users edit in comfortable XYZ while the underlying game model
+	// (Z-up, Y=depth) is preserved byte-for-byte on disk. Opt-in because
+	// a vec4 can also be a packed non-spatial value (e.g., BoundaryLine
+	// packs `(startX, startY, endX, endY)`).
+	swapYZ?: boolean;
 };
 
 // Property group — splits the inspector into tabs. A group can list fields,
