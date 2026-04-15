@@ -101,8 +101,8 @@ export const BundleLayout = () => {
         </div>
       </nav>
 
-      <main className="flex-1 overflow-auto">
-        <div className="p-6">
+      <main className="flex-1 min-h-0 overflow-hidden">
+        <div className="h-full p-6 overflow-auto">
           {!hasBundle ? (
             <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
               <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">

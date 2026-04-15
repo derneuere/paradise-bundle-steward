@@ -1,6 +1,6 @@
 // Schema-driven inspector — renders the form for the currently selected path.
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -117,10 +117,19 @@ function RecordForm({ record, path, value }: RecordFormProps) {
 		};
 	}, [record]);
 
-	const [activeTab, setActiveTab] = useState<string>(() => {
+	// Default active tab — reset whenever the selected record type changes
+	// so an old tab title from a previous record doesn't leave the current
+	// record with no visibly-active tab.
+	const defaultTab = useMemo(() => {
 		if (record.propertyGroups && record.propertyGroups.length > 0) return record.propertyGroups[0].title;
 		return 'Fields';
-	});
+	}, [record]);
+
+	const [activeTab, setActiveTab] = useState<string>(defaultTab);
+
+	useEffect(() => {
+		setActiveTab(defaultTab);
+	}, [defaultTab]);
 
 	const renderFields = (fieldNames: string[]) => (
 		<div className="space-y-3">
@@ -146,31 +155,42 @@ function RecordForm({ record, path, value }: RecordFormProps) {
 		</div>
 	);
 
+	// Layout note: when the selected record has propertyGroups, the Tabs
+	// root is OUTSIDE the ScrollArea. This is deliberate — some extensions
+	// (like TrafficData's OverviewTab) render wide summary tables that
+	// force the ScrollArea's inner content to expand horizontally. If the
+	// TabsList lives inside that expanded container, its `w-full` resolves
+	// to the content width rather than the visible panel width, and the
+	// tabs never wrap. Pinning the TabsList outside the ScrollArea keeps
+	// it anchored to the panel width, so wrap engages when the panel is
+	// narrow. Only the TabsContent scrolls.
 	return (
 		<div className="flex flex-col h-full min-h-0">
-			<div className="px-4 pt-4 pb-2 border-b bg-card/60">
+			<div className="px-4 pt-4 pb-2 border-b bg-card/60 shrink-0">
 				<Breadcrumb path={path} selectPath={selectPath} />
 				<h3 className="text-sm font-semibold mt-1">{record.name}</h3>
 				{record.description && (
 					<p className="text-[11px] text-muted-foreground">{record.description}</p>
 				)}
 			</div>
-			<ScrollArea className="flex-1">
-				<div className="p-4">
-					{groups ? (
-						<Tabs value={activeTab} onValueChange={setActiveTab}>
-							<TabsList className="flex-wrap h-auto">
-								{groups.map((g: PropertyGroup) => (
-									<TabsTrigger key={g.title} value={g.title} className="text-[11px]">
-										{g.title}
-									</TabsTrigger>
-								))}
-								{ungrouped.length > 0 && (
-									<TabsTrigger value="Other" className="text-[11px]">Other</TabsTrigger>
-								)}
-							</TabsList>
+			{groups ? (
+				<Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
+					<div className="px-4 pt-3 shrink-0">
+						<TabsList className="flex w-full flex-wrap h-auto gap-1 py-1 justify-start">
 							{groups.map((g: PropertyGroup) => (
-								<TabsContent key={g.title} value={g.title} className="mt-3">
+								<TabsTrigger key={g.title} value={g.title} className="text-[11px] px-2 py-1 h-auto">
+									{g.title}
+								</TabsTrigger>
+							))}
+							{ungrouped.length > 0 && (
+								<TabsTrigger value="Other" className="text-[11px] px-2 py-1 h-auto">Other</TabsTrigger>
+							)}
+						</TabsList>
+					</div>
+					<ScrollArea className="flex-1 min-h-0">
+						<div className="p-4">
+							{groups.map((g: PropertyGroup) => (
+								<TabsContent key={g.title} value={g.title} className="mt-0">
 									{'properties' in g &&
 										g.properties &&
 										renderFields(g.properties.filter((p) => p in record.fields))}
@@ -180,16 +200,18 @@ function RecordForm({ record, path, value }: RecordFormProps) {
 								</TabsContent>
 							))}
 							{ungrouped.length > 0 && (
-								<TabsContent value="Other" className="mt-3">
+								<TabsContent value="Other" className="mt-0">
 									{renderFields(ungrouped)}
 								</TabsContent>
 							)}
-						</Tabs>
-					) : (
-						renderFields(ungrouped)
-					)}
-				</div>
-			</ScrollArea>
+						</div>
+					</ScrollArea>
+				</Tabs>
+			) : (
+				<ScrollArea className="flex-1 min-h-0">
+					<div className="p-4">{renderFields(ungrouped)}</div>
+				</ScrollArea>
+			)}
 		</div>
 	);
 }

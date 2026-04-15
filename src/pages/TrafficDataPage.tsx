@@ -32,14 +32,16 @@ const TrafficDataPage = () => {
 	}
 
 	return (
-		<SchemaEditorProvider
-			resource={trafficDataResourceSchema}
-			data={data}
-			onChange={(next) => setResource('trafficData', next as ParsedTrafficData)}
-			extensions={trafficDataExtensions}
-		>
-			<SchemaEditor />
-		</SchemaEditorProvider>
+		<div className="h-full min-h-0">
+			<SchemaEditorProvider
+				resource={trafficDataResourceSchema}
+				data={data}
+				onChange={(next) => setResource('trafficData', next as ParsedTrafficData)}
+				extensions={trafficDataExtensions}
+			>
+				<SchemaEditor />
+			</SchemaEditorProvider>
+		</div>
 	);
 };
 

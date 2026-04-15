@@ -98,8 +98,8 @@ const PolygonSoupListPage = () => {
 	}
 
 	return (
-		<div className="space-y-3">
-			<div className="flex items-center gap-4">
+		<div className="h-full min-h-0 flex flex-col gap-3">
+			<div className="flex items-center gap-4 shrink-0">
 				<div className="flex-1">
 					<h2 className="text-lg font-semibold">Polygon Soup List — Schema Editor</h2>
 					<p className="text-xs text-muted-foreground">
@@ -128,26 +128,28 @@ const PolygonSoupListPage = () => {
 					</Select>
 				</div>
 			</div>
-			<PolygonSoupListContext.Provider
-				value={{
-					models: models as (ParsedPolygonSoupList | null)[],
-					selectedModelIndex: selectedIndex,
-					onSelect: handleViewportSelect,
-				}}
-			>
-				<SchemaEditorProvider
-					// Key on selectedIndex so the provider remounts with a fresh
-					// initialPath whenever the user (or the viewport) picks a
-					// different resource.
-					key={`psl-${selectedIndex}`}
-					resource={polygonSoupListResourceSchema}
-					data={currentModel}
-					onChange={handleChange}
-					initialPath={initialPath}
+			<div className="flex-1 min-h-0">
+				<PolygonSoupListContext.Provider
+					value={{
+						models: models as (ParsedPolygonSoupList | null)[],
+						selectedModelIndex: selectedIndex,
+						onSelect: handleViewportSelect,
+					}}
 				>
-					<SchemaEditor />
-				</SchemaEditorProvider>
-			</PolygonSoupListContext.Provider>
+					<SchemaEditorProvider
+						// Key on selectedIndex so the provider remounts with a fresh
+						// initialPath whenever the user (or the viewport) picks a
+						// different resource.
+						key={`psl-${selectedIndex}`}
+						resource={polygonSoupListResourceSchema}
+						data={currentModel}
+						onChange={handleChange}
+						initialPath={initialPath}
+					>
+						<SchemaEditor />
+					</SchemaEditorProvider>
+				</PolygonSoupListContext.Provider>
+			</div>
 		</div>
 	);
 };

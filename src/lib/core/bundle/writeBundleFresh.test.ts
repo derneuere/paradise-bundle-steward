@@ -153,3 +153,123 @@ for (const fixture of FIXTURES) {
 		});
 	});
 }
+
+// ---------------------------------------------------------------------------
+// byResourceId override — for bundles that hold multiple resources of the
+// same type (e.g. WORLDCOL.BIN with hundreds of PolygonSoupList resources).
+// A typeId-keyed override would clobber ALL of them with the same bytes;
+// byResourceId lets us re-encode exactly one resource and let the rest
+// pass through unchanged.
+// ---------------------------------------------------------------------------
+
+describe('writeBundleFresh byResourceId override', () => {
+	const bundlePath = path.resolve(REPO_ROOT, 'example/WORLDCOL.BIN');
+	if (!fs.existsSync(bundlePath)) {
+		it.skip('WORLDCOL.BIN not available', () => { /* noop */ });
+		return;
+	}
+
+	const original = loadBundle('example/WORLDCOL.BIN');
+	const bundle = parseBundle(original);
+	const ctx = resourceCtxFromBundle(bundle);
+	const handler = registry.find(h => h.typeId === 0x43)!;
+
+	// Pick the first PolygonSoupList resource that has actual soups so the
+	// edit we perform is observable (the first resource in WORLDCOL is a
+	// 48-byte empty stub).
+	const firstPopulated = (() => {
+		for (const r of bundle.resources) {
+			if (r.resourceTypeId !== 0x43) continue;
+			const raw = extractResourceRaw(original, bundle, r);
+			const model = handler.parseRaw(raw, ctx) as { soups: unknown[] };
+			if (model.soups.length > 0) return { resource: r, model };
+		}
+		throw new Error('WORLDCOL has no populated PolygonSoupList');
+	})();
+
+	// Format the resource id the same way writeBundleFresh + BundleContext do.
+	function formatId(id: { low: number; high: number }): string {
+		const bi = (BigInt(id.high >>> 0) << 32n) | BigInt(id.low >>> 0);
+		return `0x${bi.toString(16).toUpperCase().padStart(16, '0')}`;
+	}
+
+	it('overrides a single resource by id without touching sibling resources', () => {
+		// Re-encode just the populated one we picked above. All other 0x43
+		// resources should pass through byte-exact.
+		const target = firstPopulated.resource;
+		const targetIdHex = formatId(target.resourceId);
+		const targetReencoded = handler.writeRaw!(firstPopulated.model as never, ctx);
+
+		const repacked = writeBundleFresh(bundle, original, {
+			overrides: { byResourceId: { [targetIdHex]: targetReencoded } },
+		});
+
+		const bundle2 = parseBundle(repacked);
+
+		// The targeted resource should decode back to the same model.
+		const target2 = bundle2.resources.find(r => {
+			const id = formatId(r.resourceId);
+			return id === targetIdHex;
+		});
+		expect(target2).toBeDefined();
+		const raw2 = extractResourceRaw(repacked, bundle2, target2!);
+		const model2 = handler.parseRaw(raw2, ctx) as { soups: unknown[] };
+		expect(model2.soups.length).toBe((firstPopulated.model as { soups: unknown[] }).soups.length);
+
+		// Every OTHER 0x43 resource must have the same raw bytes as before
+		// (writer pass-through, not re-encoded). This is the whole point of
+		// byResourceId — a typeId-scoped override would fail this check.
+		for (const r of bundle.resources) {
+			if (r.resourceTypeId !== 0x43) continue;
+			if (formatId(r.resourceId) === targetIdHex) continue;
+			const rawBefore = extractResourceRaw(original, bundle, r);
+			const rAfter = bundle2.resources.find(x => {
+				return formatId(x.resourceId) === formatId(r.resourceId);
+			})!;
+			const rawAfter = extractResourceRaw(repacked, bundle2, rAfter);
+			expect(rawAfter.byteLength).toBe(rawBefore.byteLength);
+			expect(Buffer.from(rawAfter).equals(Buffer.from(rawBefore))).toBe(true);
+		}
+	});
+
+	it('falls back to typeId override when byResourceId has no entry for a resource', () => {
+		// byResourceId targets resource X, typeId override targets type 0x43.
+		// Resource X should use byResourceId; other 0x43 resources should
+		// use the typeId override (all get the same replacement bytes).
+		const target = firstPopulated.resource;
+		const targetIdHex = formatId(target.resourceId);
+		const targetReencoded = handler.writeRaw!(firstPopulated.model as never, ctx);
+
+		// Construct a different "typeId override" from a second populated
+		// resource so we can distinguish the two code paths downstream.
+		const secondPopulated = (() => {
+			let seen = 0;
+			for (const r of bundle.resources) {
+				if (r.resourceTypeId !== 0x43) continue;
+				const raw = extractResourceRaw(original, bundle, r);
+				const model = handler.parseRaw(raw, ctx) as { soups: unknown[] };
+				if (model.soups.length > 0) {
+					if (seen === 1) return { resource: r, model };
+					seen++;
+				}
+			}
+			throw new Error('WORLDCOL has <2 populated PolygonSoupList');
+		})();
+		const fallbackBytes = handler.writeRaw!(secondPopulated.model as never, ctx);
+
+		const repacked = writeBundleFresh(bundle, original, {
+			overrides: {
+				resources: { 0x43: fallbackBytes },
+				byResourceId: { [targetIdHex]: targetReencoded },
+			},
+		});
+
+		const bundle2 = parseBundle(repacked);
+
+		// The targeted resource should decode to model A (from byResourceId).
+		const target2 = bundle2.resources.find(r => formatId(r.resourceId) === targetIdHex)!;
+		const rawA = extractResourceRaw(repacked, bundle2, target2);
+		const modelA = handler.parseRaw(rawA, ctx) as { soups: unknown[] };
+		expect(modelA.soups.length).toBe((firstPopulated.model as { soups: unknown[] }).soups.length);
+	});
+});

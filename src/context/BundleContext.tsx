@@ -72,6 +72,11 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
   const [debugResources, setDebugResources] = useState<DebugResource[]>([]);
   const [parsedResources, setParsedResources] = useState<Map<string, unknown>>(() => new Map());
   const [parsedResourcesAll, setParsedResourcesAll] = useState<Map<string, (unknown | null)[]>>(() => new Map());
+  // Tracks which (handlerKey, index) pairs have been explicitly edited since
+  // the bundle loaded. Drives the multi-resource export path: only dirty
+  // entries become `byResourceId` overrides, so untouched resources write
+  // back byte-exact through the pass-through path.
+  const [dirtyMulti, setDirtyMulti] = useState<Set<string>>(() => new Set());
 
   const convertResourceToUI = useMemo(() => {
     return (resource: any, bundle: ParsedBundle, debugData: DebugResource[]): UIResource => {
@@ -127,6 +132,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
 
       setParsedResources(modelMap);
       setParsedResourcesAll(modelMapAll);
+      setDirtyMulti(new Set());
       setLoadedBundle(bundle);
       setResources(uiResources);
       setDebugResources(debugData);
@@ -180,6 +186,14 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
         return copy;
       });
     }
+    // Mark this (key, index) as dirty so the export path emits a per-
+    // resource-id override for it instead of overriding every resource of
+    // the same type.
+    setDirtyMulti((prev) => {
+      const copy = new Set(prev);
+      copy.add(`${key}:${index}`);
+      return copy;
+    });
     setIsModified(true);
   }, []);
 
@@ -194,11 +208,43 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
     try {
-      // Build a generic resources override map keyed by handler.key, which
-      // writeBundleFresh translates to typeId via the registry.
-      const overrides: Record<string, unknown> = {};
-      for (const [key, model] of parsedResources) {
-        overrides[key] = model;
+      // Two override paths are emitted in parallel:
+      //
+      //   1. `resources` (keyed by typeId) — legacy/broad overrides for
+      //      bundles with one resource per type. Keeps every existing
+      //      single-resource editor working with zero changes.
+      //   2. `byResourceId` (keyed by formatted u64 hex) — only populated
+      //      for `(key, index)` pairs that setResourceAt actually touched
+      //      since bundle load. Dirty entries become per-resource overrides,
+      //      so untouched resources of the same type write back byte-exact
+      //      through the pass-through path. This is what makes multi-
+      //      resource bundles like WORLDCOL.BIN round-trip cleanly after
+      //      editing a single soup.
+      //
+      // When byResourceId has an entry for a given resource, writeBundleFresh
+      // prefers it over the typeId override, so the two can coexist safely.
+      const byResourceId = buildByResourceIdOverrides(
+        loadedBundle,
+        parsedResourcesAll,
+        dirtyMulti,
+      );
+
+      // Only emit `resources[typeId]` overrides for keys the user has
+      // explicitly touched at index 0. Otherwise, parsedResources — which is
+      // auto-populated on bundle load — would apply its "first resource of
+      // each type" model to EVERY resource of that type, clobbering the
+      // remaining same-typed resources with the first one's bytes. For
+      // bundles like WORLDCOL.BIN that hold hundreds of PolygonSoupList
+      // resources, this would strip ~14 MB of world geometry on every
+      // export, because the first PSL is a 48-byte empty stub.
+      //
+      // dirtyMulti tracks explicit edits: an entry at `${key}:0` means the
+      // user actually changed that resource and wants its override emitted.
+      // Unedited types fall through to the writer's pass-through path and
+      // round-trip byte-exact.
+      const filteredSingleResource = new Map<string, unknown>();
+      for (const [k, model] of parsedResources) {
+        if (dirtyMulti.has(`${k}:0`)) filteredSingleResource.set(k, model);
       }
 
       const outBuffer = writeBundleFresh(
@@ -206,7 +252,10 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
         originalArrayBuffer,
         {
           includeDebugData: true,
-          overrides: { resources: keyedOverridesToTypeIdMap(parsedResources, loadedBundle) },
+          overrides: {
+            resources: keyedOverridesToTypeIdMap(filteredSingleResource, loadedBundle),
+            byResourceId,
+          },
         },
       );
 
@@ -260,7 +309,7 @@ export const useBundle = () => {
 // Translate handler-key → model map to typeId → model map for writeBundleFresh.
 // Uses the registry to look up handler metadata; imported here (not above) so
 // the registry side-effect module lands once per app boot.
-import { getHandlerByKey } from '@/lib/core/registry';
+import { getHandlerByKey, getHandlerByTypeId } from '@/lib/core/registry';
 function keyedOverridesToTypeIdMap(
   map: Map<string, unknown>,
   _bundle: ParsedBundle,
@@ -270,6 +319,45 @@ function keyedOverridesToTypeIdMap(
     const handler = getHandlerByKey(key);
     if (!handler || !handler.caps.write) continue;
     out[handler.typeId] = model;
+  }
+  return out;
+}
+
+/**
+ * Build a resource-id-keyed override map from `parsedResourcesAll` + a
+ * dirty-tracking set. Walks `bundle.resources` in order, counting per-
+ * typeId instances so `parsedResourcesAll.get(key)[N]` lines up with the
+ * N-th resource of that type in the bundle. Only emits entries for
+ * `(key, index)` pairs present in `dirty` — untouched resources are
+ * silently omitted so the writer's pass-through path can re-emit their
+ * original bytes.
+ *
+ * Keys are the same hex format `writeBundleFresh` uses internally:
+ * `0x{16-upper-hex-padded}`, derived from `u64ToBigInt(resource.resourceId)`.
+ */
+function buildByResourceIdOverrides(
+  bundle: ParsedBundle,
+  parsedResourcesAll: Map<string, (unknown | null)[]>,
+  dirty: Set<string>,
+): Record<string, unknown> {
+  if (dirty.size === 0) return {};
+  const out: Record<string, unknown> = {};
+  const typeCounters = new Map<number, number>();
+  for (const resource of bundle.resources) {
+    const typeId = resource.resourceTypeId;
+    const nBefore = typeCounters.get(typeId) ?? 0;
+    typeCounters.set(typeId, nBefore + 1);
+
+    const handler = getHandlerByTypeId(typeId);
+    if (!handler || !handler.caps.write) continue;
+    if (!dirty.has(`${handler.key}:${nBefore}`)) continue;
+    const list = parsedResourcesAll.get(handler.key);
+    if (!list) continue;
+    const model = list[nBefore];
+    if (model == null) continue;
+
+    const idHex = `0x${u64ToBigInt(resource.resourceId).toString(16).toUpperCase().padStart(16, '0')}`;
+    out[idHex] = model;
   }
   return out;
 }

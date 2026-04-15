@@ -1,4 +1,11 @@
 // Unity-style 3-pane layout: hierarchy tree left, viewport center, inspector right.
+//
+// Fills its parent container (100% height). Callers should wrap this in a
+// flex-column container with an explicit height so the editor takes the
+// available space without overflowing. BundleLayout's main content region
+// is a flex child with min-h-0 + overflow-hidden, so pages that return
+// `<div className="h-full"><SchemaEditor /></div>` (or pass h-full through
+// a flex child) will get a correctly-sized 3-pane editor.
 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { HierarchyTree } from './HierarchyTree';
@@ -7,7 +14,7 @@ import { ViewportPane } from './ViewportPane';
 
 export function SchemaEditor() {
 	return (
-		<div className="h-[calc(100vh-180px)] border rounded-lg overflow-hidden bg-card">
+		<div className="h-full min-h-0 border rounded-lg overflow-hidden bg-card">
 			<ResizablePanelGroup direction="horizontal">
 				{/* Left — Hierarchy */}
 				<ResizablePanel defaultSize={20} minSize={14} className="bg-background">

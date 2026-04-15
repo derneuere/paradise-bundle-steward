@@ -35,6 +35,7 @@ import { parseChallengeList, type ParsedChallengeList } from '../challengeList';
 import { parseStreetData, type ParsedStreetData } from '../streetData';
 import { registry, getHandlerByTypeId, resourceCtxFromBundle } from '../registry';
 import { parseBundleResourcesViaRegistry } from '../registry/bundleOps';
+import { u64ToBigInt } from '../u64';
 
 // ============================================================================
 // Main Bundle Writer
@@ -61,13 +62,23 @@ export function writeBundleFresh(
   const isLittleEndian = bundle.header.platform !== PLATFORMS.PS3;
   const ctx = resourceCtxFromBundle(bundle);
 
-  // Normalize overrides into a single map keyed by resource type id. Values
-  // are either raw encoded bytes or a model object that gets piped through
-  // the matching ResourceHandler's writeRaw(). Legacy field-name overrides
-  // (vehicleList, triggerData, challengeList, streetData) are mapped to their
-  // typeId for the duration of Step 5; Step 6 switches BundleContext to emit
-  // only options.overrides.resources.
+  // Normalize overrides into two maps:
+  //   1. `overrideMap` — keyed by resource type id. Applies the same override
+  //      to EVERY resource of that type; fine for bundles that only ever hold
+  //      one resource per type (the common case).
+  //   2. `overrideByResourceId` — keyed by the formatted resource id hex
+  //      string (`formatResourceId(u64ToBigInt(resource.resourceId))`).
+  //      Needed for bundles like WORLDCOL.BIN that contain hundreds of
+  //      resources of the same type — a single typeId-keyed override can't
+  //      express "change only resource #3 and #271". byResourceId takes
+  //      priority when both are present.
+  //
+  // Values are either raw encoded bytes or a model object that gets piped
+  // through the matching ResourceHandler's writeRaw(). Legacy field-name
+  // overrides (vehicleList, triggerData, challengeList, streetData) are
+  // mapped to their typeId.
   const overrideMap: Record<number, Uint8Array | unknown> = {};
+  const overrideByResourceId: Record<string, Uint8Array | unknown> = {};
   const legacyKey: Record<string, number> = {
     vehicleList: RESOURCE_TYPE_IDS.VEHICLE_LIST,
     triggerData: RESOURCE_TYPE_IDS.TRIGGER_DATA,
@@ -79,11 +90,14 @@ export function writeBundleFresh(
     for (const [k, v] of Object.entries(rawOverrides)) {
       if (k === 'resources' && v && typeof v === 'object') {
         Object.assign(overrideMap, v as Record<number, unknown>);
+      } else if (k === 'byResourceId' && v && typeof v === 'object') {
+        Object.assign(overrideByResourceId, v as Record<string, unknown>);
       } else if (k in legacyKey && v !== undefined) {
         overrideMap[legacyKey[k]] = v;
       }
     }
   }
+  const hasByResourceIdOverrides = Object.keys(overrideByResourceId).length > 0;
 
   /**
    * Apply a single override to its resource bytes. Called per primary block
@@ -137,9 +151,24 @@ export function writeBundleFresh(
       let finalBytes: Uint8Array;
       let uncompressedSize: number | undefined;
 
-      // Apply override only to primary block for the resource (matches in-place writer behavior)
-      if (bi === primaryBlock && Object.prototype.hasOwnProperty.call(overrideMap, resource.resourceTypeId)) {
-        const overrideValue = overrideMap[resource.resourceTypeId];
+      // Apply override only to primary block for the resource (matches in-place writer behavior).
+      // Look up byResourceId first so per-resource overrides take priority over
+      // broad typeId overrides — a bundle with 428 PolygonSoupList resources
+      // where the user edited 3 of them needs resource-specific routing.
+      let overrideValue: unknown | undefined;
+      if (bi === primaryBlock) {
+        if (hasByResourceIdOverrides) {
+          const idHex = `0x${u64ToBigInt(resource.resourceId).toString(16).toUpperCase().padStart(16, '0')}`;
+          if (Object.prototype.hasOwnProperty.call(overrideByResourceId, idHex)) {
+            overrideValue = overrideByResourceId[idHex];
+          }
+        }
+        if (overrideValue === undefined && Object.prototype.hasOwnProperty.call(overrideMap, resource.resourceTypeId)) {
+          overrideValue = overrideMap[resource.resourceTypeId];
+        }
+      }
+
+      if (overrideValue !== undefined) {
         const newUncompressed = applyOverride(
           resource.resourceTypeId,
           overrideValue,

@@ -132,8 +132,21 @@ export type WriteOptions = {
      * Generic resource overrides keyed by resource type id. Values can be either
      * raw encoded bytes to write directly, or a plain object that will be passed
      * to a registered encoder for that type if one exists.
+     *
+     * Applied to every resource of that type — useful for single-resource-per-
+     * type bundles but cannot express per-instance edits. Use `byResourceId`
+     * below when the bundle has multiple resources of the same type.
      */
     resources?: Record<number, Uint8Array | unknown>;
+    /**
+     * Per-resource overrides keyed by the formatted hex resource id
+     * (`0x{16-upper-hex-padded}`, matching `formatResourceId`). Takes
+     * priority over `resources` when both supply a value for the same
+     * resource. This is the only override path that can express
+     * "re-encode only resource #271 of type 0x43" for bundles like
+     * WORLDCOL.BIN with hundreds of same-typed resources.
+     */
+    byResourceId?: Record<string, Uint8Array | unknown>;
   };
 }
 
