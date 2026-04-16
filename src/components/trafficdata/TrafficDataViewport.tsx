@@ -62,6 +62,35 @@ function AutoFit({ center, radius }: { center: THREE.Vector3; radius: number }) 
 	return null;
 }
 
+// When the selection changes to a static vehicle, fly the camera over so the
+// highlighted box is actually on-screen. Without this, clicking a vehicle in
+// the list leaves the viewport wherever it was last aimed and you never see
+// the highlight. Only reacts to staticVehicle selections so browsing other
+// sub-types (sections, junctions, etc.) doesn't move the camera.
+function FocusOnVehicle({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
+	const { camera, controls } = useThree() as { camera: THREE.Camera; controls: { target: THREE.Vector3; update: () => void } | null };
+	useEffect(() => {
+		if (selected?.sub?.type !== 'staticVehicle') return;
+		const hull = hulls[selected.hullIndex];
+		const sv = hull?.staticTrafficVehicles[selected.sub.index];
+		if (!sv) return;
+		// Translation at mT[12..14] (RwMatrix layout).
+		const target = new THREE.Vector3(sv.mTransform[12], sv.mTransform[13], sv.mTransform[14]);
+		// Pull camera back along its existing view direction so we keep the
+		// user's current angle rather than jump-cutting. 60 units is ~10 car
+		// lengths — close enough to see the selection scaling and the label.
+		const dir = new THREE.Vector3().subVectors(camera.position, controls?.target ?? target).normalize();
+		camera.position.copy(target).addScaledVector(dir, 60);
+		if (controls) {
+			controls.target.copy(target);
+			controls.update();
+		} else {
+			camera.lookAt(target);
+		}
+	}, [hulls, selected, camera, controls]);
+	return null;
+}
+
 // ---------------------------------------------------------------------------
 // Batched rung lines for ALL hulls (one draw call)
 // ---------------------------------------------------------------------------
@@ -464,12 +493,24 @@ function AllLightTriggerInstances({
 // ---------------------------------------------------------------------------
 
 const vehicleGeo = new THREE.BoxGeometry(3, 2, 5);
-const vehicleMat = new THREE.MeshStandardMaterial({ color: 0xcc6633, roughness: 0.6, metalness: 0.1 });
+// White material so per-instance colors (setColorAt) render without tinting.
+const vehicleMat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.1 });
+
+const vehicleActiveColor = new THREE.Color(0xcc6633);
+const vehicleInactiveColor = new THREE.Color(0x554433);
+const vehicleSelectedColor = new THREE.Color(0xffee33);
+
+// Scale applied to the selected vehicle's instance matrix so it stands out
+// against the map. Applied in local space (mat * scale), so the box grows
+// around its own centre rather than drifting.
+const selectedScale = new THREE.Matrix4().makeScale(6, 6, 6);
 
 function AllStaticVehicleInstances({
-	hulls, onSelect,
+	hulls, activeHullIndex, selected, onSelect,
 }: {
 	hulls: TrafficHull[];
+	activeHullIndex: number;
+	selected: TrafficDataSelection;
 	onSelect: (sel: TrafficDataSelection) => void;
 }) {
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
@@ -504,10 +545,24 @@ function AllStaticVehicleInstances({
 			mat.fromArray(sv.mTransform);
 			const e = mat.elements;
 			e[3] = 0; e[7] = 0; e[11] = 0; e[15] = 1;
+
+			const isSel =
+				selected?.hullIndex === hullIndex &&
+				selected.sub?.type === 'staticVehicle' &&
+				selected.sub.index === localIndex;
+			if (isSel) mat.multiply(selectedScale);
 			mesh.setMatrixAt(i, mat);
+
+			const color = isSel
+				? vehicleSelectedColor
+				: hullIndex === activeHullIndex
+					? vehicleActiveColor
+					: vehicleInactiveColor;
+			mesh.setColorAt(i, color);
 		}
 		mesh.instanceMatrix.needsUpdate = true;
-	}, [hulls, mapping, totalCount]);
+		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+	}, [hulls, mapping, totalCount, activeHullIndex, selected]);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
@@ -592,6 +647,13 @@ function SelectionLabel({ hulls, selected }: { hulls: TrafficHull[]; selected: T
 			pos = [j.mPosition.x, j.mPosition.y + 8, j.mPosition.z];
 			label = `Hull ${selected.hullIndex} | Junction ${selected.sub.index} | ID: ${j.muID} | ${j.muNumStates} states`;
 		}
+	} else if (selected.sub.type === 'staticVehicle') {
+		const sv = hull.staticTrafficVehicles[selected.sub.index];
+		if (sv) {
+			// Translation lives at mTransform[12..14] (RwMatrix layout).
+			pos = [sv.mTransform[12], sv.mTransform[13] + 6, sv.mTransform[14]];
+			label = `Hull ${selected.hullIndex} | Vehicle ${selected.sub.index} | FlowType ${sv.mFlowTypeID}`;
+		}
 	}
 
 	if (!pos) return null;
@@ -636,6 +698,7 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 			>
 				<color attach="background" args={['#1a1d23']} />
 				<AutoFit center={center} radius={radius} />
+				<FocusOnVehicle hulls={hulls} selected={selected} />
 				<ambientLight intensity={0.5} />
 				<hemisphereLight args={['#b1c8e8', '#4a3f2f', 0.4]} />
 				<directionalLight position={[10, 20, 5]} intensity={0.9} />
@@ -673,6 +736,8 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 				{/* All static vehicles */}
 				<AllStaticVehicleInstances
 					hulls={hulls}
+					activeHullIndex={activeHullIndex}
+					selected={selected}
 					onSelect={onSelect}
 				/>
 
