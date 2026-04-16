@@ -487,7 +487,12 @@ function AllStaticVehicleInstances({
 		return m;
 	}, [hulls]);
 
-	useMemo(() => {
+	// useEffect (not useMemo) — the loop is a side effect that touches
+	// meshRef.current, which is only guaranteed populated after commit.
+	// Using useMemo here meant `hulls`-driven re-renders wrote to a stale
+	// mesh while the freshly-reconciled InstancedMesh came online with
+	// default identity matrices, stacking all 952 vehicle boxes at origin.
+	useEffect(() => {
 		if (!meshRef.current || totalCount === 0) return;
 		const mesh = meshRef.current;
 		const mat = new THREE.Matrix4();
