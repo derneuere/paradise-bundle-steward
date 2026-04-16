@@ -21,6 +21,9 @@ import { aiSectionsHandler } from './handlers/aiSections';
 import { trafficDataHandler } from './handlers/trafficData';
 import { attribSysVaultHandler } from './handlers/attribSysVault';
 import { polygonSoupListHandler } from './handlers/polygonSoupList';
+import { modelHandler } from './handlers/model';
+import { deformationSpecHandler } from './handlers/deformationSpec';
+import { shaderHandler, shaderProgramBufferHandler } from './handlers/shader';
 
 export const registry: ResourceHandler[] = [
 	aiSectionsHandler,
@@ -36,6 +39,10 @@ export const registry: ResourceHandler[] = [
 	textureHandler,
 	textureStateHandler,
 	polygonSoupListHandler,
+	modelHandler,
+	deformationSpecHandler,
+	shaderHandler,
+	shaderProgramBufferHandler,
 ];
 
 const byTypeId = new Map<number, ResourceHandler>();
