@@ -528,7 +528,11 @@ function AllStaticVehicleInstances({
 		return m;
 	}, [hulls]);
 
-	useMemo(() => {
+	// useEffect (not useMemo) so the ref is guaranteed attached. useMemo runs
+	// during render, before commit, so meshRef.current is null on the initial
+	// render and the early-return skips writing matrices/colors entirely —
+	// leaving every vehicle parked at origin with the default white.
+	useEffect(() => {
 		if (!meshRef.current || totalCount === 0) return;
 		const mesh = meshRef.current;
 		const mat = new THREE.Matrix4();
