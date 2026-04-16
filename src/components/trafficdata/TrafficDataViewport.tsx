@@ -500,10 +500,16 @@ const vehicleActiveColor = new THREE.Color(0xcc6633);
 const vehicleInactiveColor = new THREE.Color(0x554433);
 const vehicleSelectedColor = new THREE.Color(0xffee33);
 
-// Scale applied to the selected vehicle's instance matrix so it stands out
-// against the map. Applied in local space (mat * scale), so the box grows
-// around its own centre rather than drifting.
-const selectedScale = new THREE.Matrix4().makeScale(6, 6, 6);
+// Edge outline used on the currently-selected vehicle only. Drawn with
+// depthTest off so the border is visible even when the box is coincident
+// with or behind the road geometry. Colour contrasts with the selected
+// fill (yellow) so the outline actually reads as an outline.
+const vehicleEdgesGeo = new THREE.EdgesGeometry(vehicleGeo);
+const vehicleEdgesMat = new THREE.LineBasicMaterial({
+	color: 0xffffff,
+	depthTest: false,
+	transparent: true,
+});
 
 function AllStaticVehicleInstances({
 	hulls, activeHullIndex, selected, onSelect,
@@ -554,7 +560,6 @@ function AllStaticVehicleInstances({
 				selected?.hullIndex === hullIndex &&
 				selected.sub?.type === 'staticVehicle' &&
 				selected.sub.index === localIndex;
-			if (isSel) mat.multiply(selectedScale);
 			mesh.setMatrixAt(i, mat);
 
 			const color = isSel
@@ -583,6 +588,40 @@ function AllStaticVehicleInstances({
 			ref={meshRef}
 			args={[vehicleGeo, vehicleMat, totalCount]}
 			onClick={handleClick}
+		/>
+	);
+}
+
+// Colored wireframe outline drawn on top of the currently-selected static
+// vehicle. Keeps the car at its true 3×2×5 footprint while still making the
+// selection pop against the map (coloured fill + depth-test-off border).
+function SelectedVehicleOutline({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
+	const lineRef = useRef<THREE.LineSegments>(null!);
+
+	const matrix = useMemo(() => {
+		if (selected?.sub?.type !== 'staticVehicle') return null;
+		const sv = hulls[selected.hullIndex]?.staticTrafficVehicles[selected.sub.index];
+		if (!sv) return null;
+		const mat = new THREE.Matrix4().fromArray(sv.mTransform);
+		const e = mat.elements;
+		e[3] = 0; e[7] = 0; e[11] = 0; e[15] = 1;
+		return mat;
+	}, [hulls, selected]);
+
+	useEffect(() => {
+		if (!lineRef.current || !matrix) return;
+		lineRef.current.matrix.copy(matrix);
+		lineRef.current.matrixAutoUpdate = false;
+		lineRef.current.updateMatrixWorld(true);
+	}, [matrix]);
+
+	if (!matrix) return null;
+	return (
+		<lineSegments
+			ref={lineRef}
+			geometry={vehicleEdgesGeo}
+			material={vehicleEdgesMat}
+			renderOrder={10}
 		/>
 	);
 }
@@ -744,6 +783,7 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 					selected={selected}
 					onSelect={onSelect}
 				/>
+				<SelectedVehicleOutline hulls={hulls} selected={selected} />
 
 				{/* Traffic lights (only on lights tab) */}
 				{activeTab === 'lights' && (
