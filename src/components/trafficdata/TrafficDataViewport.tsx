@@ -702,7 +702,11 @@ function SelectionLabel({ hulls, selected }: { hulls: TrafficHull[]; selected: T
 	if (!pos) return null;
 
 	return (
-		<Html position={pos} center distanceFactor={200} style={{ pointerEvents: 'none' }}>
+		// No distanceFactor — the label stays at a fixed screen size regardless
+		// of camera distance. distanceFactor scales inversely with distance, so
+		// after FocusOnVehicle pulls the camera to ~60 units the label was
+		// rendering at 3× size and dominating the viewport.
+		<Html position={pos} center style={{ pointerEvents: 'none' }}>
 			<div style={{
 				background: 'rgba(0,0,0,0.8)', color: '#ffaa33', padding: '2px 6px',
 				borderRadius: 4, fontSize: 10, whiteSpace: 'nowrap', fontFamily: 'monospace',
