@@ -487,24 +487,23 @@ function AllStaticVehicleInstances({
 		return m;
 	}, [hulls]);
 
-	// useEffect (not useMemo) — the loop is a side effect that touches
-	// meshRef.current, which is only guaranteed populated after commit.
-	// Using useMemo here meant `hulls`-driven re-renders wrote to a stale
-	// mesh while the freshly-reconciled InstancedMesh came online with
-	// default identity matrices, stacking all 952 vehicle boxes at origin.
-	useEffect(() => {
+	useMemo(() => {
 		if (!meshRef.current || totalCount === 0) return;
 		const mesh = meshRef.current;
 		const mat = new THREE.Matrix4();
 		for (let i = 0; i < mapping.length; i++) {
 			const { hullIndex, localIndex } = mapping[i];
 			const sv = hulls[hullIndex].staticTrafficVehicles[localIndex];
-			mat.set(
-				sv.mTransform[0], sv.mTransform[1], sv.mTransform[2], sv.mTransform[3],
-				sv.mTransform[4], sv.mTransform[5], sv.mTransform[6], sv.mTransform[7],
-				sv.mTransform[8], sv.mTransform[9], sv.mTransform[10], sv.mTransform[11],
-				sv.mTransform[12], sv.mTransform[13], sv.mTransform[14], sv.mTransform[15],
-			);
+			// mTransform is an RwMatrix: four rows of (Vec3 + 4-byte pad),
+			// translation at [12..14]. That layout is column-major from
+			// THREE's perspective, so fromArray maps it directly — elements
+			// [12..14] become THREE's translation column. We then patch the
+			// bottom row to [0,0,0,1] because the pad slots ([3],[7],[11],
+			// [15]) are zero in the source, which would give a degenerate
+			// w on the homogeneous multiply.
+			mat.fromArray(sv.mTransform);
+			const e = mat.elements;
+			e[3] = 0; e[7] = 0; e[11] = 0; e[15] = 1;
 			mesh.setMatrixAt(i, mat);
 		}
 		mesh.instanceMatrix.needsUpdate = true;
