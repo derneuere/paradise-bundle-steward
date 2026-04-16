@@ -122,6 +122,33 @@ export type ParsedPolygonSoupList = {
 };
 
 // =============================================================================
+// Vertex unpacking
+// =============================================================================
+
+/**
+ * Unpack a packed PolygonSoup vertex into world-space coordinates.
+ *
+ * Per the wiki spec (`docs/PolygonSoupList.md`) and the official Burnout
+ * Paradise Blender importer, the three packed fields are **unsigned** u16
+ * values (full 0..65535 range) — NOT signed i16. Both sources apply the
+ * straight unsigned formula `(packed + offset) * granularity` per axis.
+ *
+ * Pure, no allocations beyond the returned tuple — suitable for per-vertex
+ * use in hot loops.
+ */
+export function unpackSoupVertex(
+	v: PolygonSoupVertex,
+	offsets: readonly [number, number, number],
+	granularity: number,
+): [number, number, number] {
+	return [
+		(v.x + offsets[0]) * granularity,
+		(v.y + offsets[1]) * granularity,
+		(v.z + offsets[2]) * granularity,
+	];
+}
+
+// =============================================================================
 // Parsing
 // =============================================================================
 

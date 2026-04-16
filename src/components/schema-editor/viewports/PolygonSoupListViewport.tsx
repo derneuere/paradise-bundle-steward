@@ -22,16 +22,8 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useBundle } from '@/context/BundleContext';
 import { parseAllBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
-import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
+import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
-
-// ---------------------------------------------------------------------------
-// Vertex unpacking — u16 → i16 sign-extend + `(packed + offset) * scale`
-// ---------------------------------------------------------------------------
-
-function s16(v: number): number {
-	return v >= 0x8000 ? v - 0x10000 : v;
-}
 
 // ---------------------------------------------------------------------------
 // Collision-tag → RGB color
@@ -155,10 +147,7 @@ function buildGeometry(
 			// Unpack every vertex of this soup once into a small scratch array.
 			const unpacked = new Float32Array(soup.vertices.length * 3);
 			for (let i = 0; i < soup.vertices.length; i++) {
-				const v = soup.vertices[i];
-				const wx = (s16(v.x) + vOff[0]) * scale;
-				const wy = (s16(v.y) + vOff[1]) * scale;
-				const wz = (s16(v.z) + vOff[2]) * scale;
+				const [wx, wy, wz] = unpackSoupVertex(soup.vertices[i], vOff, scale);
 				unpacked[i * 3 + 0] = wx;
 				unpacked[i * 3 + 1] = wy;
 				unpacked[i * 3 + 2] = wz;
