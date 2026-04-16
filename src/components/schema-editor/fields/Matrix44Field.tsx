@@ -1,5 +1,9 @@
+import { useEffect, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { FieldShell, type FieldRendererProps } from './common';
+import { floatsToHex, parseHex, bytesToFloats } from './matrix44Bytes';
+import { RotationVisualizer } from './RotationVisualizer';
 
 // Matrix44Affine stored as 16 f32s in row-major order. For static traffic
 // vehicles the meaningful editable parts are the translation row (indices
@@ -39,6 +43,46 @@ export function Matrix44Field({
 		? 'Matrix44Affine. Translation row is the most commonly edited. Z is up/down.'
 		: 'Matrix44Affine. Translation row is the most commonly edited.';
 
+	// ---------------- Hex bytes row ----------------
+	// The textbox is user-editable state, but it should also follow
+	// external changes (drags in the preview, edits in the 4×4 grid,
+	// X/Y/Z edits). We resync from `m` whenever the user is NOT actively
+	// typing — a dirty flag tracks that.
+	const [hexText, setHexText] = useState(() => floatsToHex(m.slice(0, 12)));
+	const [hexError, setHexError] = useState<string | null>(null);
+	const [copied, setCopied] = useState(false);
+	const dirty = useRef(false);
+
+	const canonicalHex = floatsToHex(m.slice(0, 12));
+	useEffect(() => {
+		if (!dirty.current) setHexText(canonicalHex);
+	}, [canonicalHex]);
+
+	const applyHex = () => {
+		const parsed = parseHex(hexText);
+		if ('error' in parsed) {
+			setHexError(parsed.error);
+			return;
+		}
+		const floats = bytesToFloats(parsed.bytes);
+		const next = m.slice();
+		for (let i = 0; i < floats.length && i < 16; i++) next[i] = floats[i];
+		onChange(next);
+		setHexError(null);
+		dirty.current = false;
+		// setHexText will be refreshed by the effect when `m` re-flows in.
+	};
+
+	const copyHex = async () => {
+		try {
+			await navigator.clipboard.writeText(canonicalHex);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1000);
+		} catch {
+			// clipboard blocked — fall back to selecting the input text.
+		}
+	};
+
 	return (
 		<FieldShell
 			label={label}
@@ -72,6 +116,47 @@ export function Matrix44Field({
 						})}
 					</div>
 				</div>
+
+				<div>
+					<div className="text-[10px] text-muted-foreground mb-1">
+						Raw bytes (48 = rotation only · 64 = full matrix · little-endian f32)
+					</div>
+					<div className="flex gap-1">
+						<Input
+							type="text"
+							spellCheck={false}
+							disabled={meta?.readOnly}
+							className="h-7 font-mono text-[10px] flex-1"
+							value={hexText}
+							onChange={(e) => { dirty.current = true; setHexText(e.target.value); }}
+							onBlur={() => { dirty.current = false; setHexText(canonicalHex); setHexError(null); }}
+							onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyHex(); } }}
+						/>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							disabled={meta?.readOnly}
+							className="h-7 px-2 text-[10px]"
+							onClick={applyHex}
+						>
+							Apply
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-7 px-2 text-[10px]"
+							onClick={copyHex}
+						>
+							{copied ? 'Copied' : 'Copy'}
+						</Button>
+					</div>
+					{hexError && (
+						<p className="text-[10px] text-destructive mt-1">{hexError}</p>
+					)}
+				</div>
+
 				<details>
 					<summary className="text-[11px] text-muted-foreground cursor-pointer">
 						Raw 4×4 (rotation + scale)
@@ -83,7 +168,7 @@ export function Matrix44Field({
 								type="number"
 								step="any"
 								disabled={meta?.readOnly}
-								className="h-6 border rounded px-1"
+								className="h-6 rounded border border-input bg-background text-foreground px-1 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 								value={Number.isFinite(cell) ? cell.toFixed(3) : 0}
 								onChange={(e) => {
 									const v = parseFloat(e.target.value);
@@ -93,6 +178,17 @@ export function Matrix44Field({
 						))}
 					</div>
 				</details>
+
+				<div>
+					<div className="text-[10px] text-muted-foreground mb-1">
+						Rotation preview (drag to rotate)
+					</div>
+					<RotationVisualizer
+						matrix={m}
+						onChange={onChange}
+						readOnly={meta?.readOnly}
+					/>
+				</div>
 			</div>
 		</FieldShell>
 	);
