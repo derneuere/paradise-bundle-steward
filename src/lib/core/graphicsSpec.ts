@@ -131,6 +131,48 @@ export function getGraphicsSpecHeader(
  *     Matrix44, with the conventional bottom row [tx, ty, tz, 1]. The
  *     "Affine" naming is misleading.
  */
+/**
+ * Read GraphicsSpec header + inline import table directly from raw resource
+ * bytes. Used by the registry handler (which doesn't have access to the
+ * bundle-wide imports the viewer threads through `parseGraphicsSpec`).
+ *
+ * The import table trails every GraphicsSpec resource with
+ * `partsCount + shatteredGlassPartsCount` entries of 16 bytes each
+ * (u64 id + u32 ptrOffset + u32 pad), matching the size derivation in
+ * `bundle_packer_unpacker.py:665` (`muImportCount = muPartsCount +
+ * muShatteredGlassPartsCount`).
+ */
+export function parseGraphicsSpecData(
+	raw: Uint8Array,
+	_littleEndian: boolean = true,
+): ParsedGraphicsSpec {
+	if (raw.byteLength < 0x24) {
+		throw new BundleError(
+			`GraphicsSpec too small (${raw.byteLength} bytes)`,
+			'PARSE_ERROR',
+		);
+	}
+	const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+	const partsCount = dv.getUint32(0x04, true);
+	const shatteredGlassPartsCount = dv.getUint32(0x0C, true);
+	const importCount = partsCount + shatteredGlassPartsCount;
+	const importTableOffset = raw.byteLength - importCount * 16;
+	if (importTableOffset < 0x24) {
+		throw new BundleError(
+			`GraphicsSpec import table (${importCount} × 16 B) does not fit (size ${raw.byteLength})`,
+			'PARSE_ERROR',
+		);
+	}
+	const importIds: bigint[] = [];
+	for (let i = 0; i < importCount; i++) {
+		const off = importTableOffset + i * 16;
+		const lo = BigInt(dv.getUint32(off, true));
+		const hi = BigInt(dv.getUint32(off + 4, true));
+		importIds.push((hi << 32n) | lo);
+	}
+	return parseGraphicsSpec(raw, importIds);
+}
+
 export function parseGraphicsSpec(
 	header: Uint8Array,
 	importIds: bigint[],

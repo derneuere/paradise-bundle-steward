@@ -24,6 +24,10 @@ import { polygonSoupListHandler } from './handlers/polygonSoupList';
 import { modelHandler } from './handlers/model';
 import { deformationSpecHandler } from './handlers/deformationSpec';
 import { shaderHandler, shaderProgramBufferHandler } from './handlers/shader';
+import { wheelGraphicsSpecHandler } from './handlers/wheelGraphicsSpec';
+import { graphicsStubHandler } from './handlers/graphicsStub';
+import { graphicsSpecHandler } from './handlers/graphicsSpec';
+import { materialHandler } from './handlers/material';
 
 export const registry: ResourceHandler[] = [
 	aiSectionsHandler,
@@ -43,6 +47,10 @@ export const registry: ResourceHandler[] = [
 	deformationSpecHandler,
 	shaderHandler,
 	shaderProgramBufferHandler,
+	wheelGraphicsSpecHandler,
+	graphicsStubHandler,
+	graphicsSpecHandler,
+	materialHandler,
 ];
 
 const byTypeId = new Map<number, ResourceHandler>();
