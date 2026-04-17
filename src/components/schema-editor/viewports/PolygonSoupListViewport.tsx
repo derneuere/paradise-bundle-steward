@@ -347,8 +347,23 @@ export function PolygonSoupListViewport() {
 	const selectedModelIndex = ctx?.selectedModelIndex ?? 0;
 	const onSelect = ctx?.onSelect;
 	const selectedPolysInCurrentModel = ctx?.selectedPolysInCurrentModel ?? EMPTY_POLY_SELECTION;
+	const visibleModelIndexes = ctx?.visibleModelIndexes ?? null;
 
-	const batched = useMemo(() => buildGeometry(models), [models]);
+	// Nullify hidden models before geometry build — `buildGeometry` already
+	// handles null entries by emitting an empty range at that index, so this
+	// keeps model-index→triangle-range alignment intact without any other
+	// bookkeeping. `visibleModelIndexes == null` means "render everything"
+	// (back-compat for callers that don't mount the picker).
+	const effectiveModels = useMemo(() => {
+		if (visibleModelIndexes == null) return models;
+		const out: (ParsedPolygonSoupList | null)[] = new Array(models.length);
+		for (let i = 0; i < models.length; i++) {
+			out[i] = visibleModelIndexes.has(i) ? models[i] : null;
+		}
+		return out;
+	}, [models, visibleModelIndexes]);
+
+	const batched = useMemo(() => buildGeometry(effectiveModels), [effectiveModels]);
 
 	// Snapshot the base colors so re-highlights can restore the originals
 	// without rebuilding geometry.
@@ -398,9 +413,17 @@ export function PolygonSoupListViewport() {
 	};
 
 	if (batched.triangleCount === 0) {
+		let hint: string;
+		if (models.length === 0) {
+			hint = 'Loading collision meshes…';
+		} else if (visibleModelIndexes != null && visibleModelIndexes.size === 0) {
+			hint = 'All resources hidden — toggle an eye in the tree to show something.';
+		} else {
+			hint = 'No collision geometry in this bundle.';
+		}
 		return (
-			<div className="h-full flex items-center justify-center text-xs text-muted-foreground">
-				{models.length === 0 ? 'Loading collision meshes…' : 'No collision geometry in this bundle.'}
+			<div className="h-full flex items-center justify-center text-xs text-muted-foreground px-4 text-center">
+				{hint}
 			</div>
 		);
 	}

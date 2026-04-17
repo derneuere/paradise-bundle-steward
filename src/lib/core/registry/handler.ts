@@ -24,6 +24,62 @@ export type ResourceCtx = {
 	platform: number;
 };
 
+/**
+ * Minimal view of a bundle-level resource that the collection picker can
+ * use without dragging the full `UIResource` from BundleContext into the
+ * registry layer (which would create a layering inversion — core shouldn't
+ * know about UI types).
+ */
+export type PickerResourceCtx = {
+	/** Formatted u64 hex id, e.g. `0x00000000ABCD1234`. Stable across sort. */
+	id: string;
+	/** Debug-data name when present, else the `Resource_<hex>` fallback. */
+	name: string;
+	/** Position within this handler key's list in bundle order. */
+	index: number;
+};
+
+export type PickerBadge = {
+	label: string;
+	tone: 'muted' | 'warn' | 'accent';
+};
+
+export type PickerLabel = {
+	/** Primary display text — e.g. `trk_1234_col`. */
+	primary: string;
+	/** Secondary muted text — e.g. `12 soups · 3,421 tris`. */
+	secondary?: string;
+	/** Right-aligned pills. The `empty` label is treated specially by the
+	 *  tree header's "Hide empty" toggle. */
+	badges?: PickerBadge[];
+};
+
+export type PickerEntry<Model = unknown> = {
+	model: Model | null;
+	ctx: PickerResourceCtx;
+};
+
+export type PickerSortKey<Model = unknown> = {
+	id: string;
+	label: string;
+	compare(a: PickerEntry<Model>, b: PickerEntry<Model>): number;
+};
+
+/**
+ * Per-handler config consumed by the tree-embedded collection picker when
+ * a bundle contains >1 resource of this type. Optional — handlers whose
+ * bundles only ever have one resource (TrafficData, StreetData) skip it.
+ */
+export type PickerConfig<Model = unknown> = {
+	labelOf(model: Model | null, ctx: PickerResourceCtx): PickerLabel;
+	sortKeys: PickerSortKey<Model>[];
+	/** Id of the sort key to use by default. Must match one of `sortKeys[i].id`. */
+	defaultSort: string;
+	/** Returns text matched against the user's filter query. Defaults to the
+	 *  primary label if omitted. */
+	searchText?(model: Model | null, ctx: PickerResourceCtx): string;
+};
+
 export interface ResourceHandler<Model = unknown> {
 	readonly typeId: number;
 	/** Stable slug used in JSON dumps, CLI --type flags, and UI route paths. */
@@ -32,6 +88,12 @@ export interface ResourceHandler<Model = unknown> {
 	readonly description: string;
 	readonly category: ResourceCategory;
 	readonly caps: HandlerCaps;
+
+	/**
+	 * Optional picker config for the tree-embedded resource switcher. Only
+	 * consulted when the bundle has >1 resource with this handler's typeId.
+	 */
+	picker?: PickerConfig<Model>;
 
 	/**
 	 * Decode already-extracted, already-decompressed raw resource bytes into

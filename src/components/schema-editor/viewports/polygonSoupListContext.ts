@@ -43,6 +43,11 @@ export type PolygonSoupListContextValue = {
 	 *  selection. Keys are `encodeSoupPoly(soup, poly)`. The viewport tints
 	 *  every matching triangle so the user can see their selection in 3D. */
 	selectedPolysInCurrentModel: ReadonlySet<number>;
+	/** Bundle-order model indexes that are currently visible in the 3D view.
+	 *  Models whose index is NOT in this set are skipped during geometry
+	 *  upload. When `null` every model is rendered (back-compat for callers
+	 *  that haven't wired the picker yet). */
+	visibleModelIndexes?: ReadonlySet<number> | null;
 };
 
 export const PolygonSoupListContext = createContext<PolygonSoupListContextValue | null>(null);

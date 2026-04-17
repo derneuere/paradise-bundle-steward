@@ -5,7 +5,7 @@
 // coordinate on lives here; anything that's local concern (expand/collapse,
 // filter text) stays in the component.
 
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { ResourceSchema } from '@/lib/schema/types';
 import {
 	applyDerives,
@@ -80,7 +80,27 @@ type ProviderProps = {
 	resource: ResourceSchema;
 	data: unknown;
 	onChange: (next: unknown) => void;
+	/**
+	 * Uncontrolled initial selection. Only read on first mount — use the
+	 * controlled `selectedPath` / `onSelectedPathChange` pair below when the
+	 * page needs to drive selection externally (e.g., a multi-resource page
+	 * switching resources without tearing down the viewport).
+	 */
 	initialPath?: NodePath;
+	/**
+	 * Controlled selection. When provided, the provider stops managing its
+	 * own `selectedPath` state and mirrors this prop. Pair with
+	 * `onSelectedPathChange` to receive updates from clicks inside the
+	 * editor.
+	 *
+	 * Whether the provider is controlled or uncontrolled is determined by
+	 * whether `selectedPath` is `undefined` on first render — flipping
+	 * between controlled and uncontrolled across renders is not supported
+	 * and produces a dev-only warning.
+	 */
+	selectedPath?: NodePath;
+	/** Controlled selection setter. Required when `selectedPath` is provided. */
+	onSelectedPathChange?: (next: NodePath) => void;
 	extensions?: ExtensionRegistry;
 	children: React.ReactNode;
 };
@@ -90,10 +110,25 @@ export function SchemaEditorProvider({
 	data,
 	onChange,
 	initialPath = [],
+	selectedPath: controlledPath,
+	onSelectedPathChange,
 	extensions,
 	children,
 }: ProviderProps) {
-	const [selectedPath, setSelectedPath] = useState<NodePath>(initialPath);
+	// Decide once per mount whether this provider is controlled. Flipping
+	// between controlled / uncontrolled would require swapping where the
+	// selection lives mid-flight, which React discourages and no call site
+	// in this repo needs; warn in dev and stick with the initial mode.
+	const isControlledRef = useRef<boolean>(controlledPath !== undefined);
+	if (import.meta.env?.DEV && isControlledRef.current !== (controlledPath !== undefined)) {
+		console.warn(
+			'SchemaEditorProvider: `selectedPath` switched between controlled and uncontrolled between renders. The initial mode is kept.',
+		);
+	}
+	const isControlled = isControlledRef.current;
+
+	const [internalPath, setInternalPath] = useState<NodePath>(initialPath);
+	const selectedPath = isControlled ? (controlledPath ?? []) : internalPath;
 
 	// Resolve the schema at the current selection every time selection or
 	// resource changes. Cheap — just walks record fields.
@@ -102,9 +137,22 @@ export function SchemaEditorProvider({
 		[resource, selectedPath],
 	);
 
-	const selectPath = useCallback((path: NodePath) => {
-		setSelectedPath(path);
-	}, []);
+	// Single write funnel used by every mutation path below — routes to the
+	// parent's setter in controlled mode or to local state otherwise.
+	const writeSelection = useCallback(
+		(path: NodePath) => {
+			if (isControlled) onSelectedPathChange?.(path);
+			else setInternalPath(path);
+		},
+		[isControlled, onSelectedPathChange],
+	);
+
+	const selectPath = useCallback(
+		(path: NodePath) => {
+			writeSelection(path);
+		},
+		[writeSelection],
+	);
 
 	const getAtPathFn = useCallback(
 		(path: NodePath) => getAtPath(data, path),
@@ -161,8 +209,9 @@ export function SchemaEditorProvider({
 					const maybeIndex = selectedPath[listPath.length];
 					if (typeof maybeIndex === 'number' && maybeIndex >= index) {
 						// Drop back to the list node itself — safest, avoids
-						// pointing at a now-stale sibling.
-						setSelectedPath(listPath);
+						// pointing at a now-stale sibling. Routes through the
+						// controlled/uncontrolled-aware setter.
+						writeSelection(listPath);
 					}
 				}
 			}

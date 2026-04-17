@@ -8,7 +8,25 @@ import {
 	type PolygonSoupPoly,
 	type PolygonSoupVertex,
 } from '../../polygonSoupList';
-import type { ResourceHandler } from '../handler';
+import type { PickerEntry, ResourceHandler } from '../handler';
+
+// Natural-order collator so `trk_2_*` sorts before `trk_10_*` rather than
+// lexicographic `trk_10_*` < `trk_2_*`. Shared across every sort key that
+// compares resource names.
+const NATURAL_NAME = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function countTriangles(model: ParsedPolygonSoupList | null): number {
+	if (model == null) return 0;
+	let tris = 0;
+	for (const s of model.soups) {
+		for (const p of s.polygons) tris += p.vertexIndices[3] === 0xFF ? 1 : 2;
+	}
+	return tris;
+}
+
+function compareByName(a: PickerEntry<ParsedPolygonSoupList>, b: PickerEntry<ParsedPolygonSoupList>): number {
+	return NATURAL_NAME.compare(a.ctx.name, b.ctx.name);
+}
 
 /**
  * Clone a soup deeply enough that mutating the copy can't affect the
@@ -91,6 +109,63 @@ export const polygonSoupListHandler: ResourceHandler<ParsedPolygonSoupList> = {
 		}
 		return `${model.soups.length} soups, ${polys} polys, ${verts} verts, dataSize ${model.dataSize}`;
 	},
+
+	// WORLDCOL.BIN ships ~200 PSL resources, ~160 of them empty stubs and the
+	// rest named by track unit via debug XML (e.g. `trk_unit_XXX_col`). The
+	// picker lets the user sort by name, populate-first, or size metrics so
+	// the interesting ones surface without scrolling a fixed-position dropdown.
+	picker: {
+		labelOf(model, { name }) {
+			const soupCount = model?.soups.length ?? 0;
+			const tris = countTriangles(model);
+			if (model == null) {
+				return {
+					primary: name,
+					secondary: 'parse failed',
+					badges: [{ label: 'parse failed', tone: 'warn' }],
+				};
+			}
+			if (soupCount === 0) {
+				return {
+					primary: name,
+					secondary: 'no geometry',
+					badges: [{ label: 'empty', tone: 'muted' }],
+				};
+			}
+			return {
+				primary: name,
+				secondary: `${soupCount} soup${soupCount === 1 ? '' : 's'} · ${tris.toLocaleString()} tris`,
+			};
+		},
+		sortKeys: [
+			{
+				id: 'populated',
+				label: 'Non-empty first, then name',
+				// Populated < empty < parse-failed, ties broken by natural-order name.
+				compare: (a, b) => {
+					const rank = (e: PickerEntry<ParsedPolygonSoupList>) =>
+						e.model == null ? 2 : e.model.soups.length === 0 ? 1 : 0;
+					const dr = rank(a) - rank(b);
+					return dr !== 0 ? dr : compareByName(a, b);
+				},
+			},
+			{ id: 'name', label: 'Name (A→Z)', compare: compareByName },
+			{ id: 'index', label: 'Bundle order', compare: (a, b) => a.ctx.index - b.ctx.index },
+			{
+				id: 'tris-desc',
+				label: 'Triangles (high→low)',
+				compare: (a, b) => countTriangles(b.model) - countTriangles(a.model),
+			},
+			{
+				id: 'soups-desc',
+				label: 'Soup count (high→low)',
+				compare: (a, b) => (b.model?.soups.length ?? 0) - (a.model?.soups.length ?? 0),
+			},
+		],
+		defaultSort: 'populated',
+		searchText: (_m, { name }) => name,
+	},
+
 	fixtures: [
 		{
 			bundle: 'example/WORLDCOL.BIN',

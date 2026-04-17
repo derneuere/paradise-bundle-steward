@@ -8,6 +8,16 @@
 // viewport also switches the active resource and navigates the tree to the
 // clicked polygon.
 //
+// Collection picker:
+// When the bundle has >1 PSL resource the HierarchyTree consumes a
+// MultiResourcePickerContext provided here, which gives it:
+//   - Sort / search / hide-empty controls in its header
+//   - One top-level row per resource (with an eye icon to toggle viewport
+//     visibility, alt-click to solo)
+//   - Click-to-select semantics that swap the inspector to that resource
+// Visibility is decoupled from selection: the user can hide the resource
+// they're editing, or leave other resources rendered in context.
+//
 // Bulk edit:
 // Ctrl/Cmd+clicking polygon rows in the hierarchy tree toggles them in a
 // bulk selection. The "Bulk edit" side panel only appears while that
@@ -15,19 +25,30 @@
 // collision-tag field on every selected polygon at once, leaving all
 // other fields per-polygon untouched. The 3D viewport mirrors the bulk
 // selection as an amber tint so the user can see which polys they're
-// editing in context. Switching resources (via the dropdown or a
-// cross-model viewport click) clears the bulk selection.
+// editing in context. Switching resources clears the bulk selection.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useBundle } from '@/context/BundleContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
+import {
+	MultiResourcePickerContext,
+	type MultiResourcePickerValue,
+	type PickerRow,
+} from '@/components/schema-editor/multiResourcePickerContext';
+import {
+	ShortcutsHelp,
+	PICKER_SHORTCUTS,
+	SCHEMA_TREE_SHORTCUTS,
+	BULK_SHORTCUTS,
+	type ShortcutGroup,
+} from '@/components/schema-editor/ShortcutsHelp';
 import { polygonSoupListResourceSchema } from '@/lib/schema/resources/polygonSoupList';
+import { polygonSoupListHandler } from '@/lib/core/registry/handlers/polygonSoupList';
 import type { ParsedPolygonSoupList, PolygonSoup, PolygonSoupPoly } from '@/lib/core/polygonSoupList';
 import {
 	PolygonSoupListContext,
@@ -51,20 +72,28 @@ import {
 	TRAFFIC_INFO_MAX,
 } from '@/lib/core/collisionTag';
 import type { NodePath } from '@/lib/schema/walk';
+import type { PickerEntry, PickerResourceCtx } from '@/lib/core/registry/handler';
 
-// Build a dropdown label for a PSL resource. Shows the resource index, soup
-// count, and total triangle count so the user can pick the interesting ones
-// (the 159 empty stubs in WORLDCOL get a " · empty" suffix).
-function pslLabel(model: ParsedPolygonSoupList | null, index: number): string {
-	if (model == null) return `#${index} · parse failed`;
-	const soupCount = model.soups.length;
-	if (soupCount === 0) return `#${index} · empty`;
-	let triCount = 0;
-	for (const s of model.soups) {
-		for (const p of s.polygons) triCount += p.vertexIndices[3] === 0xFF ? 1 : 2;
-	}
-	return `#${index} · ${soupCount} soup${soupCount === 1 ? '' : 's'} · ${triCount.toLocaleString()} tris`;
-}
+const PSL_TYPE_ID = 0x43;
+const PSL_HANDLER_KEY = 'polygonSoupList';
+
+// Shortcuts surfaced in the page's "Shortcuts" popover. Shared presets cover
+// the picker / tree / bulk gestures; the viewport group is PSL-specific
+// because only this editor has a 3D scene that raycasts back to a polygon.
+const PSL_SHORTCUT_GROUPS: ShortcutGroup[] = [
+	PICKER_SHORTCUTS,
+	SCHEMA_TREE_SHORTCUTS,
+	{
+		title: '3D viewport',
+		items: [
+			{ keys: ['Click', 'polygon'], label: 'Jump the inspector to that polygon (and switch resources if needed)' },
+			{ keys: ['Drag'], label: 'Orbit the camera around the scene' },
+			{ keys: ['Right-Drag'], label: 'Pan' },
+			{ keys: ['Scroll'], label: 'Zoom in / out' },
+		],
+	},
+	BULK_SHORTCUTS,
+];
 
 // ---------------------------------------------------------------------------
 // Path / key helpers
@@ -152,46 +181,166 @@ function foldBulk(polys: PolygonSoupPoly[]): BulkSummary {
 // ---------------------------------------------------------------------------
 
 const PolygonSoupListPage = () => {
-	const { getResources, setResourceAt } = useBundle();
-	const models = getResources<ParsedPolygonSoupList>('polygonSoupList');
+	const { getResources, setResourceAt, resources: uiResources } = useBundle();
+	const models = getResources<ParsedPolygonSoupList>(PSL_HANDLER_KEY);
 
-	// Default to the first populated resource so the schema editor opens on
-	// something useful instead of the 48-byte empty stub at index 0.
-	const firstPopulated = useMemo(() => {
-		for (let i = 0; i < models.length; i++) {
-			if (models[i] && (models[i] as ParsedPolygonSoupList).soups.length > 0) return i;
-		}
-		return 0;
-	}, [models]);
-
-	const [selectedIndex, setSelectedIndex] = useState<number>(firstPopulated);
-	// Initial path for the schema editor — re-keyed whenever the selected
-	// resource changes so the SchemaEditorProvider remounts with fresh state.
-	// Viewport click → (modelIndex, soupIndex, polyIndex) populates this to
-	// navigate the tree to the clicked polygon on the first render after
-	// the resource swap.
-	const [initialPath, setInitialPath] = useState<(string | number)[]>([]);
-
-	// Bulk selection for the current resource. Keyed by pathKey so the
-	// HierarchyTree can cheaply check membership via `bulkPathKeys.has(...)`.
-	// Cleared on resource change (see `switchResource` below).
-	const [bulkPaths, setBulkPaths] = useState<ReadonlySet<string>>(() => new Set());
-
-	const currentModel = models[selectedIndex] ?? null;
-
-	const handleChange = useCallback(
-		(next: unknown) => setResourceAt('polygonSoupList', selectedIndex, next),
-		[setResourceAt, selectedIndex],
+	// Correlate parsed models with their bundle-level UIResource (carries
+	// debug-name, id, flags). parseAllBundleResourcesViaRegistry walks
+	// `bundle.resources` in order and appends to each handler's list, so the
+	// Nth PSL model matches the Nth PSL-typed UIResource.
+	const pslUIResources = useMemo(
+		() => uiResources.filter((r) => r.raw?.resourceTypeId === PSL_TYPE_ID),
+		[uiResources],
 	);
 
-	// Central place to switch the active resource. Clears the bulk selection
-	// because it's scoped to whichever resource the tree is currently showing.
-	const switchResource = useCallback((nextIndex: number, nextInitialPath: (string | number)[] = []) => {
+	// Build the per-model picker ctx once so the handler's labelOf / sortKey
+	// compare functions see stable object identities. Lengths can diverge if
+	// a parse fails and falls through to null — fall back to `Resource_<idx>`
+	// when the UIResource is missing.
+	const pickerCtxs = useMemo<PickerResourceCtx[]>(() => {
+		const out: PickerResourceCtx[] = [];
+		for (let i = 0; i < models.length; i++) {
+			const ui = pslUIResources[i];
+			out.push({
+				id: ui?.id ?? `__psl:${i}__`,
+				name: ui?.name ?? `Resource_${i}`,
+				index: i,
+			});
+		}
+		return out;
+	}, [models.length, pslUIResources]);
+
+	// -------------------------------------------------------------------------
+	// Picker state (sort / search / hide-empty / visibility / selection)
+	// -------------------------------------------------------------------------
+
+	const [sortKey, setSortKey] = useState<string>(
+		polygonSoupListHandler.picker?.defaultSort ?? 'index',
+	);
+	const [searchQuery, setSearchQuery] = useState('');
+	const [hideEmpty, setHideEmpty] = useState(false);
+
+	// Visibility state. Default everything visible when a bundle loads; a
+	// ref tracks which bundle's visibility set we have so swapping bundles
+	// re-initializes cleanly without resurrecting a prior bundle's hides.
+	const initBundleRef = useRef<number>(0);
+	const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
+	useEffect(() => {
+		if (pickerCtxs.length === 0) return;
+		// Reset when the PSL resource set changes (new bundle or reparse).
+		const bundleKey = pickerCtxs.map((c) => c.id).join('|').length;
+		if (initBundleRef.current !== bundleKey) {
+			initBundleRef.current = bundleKey;
+			setVisibleIds(new Set(pickerCtxs.map((c) => c.id)));
+		}
+	}, [pickerCtxs]);
+
+	// Selection lives here so the tree-embedded picker and the viewport
+	// click handler stay in sync. Seeded lazily on first non-empty models
+	// list so we don't pick index 0 before we know the sort order.
+	// `selectedPath` is driven in controlled mode on SchemaEditorProvider —
+	// this is what lets us switch the edited resource without remounting
+	// the 3D viewport (which would tear down the WebGL context, force
+	// geometry rebuild, and snap the camera back to the auto-fit pose).
+	const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+	const [selectedPath, setSelectedPath] = useState<NodePath>([]);
+	const [bulkPaths, setBulkPaths] = useState<ReadonlySet<string>>(() => new Set());
+
+	// -------------------------------------------------------------------------
+	// Build sorted + filtered picker rows
+	// -------------------------------------------------------------------------
+
+	const pickerConfig = polygonSoupListHandler.picker!;
+
+	const allEntries = useMemo<PickerEntry<ParsedPolygonSoupList>[]>(
+		() => models.map((m, i) => ({ model: m, ctx: pickerCtxs[i] })),
+		[models, pickerCtxs],
+	);
+
+	const sortedEntries = useMemo(() => {
+		const active = pickerConfig.sortKeys.find((k) => k.id === sortKey) ?? pickerConfig.sortKeys[0];
+		return [...allEntries].sort((a, b) => active.compare(a, b));
+	}, [allEntries, sortKey, pickerConfig]);
+
+	const filteredEntries = useMemo(() => {
+		const q = searchQuery.trim().toLowerCase();
+		const textOf = pickerConfig.searchText ?? ((_m: unknown, ctx: PickerResourceCtx) => ctx.name);
+		return sortedEntries.filter((e) => {
+			if (hideEmpty) {
+				const label = pickerConfig.labelOf(e.model, e.ctx);
+				if (label.badges?.some((b) => b.label === 'empty')) return false;
+			}
+			if (!q) return true;
+			return textOf(e.model, e.ctx).toLowerCase().includes(q);
+		});
+	}, [sortedEntries, searchQuery, hideEmpty, pickerConfig]);
+
+	// Seed selection on first non-empty entry list. Defaulting to the first
+	// sorted + populated row matches the old `firstPopulated` behavior
+	// without the extra useMemo dance.
+	useEffect(() => {
+		if (selectedIndex !== -1) return;
+		if (sortedEntries.length === 0) return;
+		const firstPopulated = sortedEntries.find((e) => e.model != null && e.model.soups.length > 0);
+		const target = firstPopulated ?? sortedEntries[0];
+		setSelectedIndex(target.ctx.index);
+	}, [sortedEntries, selectedIndex]);
+
+	// Always include the selected resource in the picker rows, even when a
+	// filter would hide it — otherwise the tree's subtree dangles with no
+	// parent row above it. Users who don't want it visible can pick
+	// something else first.
+	const pickerRows = useMemo<PickerRow[]>(() => {
+		const rows = filteredEntries.map<PickerRow>((e) => ({
+			modelIndex: e.ctx.index,
+			ctx: e.ctx,
+			model: e.model,
+			label: pickerConfig.labelOf(e.model, e.ctx),
+			visible: visibleIds.has(e.ctx.id),
+		}));
+		if (selectedIndex >= 0 && !rows.some((r) => r.modelIndex === selectedIndex)) {
+			const sel = allEntries[selectedIndex];
+			if (sel) {
+				rows.unshift({
+					modelIndex: sel.ctx.index,
+					ctx: sel.ctx,
+					model: sel.model,
+					label: pickerConfig.labelOf(sel.model, sel.ctx),
+					visible: visibleIds.has(sel.ctx.id),
+				});
+			}
+		}
+		return rows;
+	}, [filteredEntries, allEntries, selectedIndex, visibleIds, pickerConfig]);
+
+	// Bundle-order indexes the viewport should actually render. Derived from
+	// `visibleIds` rather than `pickerRows` so hidden-by-filter resources
+	// don't disappear from the 3D scene when the user types in the search
+	// box.
+	const visibleModelIndexes = useMemo<Set<number>>(() => {
+		const out = new Set<number>();
+		for (const ctx of pickerCtxs) {
+			if (visibleIds.has(ctx.id)) out.add(ctx.index);
+		}
+		return out;
+	}, [pickerCtxs, visibleIds]);
+
+	// -------------------------------------------------------------------------
+	// Selection / visibility handlers
+	// -------------------------------------------------------------------------
+
+	// Used by the picker rows, the 3D viewport click handler, and the initial
+	// seed effect above. `nextPath` replaces the previous "initialPath" state:
+	// with controlled selection it's just the next `selectedPath`, applied
+	// even when `nextIndex === prev` (so clicking a polygon in the currently
+	// open resource still navigates the hierarchy tree — previously a no-op
+	// because the key-based remount didn't trigger).
+	const switchResource = useCallback((nextIndex: number, nextPath: NodePath = []) => {
 		setSelectedIndex((prev) => {
 			if (prev !== nextIndex) setBulkPaths(new Set());
 			return nextIndex;
 		});
-		setInitialPath(nextInitialPath);
+		setSelectedPath(nextPath);
 	}, []);
 
 	const handleViewportSelect = useCallback(
@@ -199,6 +348,41 @@ const PolygonSoupListPage = () => {
 			switchResource(modelIndex, ['soups', soupIndex, 'polygons', polyIndex]);
 		},
 		[switchResource],
+	);
+
+	const onToggleVisible = useCallback((resourceId: string) => {
+		setVisibleIds((prev) => {
+			const next = new Set(prev);
+			if (next.has(resourceId)) next.delete(resourceId);
+			else next.add(resourceId);
+			return next;
+		});
+	}, []);
+
+	// Alt-click = solo. First press hides everything except `resourceId`.
+	// If that resource is already soloed (it's the only visible one),
+	// pressing again restores full visibility — the quickest way back to
+	// the full scene without having to click every eye in turn.
+	const onSoloVisible = useCallback(
+		(resourceId: string) => {
+			setVisibleIds((prev) => {
+				const onlySelf = prev.size === 1 && prev.has(resourceId);
+				if (onlySelf) return new Set(pickerCtxs.map((c) => c.id));
+				return new Set([resourceId]);
+			});
+		},
+		[pickerCtxs],
+	);
+
+	// -------------------------------------------------------------------------
+	// Bulk-edit wiring (unchanged from pre-picker layout)
+	// -------------------------------------------------------------------------
+
+	const currentModel = selectedIndex >= 0 ? (models[selectedIndex] ?? null) : null;
+
+	const handleChange = useCallback(
+		(next: unknown) => setResourceAt(PSL_HANDLER_KEY, selectedIndex, next),
+		[setResourceAt, selectedIndex],
 	);
 
 	const onBulkToggle = useCallback((path: NodePath) => {
@@ -215,9 +399,6 @@ const PolygonSoupListPage = () => {
 
 	const clearBulk = useCallback(() => setBulkPaths(new Set()), []);
 
-	// Viewport-friendly set: encodeSoupPoly(s, p) for each entry. Since the
-	// bulk selection is always scoped to the current resource, every entry
-	// belongs in this model.
 	const selectedPolysInCurrentModel = useMemo(() => {
 		const s = new Set<number>();
 		for (const key of bulkPaths) {
@@ -227,9 +408,6 @@ const PolygonSoupListPage = () => {
 		return s;
 	}, [bulkPaths]);
 
-	// Resolve the actual PolygonSoupPoly refs for the bulk panel. Stale
-	// entries (pointing at a soup/poly that no longer exists) are silently
-	// dropped — they can linger if a mutation shrinks a soup's polygons list.
 	const selectedPolyRecords = useMemo(() => {
 		if (!currentModel) return [];
 		const out: { key: string; addr: PolyAddress; ref: PolygonSoupPoly }[] = [];
@@ -250,10 +428,6 @@ const PolygonSoupListPage = () => {
 		[selectedPolyRecords],
 	);
 
-	// Apply one field-level setter to every polygon in the bulk selection.
-	// Clones only the soups that actually contain a selected polygon so the
-	// rest of the resource stays structurally shared and the writer skips
-	// re-emission on unchanged regions.
 	const applyBulk = useCallback(
 		(updater: (raw: number) => number) => {
 			if (!currentModel || selectedPolyRecords.length === 0) return;
@@ -275,17 +449,53 @@ const PolygonSoupListPage = () => {
 				...currentModel,
 				soups: currentModel.soups.map((s, i) => soupPatches.get(i) ?? s),
 			};
-			setResourceAt('polygonSoupList', selectedIndex, next);
+			setResourceAt(PSL_HANDLER_KEY, selectedIndex, next);
 		},
 		[currentModel, selectedPolyRecords, selectedIndex, setResourceAt],
 	);
 
-	// Stable bulk context value for the tree. Re-created only when bulkPaths
-	// or onBulkToggle identity changes, so tree rows don't thrash.
 	const bulkSelectionContextValue = useMemo(
 		() => ({ bulkPathKeys: bulkPaths, onBulkToggle }),
 		[bulkPaths, onBulkToggle],
 	);
+
+	// -------------------------------------------------------------------------
+	// Picker context value
+	// -------------------------------------------------------------------------
+
+	const pickerContextValue = useMemo<MultiResourcePickerValue | null>(() => {
+		if (models.length <= 1) return null;
+		return {
+			handlerKey: PSL_HANDLER_KEY,
+			rows: pickerRows,
+			selectedModelIndex: selectedIndex,
+			onSelectModel: (i) => switchResource(i, []),
+			onToggleVisible,
+			onSoloVisible,
+			sortKey,
+			onSortKeyChange: setSortKey,
+			sortKeys: pickerConfig.sortKeys,
+			searchQuery,
+			onSearchQueryChange: setSearchQuery,
+			hideEmpty,
+			onHideEmptyChange: setHideEmpty,
+		};
+	}, [
+		models.length,
+		pickerRows,
+		selectedIndex,
+		switchResource,
+		onToggleVisible,
+		onSoloVisible,
+		sortKey,
+		pickerConfig.sortKeys,
+		searchQuery,
+		hideEmpty,
+	]);
+
+	// -------------------------------------------------------------------------
+	// Early-outs
+	// -------------------------------------------------------------------------
 
 	if (models.length === 0) {
 		return (
@@ -300,6 +510,12 @@ const PolygonSoupListPage = () => {
 				</CardContent>
 			</Card>
 		);
+	}
+
+	if (selectedIndex < 0) {
+		// Selection is still being seeded on first render — render nothing
+		// visible rather than mounting the schema editor with a bogus model.
+		return null;
 	}
 
 	if (!currentModel) {
@@ -322,31 +538,19 @@ const PolygonSoupListPage = () => {
 
 	return (
 		<div className="h-full min-h-0 flex flex-col gap-3">
-			<div className="flex items-center gap-4 shrink-0">
-				<div className="flex-1">
+			<div className="shrink-0">
+				<div className="flex items-center gap-3">
 					<h2 className="text-lg font-semibold">Polygon Soup List — Schema Editor</h2>
-					<p className="text-xs text-muted-foreground">
-						Collision mesh resource (0x43). Click a polygon in the 3D view to open it in the inspector. Hold <kbd className="px-1 py-0.5 bg-muted rounded border text-[10px] font-mono">Ctrl</kbd>/<kbd className="px-1 py-0.5 bg-muted rounded border text-[10px] font-mono">⌘</kbd> while clicking polygons in the hierarchy tree to build a bulk selection.
-					</p>
+					<ShortcutsHelp groups={PSL_SHORTCUT_GROUPS} />
 				</div>
-				<div className="flex items-center gap-2">
-					<span className="text-xs text-muted-foreground">Resource</span>
-					<Select
-						value={String(selectedIndex)}
-						onValueChange={(v) => switchResource(Number(v), [])}
-					>
-						<SelectTrigger className="h-8 w-72">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent className="max-h-[60vh]">
-							{models.map((m, i) => (
-								<SelectItem key={i} value={String(i)}>
-									{pslLabel(m as ParsedPolygonSoupList | null, i)}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				</div>
+				<p className="text-xs text-muted-foreground mt-1">
+					Per-track-unit collision geometry (resource type 0x43). WORLDCOL.BIN bundles one PolygonSoupList
+					per chunk of the open world, each carrying packed vertex data, triangle / quad polygons, and an
+					AABB tree for broad-phase hit-testing. Every polygon's collision tag encodes a surface ID (road,
+					wall, vegetation, …), gameplay flags (fatal / driveable / superfatal) and an index back into the
+					AISections resource that drives traffic AI — so edits here ripple into physics behaviour and AI
+					routing at runtime.
+				</p>
 			</div>
 			<div className="flex-1 min-h-0 flex gap-3">
 				<div className="flex-1 min-w-0">
@@ -356,23 +560,27 @@ const PolygonSoupListPage = () => {
 							selectedModelIndex: selectedIndex,
 							onSelect: handleViewportSelect,
 							selectedPolysInCurrentModel,
+							visibleModelIndexes,
 						}}
 					>
-						<SchemaBulkSelectionContext.Provider value={bulkSelectionContextValue}>
-							<SchemaEditorProvider
-								// Key on selectedIndex so the provider remounts with a fresh
-								// initialPath whenever the user (or the viewport) picks a
-								// different resource.
-								key={`psl-${selectedIndex}`}
-								resource={polygonSoupListResourceSchema}
-								data={currentModel}
-								onChange={handleChange}
-								initialPath={initialPath}
-								extensions={polygonSoupListExtensions}
-							>
-								<SchemaEditor />
-							</SchemaEditorProvider>
-						</SchemaBulkSelectionContext.Provider>
+						<MultiResourcePickerContext.Provider value={pickerContextValue}>
+							<SchemaBulkSelectionContext.Provider value={bulkSelectionContextValue}>
+								<SchemaEditorProvider
+									// Controlled selection: the page owns `selectedPath`
+									// alongside `selectedIndex`, so switching resources
+									// doesn't remount the provider (and, crucially, the
+									// 3D viewport underneath it).
+									resource={polygonSoupListResourceSchema}
+									data={currentModel}
+									onChange={handleChange}
+									selectedPath={selectedPath}
+									onSelectedPathChange={setSelectedPath}
+									extensions={polygonSoupListExtensions}
+								>
+									<SchemaEditor />
+								</SchemaEditorProvider>
+							</SchemaBulkSelectionContext.Provider>
+						</MultiResourcePickerContext.Provider>
 					</PolygonSoupListContext.Provider>
 				</div>
 				{bulkActive && (

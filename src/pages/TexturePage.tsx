@@ -1,38 +1,36 @@
 // Schema-driven editor for Texture resources (type 0x0).
 //
-// Bundles like VEH_CARBRWDS_GR.BIN hold hundreds of Texture resources — the
-// old gallery page showed every one at once, but the schema editor is
-// per-resource. This page follows the same pattern as PolygonSoupListPage:
+// Vehicle bundles (e.g. VEH_CARBRWDS_GR.BIN) hold hundreds of Texture
+// resources — diffuse / normal / spec / masks at several LODs per mesh
+// group. This page uses the tree-embedded collection picker to let the
+// user sort by name, format, or pixel count and filter by either; the
+// selected texture drives the 2D preview in TextureViewport and the
+// header fields shown in the inspector.
 //
-//   - `getResources<ParsedTextureHeader>('texture')` lists every parsed
-//     header in the loaded bundle, indexed in resource-order.
-//   - A dropdown above the 3-pane SchemaEditor picks which one the editor
-//     should open. The preview viewport re-decodes pixel data for the
-//     selected texture on every selection change.
-//   - TextureContext carries the decoded RGBA payload + the active index
-//     into TextureViewport (the center pane), which is where the 2D
-//     preview lives. The schema editor's left tree is minimal (single
-//     record) and the inspector shows the header fields.
-//
-// Edits to the schema's header fields are kept in memory (setResourceAt),
-// but the texture handler is read-only so they're silently dropped on
-// export. Every field is marked readOnly in the schema to make that
-// behavior visible in the UI — users see a rendered value rather than an
-// editable input.
+// The header is all this page edits. Pixel decode happens on demand in
+// the viewport via decodeTexture(); edits to header fields are kept in
+// memory (setResourceAt) but the handler is read-only, so they're
+// dropped on export. Every field is marked readOnly in the schema to
+// make that behavior visible.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from '@/components/ui/select';
 import { useBundle } from '@/context/BundleContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
+import {
+	MultiResourcePickerContext,
+	type MultiResourcePickerValue,
+	type PickerRow,
+} from '@/components/schema-editor/multiResourcePickerContext';
+import {
+	ShortcutsHelp,
+	PICKER_SHORTCUTS,
+	SCHEMA_TREE_SHORTCUTS,
+	type ShortcutGroup,
+} from '@/components/schema-editor/ShortcutsHelp';
 import { textureResourceSchema } from '@/lib/schema/resources/texture';
+import { textureHandler } from '@/lib/core/registry/handlers/texture';
 import {
 	TEXTURE_TYPE_ID,
 	decodeTexture,
@@ -43,66 +41,161 @@ import {
 	type TextureContextValue,
 	type TextureDecodeResult,
 } from '@/components/schema-editor/viewports/textureContext';
-import { u64ToBigInt } from '@/lib/core/u64';
+import type { NodePath } from '@/lib/schema/walk';
+import type { PickerEntry, PickerResourceCtx } from '@/lib/core/registry/handler';
 
-// Build a dropdown label for one texture resource. Shows the bundle index,
-// resource id (hex), dimensions, and format so the user can tell similar
-// textures apart (`64x64 DXT1 · body base` vs `128x128 DXT5 · body normal`
-// etc.). Only the header is available here — the pre-migration page surfaced
-// the same fields in its grid metadata strip.
-function textureLabel(
-	header: ParsedTextureHeader | null,
-	resourceIdHex: string,
-	index: number,
-): string {
-	if (header == null) {
-		return `#${index} · ${resourceIdHex} · parse failed`;
-	}
-	return `#${index} · ${resourceIdHex} · ${header.width}×${header.height} · ${header.format}`;
-}
+const TEXTURE_HANDLER_KEY = 'texture';
+
+const TEXTURE_SHORTCUT_GROUPS: ShortcutGroup[] = [
+	PICKER_SHORTCUTS,
+	SCHEMA_TREE_SHORTCUTS,
+];
 
 const TexturePage = () => {
-	const { getResources, setResourceAt, loadedBundle, originalArrayBuffer } = useBundle();
-	const headers = getResources<ParsedTextureHeader>('texture');
+	const { getResources, setResourceAt, loadedBundle, originalArrayBuffer, resources: uiResources } = useBundle();
+	const headers = getResources<ParsedTextureHeader>(TEXTURE_HANDLER_KEY);
 
-	// The resources the UI dropdown maps onto. `getResources('texture')`
-	// gives us one model per resource in bundle order, but we also need the
-	// ResourceEntry itself so `decodeTexture` can find block 1 (the pixel
-	// block) on demand.
+	// The resources the decoder maps onto. `getResources('texture')` gives
+	// us one model per resource in bundle order, but the decoder also needs
+	// the ResourceEntry itself so it can find block 1 (the pixel block).
 	const textureResources = useMemo(() => {
 		if (!loadedBundle) return [];
 		return loadedBundle.resources.filter((r) => r.resourceTypeId === TEXTURE_TYPE_ID);
 	}, [loadedBundle]);
 
-	// Pre-format the resource ids once — 16-char upper-hex strings match the
-	// byResourceId keys used elsewhere in the codebase, which makes the
-	// dropdown values stable across sessions even if bundle order changes.
-	const resourceIdHex = useMemo(
-		() =>
-			textureResources.map((r) =>
-				u64ToBigInt(r.resourceId).toString(16).toUpperCase().padStart(16, '0'),
-			),
-		[textureResources],
+	// Pair parsed headers with their bundle-level UIResource so the picker
+	// labelOf / searchText callbacks get the debug name + formatted hex id.
+	const textureUIResources = useMemo(
+		() => uiResources.filter((r) => r.raw?.resourceTypeId === TEXTURE_TYPE_ID),
+		[uiResources],
 	);
 
-	// Default to the first successfully-parsed texture so the inspector opens
-	// on something renderable instead of a parse-error stub.
-	const firstParsed = useMemo(() => {
+	const pickerCtxs = useMemo<PickerResourceCtx[]>(() => {
+		const out: PickerResourceCtx[] = [];
 		for (let i = 0; i < headers.length; i++) {
-			if (headers[i] != null) return i;
+			const ui = textureUIResources[i];
+			out.push({
+				id: ui?.id ?? `__texture:${i}__`,
+				name: ui?.name ?? `Resource_${i}`,
+				index: i,
+			});
 		}
-		return 0;
-	}, [headers]);
+		return out;
+	}, [headers.length, textureUIResources]);
 
-	const [selectedIndex, setSelectedIndex] = useState<number>(firstParsed);
+	// -------------------------------------------------------------------------
+	// Picker state (sort / search / visibility / selection)
+	// -------------------------------------------------------------------------
 
-	const currentModel = headers[selectedIndex] ?? null;
+	const pickerConfig = textureHandler.picker!;
+
+	const [sortKey, setSortKey] = useState<string>(pickerConfig.defaultSort);
+	const [searchQuery, setSearchQuery] = useState('');
+	const [hideEmpty, setHideEmpty] = useState(false); // No "empty" badge for textures; kept for symmetry with the tree-header control.
+	const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+	const [selectedPath, setSelectedPath] = useState<NodePath>([]);
+
+	// Picker visibility is a no-op for textures (no 3D viewport to dim), but
+	// the context still needs a stable visibility set so the eye icon isn't
+	// misleadingly grey. Default to "all visible"; the eye still toggles
+	// state and the picker row dims, giving the user a lightweight way to
+	// mark "don't look at this one again" on a cluttered bundle. Reseeded
+	// whenever the underlying resource set changes (e.g. load a new bundle).
+	const initBundleRef = useRef<number>(0);
+	const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
+	useEffect(() => {
+		if (pickerCtxs.length === 0) return;
+		const bundleKey = pickerCtxs.map((c) => c.id).join('|').length;
+		if (initBundleRef.current !== bundleKey) {
+			initBundleRef.current = bundleKey;
+			setVisibleIds(new Set(pickerCtxs.map((c) => c.id)));
+		}
+	}, [pickerCtxs]);
+
+	// Sort → filter → (ensure selected row included)
+	const allEntries = useMemo<PickerEntry<ParsedTextureHeader>[]>(
+		() => headers.map((m, i) => ({ model: m, ctx: pickerCtxs[i] })),
+		[headers, pickerCtxs],
+	);
+
+	const sortedEntries = useMemo(() => {
+		const active = pickerConfig.sortKeys.find((k) => k.id === sortKey) ?? pickerConfig.sortKeys[0];
+		return [...allEntries].sort((a, b) => active.compare(a, b));
+	}, [allEntries, sortKey, pickerConfig]);
+
+	const filteredEntries = useMemo(() => {
+		const q = searchQuery.trim().toLowerCase();
+		const textOf = pickerConfig.searchText ?? ((_m: unknown, ctx: PickerResourceCtx) => ctx.name);
+		return sortedEntries.filter((e) => {
+			if (!q) return true;
+			return textOf(e.model, e.ctx).toLowerCase().includes(q);
+		});
+	}, [sortedEntries, searchQuery, pickerConfig]);
+
+	// Seed selection on first non-empty list — prefer first parseable texture
+	// so the preview opens on something decoding-ready.
+	useEffect(() => {
+		if (selectedIndex !== -1) return;
+		if (sortedEntries.length === 0) return;
+		const firstParsed = sortedEntries.find((e) => e.model != null);
+		const target = firstParsed ?? sortedEntries[0];
+		setSelectedIndex(target.ctx.index);
+	}, [sortedEntries, selectedIndex]);
+
+	const pickerRows = useMemo<PickerRow[]>(() => {
+		const rows = filteredEntries.map<PickerRow>((e) => ({
+			modelIndex: e.ctx.index,
+			ctx: e.ctx,
+			model: e.model,
+			label: pickerConfig.labelOf(e.model, e.ctx),
+			visible: visibleIds.has(e.ctx.id),
+		}));
+		if (selectedIndex >= 0 && !rows.some((r) => r.modelIndex === selectedIndex)) {
+			const sel = allEntries[selectedIndex];
+			if (sel) {
+				rows.unshift({
+					modelIndex: sel.ctx.index,
+					ctx: sel.ctx,
+					model: sel.model,
+					label: pickerConfig.labelOf(sel.model, sel.ctx),
+					visible: visibleIds.has(sel.ctx.id),
+				});
+			}
+		}
+		return rows;
+	}, [filteredEntries, allEntries, selectedIndex, visibleIds, pickerConfig]);
+
+	const switchTexture = useCallback((nextIndex: number, nextPath: NodePath = []) => {
+		setSelectedIndex(nextIndex);
+		setSelectedPath(nextPath);
+	}, []);
+
+	const onToggleVisible = useCallback((resourceId: string) => {
+		setVisibleIds((prev) => {
+			const next = new Set(prev);
+			if (next.has(resourceId)) next.delete(resourceId);
+			else next.add(resourceId);
+			return next;
+		});
+	}, []);
+
+	const onSoloVisible = useCallback(
+		(resourceId: string) => {
+			setVisibleIds((prev) => {
+				const onlySelf = prev.size === 1 && prev.has(resourceId);
+				if (onlySelf) return new Set(pickerCtxs.map((c) => c.id));
+				return new Set([resourceId]);
+			});
+		},
+		[pickerCtxs],
+	);
+
+	const currentModel = selectedIndex >= 0 ? (headers[selectedIndex] ?? null) : null;
 
 	// Re-decode pixel data whenever the selection or source bundle changes.
 	// Edits to header fields (via the schema editor) do NOT invalidate this
-	// — we're intentionally keying on (bundle, resourceIndex), not on the
-	// header object identity, so the preview doesn't flicker while the user
-	// fiddles with width/height/etc. in the inspector.
+	// — we key on (bundle, resourceIndex) so the preview doesn't flicker
+	// while the user fiddles with width/height/etc. in the inspector.
 	const decoded: TextureDecodeResult = useMemo(() => {
 		if (!loadedBundle || !originalArrayBuffer) {
 			return { status: 'error', error: 'No bundle loaded.' };
@@ -128,9 +221,39 @@ const TexturePage = () => {
 	}, [loadedBundle, originalArrayBuffer, textureResources, selectedIndex]);
 
 	const handleChange = useCallback(
-		(next: unknown) => setResourceAt('texture', selectedIndex, next),
+		(next: unknown) => setResourceAt(TEXTURE_HANDLER_KEY, selectedIndex, next),
 		[setResourceAt, selectedIndex],
 	);
+
+	const pickerContextValue = useMemo<MultiResourcePickerValue | null>(() => {
+		if (headers.length <= 1) return null;
+		return {
+			handlerKey: TEXTURE_HANDLER_KEY,
+			rows: pickerRows,
+			selectedModelIndex: selectedIndex,
+			onSelectModel: (i) => switchTexture(i, []),
+			onToggleVisible,
+			onSoloVisible,
+			sortKey,
+			onSortKeyChange: setSortKey,
+			sortKeys: pickerConfig.sortKeys,
+			searchQuery,
+			onSearchQueryChange: setSearchQuery,
+			hideEmpty,
+			onHideEmptyChange: setHideEmpty,
+		};
+	}, [
+		headers.length,
+		pickerRows,
+		selectedIndex,
+		switchTexture,
+		onToggleVisible,
+		onSoloVisible,
+		sortKey,
+		pickerConfig.sortKeys,
+		searchQuery,
+		hideEmpty,
+	]);
 
 	if (headers.length === 0 || !loadedBundle) {
 		return (
@@ -147,6 +270,8 @@ const TexturePage = () => {
 		);
 	}
 
+	if (selectedIndex < 0) return null;
+
 	if (!currentModel) {
 		return (
 			<Card>
@@ -155,8 +280,7 @@ const TexturePage = () => {
 				</CardHeader>
 				<CardContent>
 					<div className="text-sm text-muted-foreground">
-						Texture #{selectedIndex} failed to parse — pick a different one from
-						the dropdown above.
+						Texture #{selectedIndex} failed to parse — pick a different one from the tree.
 					</div>
 				</CardContent>
 			</Card>
@@ -171,48 +295,32 @@ const TexturePage = () => {
 
 	return (
 		<div className="h-full min-h-0 flex flex-col gap-3">
-			<div className="flex items-center gap-4 shrink-0">
-				<div className="flex-1">
-					<h2 className="text-lg font-semibold">Texture</h2>
-					<p className="text-xs text-muted-foreground">
-						{headers.length === 1
-							? '1 texture in bundle · header is read-only'
-							: `${headers.length} textures in bundle · headers are read-only`}
-					</p>
+			<div className="shrink-0">
+				<div className="flex items-center gap-3">
+					<h2 className="text-lg font-semibold">Texture — Schema Editor</h2>
+					<ShortcutsHelp groups={TEXTURE_SHORTCUT_GROUPS} />
 				</div>
-				{headers.length > 1 && (
-					<div className="flex items-center gap-2">
-						<span className="text-xs text-muted-foreground">Texture</span>
-						<Select
-							value={String(selectedIndex)}
-							onValueChange={(v) => setSelectedIndex(Number(v))}
-						>
-							<SelectTrigger className="h-8 w-96">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent className="max-h-[60vh]">
-								{headers.map((h, i) => (
-									<SelectItem key={i} value={String(i)}>
-										{textureLabel(h, resourceIdHex[i] ?? '', i)}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</div>
-				)}
+				<p className="text-xs text-muted-foreground mt-1">
+					Image assets (resource type 0x0). Each Texture pairs a read-only header — pixel format
+					(DXT1 / DXT5 / A8R8G8B8), dimensions, mip count, addressing flags — with a pixel block
+					decoded on demand for the 2D preview. Downstream Renderables reference textures through
+					MaterialAssembly imports; the material-chain resolver in the Renderable editor's
+					"Materials &amp; Textures" tab surfaces which mesh group each texture feeds.
+				</p>
 			</div>
 			<div className="flex-1 min-h-0">
 				<TextureContext.Provider value={textureCtxValue}>
-					<SchemaEditorProvider
-						// Remount on selection change so initialPath is reset and any
-						// editor-local state (expanded nodes, focused input) clears.
-						key={`texture-${selectedIndex}`}
-						resource={textureResourceSchema}
-						data={currentModel}
-						onChange={handleChange}
-					>
-						<SchemaEditor />
-					</SchemaEditorProvider>
+					<MultiResourcePickerContext.Provider value={pickerContextValue}>
+						<SchemaEditorProvider
+							resource={textureResourceSchema}
+							data={currentModel}
+							onChange={handleChange}
+							selectedPath={selectedPath}
+							onSelectedPathChange={setSelectedPath}
+						>
+							<SchemaEditor />
+						</SchemaEditorProvider>
+					</MultiResourcePickerContext.Provider>
 				</TextureContext.Provider>
 			</div>
 		</div>

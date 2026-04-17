@@ -43,6 +43,28 @@ import {
 	useRenderableDecoded,
 } from '@/components/schema-editor/viewports/renderableDecodedContext';
 import { renderableExtensions } from '@/components/schema-editor/extensions/renderableExtensions';
+import {
+	ShortcutsHelp,
+	SCHEMA_TREE_SHORTCUTS,
+	type ShortcutGroup,
+} from '@/components/schema-editor/ShortcutsHelp';
+
+// Renderable has no multi-resource picker (the page folds all bundle
+// renderables into a single tree under one synthetic root), and it's
+// read-only so there's no bulk-edit story. Just the tree and the
+// viewport's click-to-focus gesture.
+const RENDERABLE_SHORTCUT_GROUPS: ShortcutGroup[] = [
+	SCHEMA_TREE_SHORTCUTS,
+	{
+		title: '3D viewport',
+		items: [
+			{ keys: ['Click', 'part'], label: 'Open that renderable in the inspector' },
+			{ keys: ['Drag'], label: 'Orbit the camera' },
+			{ keys: ['Right-Drag'], label: 'Pan' },
+			{ keys: ['Scroll'], label: 'Zoom in / out' },
+		],
+	},
+];
 
 // Inner body — rendered inside RenderableDecodedProvider so it can consume
 // the filtered/aligned data via useRenderableDecoded.
@@ -115,14 +137,19 @@ function RenderablePageInner() {
 
 	return (
 		<div className="h-full min-h-0 flex flex-col gap-3">
-			<div className="flex items-center gap-4 shrink-0">
-				<div className="flex-1">
+			<div className="shrink-0">
+				<div className="flex items-center gap-3">
 					<h2 className="text-lg font-semibold">Renderable — Schema Editor</h2>
-					<p className="text-xs text-muted-foreground">
-						3D mesh resource (0xC). Click a part in the viewer or a renderable in the tree to drill
-						in; the "Materials & Textures" tab in the inspector shows resolved texture thumbs.
-					</p>
+					<ShortcutsHelp groups={RENDERABLE_SHORTCUT_GROUPS} />
 				</div>
+				<p className="text-xs text-muted-foreground mt-1">
+					3D mesh data (resource type 0xC). A vehicle bundle typically holds ~100 Renderables —
+					one per LOD of each mesh group (body, glass, interior, …). Each carries an index /
+					vertex buffer plus a per-mesh draw table whose MaterialAssembly imports resolve to
+					Texture and TextureState resources via the material chain. The viewport decodes and
+					renders every Renderable in bundle order; the inspector's "Materials &amp; Textures"
+					tab surfaces the resolved texture thumbs for whichever renderable is selected.
+				</p>
 			</div>
 			<div className="flex-1 min-h-0">
 				<SchemaEditorProvider
