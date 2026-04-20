@@ -59,6 +59,22 @@ type BundleContextValue = {
   setResourceAt: (key: string, index: number, next: unknown | null) => void;
   loadBundleFromFile: (file: File) => Promise<void>;
   exportBundle: () => Promise<void>;
+  /**
+   * Companion bundles loaded alongside the primary bundle (e.g. WORLDTEX0.BIN
+   * loaded next to SHADERS.BNDL so the shader preview can pull real textures).
+   * Read-only — these don't participate in editing or export. The shader page
+   * walks them to build a texture catalogue. Empty by default.
+   */
+  secondaryBundles: SecondaryBundle[];
+  loadSecondaryBundle: (file: File) => Promise<void>;
+  removeSecondaryBundle: (name: string) => void;
+};
+
+export type SecondaryBundle = {
+  name: string;
+  bundle: ParsedBundle;
+  arrayBuffer: ArrayBuffer;
+  debugResources: DebugResource[];
 };
 
 const BundleContext = createContext<BundleContextValue | undefined>(undefined);
@@ -77,6 +93,35 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
   // entries become `byResourceId` overrides, so untouched resources write
   // back byte-exact through the pass-through path.
   const [dirtyMulti, setDirtyMulti] = useState<Set<string>>(() => new Set());
+  const [secondaryBundles, setSecondaryBundles] = useState<SecondaryBundle[]>([]);
+
+  const loadSecondaryBundle = useCallback(async (file: File) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bundle = parseBundle(arrayBuffer);
+      let debugResources: DebugResource[] = [];
+      if (bundle.debugData) {
+        const { parseDebugDataFromXml } = await import('@/lib/core/bundle/debugData');
+        debugResources = parseDebugDataFromXml(bundle.debugData);
+      }
+      setSecondaryBundles((prev) => {
+        // Replace if a bundle with the same filename is already loaded;
+        // otherwise append. Keeps the list de-duplicated by user intent.
+        const filtered = prev.filter((b) => b.name !== file.name);
+        return [...filtered, { name: file.name, bundle, arrayBuffer, debugResources }];
+      });
+      const textureCount = bundle.resources.filter((r) => r.resourceTypeId === 0x0).length;
+      toast.success(`Loaded companion bundle: ${file.name}`, {
+        description: `${bundle.resources.length} resources (${textureCount} textures)`,
+      });
+    } catch (error) {
+      toast.error('Failed to parse companion bundle', { description: error instanceof Error ? error.message : 'Unknown' });
+    }
+  }, []);
+
+  const removeSecondaryBundle = useCallback((name: string) => {
+    setSecondaryBundles((prev) => prev.filter((b) => b.name !== name));
+  }, []);
 
   const convertResourceToUI = useMemo(() => {
     return (resource: any, bundle: ParsedBundle, debugData: DebugResource[]): UIResource => {
@@ -290,7 +335,10 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     setResource,
     setResourceAt,
     loadBundleFromFile,
-    exportBundle
+    exportBundle,
+    secondaryBundles,
+    loadSecondaryBundle,
+    removeSecondaryBundle,
   };
 
   return <BundleContext.Provider value={value}>{children}</BundleContext.Provider>;

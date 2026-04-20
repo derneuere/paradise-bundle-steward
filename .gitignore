@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .claude/
+
+# Local debug-output dumps from the texture / shader probes
+debug_textures/

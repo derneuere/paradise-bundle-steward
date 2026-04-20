@@ -34,7 +34,17 @@ import type { ResolvedMaterial } from '@/lib/core/materialChain';
 import { parsePlayerCarColoursData, type PlayerCarColours } from '@/lib/core/playerCarColors';
 import type { DecodedTexture } from '@/lib/core/texture';
 import { D3DTextureAddress } from '@/lib/core/textureState';
-import type { ParsedBundle } from '@/lib/core/types';
+import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
+import { SHADER_TYPE_ID, parseShaderData, SHADER_PROGRAM_BUFFER_TYPE_ID } from '@/lib/core/shader';
+import { getResourceBlocks } from '@/lib/core/resourceManager';
+import { getImportIds } from '@/lib/core/bundle';
+import { u64ToBigInt } from '@/lib/core/u64';
+import { translateDxbc, type TranslatedShader } from '@/lib/core/dxbc';
+import { buildTextureCatalog, type TextureCatalogEntry } from '@/lib/core/textureCatalog';
+import { buildMaterialIndex, pickBestMaterial } from '@/lib/core/materialBinding';
+import { buildTranslatedShaderMaterial, type TranslatedMaterial } from '@/lib/core/translatedShaderMaterial';
+import { decodeTexture } from '@/lib/core/texture';
+import { parseMaterialData } from '@/lib/core/material';
 import {
 	type DecodedMesh,
 	type DecodedRenderable,
@@ -241,6 +251,133 @@ function applyWrapping(
 }
 
 // =============================================================================
+// Translated-shader rendering — opt-in path. When the user toggles
+// "translated shaders" in the viewport header, each unique Material seen
+// across the visible Renderables gets a real DXBC-translated ShaderMaterial
+// (same pipeline the ShaderPage preview uses), wired up via the
+// MaterialAssembly chain so per-channel sampler bindings come from the
+// authored TextureStates instead of the heuristic Window/Chrome/Glass
+// guesses below.
+// =============================================================================
+
+const TRANSLATED_HEURISTIC_DEFAULTS: Record<string, [number, number, number, number]> = {
+	g_PerVehicleFog: [0, 0, 0, 1],
+	FogColourPlusWhiteLevel: [0.55, 0.70, 0.85, 1],
+	KeyLightColour: [1, 1, 1, 1],
+	KeyLightClampedColour: [1, 1, 1, 1],
+	KeyLightSpecularColour: [1, 1, 1, 1],
+	KeyLightDirection: [0.4, -0.7, 0.6, 0],
+	SkyReflectionColour: [0.55, 0.75, 0.95, 1],
+	ShadowMap_Constants: [1, 1, 1, 1],
+	ShadowMap_Constants2: [1, 1, 1, 1],
+	ShadowMap_Constants3: [1, 1, 1, 1],
+	ScattCoeffs: [0.4, 0.4, 0.5, 1],
+	g_damageConstants: [0, 0, 0, 1],
+	sampleCoverage: [1, 1, 1, 1],
+	g_paintColour: [0.6, 0.1, 0.1, 1],
+	g_pearlescentColour: [0.2, 0.2, 0.3, 1],
+};
+
+type Source = { source: string; bundle: ParsedBundle; arrayBuffer: ArrayBuffer; debug: any[] };
+
+/** One-shot procedural placeholder — same look the ShaderPage uses for
+ *  shadow-map and reflection probe samplers. */
+function makePinkTex(): THREE.DataTexture {
+	const t = new THREE.DataTexture(new Uint8Array([255, 64, 200, 255]), 1, 1, THREE.RGBAFormat);
+	t.needsUpdate = true;
+	return t;
+}
+function makeWhiteTex(): THREE.DataTexture {
+	const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
+	t.needsUpdate = true;
+	return t;
+}
+const _fallback2x2 = makePinkTex();
+const _fallbackWhite = makeWhiteTex();
+function pickRenderableFallback(name: string): THREE.DataTexture {
+	const n = name.toLowerCase();
+	if (n.includes('shadow')) return _fallbackWhite;
+	return _fallback2x2;
+}
+
+function decodedToDataTextureRV(entry: TextureCatalogEntry): THREE.DataTexture | null {
+	let dt: DecodedTexture;
+	try { dt = entry.decode(); } catch { return null; }
+	const tex = new THREE.DataTexture(dt.pixels, dt.header.width, dt.header.height, THREE.RGBAFormat);
+	tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+	tex.minFilter = THREE.LinearFilter;
+	tex.magFilter = THREE.LinearFilter;
+	tex.flipY = false;
+	tex.needsUpdate = true;
+	return tex;
+}
+
+/**
+ * Translate the ShaderProgramBuffer imports of a Shader resource into
+ * `{ vs, ps }` GLSL. Returns null if the bundle layout doesn't match
+ * (no block 1, broken import chain, etc.).
+ */
+function translateShaderById(shaderId: bigint, sources: Source[]): { vs: TranslatedShader; ps: TranslatedShader; shaderName: string; constants: any[] } | null {
+	for (const s of sources) {
+		for (let i = 0; i < s.bundle.resources.length; i++) {
+			const r = s.bundle.resources[i];
+			if (r.resourceTypeId !== SHADER_TYPE_ID) continue;
+			if (u64ToBigInt(r.resourceId) !== shaderId) continue;
+			let parsed;
+			try {
+				const raw = extractResourceRaw(s.arrayBuffer, s.bundle, r);
+				parsed = parseShaderData(raw);
+			} catch { return null; }
+			const importIds = getImportIds(s.bundle.imports, s.bundle.resources, i);
+			// First two imports are typically VS / PS for the default tech.
+			let vs: TranslatedShader | null = null;
+			let ps: TranslatedShader | null = null;
+			for (const id of importIds) {
+				const target = s.bundle.resources.find((rr) => u64ToBigInt(rr.resourceId) === id && rr.resourceTypeId === SHADER_PROGRAM_BUFFER_TYPE_ID);
+				if (!target) continue;
+				const blocks = getResourceBlocks(s.arrayBuffer, s.bundle, target as ResourceEntry);
+				const bytecode = blocks[1];
+				if (!bytecode) continue;
+				try {
+					const t = translateDxbc(bytecode);
+					if (t.parsed.programType === 'vertex' && !vs) vs = t;
+					else if (t.parsed.programType === 'pixel' && !ps) ps = t;
+					if (vs && ps) break;
+				} catch { /* try next */ }
+			}
+			if (!vs || !ps) return null;
+			return { vs, ps, shaderName: parsed.name, constants: parsed.constants };
+		}
+	}
+	return null;
+}
+
+/** Pattern-match the cb0 layout from a translated VS, falling back to the
+ *  RDEF variable names when available. Identical to ShaderPage's
+ *  `inferCbLayout` — duplicated here so the renderable viewport doesn't
+ *  pull React state from the shader-page module. */
+function inferCbLayoutForRV(vsSrc: string, parsed: any) {
+	const slotByName = (name: string): number | null => {
+		if (!parsed) return null;
+		for (const cb of parsed.reflection.constantBuffers) {
+			for (const v of cb.variables) {
+				if (v.name === name) return Math.floor(v.startOffset / 16);
+			}
+		}
+		return null;
+	};
+	const worldMatch = vsSrc.match(/position, 0\.0\)\.xxxx \* cb0\[(\d+)\]/);
+	const worldRow0 = slotByName('world') ?? (worldMatch ? Number(worldMatch[1]) : 44);
+	const viewMatch = vsSrc.match(/r1\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
+	const viewRow2 = viewMatch ? Number(viewMatch[1]) : 7;
+	const vpMatch = vsSrc.match(/o0\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
+	const vpRow0 = slotByName('ViewProjectionModified') ?? (vpMatch ? Number(vpMatch[1]) : 5);
+	const camMatch = vsSrc.match(/-\(r0\.xyzx\) \+ cb0\[(\d+)\]\.xyzx/);
+	const cameraPos = slotByName('ViewPosition') ?? (camMatch ? Number(camMatch[1]) : null);
+	return { worldRow0, vpRow0, viewRow2, depthEncode: 8, cameraPos };
+}
+
+// =============================================================================
 // Mesh rendering + materials
 // =============================================================================
 
@@ -252,6 +389,7 @@ function RenderableMeshes({
 	hovered,
 	onSelect,
 	onHover,
+	useTranslatedShaders,
 }: {
 	renderables: DecodedRenderable[];
 	wireframe: boolean;
@@ -260,7 +398,34 @@ function RenderableMeshes({
 	hovered: { ri: number; mi: number } | null;
 	onSelect: (sel: { ri: number; mi: number } | null) => void;
 	onHover: (sel: { ri: number; mi: number } | null) => void;
+	useTranslatedShaders: boolean;
 }) {
+	const { loadedBundle, originalArrayBuffer, debugResources, secondaryBundles } = useBundle();
+	const decoded = useRenderableDecoded();
+
+	// Cross-bundle catalog + material index, only computed when the user
+	// actually flips to translated shaders. Sources include the primary
+	// bundle, the global secondaryBundles, AND the renderable page's own
+	// "+ texture pack" list — that way users can drop SHADERS.BNDL via the
+	// existing texture-pack button and have its shaders become translatable.
+	const translatedSetup = useMemo(() => {
+		if (!useTranslatedShaders) return null;
+		const sources: Source[] = [];
+		if (loadedBundle && originalArrayBuffer) {
+			sources.push({ source: 'primary', bundle: loadedBundle, arrayBuffer: originalArrayBuffer, debug: debugResources });
+		}
+		for (const sb of secondaryBundles) {
+			sources.push({ source: sb.name, bundle: sb.bundle, arrayBuffer: sb.arrayBuffer, debug: sb.debugResources });
+		}
+		// Renderable's own texture-pack list — separate state, but the same
+		// raw bytes work fine as Material/Shader sources too.
+		for (const tb of decoded?.textureBundles ?? []) {
+			sources.push({ source: 'texture-pack', bundle: tb.bundle, arrayBuffer: tb.buffer, debug: [] });
+		}
+		const textureCatalog = buildTextureCatalog(sources);
+		const materialIndex = buildMaterialIndex(sources, textureCatalog);
+		return { sources, textureCatalog, materialIndex };
+	}, [useTranslatedShaders, loadedBundle, originalArrayBuffer, debugResources, secondaryBundles, decoded?.textureBundles]);
 	const baseMaterial = useMemo(
 		() => {
 			const mat = new THREE.MeshStandardMaterial({ color: 0xb0b8c0, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide, wireframe });
@@ -432,6 +597,91 @@ function RenderableMeshes({
 		}
 	}, [baseMaterial, hoverMaterial, selectedMaterial, texturedMaterials]);
 
+	// Translated-shader materials. Keyed by materialAssemblyId so shared
+	// materials produce one ShaderMaterial reused across every mesh that
+	// references them. Each entry caches `{ shader translation, material
+	// binding, ShaderMaterial }` so swapping the toggle off then on again
+	// doesn't re-translate every shader.
+	const translatedMaterialMap = useMemo(() => {
+		const out = new Map<string, TranslatedMaterial | null>();
+		if (!translatedSetup) return out;
+		const { sources, textureCatalog, materialIndex } = translatedSetup;
+		// First, find the Material → Shader id for each materialAssemblyId
+		// we've actually seen on a mesh. Walk all sources for the matching
+		// Material resource and read its shaderImport.id.
+		const matIdToShaderId = new Map<string, bigint>();
+		for (const r of renderables) {
+			for (const m of r.meshes) {
+				if (!m.materialAssemblyId) continue;
+				const key = m.materialAssemblyId.toString(16);
+				if (matIdToShaderId.has(key)) continue;
+				// Search loaded sources for the Material with this id and
+				// read its shaderImport.
+				outer: for (const s of sources) {
+					for (const res of s.bundle.resources) {
+						if (res.resourceTypeId !== 0x01) continue;
+						if (u64ToBigInt(res.resourceId) !== m.materialAssemblyId) continue;
+						try {
+							const blocks = getResourceBlocks(s.arrayBuffer, s.bundle, res as ResourceEntry);
+							const block0 = blocks[0];
+							if (!block0) break outer;
+							const parsedMat = parseMaterialData(block0);
+							matIdToShaderId.set(key, parsedMat.shaderImport.id);
+						} catch { /* fall through */ }
+						break outer;
+					}
+				}
+			}
+		}
+		// For each unique material, build a ShaderMaterial by translating
+		// its target shader and pulling per-register bindings from the
+		// material index.
+		for (const [matKey, shaderId] of matIdToShaderId) {
+			const translated = translateShaderById(shaderId, sources);
+			if (!translated) {
+				out.set(matKey, null);
+				continue;
+			}
+			const shaderIdHex = shaderId.toString(16).padStart(16, '0');
+			// Find the Material whose id matches this MESH's materialAssemblyId,
+			// not just any material targeting the shader. Multiple body parts
+			// share the same shader (PaintGloss) but each has its own Material
+			// pointing at its own per-part Skin / AO / Scratch textures —
+			// picking one arbitrarily smears the same texture across every
+			// part. The hex-comparison normalises both sides because matKey
+			// drops leading zeros (toString(16)) while materialId keeps them.
+			const matKeyNorm = matKey.padStart(16, '0');
+			const matBinding = materialIndex.get(shaderIdHex)?.find((b) => b.materialId === matKeyNorm)
+				?? pickBestMaterial(shaderIdHex, [], materialIndex);
+			const layout = inferCbLayoutForRV(translated.vs.source, translated.vs.parsed);
+			const sm = buildTranslatedShaderMaterial({
+				vsSource: translated.vs.source,
+				psSource: translated.ps.source,
+				vsParsed: translated.vs.parsed,
+				psParsed: translated.ps.parsed,
+				shaderName: translated.shaderName,
+				shaderConstants: translated.constants,
+				layout,
+				materialBinding: matBinding ?? null,
+				textureCatalog,
+				heuristicDefaults: TRANSLATED_HEURISTIC_DEFAULTS,
+				pickFallbackTexture: pickRenderableFallback,
+				decodedToDataTexture: decodedToDataTextureRV,
+				applyPreviewTonemap: true,  // vehicle shaders run HDR; without an engine tonemap, paint-gloss saturates to white
+				side: THREE.DoubleSide,
+			});
+			out.set(matKey, sm);
+		}
+		return out;
+	}, [translatedSetup, renderables]);
+
+	useEffect(() => () => {
+		for (const mat of translatedMaterialMap.values()) {
+			if (!mat) continue;
+			mat.dispose();
+		}
+	}, [translatedMaterialMap]);
+
 	const matrices = useMemo(() => {
 		const out: (THREE.Matrix4 | null)[][] = [];
 		for (const r of renderables) {
@@ -452,10 +702,27 @@ function RenderableMeshes({
 					const mat = matrices[ri]?.[mi] ?? null;
 					const isSelected = selected !== null && selected.ri === ri && selected.mi === mi;
 					const isHovered = hovered !== null && hovered.ri === ri && hovered.mi === mi;
-					const texturedMat = m.materialAssemblyId
-						? texturedMaterials.get(m.materialAssemblyId.toString(16)) ?? null
+					const matKey = m.materialAssemblyId?.toString(16);
+					// Translated path wins when the toggle's on AND we built
+					// a ShaderMaterial for this material's shader. Falls back
+					// to the PBR-approximation MeshStandardMaterial otherwise
+					// so the toggle is non-destructive.
+					const translatedMat = useTranslatedShaders && matKey
+						? translatedMaterialMap.get(matKey) ?? null
 						: null;
-					const meshMaterial = isSelected ? selectedMaterial : isHovered ? hoverMaterial : (texturedMat ?? baseMaterial);
+					const texturedMat = !translatedMat && matKey
+						? texturedMaterials.get(matKey) ?? null
+						: null;
+					const meshMaterial = isSelected ? selectedMaterial
+						: isHovered ? hoverMaterial
+						: (translatedMat ?? texturedMat ?? baseMaterial);
+					// onBeforeRender hooks the cb0 update for translated
+					// materials so the world / viewproj / camera-pos / time
+					// slots refresh per frame. No-op for MeshStandardMaterial.
+					const onBeforeRender = (_r: THREE.WebGLRenderer, _s: THREE.Scene, camera: THREE.Camera, _g: THREE.BufferGeometry, material: THREE.Material, _group: THREE.Group) => {
+						const upd = (material as TranslatedMaterial).__updateCb0;
+						if (upd) upd(camera, _group ?? (material as any).__owner ?? { matrixWorld: new THREE.Matrix4() });
+					};
 					return (
 						<mesh
 							key={`${r.resourceId.toString(16)}-${mi}`}
@@ -463,6 +730,33 @@ function RenderableMeshes({
 							material={meshMaterial}
 							matrixAutoUpdate={mat === null}
 							matrix={mat ?? undefined}
+							onBeforeRender={(_r, _s, camera, _g, material, _group) => {
+								const upd = (material as TranslatedMaterial).__updateCb0;
+								if (upd) {
+									// Need the mesh itself for matrixWorld, but
+									// onBeforeRender doesn't pass it directly —
+									// `_group` is the THREE.Group containing
+									// instanced draw calls, not the mesh. Three.js
+									// does pass `this` as the binding context;
+									// we instead use the ref via a closure trick:
+									// the mesh updates its own matrixWorld before
+									// onBeforeRender fires, and we can grab it
+									// via `material.userData.__mesh` set below.
+									const owner = (material.userData as any).__mesh;
+									if (owner) upd(camera, owner);
+								}
+								// Suppress unused-args lint
+								void _r; void _s; void _g; void _group; void onBeforeRender;
+							}}
+							ref={(meshRef) => {
+								// Stash mesh reference on the material so the
+								// onBeforeRender callback can fetch matrixWorld.
+								if (!meshRef) return;
+								const mat = meshRef.material as THREE.Material;
+								if ((mat as TranslatedMaterial).__updateCb0) {
+									(mat.userData as Record<string, unknown>).__mesh = meshRef;
+								}
+							}}
 							onClick={(e) => {
 								e.stopPropagation();
 								onSelect({ ri, mi });
@@ -499,6 +793,7 @@ export function RenderableViewport() {
 	// below, so there's only one source of truth and no effect-based sync
 	// to ping-pong against.
 	const [wireframe, setWireframe] = useState(false);
+	const [useTranslatedShaders, setUseTranslatedShaders] = useState(false);
 	const [paintColor, setPaintColor] = useState<{ r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } } | null>(null);
 	const [activePalette, setActivePalette] = useState(0);
 	const [hovered, setHovered] = useState<{ ri: number; mi: number } | null>(null);
@@ -647,6 +942,14 @@ export function RenderableViewport() {
 					>
 						wireframe
 					</Button>
+					<Button
+						variant={useTranslatedShaders ? 'default' : 'outline'}
+						size="sm"
+						onClick={() => setUseTranslatedShaders(v => !v)}
+						title="Use real DXBC-translated shaders instead of PBR approximations. Requires SHADERS.BNDL + texture bundles to be loaded as companions."
+					>
+						translated shaders
+					</Button>
 					<span className="font-medium ml-2">textures:</span>
 					<Button
 						variant="outline"
@@ -710,6 +1013,7 @@ export function RenderableViewport() {
 								hovered={hovered}
 								onSelect={handleSelect}
 								onHover={setHovered}
+								useTranslatedShaders={useTranslatedShaders}
 							/>
 						)}
 					</Suspense>
