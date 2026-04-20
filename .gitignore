@@ -26,3 +26,7 @@ dist-ssr
 
 # Local debug-output dumps from the texture / shader probes
 debug_textures/
+
+# Stryker mutation-testing reports + incremental cache
+reports/mutation/
+.stryker-tmp/

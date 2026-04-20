@@ -296,3 +296,17 @@ describe('collisionTag transformation holds for every polygon in WORLDCOL.BIN', 
 		expect(outOfRangeSections).toBe(0);
 	});
 });
+
+describe('collisionTag edge cases', () => {
+	// Targets the `(… & HIGHEST_BIT) !== 0` comparisons in decodeCollisionTag:
+	// real WORLDCOL polygons always have both highest bits set, so no round-trip
+	// case cleared them. Without this, those comparisons could be replaced with
+	// `true` and every test would still pass.
+	it('reports highest bits as false when the input has them cleared', () => {
+		const d = decodeCollisionTag(0x00000000);
+		expect(d.materialHighestBit).toBe(false);
+		expect(d.groupHighestBit).toBe(false);
+		// Re-encoded value must still be 0 — no spurious bits added.
+		expect(encodeCollisionTag(d) >>> 0).toBe(0);
+	});
+});

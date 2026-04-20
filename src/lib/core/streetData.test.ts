@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { parseBundle } from './bundle';
 import { RESOURCE_TYPE_IDS } from './types';
 import { extractResourceSize, isCompressed, decompressData } from './resourceManager';
-import { parseStreetDataData, writeStreetDataData } from './streetData';
+import { parseStreetData, parseStreetDataData, writeStreetData, writeStreetDataData } from './streetData';
 
 const FIXTURE = path.resolve(__dirname, '../../../example/BTTSTREETDATA.DAT');
 
@@ -125,5 +125,125 @@ describe('streetData writer', () => {
 		const sd = parseStreetDataData(raw);
 		const bad = { ...sd, challenges: sd.challenges.slice(0, sd.challenges.length - 1) };
 		expect(() => writeStreetDataData(bad)).toThrow(/challenges\.length/);
+	});
+});
+
+describe('streetData byte-level fidelity', () => {
+	// Targets the readFixedAscii NUL-terminator scan (loop body and break).
+	// Stryker survivors showed the loop bound and break could be neutered
+	// without any assertion noticing, because no test round-tripped a string
+	// containing an embedded NUL.
+	it('truncates fixed-ASCII strings at the first embedded NUL on round-trip', () => {
+		const { buffer } = loadBundle();
+		const raw = extractStreetDataRaw(buffer);
+		const sd = parseStreetDataData(raw);
+		sd.junctions[0].macName = 'AB\0CD';
+		const written = writeStreetDataData(sd);
+		const sd2 = parseStreetDataData(written);
+		expect(sd2.junctions[0].macName).toBe('AB');
+	});
+
+	// Targets the `?? 0` / `?? 0n` nullish coalescing in writeChallengeParScores.
+	// Without this test, those could be flipped to `&& 0` (which silently zeroes
+	// valid values) and round-trip would still pass because the fixture has all
+	// fields populated.
+	it('writeChallengeParScores tolerates missing scalar score/rival values', () => {
+		const { buffer } = loadBundle();
+		const raw = extractStreetDataRaw(buffer);
+		const sd = parseStreetDataData(raw);
+
+		// Strip the optional scalars on the first challenge. The writer must
+		// still emit 0-filled slots and keep byte alignment intact so the
+		// remaining challenges round-trip unchanged.
+		sd.challenges[0] = {
+			...sd.challenges[0],
+			challengeData: {
+				...sd.challenges[0].challengeData,
+				mScoreList: { maScores: [123] }, // maScores[1] missing
+			},
+			mRivals: [], // both rivals missing
+		} as unknown as typeof sd.challenges[0];
+
+		const written = writeStreetDataData(sd);
+		const sd2 = parseStreetDataData(written);
+
+		expect(sd2.challenges[0].challengeData.mScoreList.maScores).toEqual([123, 0]);
+		expect(sd2.challenges[0].mRivals).toEqual([0n, 0n]);
+		// Second challenge is untouched — alignment preserved.
+		expect(sd2.challenges[1]).toEqual(sd.challenges[1]);
+	});
+
+	// Targets `data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)`
+	// at parseStreetDataData. If the slice is dropped, the reader sees the whole
+	// underlying buffer and parses garbage from the prefix instead of the payload.
+	it('parses a Uint8Array view with a non-zero byteOffset correctly', () => {
+		const { buffer } = loadBundle();
+		const raw = extractStreetDataRaw(buffer);
+
+		const prefix = 17;
+		const wrapped = new Uint8Array(prefix + raw.byteLength);
+		wrapped.set(raw, prefix);
+		const view = wrapped.subarray(prefix);
+		expect(view.byteOffset).toBe(prefix);
+
+		const sd = parseStreetDataData(view);
+		expect(sd.miVersion).toBe(6);
+		expect(sd.streets).toHaveLength(310);
+		expect(sd.junctions).toHaveLength(217);
+		expect(sd.roads).toHaveLength(76);
+	});
+});
+
+describe('streetData high-level wrappers', () => {
+	function findStreetDataResource(buffer: ArrayBuffer) {
+		const bundle = parseBundle(buffer);
+		const resource = bundle.resources.find((r) => r.resourceTypeId === RESOURCE_TYPE_IDS.STREET_DATA);
+		if (!resource) throw new Error('Fixture missing StreetData resource');
+		return resource;
+	}
+
+	// Covers parseStreetData end-to-end (bundle lookup + pako/nested handling +
+	// progress callback). The round-trip suite above only exercises the inner
+	// parseStreetDataData entry, leaving this whole wrapper at zero coverage.
+	it('parseStreetData parses from a bundle buffer and reports progress', () => {
+		const { buffer } = loadBundle();
+		const resource = findStreetDataResource(buffer);
+		const events: { stage: string; progress: number }[] = [];
+		const sd = parseStreetData(buffer, resource, {}, (ev) => {
+			events.push({ stage: ev.stage, progress: ev.progress });
+		});
+
+		expect(sd.miVersion).toBe(6);
+		expect(sd.streets).toHaveLength(310);
+		expect(events.length).toBeGreaterThanOrEqual(3);
+		expect(events[0].progress).toBe(0);
+		expect(events.at(-1)?.progress).toBe(1);
+	});
+
+	it('writeStreetData delegates to writeStreetDataData and reports progress', () => {
+		const { buffer } = loadBundle();
+		const raw = extractStreetDataRaw(buffer);
+		const sd = parseStreetDataData(raw);
+
+		const events: number[] = [];
+		const bytes = writeStreetData(sd, {}, (ev) => events.push(ev.progress));
+
+		expect(bytes.byteLength).toBe(26992);
+		expect(sha1(bytes)).toBe('12a3ab4dde5244bc6bf2f0ad3bf11b1530edfa4c');
+		expect(events).toEqual([0, 1]);
+	});
+
+	// Targets the `progress?.(...)` optional chaining in both wrappers. Without
+	// this test the `?.` could be turned into a bare call and every other test
+	// (which always supplies a callback) would still pass.
+	it('wrappers work when no progress callback is provided', () => {
+		const { buffer } = loadBundle();
+		const resource = findStreetDataResource(buffer);
+
+		const sd = parseStreetData(buffer, resource);
+		expect(sd.streets).toHaveLength(310);
+
+		const bytes = writeStreetData(sd);
+		expect(bytes.byteLength).toBe(26992);
 	});
 });
