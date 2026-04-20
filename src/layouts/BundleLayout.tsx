@@ -1,15 +1,31 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Upload, Download, Hexagon, Database } from 'lucide-react';
+import { Upload, Download, Hexagon, Database, Box } from 'lucide-react';
 import { useBundle } from '@/context/BundleContext';
 import { useRef, useState, useMemo } from 'react';
+import { toast } from 'sonner';
 import { ExportWarningModal } from '@/components/capabilities';
 import { getCapabilityByTypeId, type FeatureCapability } from '@/lib/capabilities';
 import { registry } from '@/lib/core/registry';
+import type { ParsedStreetData } from '@/lib/core/streetData';
+import type { ParsedTrafficData } from '@/lib/core/trafficData';
+import type { ParsedAISections } from '@/lib/core/aiSections';
+import type { ParsedTriggerData } from '@/lib/core/triggerData';
+import {
+  exportWorldLogicToGltf,
+  importWorldLogicFromGltf,
+  type WorldLogicPayload,
+} from '@/lib/core/gltf';
+
+// Which parsedResources keys participate in the worldlogic glTF flow. Order
+// matches the on-screen summary text.
+const WORLD_LOGIC_KEYS = ['streetData', 'trafficData', 'aiSections', 'triggerData'] as const;
+type WorldLogicKey = (typeof WORLD_LOGIC_KEYS)[number];
 
 export const BundleLayout = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const gltfInputRef = useRef<HTMLInputElement>(null);
   const [showExportWarning, setShowExportWarning] = useState(false);
   const {
     isLoading,
@@ -18,9 +34,17 @@ export const BundleLayout = () => {
     loadBundleFromFile,
     exportBundle,
     parsedResources,
+    getResource,
+    setResource,
   } = useBundle();
 
   const hasBundle = !!loadedBundle;
+
+  const worldLogicKeys = useMemo(
+    () => WORLD_LOGIC_KEYS.filter((k) => parsedResources.has(k)),
+    [parsedResources],
+  );
+  const hasWorldLogic = worldLogicKeys.length > 0;
 
   // Check which present-but-unsupported-for-write features have been modified.
   // Drives the export warning. Looks up capability metadata by type id so
@@ -49,6 +73,88 @@ export const BundleLayout = () => {
     void exportBundle();
   };
 
+  const handleExportGltf = async () => {
+    if (!hasWorldLogic) {
+      toast.error('No world-logic resources in this bundle', {
+        description: 'Expected StreetData, TrafficData, AISections, or TriggerData.',
+      });
+      return;
+    }
+    try {
+      const payload: WorldLogicPayload = {};
+      if (parsedResources.has('streetData')) {
+        payload.streetData = getResource<ParsedStreetData>('streetData') ?? undefined;
+      }
+      if (parsedResources.has('trafficData')) {
+        payload.trafficData = getResource<ParsedTrafficData>('trafficData') ?? undefined;
+      }
+      if (parsedResources.has('aiSections')) {
+        payload.aiSections = getResource<ParsedAISections>('aiSections') ?? undefined;
+      }
+      if (parsedResources.has('triggerData')) {
+        payload.triggerData = getResource<ParsedTriggerData>('triggerData') ?? undefined;
+      }
+      const bytes = await exportWorldLogicToGltf(payload);
+      const blob = new Blob([bytes], { type: 'model/gltf-binary' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'world-logic.glb';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      toast.success('Exported world-logic glTF', {
+        description: `${worldLogicKeys.join(', ')} · ${(bytes.byteLength / 1024).toFixed(1)} KB`,
+      });
+    } catch (error) {
+      console.error('Error exporting glTF:', error);
+      toast.error('Failed to export glTF', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
+  const handleImportGltfClick = () => {
+    if (!hasBundle) {
+      toast.error('Load a bundle first', {
+        description: 'Import replaces world-logic resources in the currently loaded bundle.',
+      });
+      return;
+    }
+    gltfInputRef.current?.click();
+  };
+
+  const handleImportGltfFile = async (file: File) => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      const payload = await importWorldLogicFromGltf(bytes);
+      const applied: WorldLogicKey[] = [];
+      for (const key of WORLD_LOGIC_KEYS) {
+        const model = payload[key];
+        if (model !== undefined) {
+          setResource(key, model);
+          applied.push(key);
+        }
+      }
+      if (applied.length === 0) {
+        toast.error('glTF contained no world-logic resources', {
+          description: 'Expected StreetData, TrafficData, AISections, or TriggerData.',
+        });
+        return;
+      }
+      toast.success('Imported world-logic glTF', {
+        description: `${applied.join(', ')} · use Export Bundle to save the rewritten bundle.`,
+      });
+    } catch (error) {
+      console.error('Error importing glTF:', error);
+      toast.error('Failed to import glTF', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col bg-background">
       <header className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/80">
@@ -74,6 +180,18 @@ export const BundleLayout = () => {
                 }}
                 className="hidden"
               />
+              <input
+                ref={gltfInputRef}
+                type="file"
+                accept=".gltf,.glb"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleImportGltfFile(f);
+                  // Reset so re-selecting the same file fires change again.
+                  e.target.value = '';
+                }}
+                className="hidden"
+              />
               <Button onClick={() => fileInputRef.current?.click()} disabled={isLoading} className="gap-2">
                 <Upload className="w-4 h-4" />
                 {isLoading ? 'Loading...' : 'Load Bundle'}
@@ -82,6 +200,30 @@ export const BundleLayout = () => {
                 <Button onClick={handleExportClick} disabled={isLoading} variant="outline" className="gap-2">
                   <Download className="w-4 h-4" />
                   Export Bundle
+                </Button>
+              )}
+              {hasWorldLogic && (
+                <Button
+                  onClick={() => void handleExportGltf()}
+                  disabled={isLoading}
+                  variant="outline"
+                  className="gap-2"
+                  title={`Export ${worldLogicKeys.join(', ')} as a single world-logic glTF for Blender`}
+                >
+                  <Box className="w-4 h-4" />
+                  Export glTF
+                </Button>
+              )}
+              {hasBundle && (
+                <Button
+                  onClick={handleImportGltfClick}
+                  disabled={isLoading}
+                  variant="outline"
+                  className="gap-2"
+                  title="Import an edited world-logic glTF back into the current bundle"
+                >
+                  <Upload className="w-4 h-4" />
+                  Import glTF
                 </Button>
               )}
             </div>

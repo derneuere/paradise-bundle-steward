@@ -3,11 +3,18 @@
 // the same set of subcommands with no per-type code in this file.
 //
 // Usage (from the steward repo root):
-//   npm run bundle -- list      <bundle>
-//   npm run bundle -- parse     <bundle> [--type <key>]
-//   npm run bundle -- dump      <bundle> <out.json> [--type <key>]
-//   npm run bundle -- pack      <in.json> <out-bundle> [--type <key>]
-//   npm run bundle -- roundtrip <bundle> [--type <key>]
+//   npm run bundle -- list           <bundle>
+//   npm run bundle -- parse          <bundle> [--type <key>]
+//   npm run bundle -- dump           <bundle> <out.json> [--type <key>]
+//   npm run bundle -- pack           <in.json> <out-bundle> [--type <key>]
+//   npm run bundle -- roundtrip      <bundle> [--type <key>]
+//   npm run bundle -- export-gltf    <bundle> <out.gltf|out.glb>
+//   npm run bundle -- import-gltf    <orig-bundle> <edited.gltf> <out-bundle>
+//   npm run bundle -- roundtrip-gltf <bundle>
+//
+// The *-gltf subcommands operate on the worldlogic glTF representation of
+// logical world data (StreetData for now; TrafficData / AISections / TriggerData
+// to follow). See docs/worldlogic-gltf-roundtrip.md.
 
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
@@ -23,6 +30,29 @@ import {
 	resourceCtxFromBundle,
 	type ResourceHandler,
 } from '../src/lib/core/registry';
+import {
+	exportWorldLogicToGltf,
+	exportWorldLogicToGltfJson,
+	importWorldLogicFromGltf,
+	type WorldLogicPayload,
+} from '../src/lib/core/gltf';
+import {
+	parseStreetDataData,
+	writeStreetDataData,
+} from '../src/lib/core/streetData';
+import {
+	parseTrafficDataData,
+	writeTrafficDataData,
+} from '../src/lib/core/trafficData';
+import {
+	parseAISectionsData,
+	writeAISectionsData,
+} from '../src/lib/core/aiSections';
+import {
+	parseTriggerDataData,
+	writeTriggerDataData,
+} from '../src/lib/core/triggerData';
+import { RESOURCE_TYPE_IDS } from '../src/lib/core/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -618,23 +648,297 @@ function cmdFuzz(args: CliArgs) {
 }
 
 // ---------------------------------------------------------------------------
+// glTF worldlogic commands
+// ---------------------------------------------------------------------------
+
+type ExtractedResources = {
+	payload: WorldLogicPayload;
+	raws: Partial<Record<keyof WorldLogicPayload, Uint8Array>>;
+};
+
+/**
+ * Scan a bundle for every resource the worldlogic glTF flow knows about and
+ * parse each one. The caller gets back a WorldLogicPayload plus the raw
+ * bytes (keyed by the same slot names) for diagnostics.
+ */
+function extractWorldLogicResources(buffer: ArrayBuffer): ExtractedResources {
+	const bundle = parseBundle(buffer);
+	const out: ExtractedResources = { payload: {}, raws: {} };
+
+	const streetRes = bundle.resources.find(
+		(r) => r.resourceTypeId === RESOURCE_TYPE_IDS.STREET_DATA,
+	);
+	if (streetRes) {
+		const raw = extractResourceRaw(buffer, bundle, streetRes);
+		out.raws.streetData = raw;
+		out.payload.streetData = parseStreetDataData(raw);
+	}
+
+	const trafficRes = bundle.resources.find(
+		(r) => r.resourceTypeId === RESOURCE_TYPE_IDS.TRAFFIC_DATA,
+	);
+	if (trafficRes) {
+		const raw = extractResourceRaw(buffer, bundle, trafficRes);
+		out.raws.trafficData = raw;
+		out.payload.trafficData = parseTrafficDataData(raw, true);
+	}
+
+	const aiRes = bundle.resources.find(
+		(r) => r.resourceTypeId === RESOURCE_TYPE_IDS.AI_SECTIONS,
+	);
+	if (aiRes) {
+		const raw = extractResourceRaw(buffer, bundle, aiRes);
+		out.raws.aiSections = raw;
+		out.payload.aiSections = parseAISectionsData(raw, true);
+	}
+
+	const triggerRes = bundle.resources.find(
+		(r) => r.resourceTypeId === RESOURCE_TYPE_IDS.TRIGGER_DATA,
+	);
+	if (triggerRes) {
+		const raw = extractResourceRaw(buffer, bundle, triggerRes);
+		out.raws.triggerData = raw;
+		out.payload.triggerData = parseTriggerDataData(raw, true);
+	}
+
+	return out;
+}
+
+function summarizePayload(payload: WorldLogicPayload): string {
+	const parts: string[] = [];
+	if (payload.streetData) {
+		const m = payload.streetData;
+		parts.push(
+			`streetData(streets ${m.streets.length}, junctions ${m.junctions.length}, roads ${m.roads.length})`,
+		);
+	}
+	if (payload.trafficData) {
+		const m = payload.trafficData;
+		let sectionCount = 0;
+		let rungCount = 0;
+		for (const h of m.hulls) {
+			sectionCount += h.sections.length;
+			rungCount += h.rungs.length;
+		}
+		parts.push(
+			`trafficData(hulls ${m.hulls.length}, sections ${sectionCount}, rungs ${rungCount})`,
+		);
+	}
+	if (payload.aiSections) {
+		const m = payload.aiSections;
+		parts.push(
+			`aiSections(sections ${m.sections.length}, resetPairs ${m.sectionResetPairs.length})`,
+		);
+	}
+	if (payload.triggerData) {
+		const m = payload.triggerData;
+		parts.push(
+			`triggerData(landmarks ${m.landmarks.length}, generic ${m.genericRegions.length}, blackspots ${m.blackspots.length}, spawns ${m.spawnLocations.length})`,
+		);
+	}
+	return parts.join(', ');
+}
+
+async function cmdExportGltf(args: CliArgs) {
+	const [bundlePath, outPath] = args.positional;
+	if (!bundlePath || !outPath) {
+		throw new Error('Usage: export-gltf <bundle> <out.gltf|out.glb>');
+	}
+	const { buffer, bytes } = loadBundleBytes(bundlePath);
+	const extracted = extractWorldLogicResources(buffer);
+	if (Object.keys(extracted.payload).length === 0) {
+		throw new Error(
+			'Bundle has no worldlogic-compatible resources (StreetData, TrafficData, AISections, TriggerData).',
+		);
+	}
+
+	const wantJson = outPath.toLowerCase().endsWith('.gltf');
+	const out = wantJson
+		? await exportWorldLogicToGltfJson(extracted.payload)
+		: await exportWorldLogicToGltf(extracted.payload);
+
+	fs.writeFileSync(outPath, out);
+	console.log(`Bundle: ${path.resolve(bundlePath)} (${bytes.byteLength} B, sha1 ${sha1(bytes)})`);
+	console.log(`Resources: ${summarizePayload(extracted.payload)}`);
+	for (const [key, raw] of Object.entries(extracted.raws)) {
+		if (raw) console.log(`  ${key} raw: ${raw.byteLength} B, sha1 ${sha1(raw)}`);
+	}
+	console.log(`Wrote ${outPath} (${out.byteLength} B, sha1 ${sha1(out)})`);
+}
+
+async function cmdImportGltf(args: CliArgs) {
+	const [origBundlePath, gltfPath, outPath] = args.positional;
+	if (!origBundlePath || !gltfPath || !outPath) {
+		throw new Error('Usage: import-gltf <orig-bundle> <edited.gltf> <out-bundle>');
+	}
+	const { buffer } = loadBundleBytes(origBundlePath);
+	const bundle = parseBundle(buffer);
+
+	const gltfFile = fs.readFileSync(gltfPath);
+	const gltfBytes = new Uint8Array(gltfFile.byteLength);
+	gltfBytes.set(gltfFile);
+	const payload = await importWorldLogicFromGltf(gltfBytes);
+
+	const overrides: Record<number, Uint8Array> = {};
+	if (payload.streetData) {
+		const rewritten = writeStreetDataData(payload.streetData);
+		overrides[RESOURCE_TYPE_IDS.STREET_DATA] = rewritten;
+		console.log(
+			`  reconstructed StreetData: ${rewritten.byteLength} B, sha1 ${sha1(rewritten)}`,
+		);
+	}
+	if (payload.trafficData) {
+		const rewritten = writeTrafficDataData(payload.trafficData, true);
+		overrides[RESOURCE_TYPE_IDS.TRAFFIC_DATA] = rewritten;
+		console.log(
+			`  reconstructed TrafficData: ${rewritten.byteLength} B, sha1 ${sha1(rewritten)}`,
+		);
+	}
+	if (payload.aiSections) {
+		const rewritten = writeAISectionsData(payload.aiSections, true);
+		overrides[RESOURCE_TYPE_IDS.AI_SECTIONS] = rewritten;
+		console.log(
+			`  reconstructed AISections: ${rewritten.byteLength} B, sha1 ${sha1(rewritten)}`,
+		);
+	}
+	if (payload.triggerData) {
+		const rewritten = writeTriggerDataData(payload.triggerData, true);
+		overrides[RESOURCE_TYPE_IDS.TRIGGER_DATA] = rewritten;
+		console.log(
+			`  reconstructed TriggerData: ${rewritten.byteLength} B, sha1 ${sha1(rewritten)}`,
+		);
+	}
+	if (Object.keys(overrides).length === 0) {
+		throw new Error('glTF contained no worldlogic resources to import.');
+	}
+
+	const outBuffer = writeBundleFresh(bundle, buffer, {
+		overrides: { resources: overrides },
+	});
+	fs.writeFileSync(outPath, new Uint8Array(outBuffer));
+	console.log(`Imported glTF: ${gltfPath} (${gltfFile.byteLength} B)`);
+	console.log(`Wrote ${outPath} (${outBuffer.byteLength} B)`);
+}
+
+async function cmdRoundtripGltf(args: CliArgs) {
+	const [bundlePath] = args.positional;
+	if (!bundlePath) throw new Error('Usage: roundtrip-gltf <bundle>');
+	const { buffer } = loadBundleBytes(bundlePath);
+	const extracted = extractWorldLogicResources(buffer);
+	if (Object.keys(extracted.payload).length === 0) {
+		throw new Error(
+			'Bundle has no worldlogic-compatible resources (StreetData, TrafficData, AISections, TriggerData).',
+		);
+	}
+
+	console.log(`Bundle: ${path.resolve(bundlePath)}`);
+	console.log(`Resources: ${summarizePayload(extracted.payload)}`);
+
+	// Direct-write baselines per resource (the writer-idempotent contract for
+	// StreetData, byte-exact for TrafficData). These become the yardsticks the
+	// glTF round-trip must match.
+	const baselines: Record<string, Uint8Array> = {};
+	if (extracted.payload.streetData) {
+		baselines.streetData = writeStreetDataData(extracted.payload.streetData);
+	}
+	if (extracted.payload.trafficData) {
+		baselines.trafficData = writeTrafficDataData(extracted.payload.trafficData, true);
+	}
+	if (extracted.payload.aiSections) {
+		baselines.aiSections = writeAISectionsData(extracted.payload.aiSections, true);
+	}
+	if (extracted.payload.triggerData) {
+		baselines.triggerData = writeTriggerDataData(extracted.payload.triggerData, true);
+	}
+	for (const [key, b] of Object.entries(baselines)) {
+		console.log(`  ${key} baseline: ${b.byteLength} B, sha1 ${sha1(b)}`);
+	}
+
+	// Round-trip via glTF.
+	const gltfBytes = await exportWorldLogicToGltf(extracted.payload);
+	console.log(`  glTF intermediate: ${gltfBytes.byteLength} B, sha1 ${sha1(gltfBytes)}`);
+
+	const payloadAfter = await importWorldLogicFromGltf(gltfBytes);
+
+	const posts: Record<string, Uint8Array> = {};
+	if (payloadAfter.streetData) {
+		posts.streetData = writeStreetDataData(payloadAfter.streetData);
+	}
+	if (payloadAfter.trafficData) {
+		posts.trafficData = writeTrafficDataData(payloadAfter.trafficData, true);
+	}
+	if (payloadAfter.aiSections) {
+		posts.aiSections = writeAISectionsData(payloadAfter.aiSections, true);
+	}
+	if (payloadAfter.triggerData) {
+		posts.triggerData = writeTriggerDataData(payloadAfter.triggerData, true);
+	}
+	for (const [key, p] of Object.entries(posts)) {
+		console.log(`  ${key} post-gltf: ${p.byteLength} B, sha1 ${sha1(p)}`);
+	}
+
+	// Compare per-resource.
+	let anyFailed = false;
+	for (const key of Object.keys(baselines)) {
+		const b = baselines[key];
+		const p = posts[key];
+		if (!p) {
+			console.log(`ROUNDTRIP-GLTF FAILED — resource ${key} not reconstructed from glTF`);
+			anyFailed = true;
+			continue;
+		}
+		if (!bytesEqual(b, p)) {
+			console.log(
+				`ROUNDTRIP-GLTF FAILED — ${key} differs: baseline sha1 ${sha1(b)}, post sha1 ${sha1(p)}`,
+			);
+			anyFailed = true;
+		}
+	}
+	if (anyFailed) {
+		process.exitCode = 1;
+		return;
+	}
+
+	// Determinism check: a second glTF export of the same payload must match.
+	const gltfBytes2 = await exportWorldLogicToGltf(extracted.payload);
+	if (!bytesEqual(gltfBytes, gltfBytes2)) {
+		console.log(
+			`ROUNDTRIP-GLTF WARNING — glTF export not deterministic across passes ` +
+				`(${gltfBytes.byteLength} B vs ${gltfBytes2.byteLength} B).`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	console.log(
+		`ROUNDTRIP-GLTF OK — every resource writer-idempotent after glTF round-trip, export deterministic.`,
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-function main() {
+async function main() {
 	const [cmd, ...rest] = process.argv.slice(2);
 	const args = parseArgs(rest);
 	try {
 		switch (cmd) {
-			case 'list':      return cmdList(args);
-			case 'parse':     return cmdParse(args);
-			case 'dump':      return cmdDump(args);
-			case 'pack':      return cmdPack(args);
-			case 'roundtrip': return cmdRoundtrip(args);
-			case 'stress':    return cmdStress(args);
-			case 'fuzz':      return cmdFuzz(args);
+			case 'list':           return cmdList(args);
+			case 'parse':          return cmdParse(args);
+			case 'dump':           return cmdDump(args);
+			case 'pack':           return cmdPack(args);
+			case 'roundtrip':      return cmdRoundtrip(args);
+			case 'stress':         return cmdStress(args);
+			case 'fuzz':           return cmdFuzz(args);
+			case 'export-gltf':    return await cmdExportGltf(args);
+			case 'import-gltf':    return await cmdImportGltf(args);
+			case 'roundtrip-gltf': return await cmdRoundtripGltf(args);
 			default:
-				console.error('Commands: list | parse | dump | pack | roundtrip | stress | fuzz');
+				console.error(
+					'Commands: list | parse | dump | pack | roundtrip | stress | fuzz | ' +
+						'export-gltf | import-gltf | roundtrip-gltf',
+				);
 				console.error('Registered handlers: ' + registry.map((h) => h.key).join(', '));
 				process.exit(1);
 		}
