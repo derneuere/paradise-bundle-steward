@@ -12,6 +12,8 @@ import { lazy, type ComponentType } from 'react';
 
 export const EDITOR_PAGES: Record<string, ComponentType<unknown>> = {
 	aiSections: lazy(() => import('@/pages/AISectionsPage')),
+	attribSysVault: lazy(() => import('@/pages/AttribSysVaultPage')),
+	deformationSpec: lazy(() => import('@/pages/DeformationSpecPage')),
 	streetData: lazy(() => import('@/pages/StreetDataPage')),
 	triggerData: lazy(() => import('@/pages/TriggerDataPage')),
 	challengeList: lazy(() => import('@/pages/ChallengeListPage')),

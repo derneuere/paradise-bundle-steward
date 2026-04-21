@@ -1,0 +1,406 @@
+scanning 49 VEH_*_AT.BIN bundles...
+processed 48, skipped 1
+
+════════════════════════════════════════════════════════════════════════════════
+PER-CLASS FIELD RANGES
+════════════════════════════════════════════════════════════════════════════════
+
+## burnoutcarasset  (20 fields)
+────────────────────────────────────────────────────────────────────────────────
+Offences                                 ref[]  lens={12×48} slots=12
+SoundExhaustAsset                        ref    class=1u key=8u
+SoundEngineAsset                         ref    class=1u key=8u
+PhysicsVehicleHandlingAsset              ref    class=1u key=48u
+GraphicsAsset                            ref    class=1u key=48u
+CarUnlockShot                            ref    class=1u key=1u
+CameraExternalBehaviourAsset             ref    class=1u key=48u
+CameraBumperBehaviourAsset               ref    class=1u key=48u
+VehicleID                                bytes8 (1u: ""(48))
+PhysicsAsset                             u64    24u distinct
+MasterSceneMayaBinaryFile                u64    24u distinct
+InGameName                               bytes8 (1u: ""(48))
+GameplayAsset                            u64    24u distinct
+ExhaustName                              bytes8 (1u: ""(48))
+ExhaustEntityKey                         u64    8u distinct
+EngineName                               bytes8 (1u: ""(48))
+EngineEntityKey                          u64    8u distinct
+DefaultWheel                             u64    29u distinct
+BuildThisVehicle                         bool   true=48/48
+_carAssetPad                             int[]  lens={3×48} vals=[0, 0] n=144 (1u: 0)
+
+## burnoutcargraphicsasset  (11 fields)
+────────────────────────────────────────────────────────────────────────────────
+PlayerPalletteIndex                      int    [0, 3] n=48 (4u: 0,1,2,3)
+PlayerColourIndex                        int    [0, 24] n=48 (17u: 0,1,3,4…23,24)
+Alloc                                    int    [1, 1] n=48 (1u: 1)
+Num_RandomTrafficColours                 int    [1, 1] n=48 (1u: 1)
+Size                                     int    [4, 4] n=48 (1u: 4)
+EncodedTypePad                           int    [0, 0] n=48 (1u: 0)
+RandomTrafficColours                     int[]  lens={1×48} vals=[0, 0] n=48 (1u: 0)
+Alloc_Offences                           int    [12, 12] n=48 (1u: 12)
+Num_Offences                             int    [12, 12] n=48 (1u: 12)
+Size_Offences                            int    [24, 24] n=48 (1u: 24)
+EncodedTypePad_Offences                  int    [0, 0] n=48 (1u: 0)
+
+## camerabumperbehaviour  (11 fields)
+────────────────────────────────────────────────────────────────────────────────
+ZOffset                                  f32    [1.2000, 1.6000] μ=1.5562 σ=0.1223 n=48 (3u)
+YOffset                                  f32    [0.1750, 0.6000] μ=0.3443 σ=0.0689 n=48 (7u)
+YawSpring                                f32    [0.7000, 0.7000] μ=0.7000 σ=0 n=48 (1u)
+RollSpring                               int    [1, 1] n=48 (1u: 1)
+PitchSpring                              f32    [0.5000, 0.5000] μ=0.5000 σ=0 n=48 (1u)
+FieldOfView                              int    [80, 80] n=48 (1u: 80)
+BoostFieldOfView                         int    [105, 105] n=48 (1u: 105)
+BodyRollScale                            f32    [1.5000, 1.5000] μ=1.5000 σ=0 n=48 (1u)
+BodyPitchScale                           f32    [1.5000, 1.5000] μ=1.5000 σ=0 n=48 (1u)
+AccelerationResponse                     f32    [3.0000, 3.0000] μ=3.0000 σ=0 n=48 (1u)
+AccelerationDampening                    int    [0, 0] n=48 (1u: 0)
+
+## cameraexternalbehaviour  (17 fields)
+────────────────────────────────────────────────────────────────────────────────
+ZDistanceScale                           int    [0, 0] n=48 (1u: 0)
+ZAndTiltCutoffSpeedMPH                   int    [100, 100] n=48 (1u: 100)
+YawSpring                                f32    [0.0600, 0.1100] μ=0.0805 σ=0.0091 n=48 (8u)
+TiltCameraScale                          int    [1, 1] n=48 (1u: 1)
+TiltAroundCar                            int    [1, 1] n=48 (1u: 1)
+SlideZOffsetMax                          int    [0, 0] n=48 (1u: 0)
+SlideYScale                              int    [0, 0] n=48 (1u: 0)
+SlideXScale                              int    [0, 0] n=48 (1u: 0)
+PivotZOffset                             f32    [1.3000, 2.2000] μ=1.5958 σ=0.1914 n=48 (9u)
+PivotLength                              f32    [6.6000, 7.8000] μ=6.9729 σ=0.3102 n=48 (9u)
+PivotHeight                              f32    [0.9000, 1.4000] μ=0.9812 σ=0.1116 n=48 (6u)
+PitchSpring                              f32    [0.5500, 1.0000] μ=0.5594 σ=0.0643 n=48 (2u)
+FieldOfView                              int    [60, 80] n=48 (3u: 60,70,80)
+DriftYawSpring                           f32    [0.0500, 0.0900] μ=0.0664 σ=0.0088 n=48 (6u)
+DownAngle                                int    [0, 5] n=48 (2u: 0,5)
+BoostFieldOfViewZoom                     int    [0, 0] n=48 (1u: 0)
+BoostFieldOfView                         int    [80, 95] n=48 (3u: 80,90,95)
+
+## physicsvehiclebaseattribs  (66 fields)
+────────────────────────────────────────────────────────────────────────────────
+_baseAlign                               int    [0, 0] n=48 (1u: 0)
+RearRightWheelPosition                   int[]  lens={4×48} vals=[-1.5, 0.8500000238418579] n=192 (5u: -1.5,-0.4000000059604645,-0.20000000298023224,0,0.8500000238418579)
+FrontRightWheelPosition                  int[]  lens={4×48} vals=[-0.4000000059604645, 1.100000023841858] n=192 (5u: -0.4000000059604645,-0.20000000298023224,0,0.8500000238418579,1.100000023841858)
+CoMOffset                                int[]  lens={4×48} vals=[-0.20000000298023224, 15000] n=192 (14u: -0.20000000298023224,-0.15000000596046448,0,1500…12000,15000)
+BrakeScaleToFactor                       int[]  lens={4×48} vals=[0, 7] n=192 (9u: 0,2,2.5,3…6,7)
+YawDampingOnTakeOff                      f32    [0, 0.0400] μ=0.0267 σ=0.0189 n=48 (2u)
+TractionLineLength                       f32    [0.2000, 0.2000] μ=0.2000 σ=0 n=48 (1u)
+TimeForFullBrake                         int    [3, 5] n=48 (3u: 3,4,5)
+SurfaceRoughnessFactor                   f32    [0.3000, 1.0000] μ=0.7979 σ=0.1164 n=48 (4u)
+SurfaceRearGripFactor                    f32    [0.4000, 0.9000] μ=0.7521 σ=0.0918 n=48 (6u)
+SurfaceFrontGripFactor                   f32    [0.1320, 0.3300] μ=0.2523 σ=0.0400 n=48 (6u)
+SurfaceDragFactor                        f32    [0.0500, 0.9000] μ=0.2219 σ=0.1472 n=48 (6u)
+RollLimitOnTakeOff                       f32    [0.6500, 1.1000] μ=0.8202 σ=0.1606 n=48 (6u)
+RollDampingOnTakeOff                     f32    [0, 0.0750] μ=0.0051 σ=0.0148 n=48 (9u)
+RearWheelMass                            int    [20, 120] n=48 (5u: 20,30,45,50,120)
+RearTireStaticFrictionCoefficient        f32    [2.0000, 3.5000] μ=2.7656 σ=0.3574 n=48 (11u)
+RearTireLongForceBias                    f32    [-0.2000, 0.3000] μ=-0.0146 σ=0.1683 n=48 (4u)
+RearTireDynamicFrictionCoefficient       f32    [2.0000, 3.5000] μ=2.7656 σ=0.3574 n=48 (11u)
+RearTireAdhesiveLimit                    int    [18000, 50000] n=48 (13u: 18000,19000,20000,21000…32000,50000)
+RearLongGripCurvePeakSlipRatio           f32    [0.1500, 0.5000] μ=0.2948 σ=0.1187 n=48 (4u)
+RearLongGripCurvePeakCoefficient         f32    [1.0000, 2.5000] μ=1.5104 σ=0.4464 n=48 (8u)
+RearLongGripCurveFloorSlipRatio          f32    [1.0000, 2.0000] μ=1.2500 σ=0.3385 n=48 (3u)
+RearLongGripCurveFallCoefficient         f32    [0.5500, 2.0000] μ=0.9677 σ=0.4440 n=48 (7u)
+RearLatGripCurvePeakSlipRatio            f32    [0.2500, 1.0000] μ=0.4594 σ=0.2495 n=48 (6u)
+RearLatGripCurvePeakCoefficient          f32    [1.5000, 3.0000] μ=2.1760 σ=0.4649 n=48 (8u)
+RearLatGripCurveFloorSlipRatio           f32    [0.8000, 3.0000] μ=2.5167 σ=0.7476 n=48 (4u)
+RearLatGripCurveFallCoefficient          f32    [1.0000, 2.0000] μ=1.3979 σ=0.2933 n=48 (7u)
+RearLatGripCurveDriftPeakSlipRatio       f32    [0.5000, 1.0000] μ=0.8688 σ=0.1657 n=48 (5u)
+PowerToRear                              f32    [0, 1.0000] μ=0.7375 σ=0.4299 n=48 (3u)
+PowerToFront                             f32    [0, 1.0000] μ=0.2625 σ=0.4299 n=48 (3u)
+PitchDampingOnTakeOff                    f32    [0.7500, 0.9500] μ=0.8812 σ=0.0592 n=48 (4u)
+MaxSpeed                                 int    [112, 180] n=48 (16u: 112,122,126,128…179,180)
+MagicBrakeFactorTurning                  f32    [0, 2.0000] μ=0.7240 σ=0.3653 n=48 (6u)
+MagicBrakeFactorStraightLine             f32    [0, 8.0000] μ=3.2708 σ=2.2078 n=48 (9u)
+LowSpeedTyreFrictionTractionControl      f32    [0, 25.0000] μ=9.8438 σ=8.3155 n=48 (10u)
+LowSpeedThrottleTractionControl          int    [0, 65] n=48 (9u: 0,5,10,13…60,65)
+LowSpeedDrivingSpeed                     int    [50, 70] n=48 (2u: 50,70)
+LockBrakeScale                           f32    [0.5000, 1.0000] μ=0.8021 σ=0.2445 n=48 (2u)
+LinearDrag                               f32    [0.1000, 0.8000] μ=0.2792 σ=0.2236 n=48 (8u)
+HighSpeedAngularDamping                  f32    [0.0200, 0.1500] μ=0.1298 σ=0.0288 n=48 (5u)
+FrontWheelMass                           int    [20, 120] n=48 (4u: 20,30,45,120)
+FrontTireStaticFrictionCoefficient       f32    [2.0000, 3.5000] μ=2.7833 σ=0.3683 n=48 (10u)
+FrontTireLongForceBias                   f32    [-0.2000, 0.3000] μ=0.1104 σ=0.1373 n=48 (5u)
+FrontTireDynamicFrictionCoefficient      f32    [2.0000, 3.5000] μ=2.7833 σ=0.3683 n=48 (10u)
+FrontTireAdhesiveLimit                   int    [18000, 50000] n=48 (13u: 18000,19000,20000,21000…32000,50000)
+FrontLongGripCurvePeakSlipRatio          f32    [0.1000, 1.0000] μ=0.3354 σ=0.2323 n=48 (4u)
+FrontLongGripCurvePeakCoefficient        f32    [0.6000, 2.0000] μ=1.5542 σ=0.5152 n=48 (6u)
+FrontLongGripCurveFloorSlipRatio         f32    [0.7500, 2.0000] μ=1.3302 σ=0.3291 n=48 (5u)
+FrontLongGripCurveFallCoefficient        f32    [0.5000, 1.3000] μ=0.9333 σ=0.2154 n=48 (4u)
+FrontLatGripCurvePeakSlipRatio           f32    [0.1000, 1.0000] μ=0.4115 σ=0.1990 n=48 (8u)
+FrontLatGripCurvePeakCoefficient         f32    [1.5000, 3.0000] μ=2.3688 σ=0.4938 n=48 (6u)
+FrontLatGripCurveFloorSlipRatio          f32    [1.0000, 3.0000] μ=2.5625 σ=0.7190 n=48 (4u)
+FrontLatGripCurveFallCoefficient         f32    [1.1000, 2.0000] μ=1.5875 σ=0.2741 n=48 (9u)
+FrontLatGripCurveDriftPeakSlipRatio      f32    [0.5000, 1.0000] μ=0.8667 σ=0.1678 n=48 (6u)
+DrivingMass                              int    [721, 4250] n=48 (19u: 721,900,980,1043…2410,4250)
+DriveTimeDeformLimitX                    f32    [0, 0.1000] μ=0.0521 σ=0.0143 n=48 (3u)
+DriveTimeDeformLimitPosZ                 f32    [0, 0.2500] μ=0.1937 σ=0.0496 n=48 (6u)
+DriveTimeDeformLimitNegZ                 f32    [0, 0.5000] μ=0.3334 σ=0.0722 n=48 (9u)
+DriveTimeDeformLimitNegY                 f32    [0, 0.4000] μ=0.2115 σ=0.0523 n=48 (4u)
+DownForceZOffset                         f32    [0, 0.5000] μ=0.0310 σ=0.1008 n=48 (3u)
+DownForce                                f32    [8.0000, 24.0000] μ=15.9500 σ=5.2547 n=48 (15u)
+CrashExtraYawVelocityFactor              f32    [0.3000, 0.3000] μ=0.3000 σ=0 n=48 (1u)
+CrashExtraRollVelocityFactor             f32    [0.3000, 0.3000] μ=0.3000 σ=0 n=48 (1u)
+CrashExtraPitchVelocityFactor            int    [0, 0] n=48 (1u: 0)
+CrashExtraLinearVelocityFactor           f32    [0.3000, 0.3000] μ=0.3000 σ=0 n=48 (1u)
+AngularDrag                              f32    [0, 0.0500] μ=0.0427 σ=0.0176 n=48 (2u)
+
+## physicsvehiclebodyrollattribs  (11 fields)
+────────────────────────────────────────────────────────────────────────────────
+WheelLongForceHeightOffset               f32    [-0.5000, -0.2000] μ=-0.2958 σ=0.0809 n=48 (5u)
+WheelLatForceHeightOffset                f32    [-0.0875, -0.0300] μ=-0.0524 σ=0.0156 n=48 (11u)
+WeightTransferDecayZ                     f32    [0.2000, 0.9000] μ=0.6438 σ=0.1999 n=48 (5u)
+WeightTransferDecayX                     f32    [0.1000, 0.9000] μ=0.6875 σ=0.1954 n=48 (6u)
+RollSpringStiffness                      f32    [0.3000, 0.3000] μ=0.3000 σ=0 n=48 (1u)
+RollSpringDampening                      f32    [0.8000, 0.8000] μ=0.8000 σ=0 n=48 (1u)
+PitchSpringStiffness                     f32    [0.3000, 0.3000] μ=0.3000 σ=0 n=48 (1u)
+PitchSpringDampening                     f32    [0.1000, 0.1000] μ=0.1000 σ=0 n=48 (1u)
+FactorOfWeightZ                          f32    [0, 0.3000] μ=0.1177 σ=0.0807 n=48 (5u)
+FactorOfWeightX                          f32    [0.0100, 0.1500] μ=0.0940 σ=0.0343 n=48 (4u)
+_bodyRollPad                             int[]  lens={4×48} vals=[0, 0] n=192 (1u: 0)
+
+## physicsvehicleboostattribs  (16 fields)
+────────────────────────────────────────────────────────────────────────────────
+MaxBoostSpeed                            int    [126, 200] n=48 (15u: 126,136,141,144…199,200)
+BoostRule                                int    [1, 1] n=48 (1u: 1)
+BoostKickTime                            f32    [0.1000, 0.1000] μ=0.1000 σ=0 n=48 (1u)
+BoostKickMinTime                         f32    [0.5000, 0.7500] μ=0.5677 σ=0.1111 n=48 (2u)
+BoostKickMaxTime                         int    [1, 1] n=48 (1u: 1)
+BoostKickMaxStartSpeed                   int    [100, 180] n=48 (2u: 100,180)
+BoostKickHeightOffset                    f32    [-0.7500, 0] μ=-0.0729 σ=0.1913 n=48 (6u)
+BoostKickAcceleration                    int    [0, 30] n=48 (11u: 0,6,9,10…24,30)
+BoostKick                                int    [0, 5] n=48 (2u: 0,5)
+BoostHeightOffset                        int    [0, 0] n=48 (1u: 0)
+BoostBase                                f32    [0.2000, 1.5000] μ=0.9271 σ=0.2580 n=48 (3u)
+BoostAcceleration                        f32    [0, 15.0000] μ=8.0625 σ=2.8296 n=48 (9u)
+BlueMaxBoostSpeed                        int    [170, 180] n=48 (3u: 170,175,180)
+BlueBoostKickTime                        f32    [0.1000, 0.1000] μ=0.1000 σ=0 n=48 (1u)
+BlueBoostKick                            f32    [5.0000, 7.5000] μ=5.0521 σ=0.3571 n=48 (2u)
+BlueBoostBase                            int    [1, 1] n=48 (1u: 1)
+
+## physicsvehiclecollisionattribs  (1 fields)
+────────────────────────────────────────────────────────────────────────────────
+BodyBox                                  int[]  lens={4×48} vals=[0, 140] n=192 (15u: 0,65,70,80…130,140)
+
+## physicsvehicledriftattribs  (36 fields)
+────────────────────────────────────────────────────────────────────────────────
+DriftScaleToYawTorque                    int[]  lens={4×48} vals=[0, 100000] n=192 (29u: 0,8000,9000,10000…70000,100000)
+WheelSlip                                f32    [0.1000, 0.4000] μ=0.2620 σ=0.0923 n=48 (7u)
+TimeToCapScale                           f32    [0.8500, 1.0000] μ=0.8563 σ=0.0258 n=48 (3u)
+TimeForNaturalDrift                      int    [10, 10] n=48 (1u: 10)
+SteeringDriftScaleFactor                 f32    [0.0500, 0.6000] μ=0.3426 σ=0.1158 n=48 (10u)
+SideForcePeakDriftAngle                  f32    [13.0000, 35.0000] μ=19.0729 σ=5.0959 n=48 (6u)
+SideForceMagnitude                       f32    [15.0000, 35.0000] μ=26.3229 σ=5.1118 n=48 (10u)
+SideForceDriftSpeedCutOff                int    [1, 100] n=48 (2u: 1,100)
+SideForceDriftAngleCutOff                int    [30, 60] n=48 (7u: 30,35,40,45,50,55,60)
+SideForceDirftScaleCutOff                f32    [0.0010, 0.5000] μ=0.1831 σ=0.1250 n=48 (11u)
+NeutralTimeToReduceDrift                 int    [0, 0] n=48 (1u: 0)
+NaturalYawTorqueCutOffAngle              f32    [7.5000, 17.5000] μ=10.9115 σ=2.6440 n=48 (7u)
+NaturalYawTorque                         int    [3000, 15000] n=48 (11u: 3000,5000,6000,6250…12000,15000)
+NaturalDriftTimeToReachBaseSlip          f32    [0.3000, 0.3000] μ=0.3000 σ=0 n=48 (1u)
+NaturalDriftStartSlip                    f32    [0.9200, 0.9200] μ=0.9200 σ=0 n=48 (1u)
+NaturalDriftScaleDecay                   f32    [0.2000, 0.8000] μ=0.4554 σ=0.1884 n=48 (11u)
+MinSpeedForDrift                         int    [40, 60] n=48 (3u: 40,45,60)
+InitialDriftPushTime                     f32    [1.7500, 5.0000] μ=2.6146 σ=0.7430 n=48 (6u)
+InitialDriftPushScaleLimit               f32    [0.0500, 0.5000] μ=0.2250 σ=0.1190 n=48 (6u)
+InitialDriftPushDynamicInc               f32    [3.5000, 8.5000] μ=6.1719 σ=1.2002 n=48 (10u)
+InitialDriftPushBaseInc                  f32    [0.0500, 0.0500] μ=0.0500 σ=0 n=48 (1u)
+GripFromSteering                         int    [0, 0] n=48 (1u: 0)
+GripFromGasLetOff                        f32    [0.0500, 0.0500] μ=0.0500 σ=0 n=48 (1u)
+GripFromBrake                            int    [0, 0] n=48 (1u: 0)
+GasDriftScaleFactor                      f32    [0.0500, 0.3000] μ=0.1314 σ=0.0483 n=48 (7u)
+ForcedDriftTimeToReachBaseSlip           f32    [0.3000, 0.3000] μ=0.3000 σ=0 n=48 (1u)
+ForcedDriftStartSlip                     f32    [0.2300, 1.0000] μ=0.4421 σ=0.1961 n=48 (10u)
+DriftTorqueFallOff                       f32    [0.1000, 0.2000] μ=0.1083 σ=0.0276 n=48 (2u)
+DriftSidewaysDamping                     f32    [0.0200, 0.0200] μ=0.0200 σ=0 n=48 (1u)
+DriftMaxAngle                            int    [45, 90] n=48 (8u: 45,50,60,65,75,80,85,90)
+DriftAngularDamping                      f32    [0.0500, 0.2000] μ=0.1246 σ=0.0341 n=48 (11u)
+CounterSteeringDriftScaleFactor          f32    [0.7500, 2.8000] μ=1.8260 σ=0.3285 n=48 (12u)
+CappedScale                              f32    [0, 0.7500] μ=0.7146 σ=0.1503 n=48 (3u)
+BrakingDriftScaleFactor                  f32    [0.2500, 1.5000] μ=0.5641 σ=0.2785 n=48 (9u)
+BaseCounterSteeringDriftScaleFactor      f32    [0.2000, 0.6000] μ=0.4365 σ=0.1178 n=48 (7u)
+_driftPad                                bytes8 (1u: ""(48))
+
+## physicsvehicleengineattribs  (18 fields)
+────────────────────────────────────────────────────────────────────────────────
+TorqueScales2                            int[]  lens={4×48} vals=[0, 1] n=192 (2u: 0,1)
+TorqueScales1                            int[]  lens={4×48} vals=[0, 4] n=192 (8u: 0,1,1.399999976158142,1.75,2,2.200000047683716,3,4)
+GearUpRPMs2                              int[]  lens={4×48} vals=[0, 7500] n=192 (21u: 0,4500,5000,5100…7490,7500)
+GearUpRPMs1                              int[]  lens={4×48} vals=[0, 7930] n=192 (18u: 0,4500,5200,5250…7500,7930)
+GearRatios2                              int[]  lens={4×48} vals=[0, 1.3899999856948853] n=192 (34u: 0,0.6299999952316284,0.6800000071525574,0.7120000123977661…1.378999948501587,1.3899999856948853)
+GearRatios1                              int[]  lens={4×48} vals=[-2.799999952316284, 3.5829999446868896] n=192 (38u: -2.799999952316284,-2,-1.399999976158142,-1.2999999523162842…3.5399999618530273,3.5829999446868896)
+TransmissionEfficiency                   f32    [0.5000, 1.0000] μ=0.5208 σ=0.0999 n=48 (2u)
+TorqueFallOffRPM                         int    [2800, 6000] n=48 (9u: 2800,3000,4000,4400…5800,6000)
+MaxTorque                                int    [187, 500] n=48 (12u: 187,235,270,280…450,500)
+MaxRPM                                   int    [4510, 8800] n=48 (10u: 4510,4700,6000,6500…8300,8800)
+LSDMGearUpSpeed                          int    [20, 30] n=48 (2u: 20,30)
+GearChangeTime                           int    [0, 0] n=48 (1u: 0)
+FlyWheelInertia                          f32    [0.2000, 0.2000] μ=0.2000 σ=0 n=48 (1u)
+FlyWheelFriction                         int    [250, 250] n=48 (1u: 250)
+EngineResistance                         int    [0, 0] n=48 (1u: 0)
+EngineLowEndTorqueFactor                 f32    [0.2500, 2.0000] μ=0.6219 σ=0.3218 n=48 (6u)
+EngineBraking                            int    [125, 500] n=48 (2u: 125,500)
+Differential                             f32    [2.2500, 5.7000] μ=3.9760 σ=0.8983 n=48 (15u)
+
+## physicsvehiclehandling  (8 fields)
+────────────────────────────────────────────────────────────────────────────────
+PhysicsVehicleSuspensionAttribs          ref    class=1u key=48u
+PhysicsVehicleSteeringAttribs            ref    class=1u key=48u
+PhysicsVehicleEngineAttribs              ref    class=1u key=48u
+PhysicsVehicleDriftAttribs               ref    class=1u key=48u
+PhysicsVehicleCollisionAttribs           ref    class=1u key=48u
+PhysicsVehicleBoostAttribs               ref    class=1u key=48u
+PhysicsVehicleBodyRollAttribs            ref    class=1u key=48u
+PhysicsVehicleBaseAttribs                ref    class=1u key=48u
+
+## physicsvehiclesteeringattribs  (15 fields)
+────────────────────────────────────────────────────────────────────────────────
+TimeForLock                              f32    [0.2000, 0.5500] μ=0.4025 σ=0.1006 n=48 (9u)
+StraightReactionBias                     f32    [1.2500, 5.0000] μ=2.5365 σ=0.7162 n=48 (8u)
+SpeedForMinAngle                         int    [90, 180] n=48 (4u: 90,120,150,180)
+SpeedForMaxAngle                         int    [30, 30] n=48 (1u: 30)
+MinAngle                                 f32    [1.2000, 2.5000] μ=1.6375 σ=0.3244 n=48 (7u)
+MaxAngle                                 int    [10, 17] n=48 (5u: 10,11,12,15,17)
+AiPidCoefficientP                        int    [4, 4] n=48 (1u: 4)
+AiPidCoefficientI                        f32    [0, 0.2000] μ=0.0792 σ=0.0978 n=48 (2u)
+AiPidCoefficientDriftP                   f32    [0.5000, 1.0000] μ=0.6979 σ=0.2445 n=48 (2u)
+AiPidCoefficientDriftI                   f32    [0, 0.1000] μ=0.0396 σ=0.0489 n=48 (2u)
+AiPidCoefficientDriftD                   int    [1, 3] n=48 (2u: 1,3)
+AiPidCoefficientD                        f32    [1.0000, 2.5000] μ=1.9063 σ=0.7335 n=48 (2u)
+AiMinLookAheadDistanceForDrift           int    [0, 20] n=48 (2u: 0,20)
+AiLookAheadTimeForDrift                  f32    [0.5000, 0.5000] μ=0.5000 σ=0 n=48 (1u)
+_steeringPad                             int[]  lens={4×48} vals=[0, 0] n=192 (1u: 0)
+
+## physicsvehiclesuspensionattribs  (13 fields)
+────────────────────────────────────────────────────────────────────────────────
+UpwardMovement                           f32    [0.0550, 0.1500] μ=0.0902 σ=0.0173 n=48 (11u)
+TimeToDampAfterLanding                   f32    [0, 0.1000] μ=0.0938 σ=0.0242 n=48 (2u)
+Strength                                 f32    [0.1000, 0.1000] μ=0.1000 σ=0 n=48 (1u)
+SpringLength                             f32    [0.0750, 0.2000] μ=0.1032 σ=0.0231 n=48 (9u)
+RearHeight                               f32    [-0.1000, 0.0400] μ=-0.0128 σ=0.0326 n=48 (9u)
+MaxYawDampingOnLanding                   f32    [0, 1.0000] μ=0.9083 σ=0.2730 n=48 (3u)
+MaxVertVelocityDampingOnLanding          f32    [0, 0.1000] μ=0.0896 σ=0.0305 n=48 (2u)
+MaxRollDampingOnLanding                  f32    [0, 1.0000] μ=0.9000 σ=0.2937 n=48 (3u)
+MaxPitchDampingOnLanding                 f32    [0, 0.6000] μ=0.5375 σ=0.1833 n=48 (2u)
+InAirDamping                             int    [30, 30] n=48 (1u: 30)
+FrontHeight                              f32    [-0.0500, 0.1000] μ=-0.0064 σ=0.0313 n=48 (9u)
+DownwardMovement                         f32    [0.0650, 0.1650] μ=0.1124 σ=0.0191 n=48 (9u)
+Dampening                                f32    [2.7500, 5.0000] μ=3.3385 σ=0.5266 n=48 (5u)
+
+════════════════════════════════════════════════════════════════════════════════
+SENSITIVITY / BOUND SUGGESTIONS
+════════════════════════════════════════════════════════════════════════════════
+
+Fields flagged as constant across all vehicles (safe defaults):
+  physicsvehicleengineattribs.GearChangeTime = 0
+  physicsvehicleengineattribs.FlyWheelInertia = 0.2000
+  physicsvehicleengineattribs.FlyWheelFriction = 250
+  physicsvehicleengineattribs.EngineResistance = 0
+  physicsvehicledriftattribs.TimeForNaturalDrift = 10
+  physicsvehicledriftattribs.NeutralTimeToReduceDrift = 0
+  physicsvehicledriftattribs.NaturalDriftTimeToReachBaseSlip = 0.3000
+  physicsvehicledriftattribs.NaturalDriftStartSlip = 0.9200
+  physicsvehicledriftattribs.InitialDriftPushBaseInc = 0.0500
+  physicsvehicledriftattribs.GripFromSteering = 0
+  physicsvehicledriftattribs.GripFromGasLetOff = 0.0500
+  physicsvehicledriftattribs.GripFromBrake = 0
+  physicsvehicledriftattribs.ForcedDriftTimeToReachBaseSlip = 0.3000
+  physicsvehicledriftattribs.DriftSidewaysDamping = 0.0200
+  physicsvehiclesuspensionattribs.Strength = 0.1000
+  physicsvehiclesuspensionattribs.InAirDamping = 30
+  physicsvehiclesteeringattribs.SpeedForMaxAngle = 30
+  physicsvehiclesteeringattribs.AiPidCoefficientP = 4
+  physicsvehiclesteeringattribs.AiLookAheadTimeForDrift = 0.5000
+  physicsvehicleboostattribs.BoostRule = 1
+  physicsvehicleboostattribs.BoostKickTime = 0.1000
+  physicsvehicleboostattribs.BoostKickMaxTime = 1
+  physicsvehicleboostattribs.BoostHeightOffset = 0
+  physicsvehicleboostattribs.BlueBoostKickTime = 0.1000
+  physicsvehicleboostattribs.BlueBoostBase = 1
+  camerabumperbehaviour.YawSpring = 0.7000
+  camerabumperbehaviour.RollSpring = 1
+  camerabumperbehaviour.PitchSpring = 0.5000
+  camerabumperbehaviour.FieldOfView = 80
+  camerabumperbehaviour.BoostFieldOfView = 105
+  camerabumperbehaviour.BodyRollScale = 1.5000
+  camerabumperbehaviour.BodyPitchScale = 1.5000
+  camerabumperbehaviour.AccelerationResponse = 3.0000
+  camerabumperbehaviour.AccelerationDampening = 0
+  burnoutcargraphicsasset.Alloc = 1
+  burnoutcargraphicsasset.Num_RandomTrafficColours = 1
+  burnoutcargraphicsasset.Size = 4
+  burnoutcargraphicsasset.EncodedTypePad = 0
+  burnoutcargraphicsasset.Alloc_Offences = 12
+  burnoutcargraphicsasset.Num_Offences = 12
+  burnoutcargraphicsasset.Size_Offences = 24
+  burnoutcargraphicsasset.EncodedTypePad_Offences = 0
+  physicsvehiclebodyrollattribs.RollSpringStiffness = 0.3000
+  physicsvehiclebodyrollattribs.RollSpringDampening = 0.8000
+  physicsvehiclebodyrollattribs.PitchSpringStiffness = 0.3000
+  physicsvehiclebodyrollattribs.PitchSpringDampening = 0.1000
+  physicsvehiclebaseattribs._baseAlign = 0
+  physicsvehiclebaseattribs.TractionLineLength = 0.2000
+  physicsvehiclebaseattribs.CrashExtraYawVelocityFactor = 0.3000
+  physicsvehiclebaseattribs.CrashExtraRollVelocityFactor = 0.3000
+  physicsvehiclebaseattribs.CrashExtraPitchVelocityFactor = 0
+  physicsvehiclebaseattribs.CrashExtraLinearVelocityFactor = 0.3000
+  cameraexternalbehaviour.ZDistanceScale = 0
+  cameraexternalbehaviour.ZAndTiltCutoffSpeedMPH = 100
+  cameraexternalbehaviour.TiltCameraScale = 1
+  cameraexternalbehaviour.TiltAroundCar = 1
+  cameraexternalbehaviour.SlideZOffsetMax = 0
+  cameraexternalbehaviour.SlideYScale = 0
+  cameraexternalbehaviour.SlideXScale = 0
+  cameraexternalbehaviour.BoostFieldOfViewZoom = 0
+
+Fields flagged as categorical (small set of distinct int values):
+  physicsvehicleengineattribs.LSDMGearUpSpeed: {20, 30}
+  physicsvehicleengineattribs.EngineBraking: {125, 500}
+  physicsvehicledriftattribs.SideForceDriftSpeedCutOff: {1, 100}
+  physicsvehicledriftattribs.SideForceDriftAngleCutOff: {30, 35, 40, 45, 50, 55, 60}
+  physicsvehicledriftattribs.MinSpeedForDrift: {40, 45, 60}
+  physicsvehicledriftattribs.DriftMaxAngle: {45, 50, 60, 65, 75, 80, 85, 90}
+  physicsvehiclesteeringattribs.SpeedForMinAngle: {90, 120, 150, 180}
+  physicsvehiclesteeringattribs.MaxAngle: {10, 11, 12, 15, 17}
+  physicsvehiclesteeringattribs.AiPidCoefficientDriftD: {1, 3}
+  physicsvehiclesteeringattribs.AiMinLookAheadDistanceForDrift: {0, 20}
+  physicsvehicleboostattribs.BoostKickMaxStartSpeed: {100, 180}
+  physicsvehicleboostattribs.BoostKick: {0, 5}
+  physicsvehicleboostattribs.BlueMaxBoostSpeed: {170, 175, 180}
+  burnoutcargraphicsasset.PlayerPalletteIndex: {0, 1, 2, 3}
+  physicsvehiclebaseattribs.TimeForFullBrake: {3, 4, 5}
+  physicsvehiclebaseattribs.RearWheelMass: {20, 30, 45, 50, 120}
+  physicsvehiclebaseattribs.LowSpeedDrivingSpeed: {50, 70}
+  physicsvehiclebaseattribs.FrontWheelMass: {20, 30, 45, 120}
+  cameraexternalbehaviour.FieldOfView: {60, 70, 80}
+  cameraexternalbehaviour.DownAngle: {0, 5}
+  cameraexternalbehaviour.BoostFieldOfView: {80, 90, 95}
+
+High-variance f32 fields (σ > |μ|/2, suggesting wide editing range):
+  physicsvehicleengineattribs.EngineLowEndTorqueFactor: [0.2500, 2.0000] μ=0.6219 σ=0.3218 n=48 (6u)
+  physicsvehicledriftattribs.SideForceDirftScaleCutOff: [0.0010, 0.5000] μ=0.1831 σ=0.1250 n=48 (11u)
+  physicsvehicledriftattribs.InitialDriftPushScaleLimit: [0.0500, 0.5000] μ=0.2250 σ=0.1190 n=48 (6u)
+  physicsvehiclesuspensionattribs.RearHeight: [-0.1000, 0.0400] μ=-0.0128 σ=0.0326 n=48 (9u)
+  physicsvehiclesuspensionattribs.FrontHeight: [-0.0500, 0.1000] μ=-0.0064 σ=0.0313 n=48 (9u)
+  physicsvehiclesteeringattribs.AiPidCoefficientI: [0, 0.2000] μ=0.0792 σ=0.0978 n=48 (2u)
+  physicsvehiclesteeringattribs.AiPidCoefficientDriftI: [0, 0.1000] μ=0.0396 σ=0.0489 n=48 (2u)
+  physicsvehicleboostattribs.BoostKickHeightOffset: [-0.7500, 0] μ=-0.0729 σ=0.1913 n=48 (6u)
+  physicsvehiclebodyrollattribs.FactorOfWeightZ: [0, 0.3000] μ=0.1177 σ=0.0807 n=48 (5u)
+  physicsvehiclebaseattribs.YawDampingOnTakeOff: [0, 0.0400] μ=0.0267 σ=0.0189 n=48 (2u)
+  physicsvehiclebaseattribs.SurfaceDragFactor: [0.0500, 0.9000] μ=0.2219 σ=0.1472 n=48 (6u)
+  physicsvehiclebaseattribs.RollDampingOnTakeOff: [0, 0.0750] μ=0.0051 σ=0.0148 n=48 (9u)
+  physicsvehiclebaseattribs.RearTireLongForceBias: [-0.2000, 0.3000] μ=-0.0146 σ=0.1683 n=48 (4u)
+  physicsvehiclebaseattribs.RearLatGripCurvePeakSlipRatio: [0.2500, 1.0000] μ=0.4594 σ=0.2495 n=48 (6u)
+  physicsvehiclebaseattribs.PowerToRear: [0, 1.0000] μ=0.7375 σ=0.4299 n=48 (3u)
+  physicsvehiclebaseattribs.PowerToFront: [0, 1.0000] μ=0.2625 σ=0.4299 n=48 (3u)
+  physicsvehiclebaseattribs.MagicBrakeFactorTurning: [0, 2.0000] μ=0.7240 σ=0.3653 n=48 (6u)
+  physicsvehiclebaseattribs.MagicBrakeFactorStraightLine: [0, 8.0000] μ=3.2708 σ=2.2078 n=48 (9u)
+  physicsvehiclebaseattribs.LowSpeedTyreFrictionTractionControl: [0, 25.0000] μ=9.8438 σ=8.3155 n=48 (10u)
+  physicsvehiclebaseattribs.LinearDrag: [0.1000, 0.8000] μ=0.2792 σ=0.2236 n=48 (8u)
+  physicsvehiclebaseattribs.FrontTireLongForceBias: [-0.2000, 0.3000] μ=0.1104 σ=0.1373 n=48 (5u)
+  physicsvehiclebaseattribs.FrontLongGripCurvePeakSlipRatio: [0.1000, 1.0000] μ=0.3354 σ=0.2323 n=48 (4u)
+  physicsvehiclebaseattribs.DownForceZOffset: [0, 0.5000] μ=0.0310 σ=0.1008 n=48 (3u)
+
+Low-variance f32 fields (σ / μ < 5%, sensitive to small edits):
+  physicsvehicledriftattribs.TimeToCapScale: [0.8500, 1.0000] μ=0.8563 σ=0.0258 n=48 (3u)
+  cameraexternalbehaviour.PivotLength: [6.6000, 7.8000] μ=6.9729 σ=0.3102 n=48 (9u)
