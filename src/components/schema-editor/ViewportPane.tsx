@@ -6,6 +6,8 @@
 // porting them into the schema editor.
 
 import { useMemo } from 'react';
+import { ViewportErrorBoundary } from '@/components/common/ViewportErrorBoundary';
+import type { ResourceSchema } from '@/lib/schema/types';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
 import { TrafficDataViewport } from '@/components/trafficdata/TrafficDataViewport';
 import type { TrafficDataSelection } from '@/components/trafficdata/useTrafficSelection';
@@ -224,6 +226,31 @@ function aiSelectionToPath(sel: AISectionSelection): NodePath {
 export function ViewportPane() {
 	const { resource, data, selectedPath, selectPath } = useSchemaEditor();
 
+	// Error boundary resets when the user switches resource — otherwise a
+	// crash on one resource would wedge the pane until a full page reload.
+	return (
+		<ViewportErrorBoundary resetKey={resource.key}>
+			<ViewportPaneInner
+				resource={resource}
+				data={data}
+				selectedPath={selectedPath}
+				selectPath={selectPath}
+			/>
+		</ViewportErrorBoundary>
+	);
+}
+
+function ViewportPaneInner({
+	resource,
+	data,
+	selectedPath,
+	selectPath,
+}: {
+	resource: ResourceSchema;
+	data: unknown;
+	selectedPath: NodePath;
+	selectPath: (path: NodePath) => void;
+}) {
 	if (resource.key === 'trafficData') {
 		return <TrafficDataViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
 	}
