@@ -343,13 +343,6 @@ const PolygonSoupListPage = () => {
 		setSelectedPath(nextPath);
 	}, []);
 
-	const handleViewportSelect = useCallback(
-		(modelIndex: number, soupIndex: number, polyIndex: number) => {
-			switchResource(modelIndex, ['soups', soupIndex, 'polygons', polyIndex]);
-		},
-		[switchResource],
-	);
-
 	const onToggleVisible = useCallback((resourceId: string) => {
 		setVisibleIds((prev) => {
 			const next = new Set(prev);
@@ -396,6 +389,62 @@ const PolygonSoupListPage = () => {
 			return next;
 		});
 	}, []);
+
+	// Union every polygon between `from` and `to` into the bulk set. Both
+	// paths must be polygons in the SAME soup — the step size is 1 polygon
+	// and "in between" has no natural meaning across different soups (they
+	// don't share an index space). When the two soups differ we fall back
+	// to just adding the endpoint, so shift+click on a mismatched row still
+	// extends the selection by at least one polygon rather than silently
+	// no-oping.
+	const onBulkRange = useCallback((from: NodePath, to: NodePath) => {
+		const toAddr = parsePolyPath(to);
+		if (!toAddr) return;
+		const fromAddr = parsePolyPath(from);
+		setBulkPaths((prev) => {
+			const next = new Set(prev);
+			if (!fromAddr || fromAddr.soup !== toAddr.soup) {
+				next.add(pathKey(to));
+				return next;
+			}
+			const lo = Math.min(fromAddr.poly, toAddr.poly);
+			const hi = Math.max(fromAddr.poly, toAddr.poly);
+			for (let p = lo; p <= hi; p++) {
+				next.add(pathKey(['soups', toAddr.soup, 'polygons', p]));
+			}
+			return next;
+		});
+	}, []);
+
+	// Declared here (after onBulkToggle / onBulkRange) so the ctrl / shift
+	// branches can close over fully-initialised values rather than relying
+	// on hoist-at-call-time lookups.
+	const handleViewportSelect = useCallback(
+		(
+			modelIndex: number,
+			soupIndex: number,
+			polyIndex: number,
+			modifiers?: { shift?: boolean; ctrl?: boolean },
+		) => {
+			const targetPath: NodePath = ['soups', soupIndex, 'polygons', polyIndex];
+			if (modifiers?.ctrl) {
+				// Ctrl/Cmd+click in 3D: toggle bulk on just this polygon,
+				// don't move the inspector away from the current edit target.
+				onBulkToggle(targetPath);
+				return;
+			}
+			if (modifiers?.shift && selectedIndex === modelIndex && selectedPath.length > 0) {
+				// Shift+click in 3D: extend the bulk range from the current
+				// inspector selection to this polygon (same soup only).
+				// Inspector follows so the anchor moves forward.
+				onBulkRange(selectedPath, targetPath);
+				setSelectedPath(targetPath);
+				return;
+			}
+			switchResource(modelIndex, targetPath);
+		},
+		[switchResource, selectedIndex, selectedPath, onBulkToggle, onBulkRange],
+	);
 
 	const clearBulk = useCallback(() => setBulkPaths(new Set()), []);
 
@@ -455,8 +504,8 @@ const PolygonSoupListPage = () => {
 	);
 
 	const bulkSelectionContextValue = useMemo(
-		() => ({ bulkPathKeys: bulkPaths, onBulkToggle }),
-		[bulkPaths, onBulkToggle],
+		() => ({ bulkPathKeys: bulkPaths, onBulkToggle, onBulkRange }),
+		[bulkPaths, onBulkToggle, onBulkRange],
 	);
 
 	// -------------------------------------------------------------------------

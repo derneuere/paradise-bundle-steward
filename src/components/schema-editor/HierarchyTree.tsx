@@ -264,6 +264,7 @@ export function HierarchyTree() {
 	const bulk = useSchemaBulkSelection();
 	const bulkPathKeys = bulk?.bulkPathKeys;
 	const onBulkToggle = bulk?.onBulkToggle;
+	const onBulkRange = bulk?.onBulkRange;
 	const picker = useMultiResourcePicker();
 
 	const rootRecord = resource.registry[resource.rootType];
@@ -434,9 +435,11 @@ export function HierarchyTree() {
 									isSelected={isSelected}
 									isOnPath={isOnPath}
 									isInBulk={isInBulk}
+									selectedPath={selectedPath}
 									onSelect={selectPath}
 									onToggle={toggle}
 									onBulkToggle={onBulkToggle}
+									onBulkRange={onBulkRange}
 								/>
 							</div>
 						);
@@ -578,9 +581,11 @@ type TreeRowProps = {
 	isSelected: boolean;
 	isOnPath: boolean;
 	isInBulk: boolean;
+	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
 	onToggle: (path: NodePath) => void;
 	onBulkToggle?: (path: NodePath) => void;
+	onBulkRange?: (from: NodePath, to: NodePath) => void;
 };
 
 const TreeRow = React.memo(function TreeRow({
@@ -588,9 +593,11 @@ const TreeRow = React.memo(function TreeRow({
 	isSelected,
 	isOnPath,
 	isInBulk,
+	selectedPath,
 	onSelect,
 	onToggle,
 	onBulkToggle,
+	onBulkRange,
 }: TreeRowProps) {
 	return (
 		<div
@@ -611,6 +618,17 @@ const TreeRow = React.memo(function TreeRow({
 				// without moving the inspector focus, if a bulk context is active.
 				if ((e.ctrlKey || e.metaKey) && onBulkToggle) {
 					onBulkToggle(node.path);
+					return;
+				}
+				// Shift click: extend the bulk selection to this row using the
+				// current inspector selection as the range anchor. The page's
+				// onBulkRange implementation decides what "range" means (for
+				// PolygonSoupList it's all polygons between the two, same soup).
+				// Inspector also follows to the shift-clicked row so the anchor
+				// moves forward and subsequent shift-clicks extend outward.
+				if (e.shiftKey && onBulkRange && selectedPath.length > 0) {
+					onBulkRange(selectedPath, node.path);
+					onSelect(node.path);
 					return;
 				}
 				onSelect(node.path);

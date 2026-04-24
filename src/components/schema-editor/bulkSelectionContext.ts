@@ -23,6 +23,13 @@ export type BulkSelectionContextValue = {
 	 *  ctrl/cmd+click of a tree row. Implementations should silently ignore
 	 *  paths that don't correspond to a bulk-editable node. */
 	onBulkToggle: (path: NodePath) => void;
+	/** Add every bulk-editable node from `from` to `to` (inclusive) to the
+	 *  selection, union-style — never removes. Called on shift+click of a
+	 *  tree row, with `from` = the current inspector selection and `to` =
+	 *  the clicked row. Implementations decide what "range" means in their
+	 *  own domain; for PolygonSoupList it's polygons within the same soup.
+	 *  Optional — pages that don't provide it get plain toggle only. */
+	onBulkRange?: (from: NodePath, to: NodePath) => void;
 };
 
 export const SchemaBulkSelectionContext =

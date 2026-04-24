@@ -37,8 +37,17 @@ export type PolygonSoupListContextValue = {
 	/** Resource index currently owned by the schema editor. */
 	selectedModelIndex: number;
 	/** Fired on a click in the 3D viewport. Navigates the schema editor to
-	 *  the clicked polygon (and potentially swaps the active resource). */
-	onSelect: (modelIndex: number, soupIndex: number, polyIndex: number) => void;
+	 *  the clicked polygon (and potentially swaps the active resource).
+	 *  `modifiers` carries the event's shift/ctrl state so the page can
+	 *  branch: ctrl → toggle bulk, shift → extend bulk range to this poly,
+	 *  plain → replace inspector selection. Absent modifiers are treated
+	 *  as plain. */
+	onSelect: (
+		modelIndex: number,
+		soupIndex: number,
+		polyIndex: number,
+		modifiers?: { shift?: boolean; ctrl?: boolean },
+	) => void;
 	/** Polygons in the currently-selected model that are in the page's bulk
 	 *  selection. Keys are `encodeSoupPoly(soup, poly)`. The viewport tints
 	 *  every matching triangle so the user can see their selection in 3D. */

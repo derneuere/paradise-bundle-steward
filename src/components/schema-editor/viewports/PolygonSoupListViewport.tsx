@@ -530,7 +530,14 @@ export function PolygonSoupListViewport() {
 		const soupIndex = map[faceIdx * 3 + 1];
 		const polyIndex = map[faceIdx * 3 + 2];
 		event.stopPropagation();
-		onSelect(modelIndex, soupIndex, polyIndex);
+		// Forward modifier keys so the page can branch on ctrl (toggle into
+		// bulk) / shift (extend bulk range). ThreeEvent's nativeEvent is the
+		// underlying PointerEvent and carries the usual modifier flags.
+		const ne = event.nativeEvent as PointerEvent | undefined;
+		onSelect(modelIndex, soupIndex, polyIndex, {
+			shift: ne?.shiftKey ?? false,
+			ctrl: (ne?.ctrlKey || ne?.metaKey) ?? false,
+		});
 	};
 
 	if (batched.triangleCount === 0) {
