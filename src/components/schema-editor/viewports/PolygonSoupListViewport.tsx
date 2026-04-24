@@ -442,6 +442,20 @@ export function PolygonSoupListViewport() {
 	const onSelect = ctx?.onSelect;
 	const selectedPolysInCurrentModel = ctx?.selectedPolysInCurrentModel ?? EMPTY_POLY_SELECTION;
 	const visibleModelIndexes = ctx?.visibleModelIndexes ?? null;
+	const treeSelectedPoly = ctx?.treeSelectedPoly ?? null;
+
+	// Union of bulk selection + the singly tree-selected polygon. The bulk
+	// set drives amber fill (unchanged); this merged set drives the white
+	// outline so tree navigation alone is enough to get a visible cue —
+	// the user doesn't have to Ctrl+click every polygon they want to see.
+	const outlinedPolys = useMemo(() => {
+		if (!treeSelectedPoly) return selectedPolysInCurrentModel;
+		const extra = encodeSoupPoly(treeSelectedPoly.soup, treeSelectedPoly.poly);
+		if (selectedPolysInCurrentModel.has(extra)) return selectedPolysInCurrentModel;
+		const merged = new Set(selectedPolysInCurrentModel);
+		merged.add(extra);
+		return merged;
+	}, [selectedPolysInCurrentModel, treeSelectedPoly]);
 
 	// Nullify hidden models before geometry build — `buildGeometry` already
 	// handles null entries by emitting an empty range at that index, so this
@@ -459,12 +473,13 @@ export function PolygonSoupListViewport() {
 
 	const batched = useMemo(() => buildGeometry(effectiveModels), [effectiveModels]);
 
-	// Outline mesh for the bulk selection — rebuilt whenever the set changes
-	// or the underlying model changes. Kept separate from `batched` so tinting
-	// the selection doesn't force the whole mesh geometry to rebuild.
+	// Outline mesh for bulk + tree selection — rebuilt whenever the merged
+	// set changes or the underlying model changes. Kept separate from
+	// `batched` so tinting the selection doesn't force the whole mesh
+	// geometry to rebuild.
 	const outlineGeometry = useMemo(
-		() => buildSelectionOutlines(effectiveModels, selectedModelIndex, selectedPolysInCurrentModel),
-		[effectiveModels, selectedModelIndex, selectedPolysInCurrentModel],
+		() => buildSelectionOutlines(effectiveModels, selectedModelIndex, outlinedPolys),
+		[effectiveModels, selectedModelIndex, outlinedPolys],
 	);
 	useEffect(() => {
 		const g = outlineGeometry;

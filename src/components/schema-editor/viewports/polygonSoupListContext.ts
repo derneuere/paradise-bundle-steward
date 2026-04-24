@@ -48,6 +48,14 @@ export type PolygonSoupListContextValue = {
 	 *  upload. When `null` every model is rendered (back-compat for callers
 	 *  that haven't wired the picker yet). */
 	visibleModelIndexes?: ReadonlySet<number> | null;
+	/** The single polygon currently inspected via the hierarchy tree (the
+	 *  click-a-row-without-ctrl selection). Separate from the bulk set so
+	 *  bulk counts and the amber fill keep their exact semantics. The
+	 *  viewport unions this with `selectedPolysInCurrentModel` when drawing
+	 *  selection outlines so tree navigation gets the same "here it is" wire
+	 *  cue without the user having to Ctrl+click every polygon. `null` when
+	 *  the tree selection isn't on an editable polygon row. */
+	treeSelectedPoly?: { soup: number; poly: number } | null;
 };
 
 export const PolygonSoupListContext = createContext<PolygonSoupListContextValue | null>(null);

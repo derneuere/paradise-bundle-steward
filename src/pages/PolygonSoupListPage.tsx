@@ -561,6 +561,7 @@ const PolygonSoupListPage = () => {
 							onSelect: handleViewportSelect,
 							selectedPolysInCurrentModel,
 							visibleModelIndexes,
+							treeSelectedPoly: parsePolyPath(selectedPath),
 						}}
 					>
 						<MultiResourcePickerContext.Provider value={pickerContextValue}>
