@@ -512,18 +512,24 @@ export function readChallengeListEntryAction(reader: BinReader): ChallengeListEn
         padding1.push(reader.readU8());
     } 
     
-    // Read location data (4 elements) - each is 8 bytes (2 x u32 based on 0x20 total for 4 entries)
+    // Each LocationData is an 8-byte UNION discriminated by mauLocationType[i]:
+    //   DISTRICT (1)       -> EDistrict u32 at 0..3, 4..7 unused
+    //   COUNTY   (2)       -> ECounty  u32 at 0..3, 4..7 unused
+    //   TRIGGER  (3)       -> CgsID    u64 across 0..7
+    //   ROAD(_NO_MARKER) (4/5) -> CgsID u64 across 0..7
+    //   anything else      -> slot is unused (zero)
+    // Read the full 8 bytes as a u64 and populate all four interpretation
+    // fields as views of the same bytes; the writer picks the active arm based
+    // on locationType[i].
     const locationData: LocationData[] = [];
     for (let i = 0; i < 4; i++) {
-        // Based on the structure being 32 bytes (0x20) for 4 entries = 8 bytes each
-        // It appears district and county are packed or the structure is 2xu32
-        const districtCounty = reader.readU32(); // Combined district/county or first ID
-        const triggerID = reader.readU32(); // Second half or trigger ID low
+        const slot = reader.readU64();
+        const low32 = Number(slot & 0xFFFFFFFFn);
         locationData.push({
-            district: districtCounty & 0xFF,
-            county: (districtCounty >> 8) & 0xFF,
-            triggerID: BigInt(triggerID), // Store as bigint for consistency
-            roadID: 0n, // Not present in this packed format
+            district: low32,
+            county: low32,
+            triggerID: slot,
+            roadID: slot,
         });
     }
     
@@ -775,14 +781,32 @@ function writeChallengeListEntryAction(writer: BinWriter, action: ChallengeListE
         writer.writeU8(action.padding1?.[i] || 0);
     }
     
-    // Write location data (4 elements) - each is 8 bytes (2 x u32 based on 0x20 total for 4 entries)
+    // Each LocationData is an 8-byte union; pick the active arm from
+    // mauLocationType[i] and emit the matching field as a u64. Bytes beyond
+    // a 4-byte EDistrict/ECounty arm are the high half of the u64 (zero).
     for (let i = 0; i < 4; i++) {
         const loc = action.locationData[i] || { district: 0, county: 0, triggerID: 0n, roadID: 0n };
-        // Pack district and county into first u32
-        const districtCounty = (loc.district & 0xFF) | ((loc.county & 0xFF) << 8);
-        writer.writeU32(districtCounty);
-        // Write triggerID as u32 (low part)
-        writer.writeU32(Number(loc.triggerID & 0xFFFFFFFFn));
+        const type = action.locationType?.[i] ?? LocationType.ANYWHERE;
+        let slot: bigint;
+        switch (type) {
+            case LocationType.DISTRICT:
+                slot = BigInt(loc.district >>> 0);
+                break;
+            case LocationType.COUNTY:
+                slot = BigInt(loc.county >>> 0);
+                break;
+            case LocationType.TRIGGER:
+                slot = loc.triggerID;
+                break;
+            case LocationType.ROAD:
+            case LocationType.ROAD_NO_MARKER:
+                slot = loc.roadID;
+                break;
+            default:
+                slot = 0n;
+                break;
+        }
+        writer.writeU64(slot);
     }
     
     writer.writeU8(action.numTargets);

@@ -330,13 +330,13 @@ function actionLabel(a: unknown, index: number): string {
 function locationDataLabel(l: unknown, index: number): string {
 	try {
 		if (!l || typeof l !== 'object') return `Location ${index + 1}`;
-		const loc = l as { district?: number; county?: number; triggerID?: bigint };
-		const d = loc.district ?? 0;
-		const c = loc.county ?? 0;
-		const t = loc.triggerID != null && loc.triggerID !== 0n
-			? `T:0x${loc.triggerID.toString(16).toUpperCase()}`
-			: '';
-		return `Location ${index + 1} · D${d}/C${c}${t ? ' · ' + t : ''}`;
+		const loc = l as { triggerID?: bigint };
+		// All four fields view the same 8 bytes, so triggerID doubles as a
+		// non-zero check for "slot has any content".
+		const hex = loc.triggerID != null && loc.triggerID !== 0n
+			? `0x${loc.triggerID.toString(16).toUpperCase()}`
+			: '∅';
+		return `Location ${index + 1} · ${hex}`;
 	} catch {
 		return `Location ${index + 1}`;
 	}
@@ -348,21 +348,18 @@ function locationDataLabel(l: unknown, index: number): string {
 
 const LocationData: RecordSchema = {
 	name: 'LocationData',
-	description: 'Challenge location — district/county + optional trigger and road IDs.',
+	description: 'Challenge location — an 8-byte union discriminated by the parent action\'s locationType[i].',
 	fields: {
-		district: u8(),
-		county: u8(),
+		district: u32(),
+		county: u32(),
 		triggerID: cgsId(),
 		roadID: cgsId(),
 	},
 	fieldMetadata: {
-		district: { description: 'EDistrict — Paradise City district code. Packed into the low 8 bits of the first u32.' },
-		county: { description: 'ECounty — Paradise City county code. Packed into bits 8-15 of the first u32.' },
-		triggerID: { description: 'CgsID of the linked trigger, if any.' },
-		roadID: {
-			description: 'CgsID of the linked road, if any. The current parser packs district/county/triggerID into 8 bytes and leaves roadID at 0 — the writer mirrors this, so the field is always zero on round-trip.',
-			readOnly: true,
-		},
+		district: { description: 'EDistrict — Paradise City district code. Active when locationType is DISTRICT (1).' },
+		county: { description: 'ECounty — Paradise City county code. Active when locationType is COUNTY (2).' },
+		triggerID: { description: 'CgsID of the linked trigger. Active when locationType is TRIGGER (3).' },
+		roadID: { description: 'CgsID of the linked road. Active when locationType is ROAD (4) or ROAD_NO_MARKER (5).' },
 	},
 	label: (value, index) => locationDataLabel(value, index ?? 0),
 };
