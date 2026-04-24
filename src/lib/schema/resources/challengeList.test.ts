@@ -286,11 +286,20 @@ describe('getAtPath / updateAtPath', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Byte round-trip — the fixture declares `stableWriter`, so we assert
-//    writer idempotence rather than byte-equality against the source.
+// 4. Byte round-trip — the writer is byte-exact against the source fixture
+//    (the fixture still keeps `stableWriter: true` alongside `byteRoundTrip`
+//    as a belt-and-braces check). The byte-exactness here is what catches
+//    regressions of the LocationData-union bug that used to zero byte 2 of
+//    every trigger ID on save.
 // ---------------------------------------------------------------------------
 
 describe('challengeList writer stability', () => {
+	it('write(parse(raw)) is byte-exact with the source fixture', () => {
+		// Guards against any regression of the LocationData union handling
+		// (the user-reported "third byte of every trigger ID zeroed" bug).
+		expect(sha1(stableBaseline)).toBe(sha1(rawChallenges));
+	});
+
 	it('writer is idempotent on a walk-only pass', () => {
 		// Walk the tree (read-only) then write. Must match the stable
 		// baseline captured at the top of the suite.
@@ -404,5 +413,106 @@ describe('schema labels', () => {
 		const ctx = { root: parsedChallenges, resource: challengeListResourceSchema };
 		const label = listField.itemLabel?.(parsedChallenges.challenges[0], 0, ctx);
 		expect(label).toBe(challengeLabel(parsedChallenges.challenges[0], 0));
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 7. LocationData union round-trip — regression tests for the bug where the
+//    reader/writer treated each 8-byte slot as (districtCounty:u32,
+//    triggerID:u32), zeroing byte 2 of every trigger/road CgsID on save.
+//    Each test exercises one union arm end-to-end (write → re-parse).
+// ---------------------------------------------------------------------------
+
+describe('LocationData union round-trip (regression)', () => {
+	// LocationType codes from the wiki spec, inlined to keep this test
+	// independent of the public enum export.
+	const ANYWHERE = 0;
+	const DISTRICT = 1;
+	const COUNTY = 2;
+	const TRIGGER = 3;
+	const ROAD = 4;
+	const ROAD_NO_MARKER = 5;
+
+	function freshModel(): ParsedChallengeList {
+		// Start from a freshly-reparsed copy so in-test mutations don't
+		// bleed across cases.
+		return parseChallengeListData(stableBaseline, true);
+	}
+
+	function slotView(value: bigint) {
+		return {
+			district: Number(value & 0xFFFFFFFFn),
+			county: Number(value & 0xFFFFFFFFn),
+			triggerID: value,
+			roadID: value,
+		};
+	}
+
+	function setSlot(
+		model: ParsedChallengeList,
+		locationType: number,
+		value: bigint,
+	): ParsedChallengeList {
+		const action = model.challenges[0].actions[0];
+		action.locationType[0] = locationType;
+		action.locationData[0] = slotView(value);
+		return model;
+	}
+
+	function roundTrip(model: ParsedChallengeList): ParsedChallengeList {
+		return parseChallengeListData(writeChallengeListData(model, true), true);
+	}
+
+	it('TRIGGER slot preserves byte 2 of the CgsID (the user-reported bug)', () => {
+		// 0x00000000_0008C3D6 — laid out on disk as "d6 c3 08 00 00 00 00 00".
+		// Pre-fix the writer zeroed byte 2 (the 0x08), truncating the ID to
+		// 0x0000_C3D6.
+		const cgs = 0x0008C3D6n;
+		const reparsed = roundTrip(setSlot(freshModel(), TRIGGER, cgs));
+		expect(reparsed.challenges[0].actions[0].locationData[0].triggerID).toBe(cgs);
+	});
+
+	it('TRIGGER slot preserves the full 8-byte CgsID including high half', () => {
+		const cgs = 0xDEADBEEFCAFEBABEn;
+		const reparsed = roundTrip(setSlot(freshModel(), TRIGGER, cgs));
+		expect(reparsed.challenges[0].actions[0].locationData[0].triggerID).toBe(cgs);
+	});
+
+	it('ROAD slot preserves the full 8-byte CgsID via roadID', () => {
+		const cgs = 0x0102030405060708n;
+		const reparsed = roundTrip(setSlot(freshModel(), ROAD, cgs));
+		expect(reparsed.challenges[0].actions[0].locationData[0].roadID).toBe(cgs);
+	});
+
+	it('ROAD_NO_MARKER slot uses the same union arm as ROAD', () => {
+		const cgs = 0xFEDCBA9876543210n;
+		const reparsed = roundTrip(setSlot(freshModel(), ROAD_NO_MARKER, cgs));
+		expect(reparsed.challenges[0].actions[0].locationData[0].roadID).toBe(cgs);
+	});
+
+	it('DISTRICT slot stores EDistrict u32 in the low 4 bytes, high half is zero', () => {
+		const district = 0x12345678;
+		const reparsed = roundTrip(setSlot(freshModel(), DISTRICT, BigInt(district)));
+		const loc = reparsed.challenges[0].actions[0].locationData[0];
+		expect(loc.district).toBe(district);
+		// High 32 bits of the slot are zero per the union spec, so the
+		// CgsID-view of the bytes equals the u32 value.
+		expect(loc.triggerID).toBe(BigInt(district));
+	});
+
+	it('COUNTY slot stores ECounty u32 in the low 4 bytes', () => {
+		const county = 0x000000FF;
+		const reparsed = roundTrip(setSlot(freshModel(), COUNTY, BigInt(county)));
+		expect(reparsed.challenges[0].actions[0].locationData[0].county).toBe(county);
+	});
+
+	it('ANYWHERE slot is written as 8 zero bytes regardless of field content', () => {
+		const model = setSlot(freshModel(), ANYWHERE, 0xDEADBEEFCAFEBABEn);
+		const reparsed = roundTrip(model);
+		const loc = reparsed.challenges[0].actions[0].locationData[0];
+		expect(loc.triggerID).toBe(0n);
+		expect(loc.roadID).toBe(0n);
+		expect(loc.district).toBe(0);
+		expect(loc.county).toBe(0);
 	});
 });

@@ -25,7 +25,7 @@ export const challengeListHandler: ResourceHandler<ParsedChallengeList> = {
 		return `numChallenges ${model.numChallenges}, entries ${model.challenges.length}`;
 	},
 	fixtures: [
-		{ bundle: 'example/ONLINECHALLENGES.BNDL', expect: { parseOk: true, stableWriter: true } },
+		{ bundle: 'example/ONLINECHALLENGES.BNDL', expect: { parseOk: true, byteRoundTrip: true, stableWriter: true } },
 	],
 
 	// Generic structural mutations on `challenges` don't update `numChallenges`,
