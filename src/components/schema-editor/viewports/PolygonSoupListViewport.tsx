@@ -240,6 +240,100 @@ function buildGeometry(
 	};
 }
 
+// Build a LineSegments geometry tracing the boundary of every polygon in the
+// bulk selection. Rendered on top of the batched mesh (depthTest off, high
+// renderOrder) so the user can always tell which polygons are being edited,
+// even when the selection sits inside dense terrain or is a single triangle
+// lost in a crowded view. Polygons are drawn at their full boundary — tri
+// = 3 edges (a→b→c→a), quad = 4 edges (a→b→c→d→a); the diagonal that splits
+// a quad into two triangles is NOT emitted, so quads read as quads.
+function buildSelectionOutlines(
+	models: (ParsedPolygonSoupList | null)[],
+	selectedModelIndex: number,
+	selectedPolysInCurrentModel: ReadonlySet<number>,
+): THREE.BufferGeometry {
+	const geometry = new THREE.BufferGeometry();
+	const model = models[selectedModelIndex];
+	if (!model || selectedPolysInCurrentModel.size === 0) {
+		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+		return geometry;
+	}
+
+	// First pass: count edges so we can pre-allocate exactly.
+	let edgeCount = 0;
+	for (let soupIndex = 0; soupIndex < model.soups.length; soupIndex++) {
+		const soup = model.soups[soupIndex];
+		for (let polyIndex = 0; polyIndex < soup.polygons.length; polyIndex++) {
+			if (!selectedPolysInCurrentModel.has(encodeSoupPoly(soupIndex, polyIndex))) continue;
+			edgeCount += soup.polygons[polyIndex].vertexIndices[3] === 0xFF ? 3 : 4;
+		}
+	}
+
+	if (edgeCount === 0) {
+		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+		return geometry;
+	}
+
+	// Two verts per edge, three f32 per vert.
+	const positions = new Float32Array(edgeCount * 2 * 3);
+	let writeIdx = 0;
+
+	for (let soupIndex = 0; soupIndex < model.soups.length; soupIndex++) {
+		const soup = model.soups[soupIndex];
+		// Lazy-unpack soup vertices once only if at least one of its polys is
+		// in the selection — most soups contribute nothing to the outline.
+		let unpacked: Float32Array | null = null;
+
+		for (let polyIndex = 0; polyIndex < soup.polygons.length; polyIndex++) {
+			if (!selectedPolysInCurrentModel.has(encodeSoupPoly(soupIndex, polyIndex))) continue;
+
+			if (!unpacked) {
+				unpacked = new Float32Array(soup.vertices.length * 3);
+				const vOff = soup.vertexOffsets;
+				const scale = soup.comprGranularity;
+				for (let i = 0; i < soup.vertices.length; i++) {
+					const [wx, wy, wz] = unpackSoupVertex(soup.vertices[i], vOff, scale);
+					unpacked[i * 3 + 0] = wx;
+					unpacked[i * 3 + 1] = wy;
+					unpacked[i * 3 + 2] = wz;
+				}
+			}
+
+			const poly = soup.polygons[polyIndex];
+			const [a, b, c, d] = poly.vertexIndices;
+			const len = soup.vertices.length;
+			const ia = a < len ? a : 0;
+			const ib = b < len ? b : 0;
+			const ic = c < len ? c : 0;
+			const isTri = d === 0xFF;
+
+			const emit = (from: number, to: number) => {
+				positions[writeIdx++] = unpacked![from * 3 + 0];
+				positions[writeIdx++] = unpacked![from * 3 + 1];
+				positions[writeIdx++] = unpacked![from * 3 + 2];
+				positions[writeIdx++] = unpacked![to * 3 + 0];
+				positions[writeIdx++] = unpacked![to * 3 + 1];
+				positions[writeIdx++] = unpacked![to * 3 + 2];
+			};
+
+			if (isTri) {
+				emit(ia, ib);
+				emit(ib, ic);
+				emit(ic, ia);
+			} else {
+				const id = d < len ? d : 0;
+				emit(ia, ib);
+				emit(ib, ic);
+				emit(ic, id);
+				emit(id, ia);
+			}
+		}
+	}
+
+	geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+	return geometry;
+}
+
 // Apply a highlight tint to the colors attribute for the currently-selected
 // model's triangle range, plus a stronger per-poly emphasis for any polygons
 // in the bulk selection. Called after picking changes; avoids rebuilding the
@@ -365,6 +459,18 @@ export function PolygonSoupListViewport() {
 
 	const batched = useMemo(() => buildGeometry(effectiveModels), [effectiveModels]);
 
+	// Outline mesh for the bulk selection — rebuilt whenever the set changes
+	// or the underlying model changes. Kept separate from `batched` so tinting
+	// the selection doesn't force the whole mesh geometry to rebuild.
+	const outlineGeometry = useMemo(
+		() => buildSelectionOutlines(effectiveModels, selectedModelIndex, selectedPolysInCurrentModel),
+		[effectiveModels, selectedModelIndex, selectedPolysInCurrentModel],
+	);
+	useEffect(() => {
+		const g = outlineGeometry;
+		return () => { g.dispose(); };
+	}, [outlineGeometry]);
+
 	// Snapshot the base colors so re-highlights can restore the originals
 	// without rebuilding geometry.
 	const baseColorsRef = useRef<Float32Array | null>(null);
@@ -440,6 +546,12 @@ export function PolygonSoupListViewport() {
 				<mesh geometry={batched.geometry} onClick={handleClick}>
 					<meshLambertMaterial vertexColors side={THREE.DoubleSide} flatShading />
 				</mesh>
+				{/* Bulk-selection outline. depthTest=false + high renderOrder so
+				    the outline is always visible, even when the selected polygon
+				    is tucked inside dense geometry or behind a wall. */}
+				<lineSegments geometry={outlineGeometry} renderOrder={999}>
+					<lineBasicMaterial color={0xffffff} depthTest={false} transparent={false} />
+				</lineSegments>
 				<AutoFit center={batched.center} radius={batched.radius} />
 				<OrbitControls
 					makeDefault
