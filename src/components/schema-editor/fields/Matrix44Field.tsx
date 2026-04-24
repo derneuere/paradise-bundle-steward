@@ -138,6 +138,12 @@ export function Matrix44Field({
 							size="sm"
 							disabled={meta?.readOnly}
 							className="h-7 px-2 text-[10px]"
+							// Prevent the mousedown from shifting focus off the hex input,
+							// which would fire onBlur and reset hexText to the OLD canonical
+							// value before onClick runs — turning the apply into a no-op.
+							// Default action of mousedown on a button is "move focus here";
+							// preventDefault cancels just the focus move, onClick still fires.
+							onMouseDown={(e) => e.preventDefault()}
 							onClick={applyHex}
 						>
 							Apply
