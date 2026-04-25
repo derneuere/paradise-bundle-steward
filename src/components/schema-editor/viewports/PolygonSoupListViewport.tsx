@@ -16,14 +16,17 @@
 // (provided by PolygonSoupListPage) rather than useBundle directly, so the
 // page controls which models to render and receives click selections back.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
+import { useEffect, useMemo, useRef } from 'react';
+import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useBundle } from '@/context/BundleContext';
 import { parseAllBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
 import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
+import { AutoFit } from '@/components/common/three/AutoFit';
+import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
+import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 
 // ---------------------------------------------------------------------------
 // Collision-tag → RGB color
@@ -334,72 +337,6 @@ function buildSelectionOutlines(
 	return geometry;
 }
 
-// Build a screen-space selection frustum from a marquee rectangle.
-//
-// Ported from three.js's `SelectionBox.updateFrustum()` (perspective branch
-// at three/examples/jsm/interactive/SelectionBox.js, MIT). The stock class
-// is mesh-granular — its `select()` walks scene.children and tests each
-// mesh's bounding-sphere center, which is useless when our entire viewport
-// is a single batched mesh of ~1.5M triangles. We only want the math that
-// turns (camera, startNDC, endNDC) into a 6-plane frustum so we can run
-// our own per-polygon containsPoint test downstream.
-//
-// `start` / `end` are NDC (-1..+1, y flipped). `deep` is the far plane
-// distance from the camera in world units (the original defaults to
-// MAX_VALUE = "everything in the cone, ignore occlusion"). For collision
-// editing we want exactly that — Windows-Explorer-marquee semantics —
-// because polygons buried inside a building still belong to the section
-// the user is dragging across. Orthographic cameras are out of scope; the
-// PolygonSoupList viewport always uses a PerspectiveCamera.
-function buildMarqueeFrustum(
-	camera: THREE.PerspectiveCamera,
-	start: THREE.Vector3,
-	end: THREE.Vector3,
-	deep: number,
-): THREE.Frustum {
-	camera.updateProjectionMatrix();
-	camera.updateMatrixWorld();
-
-	// Avoid degenerate (zero-area) frustums — the math collapses to NaN
-	// when start.x === end.x or start.y === end.y. EPSILON is enough to
-	// keep the planes distinct without visibly shifting the rectangle.
-	const sx = start.x === end.x ? start.x + Number.EPSILON : start.x;
-	const sy = start.y === end.y ? start.y + Number.EPSILON : start.y;
-	const ex = end.x;
-	const ey = end.y;
-
-	// Normalize the rectangle so (tmpX, tmpY) is the top-left and
-	// (endX, endY) is the bottom-right in NDC (y axis inverted relative
-	// to screen space, hence "max" for top-y).
-	const tmpX = Math.min(sx, ex);
-	const tmpY = Math.max(sy, ey);
-	const rectEndX = Math.max(sx, ex);
-	const rectEndY = Math.min(sy, ey);
-
-	const near = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
-	const topLeft = new THREE.Vector3(tmpX, tmpY, 0).unproject(camera);
-	const topRight = new THREE.Vector3(rectEndX, tmpY, 0).unproject(camera);
-	const downRight = new THREE.Vector3(rectEndX, rectEndY, 0).unproject(camera);
-	const downLeft = new THREE.Vector3(tmpX, rectEndY, 0).unproject(camera);
-
-	// Ray directions from the camera through the four rectangle corners,
-	// then pushed out by `deep` to anchor the far cap.
-	const dirTL = topLeft.clone().sub(near).normalize().multiplyScalar(deep).add(near);
-	const dirTR = topRight.clone().sub(near).normalize().multiplyScalar(deep).add(near);
-	const dirDR = downRight.clone().sub(near).normalize().multiplyScalar(deep).add(near);
-
-	const frustum = new THREE.Frustum();
-	const planes = frustum.planes;
-	planes[0].setFromCoplanarPoints(near, topLeft, topRight);
-	planes[1].setFromCoplanarPoints(near, topRight, downRight);
-	planes[2].setFromCoplanarPoints(downRight, downLeft, near);
-	planes[3].setFromCoplanarPoints(downLeft, topLeft, near);
-	planes[4].setFromCoplanarPoints(topRight, downRight, downLeft);
-	planes[5].setFromCoplanarPoints(dirDR, dirTR, dirTL);
-	planes[5].normal.multiplyScalar(-1);
-	return frustum;
-}
-
 // Iterate triangles in `selectedModelIndex`'s range, reading each one's
 // centroid out of the batched position buffer and testing whether the
 // centroid lies inside `frustum`. Returns one entry per (soup, poly) hit
@@ -499,239 +436,6 @@ function applyHighlight(
 	attr.needsUpdate = true;
 }
 
-// ---------------------------------------------------------------------------
-// Camera auto-fit
-// ---------------------------------------------------------------------------
-
-function AutoFit({ center, radius }: { center: THREE.Vector3; radius: number }) {
-	const { camera } = useThree();
-	const fitted = useRef(false);
-	useEffect(() => {
-		if (fitted.current) return;
-		fitted.current = true;
-		const d = radius * 1.5;
-		camera.position.set(center.x, center.y + d, center.z + d * 0.3);
-		camera.lookAt(center);
-		if ('far' in camera) {
-			(camera as THREE.PerspectiveCamera).far = radius * 10;
-			(camera as THREE.PerspectiveCamera).updateProjectionMatrix();
-		}
-	}, [camera, center, radius]);
-	return null;
-}
-
-// ---------------------------------------------------------------------------
-// Camera bridge — exposes the active camera + canvas size to code that lives
-// outside the <Canvas> tree (the marquee overlay needs them). Mounted as a
-// child of <Canvas> so it can call useThree(); writes to a ref the parent
-// passes in.
-// ---------------------------------------------------------------------------
-
-type CameraBridgeData = { camera: THREE.PerspectiveCamera; size: { width: number; height: number } };
-
-function CameraBridge({ bridge }: { bridge: React.MutableRefObject<CameraBridgeData | null> }) {
-	const { camera, size } = useThree();
-	useEffect(() => {
-		if ((camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
-			bridge.current = { camera: camera as THREE.PerspectiveCamera, size };
-		}
-		return () => { bridge.current = null; };
-	}, [camera, size, bridge]);
-	return null;
-}
-
-// ---------------------------------------------------------------------------
-// Marquee (box-select) overlay
-// ---------------------------------------------------------------------------
-//
-// Activation model: a sticky toggle bound to the `B` key (matches Blender's
-// "Box select" mnemonic, a shape FRAME's already familiar with from other
-// 3D tools). When active, this component's div sits on top of the canvas
-// with `pointer-events: auto`, so it intercepts the pointerdown that would
-// otherwise hit the OrbitControls listener — no orbit while dragging a
-// selection rectangle. When inactive, `pointer-events: none` lets every
-// pointer event pass through to the canvas as if the overlay isn't there.
-//
-// We chose a sticky modal toggle over a held modifier key (shift/alt+drag)
-// because shift is already taken by the click-time range-extend gesture,
-// and a held key conflicts with cross-window focus changes during the
-// drag. Press B once to enter, press B / Esc / click "Done" to exit.
-//
-// Modifier behaviour during the drag:
-//   - default                → add picked polys to bulk
-//   - alt held on pointerup  → remove picked polys from bulk
-// We snapshot Alt at pointerup, not pointerdown, so users can decide
-// add-vs-remove mid-drag.
-
-type MarqueeOverlayProps = {
-	bridge: React.MutableRefObject<CameraBridgeData | null>;
-	batched: BatchedGeometry;
-	selectedModelIndex: number;
-	onMarqueeApply?: (
-		modelIndex: number,
-		polys: ReadonlyArray<{ soup: number; poly: number }>,
-		mode: 'add' | 'remove',
-	) => void;
-};
-
-// Pixels of pointer movement below which a drag is treated as a click and
-// no marquee fires. Empirical — small enough to feel responsive, large
-// enough to avoid accidental marquees from a clicking hand twitch.
-const MARQUEE_DRAG_THRESHOLD_PX = 6;
-
-function MarqueeOverlay({ bridge, batched, selectedModelIndex, onMarqueeApply }: MarqueeOverlayProps) {
-	const overlayRef = useRef<HTMLDivElement>(null);
-	const [active, setActive] = useState(false);
-	const [drag, setDrag] = useState<{
-		startX: number;
-		startY: number;
-		currentX: number;
-		currentY: number;
-		pointerId: number;
-	} | null>(null);
-
-	// Toggle on `B`, exit on `Escape`. Listening on window (not the
-	// overlay) so the keystroke works regardless of where focus is in the
-	// page. Ignore key events that originate inside an editable element so
-	// typing "b" into an input field doesn't toggle marquee mode.
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			const target = e.target as HTMLElement | null;
-			const tag = target?.tagName;
-			const isEditable =
-				target?.isContentEditable ||
-				tag === 'INPUT' ||
-				tag === 'TEXTAREA' ||
-				tag === 'SELECT';
-			if (isEditable) return;
-			if (e.key === 'b' || e.key === 'B') {
-				e.preventDefault();
-				setActive((a) => !a);
-			} else if (e.key === 'Escape') {
-				setActive(false);
-				setDrag(null);
-			}
-		};
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
-	}, []);
-
-	// If the user toggles off mid-drag, abort cleanly so we don't leak
-	// pointer capture or render a stale rectangle next time.
-	useEffect(() => {
-		if (!active) setDrag(null);
-	}, [active]);
-
-	const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-		if (!active || e.button !== 0) return;
-		e.preventDefault();
-		overlayRef.current?.setPointerCapture(e.pointerId);
-		setDrag({
-			startX: e.clientX,
-			startY: e.clientY,
-			currentX: e.clientX,
-			currentY: e.clientY,
-			pointerId: e.pointerId,
-		});
-	};
-
-	const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-		if (!drag || drag.pointerId !== e.pointerId) return;
-		setDrag({ ...drag, currentX: e.clientX, currentY: e.clientY });
-	};
-
-	const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-		if (!drag || drag.pointerId !== e.pointerId) return;
-		overlayRef.current?.releasePointerCapture(e.pointerId);
-		const dx = e.clientX - drag.startX;
-		const dy = e.clientY - drag.startY;
-		const moved = Math.hypot(dx, dy) >= MARQUEE_DRAG_THRESHOLD_PX;
-		setDrag(null);
-		if (!moved) return;
-
-		const data = bridge.current;
-		const overlay = overlayRef.current;
-		if (!data || !overlay || !onMarqueeApply || selectedModelIndex < 0) return;
-		const rect = overlay.getBoundingClientRect();
-		const startNDC = new THREE.Vector3(
-			((drag.startX - rect.left) / rect.width) * 2 - 1,
-			-((drag.startY - rect.top) / rect.height) * 2 + 1,
-			0,
-		);
-		const endNDC = new THREE.Vector3(
-			((e.clientX - rect.left) / rect.width) * 2 - 1,
-			-((e.clientY - rect.top) / rect.height) * 2 + 1,
-			0,
-		);
-		// Far plane: 10× the scene radius is plenty for "everything in cone"
-		// without flirting with float precision at MAX_VALUE.
-		const frustum = buildMarqueeFrustum(data.camera, startNDC, endNDC, batched.radius * 10);
-		const polys = pickPolysInFrustum(batched, frustum, selectedModelIndex);
-		if (polys.length === 0) return;
-		onMarqueeApply(selectedModelIndex, polys, e.altKey ? 'remove' : 'add');
-	};
-
-	// CSS rectangle for the in-progress drag. Positioned in viewport (page)
-	// coords because the pointer events deliver clientX/clientY in the same
-	// frame; getBoundingClientRect on the overlay div would shift if the
-	// page scrolls during a drag.
-	const rectStyle = drag
-		? (() => {
-			const overlay = overlayRef.current;
-			if (!overlay) return null;
-			const rect = overlay.getBoundingClientRect();
-			const left = Math.min(drag.startX, drag.currentX) - rect.left;
-			const top = Math.min(drag.startY, drag.currentY) - rect.top;
-			const width = Math.abs(drag.currentX - drag.startX);
-			const height = Math.abs(drag.currentY - drag.startY);
-			return { left, top, width, height };
-		})()
-		: null;
-
-	return (
-		<>
-			<div
-				ref={overlayRef}
-				style={{
-					position: 'absolute',
-					inset: 0,
-					pointerEvents: active ? 'auto' : 'none',
-					cursor: active ? 'crosshair' : 'auto',
-				}}
-				onPointerDown={handlePointerDown}
-				onPointerMove={handlePointerMove}
-				onPointerUp={handlePointerUp}
-				onPointerCancel={() => setDrag(null)}
-			>
-				{rectStyle && (
-					<div
-						style={{
-							position: 'absolute',
-							left: rectStyle.left,
-							top: rectStyle.top,
-							width: rectStyle.width,
-							height: rectStyle.height,
-							border: '1px dashed rgba(255, 184, 51, 0.95)',
-							background: 'rgba(255, 184, 51, 0.12)',
-							pointerEvents: 'none',
-						}}
-					/>
-				)}
-			</div>
-			{/* Mode hint — bottom-right, small badge. Always rendered (not
-			    just when active) so the keybind is discoverable. */}
-			<div className="absolute bottom-2 right-2 text-[10px] font-mono text-white/70 bg-black/50 px-2 py-1 rounded pointer-events-none select-none">
-				{active ? (
-					<span className="text-amber-300">
-						box select on — drag to add (alt = remove) · B / Esc to exit
-					</span>
-				) : (
-					<span>press B for box select</span>
-				)}
-			</div>
-		</>
-	);
-}
 
 // ---------------------------------------------------------------------------
 // Fallback parser — when the viewport is rendered WITHOUT a page-level
@@ -907,11 +611,15 @@ export function PolygonSoupListViewport() {
 					maxDistance={batched.radius * 5}
 				/>
 			</Canvas>
-			<MarqueeOverlay
+			<MarqueeSelector
 				bridge={cameraBridge}
-				batched={batched}
-				selectedModelIndex={selectedModelIndex}
-				onMarqueeApply={onMarqueeApply}
+				far={batched.radius * 10}
+				onMarquee={(frustum, mode) => {
+					if (!onMarqueeApply || selectedModelIndex < 0) return;
+					const polys = pickPolysInFrustum(batched, frustum, selectedModelIndex);
+					if (polys.length === 0) return;
+					onMarqueeApply(selectedModelIndex, polys, mode);
+				}}
 			/>
 			<div className="absolute top-2 left-2 text-[10px] font-mono text-white/80 bg-black/50 px-2 py-1 rounded pointer-events-none">
 				{batched.modelCount} resources · {batched.soupCount} soups · {batched.triangleCount.toLocaleString()} triangles
