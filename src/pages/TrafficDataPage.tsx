@@ -4,10 +4,13 @@
 // schema-editor extension, so this page now just wires up the schema editor
 // provider with the TrafficData resource schema and extension registry.
 
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBundle } from '@/context/BundleContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
+import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
+import { useGenericBulkSelection } from '@/components/schema-editor/useGenericBulkSelection';
 import { trafficDataExtensions } from '@/components/schema-editor/extensions/trafficDataExtensions';
 import { trafficDataResourceSchema } from '@/lib/schema/resources/trafficData';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
@@ -15,6 +18,11 @@ import type { ParsedTrafficData } from '@/lib/core/trafficData';
 const TrafficDataPage = () => {
 	const { getResource, setResource } = useBundle();
 	const data = getResource<ParsedTrafficData>('trafficData');
+	const bulk = useGenericBulkSelection();
+	const bulkValue = useMemo(
+		() => ({ bulkPathKeys: bulk.bulkPathKeys, onBulkToggle: bulk.onBulkToggle, onBulkRange: bulk.onBulkRange }),
+		[bulk.bulkPathKeys, bulk.onBulkToggle, bulk.onBulkRange],
+	);
 
 	if (!data) {
 		return (
@@ -33,14 +41,16 @@ const TrafficDataPage = () => {
 
 	return (
 		<div className="h-full min-h-0">
-			<SchemaEditorProvider
-				resource={trafficDataResourceSchema}
-				data={data}
-				onChange={(next) => setResource('trafficData', next as ParsedTrafficData)}
-				extensions={trafficDataExtensions}
-			>
-				<SchemaEditor />
-			</SchemaEditorProvider>
+			<SchemaBulkSelectionContext.Provider value={bulkValue}>
+				<SchemaEditorProvider
+					resource={trafficDataResourceSchema}
+					data={data}
+					onChange={(next) => setResource('trafficData', next as ParsedTrafficData)}
+					extensions={trafficDataExtensions}
+				>
+					<SchemaEditor />
+				</SchemaEditorProvider>
+			</SchemaBulkSelectionContext.Provider>
 		</div>
 	);
 };

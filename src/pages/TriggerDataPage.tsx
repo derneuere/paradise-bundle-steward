@@ -5,10 +5,13 @@
 // …) so this page now just wires up the SchemaEditorProvider with the
 // TriggerData resource schema and extension registry.
 
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBundle } from '@/context/BundleContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
+import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
+import { useGenericBulkSelection } from '@/components/schema-editor/useGenericBulkSelection';
 import { triggerDataExtensions } from '@/components/schema-editor/extensions/triggerDataExtensions';
 import { triggerDataResourceSchema } from '@/lib/schema/resources/triggerData';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
@@ -16,6 +19,11 @@ import type { ParsedTriggerData } from '@/lib/core/triggerData';
 const TriggerDataPage = () => {
 	const { getResource, setResource } = useBundle();
 	const data = getResource<ParsedTriggerData>('triggerData');
+	const bulk = useGenericBulkSelection();
+	const bulkValue = useMemo(
+		() => ({ bulkPathKeys: bulk.bulkPathKeys, onBulkToggle: bulk.onBulkToggle, onBulkRange: bulk.onBulkRange }),
+		[bulk.bulkPathKeys, bulk.onBulkToggle, bulk.onBulkRange],
+	);
 
 	if (!data) {
 		return (
@@ -34,14 +42,16 @@ const TriggerDataPage = () => {
 
 	return (
 		<div className="h-full min-h-0">
-			<SchemaEditorProvider
-				resource={triggerDataResourceSchema}
-				data={data}
-				onChange={(next) => setResource('triggerData', next as ParsedTriggerData)}
-				extensions={triggerDataExtensions}
-			>
-				<SchemaEditor />
-			</SchemaEditorProvider>
+			<SchemaBulkSelectionContext.Provider value={bulkValue}>
+				<SchemaEditorProvider
+					resource={triggerDataResourceSchema}
+					data={data}
+					onChange={(next) => setResource('triggerData', next as ParsedTriggerData)}
+					extensions={triggerDataExtensions}
+				>
+					<SchemaEditor />
+				</SchemaEditorProvider>
+			</SchemaBulkSelectionContext.Provider>
 		</div>
 	);
 };

@@ -6,10 +6,13 @@
 // table is a customRenderer on the root.sections list; everything else
 // flows through the default schema form renderers.
 
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBundle } from '@/context/BundleContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
+import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
+import { useGenericBulkSelection } from '@/components/schema-editor/useGenericBulkSelection';
 import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
 import { aiSectionsResourceSchema } from '@/lib/schema/resources/aiSections';
 import type { ParsedAISections } from '@/lib/core/aiSections';
@@ -17,6 +20,11 @@ import type { ParsedAISections } from '@/lib/core/aiSections';
 const AISectionsPage = () => {
 	const { getResource, setResource } = useBundle();
 	const data = getResource<ParsedAISections>('aiSections');
+	const bulk = useGenericBulkSelection();
+	const bulkValue = useMemo(
+		() => ({ bulkPathKeys: bulk.bulkPathKeys, onBulkToggle: bulk.onBulkToggle, onBulkRange: bulk.onBulkRange }),
+		[bulk.bulkPathKeys, bulk.onBulkToggle, bulk.onBulkRange],
+	);
 
 	if (!data) {
 		return (
@@ -35,14 +43,16 @@ const AISectionsPage = () => {
 
 	return (
 		<div className="h-full min-h-0">
-			<SchemaEditorProvider
-				resource={aiSectionsResourceSchema}
-				data={data}
-				onChange={(next) => setResource('aiSections', next as ParsedAISections)}
-				extensions={aiSectionsExtensions}
-			>
-				<SchemaEditor />
-			</SchemaEditorProvider>
+			<SchemaBulkSelectionContext.Provider value={bulkValue}>
+				<SchemaEditorProvider
+					resource={aiSectionsResourceSchema}
+					data={data}
+					onChange={(next) => setResource('aiSections', next as ParsedAISections)}
+					extensions={aiSectionsExtensions}
+				>
+					<SchemaEditor />
+				</SchemaEditorProvider>
+			</SchemaBulkSelectionContext.Provider>
 		</div>
 	);
 };
