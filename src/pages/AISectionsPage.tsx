@@ -22,8 +22,13 @@ const AISectionsPage = () => {
 	const data = getResource<ParsedAISections>('aiSections');
 	const bulk = useGenericBulkSelection();
 	const bulkValue = useMemo(
-		() => ({ bulkPathKeys: bulk.bulkPathKeys, onBulkToggle: bulk.onBulkToggle, onBulkRange: bulk.onBulkRange }),
-		[bulk.bulkPathKeys, bulk.onBulkToggle, bulk.onBulkRange],
+		() => ({
+			bulkPathKeys: bulk.bulkPathKeys,
+			onBulkToggle: bulk.onBulkToggle,
+			onBulkRange: bulk.onBulkRange,
+			onBulkApplyPaths: bulk.onBulkApplyPaths,
+		}),
+		[bulk.bulkPathKeys, bulk.onBulkToggle, bulk.onBulkRange, bulk.onBulkApplyPaths],
 	);
 
 	if (!data) {

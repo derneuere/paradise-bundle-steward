@@ -30,6 +30,12 @@ export type BulkSelectionContextValue = {
 	 *  own domain; for PolygonSoupList it's polygons within the same soup.
 	 *  Optional — pages that don't provide it get plain toggle only. */
 	onBulkRange?: (from: NodePath, to: NodePath) => void;
+	/** Apply a batch of paths to the selection in one go: `mode === 'add'`
+	 *  unions them, `mode === 'remove'` subtracts. Used by 3D marquee
+	 *  (box-select) which collects an arbitrary set of items in a single
+	 *  drag — `onBulkToggle` per-path would emit N re-renders, this
+	 *  collapses to one. Optional. */
+	onBulkApplyPaths?: (paths: ReadonlyArray<NodePath>, mode: 'add' | 'remove') => void;
 };
 
 export const SchemaBulkSelectionContext =

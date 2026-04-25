@@ -27,6 +27,7 @@ import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListCont
 import { AutoFit } from '@/components/common/three/AutoFit';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
+import { useLineSegmentsGeometry, type Edge } from '@/components/common/three/SelectionOutline';
 
 // ---------------------------------------------------------------------------
 // Collision-tag → RGB color
@@ -243,48 +244,22 @@ function buildGeometry(
 	};
 }
 
-// Build a LineSegments geometry tracing the boundary of every polygon in the
-// bulk selection. Rendered on top of the batched mesh (depthTest off, high
-// renderOrder) so the user can always tell which polygons are being edited,
-// even when the selection sits inside dense terrain or is a single triangle
-// lost in a crowded view. Polygons are drawn at their full boundary — tri
-// = 3 edges (a→b→c→a), quad = 4 edges (a→b→c→d→a); the diagonal that splits
-// a quad into two triangles is NOT emitted, so quads read as quads.
-function buildSelectionOutlines(
+// Yield boundary edges for every polygon in the bulk + tree selection
+// within `selectedModelIndex`'s model. Each polygon contributes its full
+// boundary — tri = 3 edges (a→b→c→a), quad = 4 edges (a→b→c→d→a); the
+// diagonal that splits a quad into two triangles is NOT emitted, so quads
+// read as quads in the wireframe. Soups are unpacked lazily so soups that
+// contribute nothing to the outline don't pay vertex-decompression cost.
+function* iterateSelectionOutlineEdges(
 	models: (ParsedPolygonSoupList | null)[],
 	selectedModelIndex: number,
 	selectedPolysInCurrentModel: ReadonlySet<number>,
-): THREE.BufferGeometry {
-	const geometry = new THREE.BufferGeometry();
+): Generator<Edge> {
 	const model = models[selectedModelIndex];
-	if (!model || selectedPolysInCurrentModel.size === 0) {
-		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
-		return geometry;
-	}
-
-	// First pass: count edges so we can pre-allocate exactly.
-	let edgeCount = 0;
-	for (let soupIndex = 0; soupIndex < model.soups.length; soupIndex++) {
-		const soup = model.soups[soupIndex];
-		for (let polyIndex = 0; polyIndex < soup.polygons.length; polyIndex++) {
-			if (!selectedPolysInCurrentModel.has(encodeSoupPoly(soupIndex, polyIndex))) continue;
-			edgeCount += soup.polygons[polyIndex].vertexIndices[3] === 0xFF ? 3 : 4;
-		}
-	}
-
-	if (edgeCount === 0) {
-		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
-		return geometry;
-	}
-
-	// Two verts per edge, three f32 per vert.
-	const positions = new Float32Array(edgeCount * 2 * 3);
-	let writeIdx = 0;
+	if (!model || selectedPolysInCurrentModel.size === 0) return;
 
 	for (let soupIndex = 0; soupIndex < model.soups.length; soupIndex++) {
 		const soup = model.soups[soupIndex];
-		// Lazy-unpack soup vertices once only if at least one of its polys is
-		// in the selection — most soups contribute nothing to the outline.
 		let unpacked: Float32Array | null = null;
 
 		for (let polyIndex = 0; polyIndex < soup.polygons.length; polyIndex++) {
@@ -310,31 +285,23 @@ function buildSelectionOutlines(
 			const ic = c < len ? c : 0;
 			const isTri = d === 0xFF;
 
-			const emit = (from: number, to: number) => {
-				positions[writeIdx++] = unpacked![from * 3 + 0];
-				positions[writeIdx++] = unpacked![from * 3 + 1];
-				positions[writeIdx++] = unpacked![from * 3 + 2];
-				positions[writeIdx++] = unpacked![to * 3 + 0];
-				positions[writeIdx++] = unpacked![to * 3 + 1];
-				positions[writeIdx++] = unpacked![to * 3 + 2];
-			};
+			const v = (idx: number): [number, number, number] => [
+				unpacked![idx * 3 + 0],
+				unpacked![idx * 3 + 1],
+				unpacked![idx * 3 + 2],
+			];
 
+			yield [v(ia), v(ib)];
+			yield [v(ib), v(ic)];
 			if (isTri) {
-				emit(ia, ib);
-				emit(ib, ic);
-				emit(ic, ia);
+				yield [v(ic), v(ia)];
 			} else {
 				const id = d < len ? d : 0;
-				emit(ia, ib);
-				emit(ib, ic);
-				emit(ic, id);
-				emit(id, ia);
+				yield [v(ic), v(id)];
+				yield [v(id), v(ia)];
 			}
 		}
 	}
-
-	geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-	return geometry;
 }
 
 // Iterate triangles in `selectedModelIndex`'s range, reading each one's
@@ -504,15 +471,12 @@ export function PolygonSoupListViewport() {
 	// Outline mesh for bulk + tree selection — rebuilt whenever the merged
 	// set changes or the underlying model changes. Kept separate from
 	// `batched` so tinting the selection doesn't force the whole mesh
-	// geometry to rebuild.
-	const outlineGeometry = useMemo(
-		() => buildSelectionOutlines(effectiveModels, selectedModelIndex, outlinedPolys),
+	// geometry to rebuild. Edge generation + dispose lifecycle delegated
+	// to the shared `useLineSegmentsGeometry` hook.
+	const outlineGeometry = useLineSegmentsGeometry(
+		() => iterateSelectionOutlineEdges(effectiveModels, selectedModelIndex, outlinedPolys),
 		[effectiveModels, selectedModelIndex, outlinedPolys],
 	);
-	useEffect(() => {
-		const g = outlineGeometry;
-		return () => { g.dispose(); };
-	}, [outlineGeometry]);
 
 	// Snapshot the base colors so re-highlights can restore the originals
 	// without rebuilding geometry.

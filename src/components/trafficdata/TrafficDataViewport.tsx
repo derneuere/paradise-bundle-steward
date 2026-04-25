@@ -15,6 +15,10 @@ import * as THREE from 'three';
 import type { ParsedTrafficData, TrafficHull } from '@/lib/core/trafficData';
 import type { TrafficDataSelection } from './useTrafficSelection';
 import { buildRungToSectionMap, speedToRGB } from './constants';
+import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
+import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
+import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
+import type { NodePath } from '@/lib/schema/walk';
 
 type Props = {
 	data: ParsedTrafficData;
@@ -731,8 +735,36 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 	const selectedHull = selected ? hulls[selected.hullIndex] : null;
 	const selectedSectionIndex = selected?.sub?.type === 'section' ? selected.sub.index : -1;
 
+	// Marquee wiring: pick static traffic vehicles inside the dragged
+	// rectangle and union/subtract their schema paths into the bulk set.
+	// Other pickable item kinds (junctions, light triggers) could be
+	// added later — vehicles are the most common bulk-edit target.
+	const cameraBridge = useRef<CameraBridgeData | null>(null);
+	const bulk = useSchemaBulkSelection();
+	const handleMarquee = useCallback(
+		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
+			if (!bulk?.onBulkApplyPaths) return;
+			const hits: NodePath[] = [];
+			const pt = new THREE.Vector3();
+			for (let h = 0; h < hulls.length; h++) {
+				const list = hulls[h].staticTrafficVehicles;
+				for (let s = 0; s < list.length; s++) {
+					const m = list[s].mTransform;
+					// Translation column of the 4×4 (RwMatrix layout).
+					pt.set(m[12] ?? 0, m[13] ?? 0, m[14] ?? 0);
+					if (frustum.containsPoint(pt)) {
+						hits.push(['hulls', h, 'staticTrafficVehicles', s]);
+					}
+				}
+			}
+			if (hits.length === 0) return;
+			bulk.onBulkApplyPaths(hits, mode);
+		},
+		[hulls, bulk],
+	);
+
 	return (
-		<div style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0 }}>
+		<div style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0, position: 'relative' }}>
 			<Canvas
 				camera={{
 					position: [center.x, camDistance, center.z + camDistance * 0.3],
@@ -797,6 +829,7 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 				{/* Selection label */}
 				<SelectionLabel hulls={hulls} selected={selected} />
 
+				<CameraBridge bridge={cameraBridge} />
 				<OrbitControls
 					target={[center.x, 0, center.z]}
 					enableDamping
@@ -804,6 +837,12 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 					makeDefault
 				/>
 			</Canvas>
+			<MarqueeSelector
+				bridge={cameraBridge}
+				far={Math.max(camDistance * 20, 50000)}
+				onMarquee={handleMarquee}
+				hintIdle="press B to box-select static vehicles"
+			/>
 		</div>
 	);
 };

@@ -10,6 +10,10 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Canvas, useThree, useFrame, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
+import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
+import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
+import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
+import type { NodePath } from '@/lib/schema/walk';
 import * as THREE from 'three';
 import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
@@ -461,8 +465,34 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 	const selSection = selected ? data.sections[selected.sectionIndex] : null;
 	const hovSection = hovered ? data.sections[hovered.sectionIndex] : null;
 
+	// Marquee wiring: pick AI sections whose corner-centroid is inside the
+	// dragged rectangle and union/subtract their schema paths into the
+	// bulk set. Sections store XY corners on the Y=0 ground plane (height
+	// is implicit), so the centroid we project is (avgX, 0, avgY).
+	const cameraBridge = useRef<CameraBridgeData | null>(null);
+	const bulk = useSchemaBulkSelection();
+	const handleMarquee = useCallback(
+		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
+			if (!bulk?.onBulkApplyPaths) return;
+			const hits: NodePath[] = [];
+			const pt = new THREE.Vector3();
+			for (let i = 0; i < data.sections.length; i++) {
+				const corners = data.sections[i].corners;
+				if (corners.length === 0) continue;
+				let sx = 0, sy = 0;
+				for (const c of corners) { sx += c.x; sy += c.y; }
+				const n = corners.length;
+				pt.set(sx / n, 0, sy / n);
+				if (frustum.containsPoint(pt)) hits.push(['sections', i]);
+			}
+			if (hits.length === 0) return;
+			bulk.onBulkApplyPaths(hits, mode);
+		},
+		[data, bulk],
+	);
+
 	return (
-		<div style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0 }}>
+		<div style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0, position: 'relative' }}>
 			<Canvas
 				camera={{
 					position: [center.x, camDistance, center.z + camDistance * 0.3],
@@ -514,6 +544,7 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 					/>
 				)}
 
+				<CameraBridge bridge={cameraBridge} />
 				<OrbitControls
 					target={[center.x, 0, center.z]}
 					enableDamping
@@ -521,6 +552,12 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 					makeDefault
 				/>
 			</Canvas>
+			<MarqueeSelector
+				bridge={cameraBridge}
+				far={Math.max(camDistance * 20, 5000)}
+				onMarquee={handleMarquee}
+				hintIdle="press B to box-select AI sections"
+			/>
 		</div>
 	);
 };

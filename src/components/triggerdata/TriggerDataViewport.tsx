@@ -8,6 +8,10 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
+import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
+import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
+import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
+import type { NodePath } from '@/lib/schema/walk';
 import * as THREE from 'three';
 import type {
 	ParsedTriggerData, BoxRegion, Vector4,
@@ -390,8 +394,45 @@ export const TriggerDataViewport: React.FC<Props> = ({ data, onChange, selected,
 	const selEntry = findEntry(selected);
 	const hovEntry = findEntry(hovered);
 
+	// Marquee wiring: pick every region/spawn/roaming whose centroid is
+	// inside the dragged rectangle and union/subtract their schema paths
+	// into the bulk set. Boxes use box.position; vec-positioned items
+	// (spawns, roams, playerStart) use their position field.
+	const cameraBridge = useRef<CameraBridgeData | null>(null);
+	const bulk = useSchemaBulkSelection();
+	const handleMarquee = useCallback(
+		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
+			if (!bulk?.onBulkApplyPaths) return;
+			const hits: NodePath[] = [];
+			const pt = new THREE.Vector3();
+			const tryBox = (listKey: string, list: { box: BoxRegion }[]) => {
+				for (let i = 0; i < list.length; i++) {
+					const p = list[i].box.position;
+					pt.set(p.x, p.y, p.z);
+					if (frustum.containsPoint(pt)) hits.push([listKey, i]);
+				}
+			};
+			const tryVec = (listKey: string, list: { position: Vector4 }[]) => {
+				for (let i = 0; i < list.length; i++) {
+					const p = list[i].position;
+					pt.set(p.x, p.y, p.z);
+					if (frustum.containsPoint(pt)) hits.push([listKey, i]);
+				}
+			};
+			tryBox('landmarks', data.landmarks);
+			tryBox('genericRegions', data.genericRegions);
+			tryBox('blackspots', data.blackspots);
+			tryBox('vfxBoxRegions', data.vfxBoxRegions);
+			tryVec('spawnLocations', data.spawnLocations);
+			tryVec('roamingLocations', data.roamingLocations);
+			if (hits.length === 0) return;
+			bulk.onBulkApplyPaths(hits, mode);
+		},
+		[data, bulk],
+	);
+
 	return (
-		<div style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0 }}>
+		<div style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0, position: 'relative' }}>
 			<Canvas
 				camera={{
 					position: [center.x + camDistance * 0.7, center.y + camDistance, center.z + camDistance * 0.7],
@@ -428,6 +469,7 @@ export const TriggerDataViewport: React.FC<Props> = ({ data, onChange, selected,
 				<SpawnArrows data={data} selected={selected} onSelect={onSelect} />
 				<RoamingDots data={data} selected={selected} onSelect={onSelect} />
 				<PlayerStartMarker data={data} selected={selected} onSelect={onSelect} />
+				<CameraBridge bridge={cameraBridge} />
 				<OrbitControls
 					target={[center.x, center.y, center.z]}
 					enableDamping
@@ -435,6 +477,12 @@ export const TriggerDataViewport: React.FC<Props> = ({ data, onChange, selected,
 					makeDefault
 				/>
 			</Canvas>
+			<MarqueeSelector
+				bridge={cameraBridge}
+				far={Math.max(camDistance * 20, 5000)}
+				onMarquee={handleMarquee}
+				hintIdle="press B to box-select trigger regions"
+			/>
 		</div>
 	);
 };

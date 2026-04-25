@@ -56,6 +56,7 @@ export type GenericBulkSelection = {
 	bulkPathKeys: ReadonlySet<string>;
 	onBulkToggle: (path: NodePath) => void;
 	onBulkRange: (from: NodePath, to: NodePath) => void;
+	onBulkApplyPaths: (paths: ReadonlyArray<NodePath>, mode: 'add' | 'remove') => void;
 	clear: () => void;
 };
 
@@ -80,7 +81,23 @@ export function useGenericBulkSelection(): GenericBulkSelection {
 		});
 	}, []);
 
+	const onBulkApplyPaths = useCallback(
+		(paths: ReadonlyArray<NodePath>, mode: 'add' | 'remove') => {
+			if (paths.length === 0) return;
+			setBulkPathKeys((prev) => {
+				const next = new Set(prev);
+				for (const p of paths) {
+					const key = pathKey(p);
+					if (mode === 'add') next.add(key);
+					else next.delete(key);
+				}
+				return next;
+			});
+		},
+		[],
+	);
+
 	const clear = useCallback(() => setBulkPathKeys(new Set()), []);
 
-	return { bulkPathKeys, onBulkToggle, onBulkRange, clear };
+	return { bulkPathKeys, onBulkToggle, onBulkRange, onBulkApplyPaths, clear };
 }
