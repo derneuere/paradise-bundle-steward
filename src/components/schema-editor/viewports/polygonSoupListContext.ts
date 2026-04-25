@@ -65,6 +65,16 @@ export type PolygonSoupListContextValue = {
 	 *  cue without the user having to Ctrl+click every polygon. `null` when
 	 *  the tree selection isn't on an editable polygon row. */
 	treeSelectedPoly?: { soup: number; poly: number } | null;
+	/** Fired when a marquee (box-select) drag completes with at least one
+	 *  polygon inside the rectangle. `mode` is `'add'` to union the polys
+	 *  into the bulk set or `'remove'` to subtract them. Pages that don't
+	 *  implement marquee can leave this undefined — the viewport then
+	 *  silently no-ops at the end of a drag. */
+	onMarqueeApply?: (
+		modelIndex: number,
+		polys: ReadonlyArray<{ soup: number; poly: number }>,
+		mode: 'add' | 'remove',
+	) => void;
 };
 
 export const PolygonSoupListContext = createContext<PolygonSoupListContextValue | null>(null);

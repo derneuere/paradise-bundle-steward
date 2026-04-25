@@ -390,6 +390,31 @@ const PolygonSoupListPage = () => {
 		});
 	}, []);
 
+	// Apply a marquee (box-select) drag to the bulk set. `mode === 'add'`
+	// unions the picked polys; `mode === 'remove'` subtracts them. The
+	// viewport already filters to a single model, but we re-check here to
+	// keep the bulkPaths invariant ("only paths in the currently-selected
+	// resource") explicit at the call site rather than implicit upstream.
+	const onMarqueeApply = useCallback(
+		(
+			modelIndex: number,
+			polys: ReadonlyArray<{ soup: number; poly: number }>,
+			mode: 'add' | 'remove',
+		) => {
+			if (modelIndex !== selectedIndex || polys.length === 0) return;
+			setBulkPaths((prev) => {
+				const next = new Set(prev);
+				for (const { soup, poly } of polys) {
+					const key = pathKey(['soups', soup, 'polygons', poly]);
+					if (mode === 'add') next.add(key);
+					else next.delete(key);
+				}
+				return next;
+			});
+		},
+		[selectedIndex],
+	);
+
 	// Union every polygon between `from` and `to` into the bulk set. Both
 	// paths must be polygons in the SAME soup — the step size is 1 polygon
 	// and "in between" has no natural meaning across different soups (they
@@ -611,6 +636,7 @@ const PolygonSoupListPage = () => {
 							selectedPolysInCurrentModel,
 							visibleModelIndexes,
 							treeSelectedPoly: parsePolyPath(selectedPath),
+							onMarqueeApply,
 						}}
 					>
 						<MultiResourcePickerContext.Provider value={pickerContextValue}>
