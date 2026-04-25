@@ -15,13 +15,19 @@ Every editor in the app is powered by the same schema-driven framework (see [Sch
 - **Street Data** (0x10018) — editor for streets, junctions, roads, and challenge par scores used by the road network. 3D viewport renders the road graph. Writer is lossy-but-idempotent: the first write drops the retail spans/exits tail (which the game ignores due to a FixUp bug), subsequent writes are stable.
 - **Challenge List** (0x1001F) — editor for all 500 freeburn challenges, with difficulty, player requirements, two goal actions each, and up to 4 locations per action. Type-aware tree labels surface each challenge's primary action as a short label (`#0 · Near Miss · FBCT_599594`).
 - **Player Car Colours** (0x1001E) — editor for all color palettes (Gloss, Metallic, Pearlescent, Special, Party) with paint and pearl Vector4 color values. Writer round-trips **byte-exact**. 32-bit PC layout.
-- **PolygonSoup List** (0x43) — editor for world collision polygon soups (WORLDCOL.BIN: 850+ polygon soups, 1.5M triangles total). Dedicated batched 3D viewport, page-level resource picker for multi-resource bundles, and `byResourceId` export support for bundles with hundreds of same-typed resources. Writer round-trips **byte-exact** across the entire fixture.
-- **AttribSys Vault** — typed vehicle-attribute writer used by vehicle bundles. Integrated into the CLI roundtrip suite; no dedicated editor page yet.
+- **PolygonSoup List** (0x43) — editor for world collision polygon soups (WORLDCOL.BIN: 850+ polygon soups, 1.5M triangles total). Dedicated batched 3D viewport, page-level resource picker for multi-resource bundles, `byResourceId` export support for bundles with hundreds of same-typed resources, and a decoded-bitfield inspector extension for `PolygonSoupPoly.collisionTag` (surface kind, sound bank, footstep / particle / decal slots) that clears only the bits it owns and pastes the decoded result back. Writer round-trips **byte-exact** across the entire fixture.
+- **AttribSys Vault** — typed vehicle-attribute writer used by vehicle bundles. Has a dedicated editor page ([AttribSysVaultPage](src/pages/AttribSysVaultPage.tsx)) plus 9 stress scenarios covering top-speed, boost, torque, mass, FOV, drift params, full-tune, and zero-grip mutations.
+- **Material** (0x40) — read+write handler for the per-mesh Material resource that points at a Shader plus per-register sampler / cbuffer bindings. Drives both the schema-editor and the Renderable viewer's translated-shader path (the cross-bundle MaterialAssembly index is built from this handler).
+- **Model** (0x2A) — read+write handler for the LOD container that maps state indices to Renderable LODs. Stress scenarios cover LOD-distance bumps, state-mapping shuffles, and flag-bit flips.
+- **Shader** (0x12) + **ShaderProgramBuffer** — read+write handlers for vehicle / world shaders, with a dedicated [ShaderPage](src/pages/ShaderPage.tsx) for inspecting the DXBC bytecode, RDEF cbuffers, and named techniques. The Shader handler is the source of bytecode for the DXBC → GLSL translator that powers translated-shader rendering in the Renderable viewer.
+- **DeformationSpec** — read+write handler for the per-vehicle deformation spec (handling-body scale, wheel raise/drop, sensor radii, IK-part joint angles, transform-tag positions, driven-point distance sums). 9 stress scenarios.
+- **WheelGraphicsSpec** + **GraphicsStub** — read+write handlers for the wheel/caliper Model lookup and the small per-bundle graphics stub. Both are byte-exact round-trip with a handful of structural mutation scenarios each.
 
 ### Read-only
 
 - **Renderable + GraphicsSpec viewer** — three.js-powered 3D viewer for vehicle bundles, now integrated as a schema-editor viewport. The left pane lists meshes, materials, and vertex descriptors via the schema tree; the center pane runs the r3f scene with click-to-select; the right pane inspects per-mesh draw parameters, resolved Material / VertexDescriptor imports, part locator status, and the per-mesh OBB matrix. Walks the GraphicsSpec → Model → Renderable chain, applies per-part `mpPartLocators` Matrix44 transforms, and decodes vertex/index data from each Renderable's secondary block. See [Renderable viewer](#renderable-viewer) for details.
 - **Texture** — schema editor with a dedicated 2D texture viewport showing the decoded pixel data alongside the header metadata (format, dimensions, mip count, flags). Pixel blobs are marked as opaque in the schema to keep them out of the walker.
+- **TextureState** (0x42) — sampler-state metadata that pairs with each Texture (filter, wrap, addressing mode). Parsed by the registry so the Renderable viewer's material-binding chain can surface samplers; no dedicated editor page yet.
 - **ICE Take Dictionary** — schema editor over the in-game camera editor take dictionary. Spec still incomplete on the Burnout Wiki; fields beyond the header are mirrored as-is from the parser.
 
 ### Tools
@@ -109,6 +115,11 @@ npm run bundle -- stress example/VEHICLELIST.BUNDLE --type vehicleList --scenari
 npm run bundle -- fuzz example/AI.DAT --iterations 200
 npm run bundle -- fuzz example/BTTSTREETDATA.DAT --iterations 100 --seed 1
 npm run bundle -- fuzz example/VEHICLELIST.BUNDLE --type playerCarColours
+
+# World-logic glTF round-trip (StreetData / TrafficData / AISections / TriggerData)
+npm run bundle -- export-gltf example/WORLDLOGIC.BUNDLE worldlogic.glb
+npm run bundle -- import-gltf example/WORLDLOGIC.BUNDLE edited.glb patched.BUNDLE
+npm run bundle -- roundtrip-gltf example/WORLDLOGIC.BUNDLE
 ```
 
 ### Stress mode
@@ -117,11 +128,20 @@ npm run bundle -- fuzz example/VEHICLELIST.BUNDLE --type playerCarColours
 
 Today's coverage:
 
-- **AISections**: `baseline`, `edit-first-section-speed`, `toggle-first-section-flags`, `remove-last-section`, `remove-last-reset-pair`, `edit-first-section-id`, `swap-first-two-sections` (7 scenarios)
-- **StreetData**: `baseline`, `remove-last-street`, `remove-last-road-and-challenge`, `edit-road-debug-name`, `zero-all-challenge-scores` (5 scenarios)
-- **VehicleList**: `baseline`, `edit-first-name`, `toggle-first-flags`, `swap-first-two`, `bulk-zero-colors`, `add-vehicle`, `remove-last-vehicle` (7 scenarios)
-- **TriggerData**: `baseline`, `remove-last-landmark`, `remove-last-generic-region`, `remove-last-blackspot`, `remove-last-spawn-location`, `edit-first-landmark-id`, `zero-first-spawn-position`, `bulk-pop-every-array` (8 scenarios)
-- **ChallengeList**: `baseline`, `remove-last-challenge`, `edit-first-challenge-title`, `zero-first-challenge-difficulty`, `zero-first-action-time-limit`, `duplicate-last-challenge` (6 scenarios)
+- **AISections** (7): `baseline`, `edit-first-section-speed`, `toggle-first-section-flags`, `remove-last-section`, `remove-last-reset-pair`, `edit-first-section-id`, `swap-first-two-sections`
+- **StreetData** (5): `baseline`, `remove-last-street`, `remove-last-road-and-challenge`, `edit-road-debug-name`, `zero-all-challenge-scores`
+- **VehicleList** (7): `baseline`, `edit-first-name`, `toggle-first-flags`, `swap-first-two`, `bulk-zero-colors`, `add-vehicle`, `remove-last-vehicle`
+- **TriggerData** (8): `baseline`, `remove-last-landmark`, `remove-last-generic-region`, `remove-last-blackspot`, `remove-last-spawn-location`, `edit-first-landmark-id`, `zero-first-spawn-position`, `bulk-pop-every-array`
+- **ChallengeList** (6): `baseline`, `remove-last-challenge`, `edit-first-challenge-title`, `zero-first-challenge-difficulty`, `zero-first-action-time-limit`, `duplicate-last-challenge`
+- **TrafficData** (24): `baseline` plus per-array `remove-last-*` / `remove-first-*` / `duplicate-first-*` mutations across hulls, sections, rungs, neighbours, static vehicles, junctions, stop lines, light triggers, section spans, flow types, kill zones, vehicle types/assets/traits, paint colours, and traffic lights — exercises every count-derived pointer in the writer
+- **PolygonSoupList** (7): `baseline`, `pop-last-soup`, `pop-first-soup`, `swap-first-two-soups`, `duplicate-first-soup`, `insert-synthetic-at-middle`, `append-synthetic-soup`
+- **AttribSysVault** (9): `baseline`, `set-max-speed`, `set-boost-values`, `set-engine-torque`, `set-driving-mass`, `set-fov`, `set-drift-params`, `full-tune`, `zero-all-grip`
+- **DeformationSpec** (9): `baseline`, `scale-handling-body`, `raise-all-wheels`, `sensor-radii-x2`, `tag-point-initial-positions-zero`, `driven-point-distance-sum`, `identity-car-to-handling-transform`, `tweak-ikpart-joint-angles`, `shift-all-transform-tags`
+- **Material** (3): `baseline`, `flip-shader-id-low-bit`, `reverse-material-states`
+- **Model** (4): `baseline`, `bump-lod-distances`, `shuffle-state-mapping`, `flip-flags-bit`
+- **Shader** (2) + **ShaderProgramBuffer** (1): `baseline`, `flip-flags-bit` / `baseline`
+- **WheelGraphicsSpec** (3): `baseline`, `swap-wheel-caliper-ids`, `drop-caliper`
+- **GraphicsStub** (2): `baseline`, `swap-slot-indices`
 
 Single-field mutations are surgical — editing `vehicles[0].boostCapacity` changes exactly one byte at the expected offset, nothing adjacent.
 
@@ -205,11 +225,36 @@ The picking uses r3f's built-in raycaster — no manual `THREE.Raycaster`
 calls. `e.stopPropagation()` on each mesh's `onClick` ensures the closest
 hit wins when meshes overlap.
 
+### Translated shaders + textures
+
+The viewer also has a **`useTranslatedShaders` toggle** that swaps the flat
+`MeshStandardMaterial` fallback for real game shaders. With it enabled, the
+pipeline builds a cross-bundle texture catalog and a Material → Shader
+binding index over the primary bundle, all loaded `secondaryBundles`, and
+the page-level "+ texture pack" list (so dropping in `SHADERS.BNDL` or a
+texture pack lights up shaders that wouldn't otherwise translate).
+
+For each unique mesh material the renderer:
+
+1. Resolves the mesh's `materialAssemblyId` → Material → Shader id chain.
+2. Translates the vertex + pixel DXBC bytecode to GLSL via
+   [`src/lib/core/dxbc/`](src/lib/core/dxbc/) (SM5 translator with cbuffer
+   layout inference).
+3. Pulls per-register sampler bindings from the Material, falling back to
+   name-matched textures from the catalog.
+4. Decodes DXT1/DXT5 swizzled mips and feeds them into a
+   `THREE.ShaderMaterial` built by
+   [`buildTranslatedShaderMaterial`](src/lib/core/translatedShaderMaterial.ts),
+   with an optional preview tonemap so HDR PaintGloss output doesn't
+   saturate to white in the absence of an engine post-stack.
+
+Result on the CARBRWDS sample: 86/86 shaders compile and many parts render
+with their lit shading and per-part textures. Non-identity vertex skinning
+(wheels) and a couple of vehicle-specific shaders still render dark — see
+the Roadmap.
+
 ### Limitations
 
-- **No textures.** Materials resolve to ids but the texture pipeline
-  (Material → TextureState → Texture, with DXT1/DXT5 swizzled mips) isn't
-  implemented yet. Every mesh gets a flat `MeshStandardMaterial`.
 - **No skinning.** BoneIndexes / BoneWeights vertex attributes are decoded
   but not used. The car renders in its bind pose.
 - **CARBRWDS-tested only.** All locators in our sample have identity
@@ -217,6 +262,34 @@ hit wins when meshes overlap.
   Wheels in particular need testing on a different vehicle bundle.
 - **No GraphicsSpec writer.** The viewer is read-only. Editing geometry or
   re-packing a vehicle bundle is out of scope.
+
+## World-logic glTF round-trip
+
+The four world-logic resources (StreetData, TrafficData, AISections,
+TriggerData) can be exported as a **single combined glTF document**, edited
+in Blender (or any glTF-aware tool), and re-imported into the original
+bundle. The CLI commands `export-gltf`, `import-gltf`, and
+`roundtrip-gltf` in [`scripts/bundle-cli.ts`](scripts/bundle-cli.ts) are
+the entry points; the orchestration lives at
+[`src/lib/core/gltf/worldLogicGltf.ts`](src/lib/core/gltf/worldLogicGltf.ts)
+with one subtree builder per resource (`streetDataGltf.ts`,
+`trafficDataGltf.ts`, `aiSectionsGltf.ts`, `triggerDataGltf.ts`).
+
+Convention (full spec in
+[`docs/worldlogic-gltf-roundtrip.md`](docs/worldlogic-gltf-roundtrip.md)):
+each resource owns one root-level group node and one key under
+`scene.extras.paradiseBundle`. Importers reconcile **adds, deletes, and
+edits** of nodes back to the parsed model — the dedicated reconcile tests
+([`blenderAddDelete.test.ts`](src/lib/core/gltf/blenderAddDelete.test.ts),
+[`blenderEditReconcile.test.ts`](src/lib/core/gltf/blenderEditReconcile.test.ts))
+simulate Blender's typical "duplicate / delete / nudge" workflow against
+each subtree.
+
+This is the recommended path for bulk edits to the road / traffic / AI /
+trigger graphs that would be tedious in the schema editor (e.g. dragging a
+chain of TrafficData section rungs). Anything edited in Blender and
+re-imported flows through the same registry writers as the schema editor,
+so byte-exact / stable-writer guarantees still apply.
 
 ## Architecture
 
@@ -227,6 +300,7 @@ The core of the app is the **resource handler registry** at `src/lib/core/regist
 - `parseRaw(bytes, ctx)` — decode already-decompressed bytes into a typed model
 - `writeRaw(model, ctx)` — re-encode the model (optional for read-only handlers)
 - `describe(model)` — one-line CLI summary
+- `category` — `'Data' | 'Graphics' | 'Camera'`, used by the CLI and Resources page to group handlers in the UI
 - `fixtures` — pinned example bundles for regression testing
 - `stressScenarios` — optional hand-curated mutation scenarios
 - `fuzz.tolerateErrors` — optional regexes for writer-invariant rejections the CLI fuzzer should treat as expected
@@ -235,7 +309,7 @@ The registry is the single source of truth for which resources exist and how the
 
 ### Schema-driven editor
 
-Above the registry sits a second layer: a **schema-driven editor framework** at `src/lib/schema/` and `src/components/schema-editor/`. Every page that edits a parsed model (11 resources as of April 2026) goes through the same React provider + 3-pane layout; no resource-specific page plumbing survives.
+Above the registry sits a second layer: a **schema-driven editor framework** at `src/lib/schema/` and `src/components/schema-editor/`. Every page that edits a parsed model goes through the same React provider + 3-pane layout; no resource-specific page plumbing survives.
 
 The schema is a plain TypeScript declaration — one file per resource at `src/lib/schema/resources/<key>.ts`. It enumerates record types, their fields, field kinds (`u8` / `u16` / `u32` / `i8` / `i16` / `i32` / `f32` / `bigint` / `bool` / `string` / `enum` / `flags` / `vec2` / `vec3` / `vec4` / `matrix44` / `ref` / `record` / `list` / `custom`), `fieldMetadata` (label, description, hidden, readOnly, derivedFrom), `propertyGroups` for tab layout, tree-label callbacks, and cross-field validation hooks. The schema **is the contract** — a coverage test walks the parsed data against the schema in both directions and fails the build on drift in either.
 
@@ -265,6 +339,8 @@ src/lib/core/
     handlers/          # one file per resource type
     registry.test.ts   # auto-generated fixture suite
   bundle/              # low-level bundle parser (header, entries, debug data)
+  dxbc/                # DXBC SM5 → GLSL translator (parser, ops, glsl emitter)
+  gltf/                # world-logic glTF round-trip (Street/Traffic/AI/Trigger + Blender reconcile)
   aiSections.ts        # parseRaw/writeRaw for AI Sections (byte-exact)
   streetData.ts        # parseRaw/writeRaw for StreetData
   triggerData.ts
@@ -273,9 +349,21 @@ src/lib/core/
   playerCarColors.ts   # 32-bit only
   iceTakeDictionary.ts # read-only, partial
   renderable.ts        # read-only Renderable (0xC) + VertexDescriptor (0xA)
-  graphicsSpec.ts      # read-only GraphicsSpec (0x10006) + Model (0x2A)
+  graphicsSpec.ts      # read-only GraphicsSpec (0x10006) parser
+  model.ts             # parseRaw/writeRaw for Model (0x2A)
+  material.ts          # parseRaw/writeRaw for Material (0x40)
+  shader.ts            # parseRaw/writeRaw for Shader (0x12) + ShaderProgramBuffer
+  deformationSpec.ts   # parseRaw/writeRaw for DeformationSpec
+  wheelGraphicsSpec.ts # parseRaw/writeRaw for WheelGraphicsSpec
+  graphicsStub.ts      # parseRaw/writeRaw for GraphicsStub
   polygonSoupList.ts   # parseRaw/writeRaw for PolygonSoup (byte-exact)
+  collisionTag.ts      # decoded-bitfield helpers for PolygonSoupPoly.collisionTag
   texture.ts           # read-only Texture (DXT1/DXT5 decode)
+  textureState.ts      # read-only TextureState (sampler metadata)
+  textureCatalog.ts    # cross-bundle texture name catalog (Renderable viewer)
+  materialBinding.ts   # per-register MaterialAssembly binding extractor
+  materialChain.ts     # Material → Shader → cbuffer/sampler resolution
+  translatedShaderMaterial.ts  # builds THREE.ShaderMaterial from translated DXBC
   trafficData.ts       # parseRaw/writeRaw for TrafficData
   binTools.ts          # BinReader / BinWriter primitives
   resourceManager.ts   # extractResourceData, compress/decompress
@@ -336,7 +424,7 @@ src/pages/
 
 ### Renderable viewer follow-ups
 
-- **Texture wiring on vehicle meshes.** The DXT1/DXT5 decoder already exists (the standalone Texture resource editor uses it to paint its preview), but the Renderable viewer doesn't yet push decoded textures into the per-mesh `THREE.MeshStandardMaterial`. Every vehicle mesh still renders as a flat-shaded surface. Hooking Material → TextureState → Texture → `THREE.Texture` and mapping the right slots onto `map` / `normalMap` / `roughnessMap` is the next step.
+- **Vehicle / skinned shaders that still render dark.** With `useTranslatedShaders` enabled, all 86 shaders in the CARBRWDS sample compile and many parts now render with their lit shading and per-part textures, but a handful of vehicle-specific shaders (and anything that needs skinning) still come out unlit. Likely missing cbuffer values or unbound samplers — the diagnostic scripts under `scripts/probe-*.ts` are the entry points for chasing these down.
 - **Skinning / bone weights.** `BoneIndexes` and `BoneWeights` vertex attributes are decoded by `decodeVertexArrays()` but not exposed. A future skeletal pose viewer could light them up.
 - **ShatteredGlassParts.** Parsed by `parseGraphicsSpec` (count + table offset) but not rendered. Each entry maps a Model to a body part index for hot-swap on collision.
 - **Per-mesh OBB visualization.** The `boundingMatrix` is a confirmed OBB. A future "show bounds" toggle could draw the OBBs as wireframe boxes for debugging mesh placement.
