@@ -87,9 +87,20 @@ const PSL_SHORTCUT_GROUPS: ShortcutGroup[] = [
 		title: '3D viewport',
 		items: [
 			{ keys: ['Click', 'polygon'], label: 'Jump the inspector to that polygon (and switch resources if needed)' },
+			{ keys: ['Shift', 'Click', 'polygon'], label: 'Extend the bulk selection from the current polygon to this one (same soup)' },
+			{ keys: ['Ctrl', 'Click', 'polygon'], label: 'Toggle a polygon in the bulk selection without moving the inspector' },
 			{ keys: ['Drag'], label: 'Orbit the camera around the scene' },
 			{ keys: ['Right-Drag'], label: 'Pan' },
 			{ keys: ['Scroll'], label: 'Zoom in / out' },
+		],
+	},
+	{
+		title: 'Box select (marquee)',
+		items: [
+			{ keys: ['B'], label: 'Toggle box-select mode (cursor turns to a crosshair)' },
+			{ keys: ['Drag'], label: 'In box-select mode: rectangle marquee — adds every polygon inside to the bulk selection' },
+			{ keys: ['Alt', 'Drag'], label: 'In box-select mode: hold Alt on release to remove the rectangle\u2019s polygons from the bulk set' },
+			{ keys: ['Esc'], label: 'Exit box-select mode' },
 		],
 	},
 	BULK_SHORTCUTS,

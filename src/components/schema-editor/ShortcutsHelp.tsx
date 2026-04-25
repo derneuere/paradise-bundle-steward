@@ -59,6 +59,7 @@ export const BULK_SHORTCUTS: ShortcutGroup = {
 	title: 'Bulk edit',
 	items: [
 		{ keys: ['Ctrl', 'Click'], label: 'Toggle a polygon in the bulk selection (⌘-click on macOS)' },
+		{ keys: ['Shift', 'Click'], label: 'Extend the bulk selection from the current row to this one (same soup)' },
 	],
 };
 
