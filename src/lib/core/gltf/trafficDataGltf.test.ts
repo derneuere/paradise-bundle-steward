@@ -24,6 +24,7 @@ import {
 	importTrafficDataFromGltf,
 	readTrafficDataFromDocument,
 } from './trafficDataGltf';
+import { paradiseToGltf } from './coords';
 
 const FIXTURE = path.resolve(__dirname, '../../../../example/B5TRAFFIC.BNDL');
 
@@ -203,14 +204,128 @@ describe('trafficData glTF round-trip', () => {
 		expect(() => readTrafficDataFromDocument(doc)).toThrow(/paradiseBundle/);
 	});
 
-	it('every non-empty TrafficSection gets a 2-primitive LINE_STRIP ribbon mesh', () => {
+	it('quad-strip vertex order is [L_i, R_i] with paradiseToGltf applied per rung', () => {
 		const { model } = loadFixtureModel();
 		const doc = buildTrafficDataDocument(model);
 		const root = doc.getRoot().listScenes()[0].listChildren()[0];
 
-		// Pick a hull guaranteed to have sections with rungs.
+		// Pick the first hull/section pair with N >= 2 rungs deterministically.
+		let hullIdx = -1;
+		let sectionIdx = -1;
+		for (let hi = 0; hi < model.hulls.length && hullIdx < 0; hi++) {
+			const h = model.hulls[hi];
+			if (h.rungs.length === 0) continue;
+			for (let si = 0; si < h.sections.length; si++) {
+				if (h.sections[si].muNumRungs >= 2) {
+					hullIdx = hi;
+					sectionIdx = si;
+					break;
+				}
+			}
+		}
+		expect(hullIdx).toBeGreaterThanOrEqual(0);
+
+		const hull = model.hulls[hullIdx];
+		const section = hull.sections[sectionIdx];
+		const N = section.muNumRungs;
+
+		const sectionsGroup = root
+			.listChildren()[hullIdx]
+			.listChildren()
+			.find((n) => n.getName() === 'Sections')!;
+		const node = sectionsGroup.listChildren()[sectionIdx];
+		const positions = node.getMesh()!.listPrimitives()[0].getAttribute('POSITION')!;
+
+		// Read the f32 backing array. glTF-transform exposes it via getArray().
+		const arr = positions.getArray()!;
+		expect(arr.length).toBe(N * 2 * 3);
+
+		// For every rung in the section, the L vert must sit at index 2i and the
+		// R vert at 2i+1, with paradiseToGltf applied. Pin the first 3 rungs to
+		// keep the test cheap but enough to catch a flip/swap regression.
+		const checkUpTo = Math.min(N, 3);
+		for (let i = 0; i < checkUpTo; i++) {
+			const rung = hull.rungs[section.muRungOffset + i];
+			const [l, r] = rung.maPoints;
+			const lg = paradiseToGltf({ x: l.x, y: l.y, z: l.z });
+			const rg = paradiseToGltf({ x: r.x, y: r.y, z: r.z });
+
+			const lOff = 2 * i * 3;
+			const rOff = (2 * i + 1) * 3;
+			// Compare as f32 since the buffer rounds to single precision.
+			expect(arr[lOff + 0]).toBe(Math.fround(lg[0]));
+			expect(arr[lOff + 1]).toBe(Math.fround(lg[1]));
+			expect(arr[lOff + 2]).toBe(Math.fround(lg[2]));
+			expect(arr[rOff + 0]).toBe(Math.fround(rg[0]));
+			expect(arr[rOff + 1]).toBe(Math.fround(rg[1]));
+			expect(arr[rOff + 2]).toBe(Math.fround(rg[2]));
+		}
+	});
+
+	it('quad-strip indices spell out (L_i,R_i,R_{i+1},L_i,R_{i+1},L_{i+1}) per quad', () => {
+		const { model } = loadFixtureModel();
+		const doc = buildTrafficDataDocument(model);
+		const root = doc.getRoot().listScenes()[0].listChildren()[0];
+
+		// Find a section with at least 3 rungs so we can pin >1 quad.
+		let hullIdx = -1;
+		let sectionIdx = -1;
+		for (let hi = 0; hi < model.hulls.length && hullIdx < 0; hi++) {
+			const h = model.hulls[hi];
+			if (h.rungs.length === 0) continue;
+			for (let si = 0; si < h.sections.length; si++) {
+				if (h.sections[si].muNumRungs >= 3) {
+					hullIdx = hi;
+					sectionIdx = si;
+					break;
+				}
+			}
+		}
+		expect(hullIdx).toBeGreaterThanOrEqual(0);
+
+		const N = model.hulls[hullIdx].sections[sectionIdx].muNumRungs;
+		const sectionsGroup = root
+			.listChildren()[hullIdx]
+			.listChildren()
+			.find((n) => n.getName() === 'Sections')!;
+		const node = sectionsGroup.listChildren()[sectionIdx];
+		const indices = node.getMesh()!.listPrimitives()[0].getIndices()!;
+		const arr = indices.getArray()!;
+
+		expect(arr.length).toBe((N - 1) * 6);
+
+		// Every index must be in-bounds for the 2N vertices.
+		for (let k = 0; k < arr.length; k++) {
+			expect(arr[k]).toBeGreaterThanOrEqual(0);
+			expect(arr[k]).toBeLessThan(N * 2);
+		}
+
+		// Pin the first two quads exactly so a winding flip or off-by-one
+		// regresses loudly. Quad i corners: l0=2i, r0=2i+1, l1=2(i+1), r1=2i+3.
+		// Triangles per quad: (l0, r0, r1) and (l0, r1, l1).
+		for (let i = 0; i < Math.min(N - 1, 2); i++) {
+			const o = i * 6;
+			const l0 = 2 * i;
+			const r0 = 2 * i + 1;
+			const l1 = 2 * (i + 1);
+			const r1 = 2 * (i + 1) + 1;
+			expect(arr[o + 0]).toBe(l0);
+			expect(arr[o + 1]).toBe(r0);
+			expect(arr[o + 2]).toBe(r1);
+			expect(arr[o + 3]).toBe(l0);
+			expect(arr[o + 4]).toBe(r1);
+			expect(arr[o + 5]).toBe(l1);
+		}
+	});
+
+	it('every TrafficSection with N>=2 rungs gets a TRIANGLES quad-strip ribbon', () => {
+		const { model } = loadFixtureModel();
+		const doc = buildTrafficDataDocument(model);
+		const root = doc.getRoot().listScenes()[0].listChildren()[0];
+
+		// Pick a hull guaranteed to have sections with at least 2 rungs.
 		const hullIdx = model.hulls.findIndex(
-			(h) => h.sections.some((s) => s.muNumRungs > 0) && h.rungs.length > 0,
+			(h) => h.sections.some((s) => s.muNumRungs >= 2) && h.rungs.length > 0,
 		);
 		expect(hullIdx).toBeGreaterThanOrEqual(0);
 
@@ -222,19 +337,23 @@ describe('trafficData glTF round-trip', () => {
 		let checked = 0;
 		for (let si = 0; si < hull.sections.length; si++) {
 			const section = hull.sections[si];
-			if (section.muNumRungs <= 0) continue;
+			if (section.muNumRungs < 2) continue;
 			const node = sectionNodes[si];
 			const mesh = node.getMesh();
 			expect(mesh).toBeDefined();
-			// LINE_STRIP = glTF mode 3. Two primitives: left edge + right edge.
+			// TRIANGLES = glTF mode 4. Single primitive, indexed quad strip:
+			//   POSITION count = 2 * N (interleaved L_i, R_i)
+			//   index count    = 6 * (N - 1)  (two tris per quad)
 			const prims = mesh!.listPrimitives();
-			expect(prims.length).toBe(2);
-			for (const prim of prims) {
-				expect(prim.getMode()).toBe(3);
-				const accessor = prim.getAttribute('POSITION');
-				expect(accessor).toBeDefined();
-				expect(accessor!.getCount()).toBe(section.muNumRungs);
-			}
+			expect(prims.length).toBe(1);
+			const prim = prims[0];
+			expect(prim.getMode()).toBe(4);
+			const positions = prim.getAttribute('POSITION');
+			expect(positions).toBeDefined();
+			expect(positions!.getCount()).toBe(section.muNumRungs * 2);
+			const indices = prim.getIndices();
+			expect(indices).toBeDefined();
+			expect(indices!.getCount()).toBe((section.muNumRungs - 1) * 6);
 			checked++;
 			if (checked >= 5) break; // spot-check, not exhaustive
 		}

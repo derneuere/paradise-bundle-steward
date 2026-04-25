@@ -16,7 +16,8 @@
 //   - Visualization nodes carry Blender-friendly translations derived from
 //     the model (junction logic box positions, static vehicle transforms,
 //     light trigger positions, section midpoints from their first rung).
-//     No mesh geometry yet — Phase 5 adds LINE_STRIP ribbons for lane rungs.
+//     Lane rungs become a TRIANGLES quad-strip per section so each lane is
+//     a flat ribbon of faces in Blender — no manual Bridge Edge Loops needed.
 //
 // This keeps the feature shippable now with full round-trip guarantees while
 // leaving the door open for visible/editable geometry later.
@@ -88,9 +89,16 @@ function staticVehicleTranslation(v: TrafficStaticVehicle): {
 }
 
 /**
- * Build a LINE_STRIP mesh for a section: two primitives (left edge + right
- * edge), each a polyline of f32 positions in glTF axes. Returns null if the
- * section has no rungs (nothing to draw).
+ * Build a quad-strip face mesh for a section: a single TRIANGLES primitive
+ * with 2N interleaved [L0, R0, L1, R1, ...] vertices and 6(N-1) indices
+ * forming N-1 quads (two triangles each) bridging the left and right rung
+ * boundaries. This matches the result of selecting both edge loops in
+ * Blender and running Bridge Edge Loops, but emitted directly so the user
+ * never has to do it by hand.
+ *
+ * Returns null when there's nothing useful to draw (no rungs, or only one
+ * cross-section so no quad can be formed). The caller falls back to a
+ * point-marker node in that case.
  */
 function buildSectionRibbonMesh(
 	doc: Document,
@@ -102,46 +110,62 @@ function buildSectionRibbonMesh(
 	const start = section.muRungOffset;
 	const end = start + section.muNumRungs;
 	const slice = rungs.slice(start, end);
-	if (slice.length === 0) return null;
+	const N = slice.length;
+	if (N < 2) return null;
 
-	// Two buffers: left edge, right edge. f32 Vec3s with axis swap.
-	const left = new Float32Array(slice.length * 3);
-	const right = new Float32Array(slice.length * 3);
-	for (let i = 0; i < slice.length; i++) {
+	// Interleaved verts: [L0, R0, L1, R1, ..., L_{N-1}, R_{N-1}].
+	// Index i has L = 2i, R = 2i+1.
+	const positions = new Float32Array(N * 2 * 3);
+	for (let i = 0; i < N; i++) {
 		const [l, r] = slice[i].maPoints;
 		const lg = paradiseToGltf({ x: l.x, y: l.y, z: l.z });
 		const rg = paradiseToGltf({ x: r.x, y: r.y, z: r.z });
-		left[i * 3 + 0] = lg[0];
-		left[i * 3 + 1] = lg[1];
-		left[i * 3 + 2] = lg[2];
-		right[i * 3 + 0] = rg[0];
-		right[i * 3 + 1] = rg[1];
-		right[i * 3 + 2] = rg[2];
+		const li = 2 * i * 3;
+		const ri = (2 * i + 1) * 3;
+		positions[li + 0] = lg[0];
+		positions[li + 1] = lg[1];
+		positions[li + 2] = lg[2];
+		positions[ri + 0] = rg[0];
+		positions[ri + 1] = rg[1];
+		positions[ri + 2] = rg[2];
 	}
 
-	const leftAccessor = doc
+	// N-1 quads, two CCW triangles each. Quad i corners: L_i, R_i, R_{i+1}, L_{i+1}.
+	const quadCount = N - 1;
+	const indices = new Uint32Array(quadCount * 6);
+	for (let i = 0; i < quadCount; i++) {
+		const l0 = 2 * i;
+		const r0 = 2 * i + 1;
+		const l1 = 2 * (i + 1);
+		const r1 = 2 * (i + 1) + 1;
+		const o = i * 6;
+		indices[o + 0] = l0;
+		indices[o + 1] = r0;
+		indices[o + 2] = r1;
+		indices[o + 3] = l0;
+		indices[o + 4] = r1;
+		indices[o + 5] = l1;
+	}
+
+	const positionAccessor = doc
 		.createAccessor()
 		.setType('VEC3')
-		.setArray(left)
+		.setArray(positions)
 		.setBuffer(buffer);
-	const rightAccessor = doc
+	const indexAccessor = doc
 		.createAccessor()
-		.setType('VEC3')
-		.setArray(right)
+		.setType('SCALAR')
+		.setArray(indices)
 		.setBuffer(buffer);
 
-	// LINE_STRIP = 3 per glTF 2.0 spec.
-	const leftPrim = doc
+	// TRIANGLES = 4 per glTF 2.0 spec.
+	const prim = doc
 		.createPrimitive()
-		.setMode(3)
-		.setAttribute('POSITION', leftAccessor);
-	const rightPrim = doc
-		.createPrimitive()
-		.setMode(3)
-		.setAttribute('POSITION', rightAccessor);
+		.setMode(4)
+		.setAttribute('POSITION', positionAccessor)
+		.setIndices(indexAccessor);
 
-	const mesh = doc.createMesh().addPrimitive(leftPrim).addPrimitive(rightPrim);
-	return mesh;
+	return doc.createMesh().addPrimitive(prim);
 }
 
 function addVisualizationNodes(
@@ -158,13 +182,15 @@ function addVisualizationNodes(
 		const hullNode = doc.createNode(`Hull ${hi}`);
 		root.addChild(hullNode);
 
-		// Sections under this hull — each gets a LINE_STRIP ribbon built from
-		// its rungs' left/right edges. This is the geometry that makes the
-		// road network actually visible in Blender. When a section has a
-		// ribbon mesh we leave the node at the origin so the mesh's world-
-		// coord positions aren't double-offset. When there's no mesh (empty
-		// section), we still emit a node at the rung midpoint so the user
-		// sees the gap.
+		// Sections under this hull — each gets a TRIANGLES quad-strip face
+		// ribbon built from its rungs' left/right edges. This is the geometry
+		// that makes the road network actually visible in Blender, and emitting
+		// faces (rather than two parallel polylines) means each lane is already
+		// a usable surface — no need for the user to Bridge Edge Loops by hand.
+		// When a section has a ribbon mesh we leave the node at the origin so
+		// the mesh's world-coord positions aren't double-offset. When there's
+		// no mesh (empty or single-rung section), we still emit a node at the
+		// rung midpoint so the user sees the gap.
 		const sectionsGroup = doc.createNode('Sections');
 		hullNode.addChild(sectionsGroup);
 		for (let si = 0; si < hull.sections.length; si++) {
