@@ -540,7 +540,15 @@ const PolygonSoupListPage = () => {
 	);
 
 	const bulkSelectionContextValue = useMemo(
-		() => ({ bulkPathKeys: bulkPaths, onBulkToggle, onBulkRange }),
+		() => ({
+			bulkPathKeys: bulkPaths,
+			onBulkToggle,
+			onBulkRange,
+			// PSL has its own collisionTag-aware BulkEditPanel rendered as a
+			// side column; opt out of the inspector-pane generic panel so
+			// users don't see two bulk panels at once.
+			suppressGenericInspectorPanel: true,
+		}),
 		[bulkPaths, onBulkToggle, onBulkRange],
 	);
 

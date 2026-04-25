@@ -36,6 +36,12 @@ export type BulkSelectionContextValue = {
 	 *  drag — `onBulkToggle` per-path would emit N re-renders, this
 	 *  collapses to one. Optional. */
 	onBulkApplyPaths?: (paths: ReadonlyArray<NodePath>, mode: 'add' | 'remove') => void;
+	/** Opt-out flag for the auto-mounted GenericBulkEditPanel inside the
+	 *  inspector pane. Pages that ship their own specialized panel (like
+	 *  PolygonSoupListPage with its collisionTag-aware editor) set this
+	 *  to suppress the generic version, preventing two bulk panels from
+	 *  showing at once. Defaults to false. */
+	suppressGenericInspectorPanel?: boolean;
 };
 
 export const SchemaBulkSelectionContext =

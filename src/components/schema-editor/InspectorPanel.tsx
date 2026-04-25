@@ -9,6 +9,7 @@ import type { FieldMetadata, PropertyGroup, RecordSchema } from '@/lib/schema/ty
 import { FieldRenderer } from './fields/FieldRenderer';
 import { useSchemaEditor } from './context';
 import { formatPath, getAtPath, type NodePath } from '@/lib/schema/walk';
+import { GenericBulkEditPanel } from './GenericBulkEditPanel';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -33,27 +34,40 @@ export function InspectorPanel() {
 		if (field && selectedLocation?.parentRecord && selectedLocation.parentFieldName) {
 			const meta = selectedLocation.parentRecord.fieldMetadata?.[selectedLocation.parentFieldName];
 			return (
-				<div className="p-4">
-					<Breadcrumb path={selectedPath} selectPath={selectPath} />
-					<div className="mt-2">
-						<FieldRenderer
-							label={meta?.label ?? selectedLocation.parentFieldName}
-							field={field}
-							value={selectedValue}
-							onChange={(next) => setAtPath(selectedPath, next)}
-							meta={meta}
-							path={selectedPath}
-						/>
+				<div className="h-full flex flex-col min-h-0">
+					<GenericBulkEditPanel />
+					<div className="flex-1 min-h-0 overflow-auto p-4">
+						<Breadcrumb path={selectedPath} selectPath={selectPath} />
+						<div className="mt-2">
+							<FieldRenderer
+								label={meta?.label ?? selectedLocation.parentFieldName}
+								field={field}
+								value={selectedValue}
+								onChange={(next) => setAtPath(selectedPath, next)}
+								meta={meta}
+								path={selectedPath}
+							/>
+						</div>
 					</div>
 				</div>
 			);
 		}
 		return (
-			<div className="p-4 text-xs text-muted-foreground">Nothing selected.</div>
+			<div className="h-full flex flex-col min-h-0">
+				<GenericBulkEditPanel />
+				<div className="flex-1 min-h-0 p-4 text-xs text-muted-foreground">Nothing selected.</div>
+			</div>
 		);
 	}
 
-	return <RecordForm record={record} path={selectedPath} value={selectedValue as Record<string, unknown>} />;
+	return (
+		<div className="h-full flex flex-col min-h-0">
+			<GenericBulkEditPanel />
+			<div className="flex-1 min-h-0">
+				<RecordForm record={record} path={selectedPath} value={selectedValue as Record<string, unknown>} />
+			</div>
+		</div>
+	);
 }
 
 // ---------------------------------------------------------------------------
