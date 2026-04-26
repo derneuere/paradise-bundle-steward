@@ -8,12 +8,15 @@
 // triggers, and static vehicles use InstancedMesh with global
 // instance-to-hull mappings for picking.
 
-import { useEffect, useMemo, useRef, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import type { ParsedTrafficData, TrafficHull } from '@/lib/core/trafficData';
-import type { TrafficDataSelection } from './useTrafficSelection';
+import type { ParsedTrafficData, TrafficHull, TrafficPvs } from '@/lib/core/trafficData';
+import {
+	isPvsCellSelection,
+	type TrafficDataSelection,
+} from './useTrafficSelection';
 import { buildRungToSectionMap, speedToRGB } from './constants';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
@@ -216,18 +219,32 @@ function buildPickingIndex(hulls: TrafficHull[]): PickingIndex {
 const pickPlaneMat = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
 
 function PickingPlane({
-	hulls, center, radius, onSelect,
+	hulls, center, radius, onSelect, pvs, pvsActive, onHoverCell,
 }: {
 	hulls: TrafficHull[];
 	center: THREE.Vector3;
 	radius: number;
 	onSelect: (sel: TrafficDataSelection) => void;
+	// PVS routing: when a click on the ground plane lands far from any rung
+	// AND the grid is enabled, the click resolves to a PVS cell instead of
+	// a hull. Hover events likewise produce a cell index for the tooltip.
+	// Without these, clicks in open ocean / off-grid areas would select the
+	// nearest hull — which is exactly what people don't want when they're
+	// trying to inspect cell membership.
+	pvs: TrafficPvs | null;
+	pvsActive: boolean;
+	onHoverCell: (cellIndex: number | null, world: THREE.Vector3 | null) => void;
 }) {
 	const index = useMemo(() => buildPickingIndex(hulls), [hulls]);
 
-	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-		e.stopPropagation();
-		const px = e.point.x, py = e.point.y, pz = e.point.z;
+	// "Snap to road" radius — clicks closer than this to any rung midpoint
+	// pick the hull/section; clicks farther away fall through to PVS cell
+	// pick when the grid is on. 60 game-units is roughly half a road width
+	// in Paradise scale, which keeps road clicks reliable without making
+	// open patches between road segments unreachable.
+	const RUNG_SNAP_DIST_SQ = 60 * 60;
+
+	const findNearestRung = useCallback((px: number, py: number, pz: number) => {
 		let bestDist = Infinity;
 		let bestIdx = -1;
 		for (let i = 0; i < index.count; i++) {
@@ -236,6 +253,20 @@ function PickingPlane({
 			const dz = pz - index.midpoints[i * 3 + 2];
 			const d = dx * dx + dy * dy + dz * dz;
 			if (d < bestDist) { bestDist = d; bestIdx = i; }
+		}
+		return { idx: bestIdx, distSq: bestDist };
+	}, [index]);
+
+	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+		e.stopPropagation();
+		const { idx: bestIdx, distSq } = findNearestRung(e.point.x, e.point.y, e.point.z);
+		// PVS cell wins when the grid is on AND the click is in open space.
+		if (pvsActive && pvs && distSq > RUNG_SNAP_DIST_SQ) {
+			const cellIdx = cellAt(pvs, e.point.x, e.point.z);
+			if (cellIdx >= 0) {
+				onSelect({ kind: 'pvsCell', cellIndex: cellIdx });
+				return;
+			}
 		}
 		if (bestIdx >= 0) {
 			const hi = index.hullSection[bestIdx * 2];
@@ -246,7 +277,19 @@ function PickingPlane({
 				onSelect({ hullIndex: hi });
 			}
 		}
-	}, [index, onSelect]);
+	}, [findNearestRung, index, onSelect, pvs, pvsActive]);
+
+	// Hover updates the PVS tooltip — only meaningful when the grid is on.
+	const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
+		if (!pvsActive || !pvs) {
+			onHoverCell(null, null);
+			return;
+		}
+		const idx = cellAt(pvs, e.point.x, e.point.z);
+		onHoverCell(idx >= 0 ? idx : null, idx >= 0 ? e.point.clone() : null);
+	}, [pvs, pvsActive, onHoverCell]);
+
+	const handlePointerOut = useCallback(() => onHoverCell(null, null), [onHoverCell]);
 
 	// Large plane at y=0 spanning the entire scene
 	const size = radius * 3;
@@ -256,6 +299,8 @@ function PickingPlane({
 			rotation={[-Math.PI / 2, 0, 0]}
 			material={pickPlaneMat}
 			onClick={handleClick}
+			onPointerMove={handlePointerMove}
+			onPointerOut={handlePointerOut}
 		>
 			<planeGeometry args={[size, size]} />
 		</mesh>
@@ -722,6 +767,352 @@ function SelectionLabel({ hulls, selected }: { hulls: TrafficHull[]; selected: T
 }
 
 // ---------------------------------------------------------------------------
+// PVS grid overlay
+// ---------------------------------------------------------------------------
+//
+// Draws every PVS cell (uniform `mCellSize`, `muNumCells_X` × `muNumCells_Z`
+// grid anchored at `mGridMin`) as a tinted quad on the X-Z plane. Cells are
+// coloured by hull-count so the user can read at a glance which areas of the
+// city have heavy traffic-AI visibility and which are sparse / empty.
+//
+// Cell index convention: `idx = i + j * X` where `i ∈ [0, X)` is the column
+// (x axis) and `j ∈ [0, Z)` is the row (z axis). This matches the natural
+// scanline order in which the writer emits `mpaHullPvs`.
+
+// Map a hull-count (0..8) to an RGB tint. Cold for empty, warm for heavily-
+// occupied cells. The gradient is calibrated so all eight steps are
+// distinguishable through the 0.28-alpha fill — empty cells stay legible
+// against the dark viewport background so the user can still read the grid.
+function hullCountTint(count: number): [number, number, number] {
+	if (count <= 0) return [0.30, 0.32, 0.38]; // empty — visible but cool
+	const t = Math.min(1, count / 8);
+	// Lerp blue → green → orange via 3-stop gradient.
+	if (t < 0.5) {
+		const u = t / 0.5;
+		return [0.15 + 0.25 * u, 0.55 + 0.20 * u, 0.95 - 0.30 * u];
+	}
+	const u = (t - 0.5) / 0.5;
+	return [0.40 + 0.55 * u, 0.75 - 0.25 * u, 0.65 - 0.45 * u];
+}
+
+// Cell index → world bounds (X-Z rectangle). Returns null when the index is
+// out of range.
+function cellRect(pvs: TrafficPvs, cellIndex: number) {
+	const X = pvs.muNumCells_X;
+	const Z = pvs.muNumCells_Z;
+	if (X <= 0 || Z <= 0) return null;
+	if (cellIndex < 0 || cellIndex >= X * Z) return null;
+	const i = cellIndex % X;
+	const j = Math.floor(cellIndex / X);
+	const x0 = pvs.mGridMin.x + i * pvs.mCellSize.x;
+	const z0 = pvs.mGridMin.z + j * pvs.mCellSize.z;
+	return {
+		i, j,
+		x0, z0,
+		x1: x0 + pvs.mCellSize.x,
+		z1: z0 + pvs.mCellSize.z,
+	};
+}
+
+// Inverse: world (x, z) → cell index. Returns -1 outside the grid.
+function cellAt(pvs: TrafficPvs, x: number, z: number): number {
+	const X = pvs.muNumCells_X;
+	const Z = pvs.muNumCells_Z;
+	if (X <= 0 || Z <= 0) return -1;
+	const dx = pvs.mCellSize.x;
+	const dz = pvs.mCellSize.z;
+	if (dx === 0 || dz === 0) return -1;
+	const i = Math.floor((x - pvs.mGridMin.x) / dx);
+	const j = Math.floor((z - pvs.mGridMin.z) / dz);
+	if (i < 0 || i >= X || j < 0 || j >= Z) return -1;
+	return i + j * X;
+}
+
+const PVS_OVERLAY_Y = 0.5; // sits just above ground to avoid z-fighting
+
+// Vertex-coloured quads for every cell. Built once per pvs-data change.
+function buildPvsFillGeometry(pvs: TrafficPvs): THREE.BufferGeometry {
+	const X = pvs.muNumCells_X;
+	const Z = pvs.muNumCells_Z;
+	const count = X * Z;
+	const positions = new Float32Array(count * 6 * 3); // 2 tris × 3 verts × xyz
+	const colors = new Float32Array(count * 6 * 3);
+	let p = 0, c = 0;
+	for (let j = 0; j < Z; j++) {
+		for (let i = 0; i < X; i++) {
+			const idx = i + j * X;
+			const set = pvs.hullPvsSets[idx];
+			const tint = hullCountTint(set ? set.muCount : 0);
+			const x0 = pvs.mGridMin.x + i * pvs.mCellSize.x;
+			const z0 = pvs.mGridMin.z + j * pvs.mCellSize.z;
+			const x1 = x0 + pvs.mCellSize.x;
+			const z1 = z0 + pvs.mCellSize.z;
+			// Two triangles per quad: (x0,z0)-(x1,z0)-(x1,z1) and (x0,z0)-(x1,z1)-(x0,z1)
+			const verts: [number, number][] = [
+				[x0, z0], [x1, z0], [x1, z1],
+				[x0, z0], [x1, z1], [x0, z1],
+			];
+			for (const [vx, vz] of verts) {
+				positions[p++] = vx; positions[p++] = PVS_OVERLAY_Y; positions[p++] = vz;
+				colors[c++] = tint[0]; colors[c++] = tint[1]; colors[c++] = tint[2];
+			}
+		}
+	}
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+	geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+	geo.computeBoundingSphere();
+	return geo;
+}
+
+// Thin grid lines around every cell.
+function buildPvsBorderGeometry(pvs: TrafficPvs): THREE.BufferGeometry {
+	const X = pvs.muNumCells_X;
+	const Z = pvs.muNumCells_Z;
+	// (X+1) verticals × Z segs + (Z+1) horizontals × X segs, 2 endpoints each
+	const totalSegs = (X + 1) * Z + (Z + 1) * X;
+	const positions = new Float32Array(totalSegs * 2 * 3);
+	let p = 0;
+	const x0 = pvs.mGridMin.x;
+	const z0 = pvs.mGridMin.z;
+	const dx = pvs.mCellSize.x;
+	const dz = pvs.mCellSize.z;
+	// Vertical lines
+	for (let i = 0; i <= X; i++) {
+		const x = x0 + i * dx;
+		positions[p++] = x; positions[p++] = PVS_OVERLAY_Y; positions[p++] = z0;
+		positions[p++] = x; positions[p++] = PVS_OVERLAY_Y; positions[p++] = z0 + Z * dz;
+	}
+	// Horizontal lines
+	for (let j = 0; j <= Z; j++) {
+		const z = z0 + j * dz;
+		positions[p++] = x0; positions[p++] = PVS_OVERLAY_Y; positions[p++] = z;
+		positions[p++] = x0 + X * dx; positions[p++] = PVS_OVERLAY_Y; positions[p++] = z;
+	}
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+	geo.computeBoundingSphere();
+	return geo;
+}
+
+// One quad outline at a specific cell — used for the selected / hovered cell
+// and for the "containing cell of the selected static car" highlight.
+function buildCellOutline(pvs: TrafficPvs, cellIndex: number, yOffset: number): THREE.BufferGeometry | null {
+	const r = cellRect(pvs, cellIndex);
+	if (!r) return null;
+	const y = PVS_OVERLAY_Y + yOffset;
+	const positions = new Float32Array([
+		r.x0, y, r.z0, r.x1, y, r.z0,
+		r.x1, y, r.z0, r.x1, y, r.z1,
+		r.x1, y, r.z1, r.x0, y, r.z1,
+		r.x0, y, r.z1, r.x0, y, r.z0,
+	]);
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+	geo.computeBoundingSphere();
+	return geo;
+}
+
+// Materials shared across overlay components — created once.
+const pvsFillMat = new THREE.MeshBasicMaterial({
+	vertexColors: true,
+	transparent: true,
+	opacity: 0.28,
+	side: THREE.DoubleSide,
+	depthWrite: false,
+});
+const pvsBorderMat = new THREE.LineBasicMaterial({
+	color: 0xffffff,
+	transparent: true,
+	opacity: 0.16,
+	depthWrite: false,
+});
+const pvsSelectedOutlineMat = new THREE.LineBasicMaterial({
+	color: 0xffaa33,
+	transparent: true,
+	opacity: 0.95,
+	depthTest: false,
+});
+const pvsContainingCellOutlineMat = new THREE.LineBasicMaterial({
+	color: 0x33ddff,
+	transparent: true,
+	opacity: 0.85,
+	depthTest: false,
+});
+const pvsHullCellOutlineMat = new THREE.LineBasicMaterial({
+	color: 0xff66aa,
+	transparent: true,
+	opacity: 0.55,
+	depthTest: false,
+});
+
+// Cells whose `hullPvsSets[idx].mauItems.slice(0, muCount)` contains a given
+// hull index. Used to light up the cells that reference the selected hull.
+function findCellsListingHull(pvs: TrafficPvs, hullIndex: number): number[] {
+	const out: number[] = [];
+	const sets = pvs.hullPvsSets;
+	for (let i = 0; i < sets.length; i++) {
+		const s = sets[i];
+		const n = Math.min(s.muCount, s.mauItems.length);
+		for (let k = 0; k < n; k++) {
+			if (s.mauItems[k] === hullIndex) {
+				out.push(i);
+				break;
+			}
+		}
+	}
+	return out;
+}
+
+function PvsGridOverlay({
+	pvs, hulls, selected,
+}: {
+	pvs: TrafficPvs;
+	hulls: TrafficHull[];
+	selected: TrafficDataSelection;
+}) {
+	const fillGeo = useMemo(() => buildPvsFillGeometry(pvs), [pvs]);
+	const borderGeo = useMemo(() => buildPvsBorderGeometry(pvs), [pvs]);
+
+	// Click + hover are routed through the PickingPlane so a single decision
+	// (rung-near vs open-space) handles both road and cell picking. The
+	// overlay itself is a passive visual.
+
+	// Selected cell — drawn as a depth-test-off bright outline so it pops above
+	// the road network even when the camera is angled in.
+	const selectedCellOutline = useMemo(() => {
+		if (!isPvsCellSelection(selected)) return null;
+		return buildCellOutline(pvs, selected.cellIndex, 0.4);
+	}, [pvs, selected]);
+
+	// "Containing cell of the selected static car" — when a static-traffic
+	// vehicle is selected, light up the cell its translation falls into so
+	// the user can immediately see which PvsHullSet they need to edit.
+	const containingCellOutline = useMemo(() => {
+		if (!selected || isPvsCellSelection(selected)) return null;
+		if (selected.sub?.type !== 'staticVehicle') return null;
+		const sv = hulls[selected.hullIndex]?.staticTrafficVehicles[selected.sub.index];
+		if (!sv) return null;
+		const idx = cellAt(pvs, sv.mTransform[12] ?? 0, sv.mTransform[14] ?? 0);
+		if (idx < 0) return null;
+		return buildCellOutline(pvs, idx, 0.3);
+	}, [pvs, hulls, selected]);
+
+	// Inverse mapping: when a hull is the focus of selection (and no PVS cell
+	// is selected), outline every cell that lists this hull. Capped at the
+	// active hull index so it tracks the existing dim/bright treatment.
+	const hullCellsOutline = useMemo(() => {
+		if (!selected || isPvsCellSelection(selected)) return null;
+		if (selected.sub?.type === 'staticVehicle') return null; // containing-cell wins
+		const cells = findCellsListingHull(pvs, selected.hullIndex);
+		if (cells.length === 0) return null;
+		// One BufferGeometry of `cells.length × 8` line endpoints (4 segments per cell).
+		const positions = new Float32Array(cells.length * 8 * 3);
+		let p = 0;
+		const y = PVS_OVERLAY_Y + 0.2;
+		for (const ci of cells) {
+			const r = cellRect(pvs, ci);
+			if (!r) continue;
+			const segs: [number, number, number, number][] = [
+				[r.x0, r.z0, r.x1, r.z0],
+				[r.x1, r.z0, r.x1, r.z1],
+				[r.x1, r.z1, r.x0, r.z1],
+				[r.x0, r.z1, r.x0, r.z0],
+			];
+			for (const [ax, az, bx, bz] of segs) {
+				positions[p++] = ax; positions[p++] = y; positions[p++] = az;
+				positions[p++] = bx; positions[p++] = y; positions[p++] = bz;
+			}
+		}
+		const geo = new THREE.BufferGeometry();
+		geo.setAttribute('position', new THREE.BufferAttribute(positions.subarray(0, p), 3));
+		return geo;
+	}, [pvs, selected]);
+
+	// When a PVS cell is selected, also outline the hulls that cell references
+	// (rungs of those hulls drawn in a magenta tint, depth-test off).
+	const cellHullsRungGeo = useMemo(() => {
+		if (!isPvsCellSelection(selected)) return null;
+		const set = pvs.hullPvsSets[selected.cellIndex];
+		if (!set) return null;
+		const ids = set.mauItems.slice(0, Math.min(set.muCount, set.mauItems.length));
+		if (ids.length === 0) return null;
+		const segs: number[] = [];
+		for (const hi of ids) {
+			const hull = hulls[hi];
+			if (!hull) continue;
+			for (const rung of hull.rungs) {
+				const a = rung.maPoints[0], b = rung.maPoints[1];
+				segs.push(a.x, a.y + 0.6, a.z, b.x, b.y + 0.6, b.z);
+			}
+		}
+		if (segs.length === 0) return null;
+		const geo = new THREE.BufferGeometry();
+		geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(segs), 3));
+		return geo;
+	}, [pvs, hulls, selected]);
+
+	return (
+		<>
+			{/* Tinted fill — passive (clicks routed via PickingPlane) */}
+			<mesh
+				geometry={fillGeo}
+				material={pvsFillMat}
+				renderOrder={1}
+				raycast={() => undefined as unknown as void}
+			/>
+			{/* Cell borders — passive */}
+			<lineSegments geometry={borderGeo} material={pvsBorderMat} renderOrder={2} />
+			{/* Cells listing the selected hull */}
+			{hullCellsOutline && (
+				<lineSegments geometry={hullCellsOutline} material={pvsHullCellOutlineMat} renderOrder={5} />
+			)}
+			{/* Containing cell of the selected static-traffic vehicle */}
+			{containingCellOutline && (
+				<lineSegments geometry={containingCellOutline} material={pvsContainingCellOutlineMat} renderOrder={6} />
+			)}
+			{/* Selected cell — drawn last so it always wins */}
+			{selectedCellOutline && (
+				<lineSegments geometry={selectedCellOutline} material={pvsSelectedOutlineMat} renderOrder={7} />
+			)}
+			{/* Hulls referenced by the selected cell */}
+			{cellHullsRungGeo && (
+				<lineSegments geometry={cellHullsRungGeo} renderOrder={8}>
+					<lineBasicMaterial color={0xff66aa} transparent opacity={0.95} depthTest={false} />
+				</lineSegments>
+			)}
+		</>
+	);
+}
+
+// Floating tooltip that follows the mouse over the grid. Reads the cell's
+// hull list from `pvs.hullPvsSets` so the user sees exactly which hulls a
+// click would reference.
+function PvsCellTooltip({
+	pvs, hoverCellIndex, hoverWorld,
+}: {
+	pvs: TrafficPvs;
+	hoverCellIndex: number | null;
+	hoverWorld: THREE.Vector3 | null;
+}) {
+	if (hoverCellIndex == null || !hoverWorld) return null;
+	const set = pvs.hullPvsSets[hoverCellIndex];
+	const r = cellRect(pvs, hoverCellIndex);
+	const hulls = set ? set.mauItems.slice(0, Math.min(set.muCount, set.mauItems.length)) : [];
+	const label = `Cell #${hoverCellIndex} (${r?.i},${r?.j}) · ${set?.muCount ?? 0} hulls${hulls.length ? `: ${hulls.join(', ')}` : ''}`;
+	return (
+		<Html position={[hoverWorld.x, PVS_OVERLAY_Y + 4, hoverWorld.z]} center style={{ pointerEvents: 'none' }}>
+			<div style={{
+				background: 'rgba(0,0,0,0.85)', color: '#33ddff', padding: '2px 8px',
+				borderRadius: 4, fontSize: 10, whiteSpace: 'nowrap', fontFamily: 'monospace',
+			}}>
+				{label}
+			</div>
+		</Html>
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Main viewport component
 // ---------------------------------------------------------------------------
 
@@ -732,8 +1123,20 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 	const { center, radius } = useMemo(() => computeAllBounds(hulls), [hulls]);
 	const camDistance = radius * 1.5;
 
-	const selectedHull = selected ? hulls[selected.hullIndex] : null;
-	const selectedSectionIndex = selected?.sub?.type === 'section' ? selected.sub.index : -1;
+	const selectedHull = selected && !isPvsCellSelection(selected) ? hulls[selected.hullIndex] : null;
+	const selectedSectionIndex = selected && !isPvsCellSelection(selected) && selected.sub?.type === 'section' ? selected.sub.index : -1;
+
+	// PVS overlay: visible by default whenever the resource has a populated
+	// grid. Toggle gates click + tooltip too — we don't want the grid mesh
+	// intercepting clicks meant for hulls / vehicles when it's hidden.
+	const hasPvsGrid = data.pvs.muNumCells_X > 0 && data.pvs.muNumCells_Z > 0 && data.pvs.hullPvsSets.length > 0;
+	const [showPvsGrid, setShowPvsGrid] = useState(hasPvsGrid);
+	const [hoverCellIndex, setHoverCellIndex] = useState<number | null>(null);
+	const [hoverWorld, setHoverWorld] = useState<THREE.Vector3 | null>(null);
+	const handleHoverCell = useCallback((idx: number | null, w: THREE.Vector3 | null) => {
+		setHoverCellIndex(idx);
+		setHoverWorld(w);
+	}, []);
 
 	// Marquee wiring: pick static traffic vehicles inside the dragged
 	// rectangle and union/subtract their schema paths into the bulk set.
@@ -783,8 +1186,18 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 				<directionalLight position={[10, 20, 5]} intensity={0.9} />
 				<directionalLight position={[-8, 15, -10]} intensity={0.4} />
 
-				{/* Invisible picking plane — catches clicks anywhere and finds nearest rung */}
-				<PickingPlane hulls={hulls} center={center} radius={radius} onSelect={onSelect} />
+				{/* Invisible picking plane — catches clicks anywhere, finds nearest
+				    rung; falls through to PVS cell pick when the grid is on and
+				    the click isn't near any road. */}
+				<PickingPlane
+					hulls={hulls}
+					center={center}
+					radius={radius}
+					onSelect={onSelect}
+					pvs={hasPvsGrid ? data.pvs : null}
+					pvsActive={showPvsGrid && hasPvsGrid}
+					onHoverCell={handleHoverCell}
+				/>
 
 				{/* All lane connections (dim background lines) */}
 				<AllLaneConnections hulls={hulls} activeHullIndex={activeHullIndex} />
@@ -826,6 +1239,25 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 					<TrafficLightInstances data={data} />
 				)}
 
+				{/* PVS grid overlay — sits on top of road geometry, picks at the
+				    XZ plane. Renders cells, the selected cell, and inverse
+				    highlights ("which cell holds this static car", "which cells
+				    list this hull"). */}
+				{showPvsGrid && hasPvsGrid && (
+					<>
+						<PvsGridOverlay
+							pvs={data.pvs}
+							hulls={hulls}
+							selected={selected}
+						/>
+						<PvsCellTooltip
+							pvs={data.pvs}
+							hoverCellIndex={hoverCellIndex}
+							hoverWorld={hoverWorld}
+						/>
+					</>
+				)}
+
 				{/* Selection label */}
 				<SelectionLabel hulls={hulls} selected={selected} />
 
@@ -843,6 +1275,25 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 				onMarquee={handleMarquee}
 				hintIdle="press B to box-select static vehicles"
 			/>
+			{hasPvsGrid && (
+				<label
+					style={{
+						position: 'absolute', top: 8, right: 8,
+						background: 'rgba(0,0,0,0.7)', color: '#cdd', padding: '4px 8px',
+						borderRadius: 4, fontSize: 11, fontFamily: 'monospace',
+						display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+						userSelect: 'none',
+					}}
+				>
+					<input
+						type="checkbox"
+						checked={showPvsGrid}
+						onChange={(e) => setShowPvsGrid(e.target.checked)}
+						style={{ margin: 0 }}
+					/>
+					PVS grid ({data.pvs.muNumCells_X}×{data.pvs.muNumCells_Z})
+				</label>
+			)}
 		</div>
 	);
 };

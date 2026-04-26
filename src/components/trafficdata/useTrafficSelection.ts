@@ -4,7 +4,12 @@ import { useState, useCallback, useRef } from 'react';
 // Selection type
 // ---------------------------------------------------------------------------
 
-export type TrafficDataSelection = {
+// PVS cells are not owned by a hull — they are top-level entries in the
+// TrafficData root, so they need their own variant in the selection union.
+// Use `isPvsCellSelection` to discriminate.
+export type PvsCellSelection = { kind: 'pvsCell'; cellIndex: number };
+
+export type HullSelection = {
 	hullIndex: number;
 	sub?:
 		| { type: 'section'; index: number }
@@ -12,7 +17,17 @@ export type TrafficDataSelection = {
 		| { type: 'junction'; index: number }
 		| { type: 'lightTrigger'; index: number }
 		| { type: 'staticVehicle'; index: number };
-} | null;
+};
+
+export type TrafficDataSelection = HullSelection | PvsCellSelection | null;
+
+export function isPvsCellSelection(s: TrafficDataSelection): s is PvsCellSelection {
+	return s != null && (s as { kind?: string }).kind === 'pvsCell';
+}
+
+export function isHullSelection(s: TrafficDataSelection): s is HullSelection {
+	return s != null && (s as { kind?: string }).kind !== 'pvsCell';
+}
 
 // ---------------------------------------------------------------------------
 // Sub-type → tab mapping
@@ -39,6 +54,9 @@ export function useTrafficSelection() {
 	const select = useCallback((sel: TrafficDataSelection) => {
 		setSelected(sel);
 		if (!sel) return;
+		// PVS cells aren't bound to a hull or one of the existing tabs, so
+		// don't shuffle the table tabs underneath when one is picked.
+		if (isPvsCellSelection(sel)) return;
 		setActiveHullIndex(sel.hullIndex);
 		if (sel.sub) {
 			const nextTab = SUB_TYPE_TO_TAB[sel.sub.type];

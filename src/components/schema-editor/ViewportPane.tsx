@@ -10,7 +10,10 @@ import { ViewportErrorBoundary } from '@/components/common/ViewportErrorBoundary
 import type { ResourceSchema } from '@/lib/schema/types';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
 import { TrafficDataViewport } from '@/components/trafficdata/TrafficDataViewport';
-import type { TrafficDataSelection } from '@/components/trafficdata/useTrafficSelection';
+import {
+	isPvsCellSelection,
+	type TrafficDataSelection,
+} from '@/components/trafficdata/useTrafficSelection';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 import {
 	StreetDataViewport,
@@ -44,7 +47,11 @@ import {
 //   ["hulls", h, "junctions", i]                     → { ..., sub: junction }
 //   ["hulls", h, "lightTriggers", i]                 → { ..., sub: lightTrigger }
 //   ["hulls", h, "staticTrafficVehicles", i]         → { ..., sub: staticVehicle }
+//   ["pvs", "hullPvsSets", N]                        → { kind: 'pvsCell', ... }
 function pathToSelection(path: NodePath): TrafficDataSelection {
+	if (path[0] === 'pvs' && path[1] === 'hullPvsSets' && typeof path[2] === 'number') {
+		return { kind: 'pvsCell', cellIndex: path[2] };
+	}
 	if (path.length < 2 || path[0] !== 'hulls') return null;
 	const hullIndex = path[1];
 	if (typeof hullIndex !== 'number') return null;
@@ -72,6 +79,7 @@ function pathToSelection(path: NodePath): TrafficDataSelection {
 // Inverse: a TrafficDataSelection from the viewport becomes a schema path.
 function selectionToPath(sel: TrafficDataSelection): NodePath {
 	if (!sel) return [];
+	if (isPvsCellSelection(sel)) return ['pvs', 'hullPvsSets', sel.cellIndex];
 	const base: NodePath = ['hulls', sel.hullIndex];
 	if (!sel.sub) return base;
 	switch (sel.sub.type) {
@@ -91,7 +99,8 @@ function selectionToPath(sel: TrafficDataSelection): NodePath {
 // Derive the viewport's `activeTab` from the selection sub-type. The
 // viewport uses this to filter what 3D layers it highlights.
 function selectionToActiveTab(sel: TrafficDataSelection): string {
-	if (!sel?.sub) return 'sections';
+	if (!sel || isPvsCellSelection(sel)) return 'sections';
+	if (!sel.sub) return 'sections';
 	switch (sel.sub.type) {
 		case 'section': return 'sections';
 		case 'rung': return 'rungs';
@@ -301,7 +310,9 @@ function TrafficDataViewportShim({
 }) {
 	const trafficData = data as ParsedTrafficData;
 	const selection = useMemo(() => pathToSelection(selectedPath), [selectedPath]);
-	const activeHullIndex = selection?.hullIndex ?? 0;
+	// PVS-cell selections aren't owned by a hull. Fall back to hull 0 so the
+	// viewport keeps its existing dim/bright treatment for hull lines.
+	const activeHullIndex = selection && !isPvsCellSelection(selection) ? selection.hullIndex : 0;
 	const activeTab = useMemo(() => selectionToActiveTab(selection), [selection]);
 
 	return (
