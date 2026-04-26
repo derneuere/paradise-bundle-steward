@@ -453,6 +453,138 @@ describe('schema derive hook', () => {
 		// No-op write returns the same recip the original file stored.
 		expect(reconciled.hulls[hullIdx].sectionSpans[0].mfMaxVehicleRecip).toBe(originalRecip);
 	});
+
+	// ── TrafficPvs ─────────────────────────────────────────────────────────
+	// The runtime derives world→cell-index lookups from `mRecipCellSize`
+	// and asserts `hullPvsSets.length === muNumCells`, so every edit to a
+	// source-of-truth PVS field must keep the cached fields consistent.
+
+	it('recomputes mRecipCellSize when mCellSize is edited', () => {
+		const cellSize = parsedTraffic.pvs.mCellSize;
+		const newSize = { ...cellSize, x: cellSize.x * 2, z: cellSize.z * 2 };
+		const field: NodePath = ['pvs', 'mCellSize'];
+
+		const next = setAtPath(parsedTraffic, field, newSize);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		expect(reconciled.pvs.mCellSize).toEqual(newSize);
+		expect(reconciled.pvs.mRecipCellSize.x).toBeCloseTo(1 / newSize.x, 6);
+		expect(reconciled.pvs.mRecipCellSize.y).toBeCloseTo(newSize.y !== 0 ? 1 / newSize.y : 0, 6);
+		expect(reconciled.pvs.mRecipCellSize.z).toBeCloseTo(1 / newSize.z, 6);
+		// w is preserved verbatim — it isn't a spatial axis.
+		expect(reconciled.pvs.mRecipCellSize.w).toBe(newSize.w);
+	});
+
+	it('recomputes mRecipCellSize via component-level edit', () => {
+		// Edit only mCellSize.x — the derive should still fire because the
+		// vec4 was structurally rebuilt by updateAtPath.
+		const originalX = parsedTraffic.pvs.mCellSize.x;
+		const field: NodePath = ['pvs', 'mCellSize', 'x'];
+		const next = setAtPath(parsedTraffic, field, originalX * 4);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		expect(reconciled.pvs.mCellSize.x).toBe(originalX * 4);
+		expect(reconciled.pvs.mRecipCellSize.x).toBeCloseTo(1 / (originalX * 4), 6);
+	});
+
+	it('guards against divide-by-zero in mRecipCellSize', () => {
+		const cellSize = parsedTraffic.pvs.mCellSize;
+		const newSize = { x: 0, y: cellSize.y, z: 0, w: cellSize.w };
+		const field: NodePath = ['pvs', 'mCellSize'];
+
+		const next = setAtPath(parsedTraffic, field, newSize);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		// Zero source → zero recip, never Infinity / NaN.
+		expect(reconciled.pvs.mRecipCellSize.x).toBe(0);
+		expect(Number.isFinite(reconciled.pvs.mRecipCellSize.x)).toBe(true);
+		expect(reconciled.pvs.mRecipCellSize.z).toBe(0);
+	});
+
+	it('skips PVS derive when mCellSize is unchanged', () => {
+		// Editing mGridMin should not recompute the recip — only mCellSize
+		// drives that field.
+		const originalRecip = parsedTraffic.pvs.mRecipCellSize;
+		const field: NodePath = ['pvs', 'mGridMin', 'x'];
+		const next = setAtPath(parsedTraffic, field, parsedTraffic.pvs.mGridMin.x + 100);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		// Reference equality — derive returned `{}` for the recip key.
+		expect(reconciled.pvs.mRecipCellSize).toBe(originalRecip);
+	});
+
+	it('grows hullPvsSets and updates muNumCells when grid resolution increases', () => {
+		const origX = parsedTraffic.pvs.muNumCells_X;
+		const origZ = parsedTraffic.pvs.muNumCells_Z;
+		const origLen = parsedTraffic.pvs.hullPvsSets.length;
+		const field: NodePath = ['pvs', 'muNumCells_X'];
+		const next = setAtPath(parsedTraffic, field, origX + 2);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		const expectedTotal = (origX + 2) * origZ;
+		expect(reconciled.pvs.muNumCells_X).toBe(origX + 2);
+		expect(reconciled.pvs.muNumCells).toBe(expectedTotal);
+		expect(reconciled.pvs.hullPvsSets.length).toBe(expectedTotal);
+
+		// Existing cells preserved verbatim.
+		for (let i = 0; i < origLen; i++) {
+			expect(reconciled.pvs.hullPvsSets[i]).toBe(parsedTraffic.pvs.hullPvsSets[i]);
+		}
+		// New cells are empty PvsHullSets.
+		const tail = reconciled.pvs.hullPvsSets[expectedTotal - 1];
+		expect(tail.muCount).toBe(0);
+		expect(tail.mauItems).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+	});
+
+	it('shrinks hullPvsSets from the tail when grid resolution decreases', () => {
+		const origX = parsedTraffic.pvs.muNumCells_X;
+		const origZ = parsedTraffic.pvs.muNumCells_Z;
+		// Skip if the fixture is too small to shrink meaningfully.
+		if (origX <= 1) return;
+
+		const field: NodePath = ['pvs', 'muNumCells_X'];
+		const next = setAtPath(parsedTraffic, field, origX - 1);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		const expectedTotal = (origX - 1) * origZ;
+		expect(reconciled.pvs.muNumCells).toBe(expectedTotal);
+		expect(reconciled.pvs.hullPvsSets.length).toBe(expectedTotal);
+		// Front of the list is preserved (we trim from the end).
+		for (let i = 0; i < expectedTotal; i++) {
+			expect(reconciled.pvs.hullPvsSets[i]).toBe(parsedTraffic.pvs.hullPvsSets[i]);
+		}
+	});
+
+	it('resizes both axes when X and Z change in the same edit', () => {
+		const origX = parsedTraffic.pvs.muNumCells_X;
+		const origZ = parsedTraffic.pvs.muNumCells_Z;
+		// Apply two primitive edits, then run derive once at the deepest
+		// shared ancestor (the pvs record).
+		let next = setAtPath(parsedTraffic, ['pvs', 'muNumCells_X'], origX + 1);
+		next = setAtPath(next, ['pvs', 'muNumCells_Z'], origZ + 1);
+		const reconciled = applyDerives(parsedTraffic, next, ['pvs', 'muNumCells_Z'], trafficDataResourceSchema);
+
+		const expectedTotal = (origX + 1) * (origZ + 1);
+		expect(reconciled.pvs.muNumCells).toBe(expectedTotal);
+		expect(reconciled.pvs.hullPvsSets.length).toBe(expectedTotal);
+	});
+
+	it('leaves hullPvsSets alone when the user mutates it directly', () => {
+		// Direct list edits (e.g., setting an existing cell's hull list)
+		// must not invalidate the user's change just because the list ref
+		// changed. Only X/Z edits trigger a resize.
+		if (parsedTraffic.pvs.hullPvsSets.length === 0) return;
+		const origLen = parsedTraffic.pvs.hullPvsSets.length;
+		const field: NodePath = ['pvs', 'hullPvsSets', 0, 'muCount'];
+		const originalCount = parsedTraffic.pvs.hullPvsSets[0].muCount;
+		const next = setAtPath(parsedTraffic, field, originalCount + 1);
+		const reconciled = applyDerives(parsedTraffic, next, field, trafficDataResourceSchema);
+
+		expect(reconciled.pvs.hullPvsSets.length).toBe(origLen);
+		expect(reconciled.pvs.hullPvsSets[0].muCount).toBe(originalCount + 1);
+		// muNumCells didn't move either.
+		expect(reconciled.pvs.muNumCells).toBe(parsedTraffic.pvs.muNumCells);
+	});
 });
 
 // ---------------------------------------------------------------------------

@@ -179,6 +179,14 @@ export type FieldMetadata = {
 	// a vec4 can also be a packed non-spatial value (e.g., BoundaryLine
 	// packs `(startX, startY, endX, endY)`).
 	swapYZ?: boolean;
+	// Vec3/Vec4 only — show a chain toggle alongside the axis inputs.
+	// When linked, editing any participating axis scales the others by
+	// `typed / previous` (uniform scale). The W component on a Vec4 is
+	// always excluded since it's not a spatial axis. Off by default;
+	// must be opted into per-field because most vec edits are
+	// independent (e.g., grid origins, AABB endpoints) — uniform scale
+	// only makes semantic sense for sizes / extents / dimensions.
+	linkable?: boolean;
 };
 
 // Property group — splits the inspector into tabs. A group can list fields,

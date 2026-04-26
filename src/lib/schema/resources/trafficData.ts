@@ -231,9 +231,51 @@ const TrafficPvs: RecordSchema = {
 	},
 	fieldMetadata: {
 		mGridMin: { label: 'Grid min (world)', swapYZ: true },
-		mCellSize: { label: 'Cell size', swapYZ: true },
-		mRecipCellSize: { description: 'Reciprocal of cell size — derived from mCellSize.', swapYZ: true },
+		mCellSize: { label: 'Cell size', swapYZ: true, linkable: true },
+		mRecipCellSize: { readOnly: true, description: 'Reciprocal of cell size — derived from mCellSize.', swapYZ: true, derivedFrom: 'mCellSize' },
 		muNumCells: { label: 'Num cells (total)', readOnly: true, derivedFrom: 'muNumCells_X · muNumCells_Z' },
+	},
+	// Keep the three redundant caches in sync with their source-of-truth
+	// fields. The runtime uses `mRecipCellSize` for fast world→cell-index
+	// math and asserts `hullPvsSets.length === muNumCells`, so an edit
+	// that touches either input MUST update the dependent fields or the
+	// rewritten file is internally inconsistent.
+	//
+	// The writer passes all three through verbatim, so a bundle the user
+	// never edits round-trips byte-exact.
+	derive: (prev, next) => {
+		const patch: Record<string, unknown> = {};
+		const prevCs = prev.mCellSize as { x: number; y: number; z: number; w: number };
+		const nextCs = next.mCellSize as { x: number; y: number; z: number; w: number };
+		const cellSizeChanged =
+			prevCs.x !== nextCs.x || prevCs.y !== nextCs.y || prevCs.z !== nextCs.z || prevCs.w !== nextCs.w;
+		if (cellSizeChanged) {
+			patch.mRecipCellSize = {
+				x: nextCs.x !== 0 ? 1 / nextCs.x : 0,
+				y: nextCs.y !== 0 ? 1 / nextCs.y : 0,
+				z: nextCs.z !== 0 ? 1 / nextCs.z : 0,
+				w: nextCs.w,
+			};
+		}
+
+		const prevX = prev.muNumCells_X as number;
+		const prevZ = prev.muNumCells_Z as number;
+		const nextX = next.muNumCells_X as number;
+		const nextZ = next.muNumCells_Z as number;
+		if (prevX !== nextX || prevZ !== nextZ) {
+			const total = nextX * nextZ;
+			patch.muNumCells = total;
+			const sets = next.hullPvsSets as { mauItems: number[]; muCount: number }[];
+			if (sets.length !== total) {
+				const resized = sets.slice(0, total);
+				while (resized.length < total) {
+					resized.push({ mauItems: [0, 0, 0, 0, 0, 0, 0, 0], muCount: 0 });
+				}
+				patch.hullPvsSets = resized;
+			}
+		}
+
+		return patch;
 	},
 };
 
