@@ -29,6 +29,7 @@ import { graphicsStubHandler } from './handlers/graphicsStub';
 import { graphicsSpecHandler } from './handlers/graphicsSpec';
 import { materialHandler } from './handlers/material';
 import { zoneListHandler } from './handlers/zoneList';
+import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
 	aiSectionsHandler,
@@ -53,6 +54,7 @@ export const registry: ResourceHandler[] = [
 	graphicsSpecHandler,
 	materialHandler,
 	zoneListHandler,
+	textFileHandler,
 ];
 
 const byTypeId = new Map<number, ResourceHandler>();

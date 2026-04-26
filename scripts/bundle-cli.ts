@@ -8,6 +8,7 @@
 //   npm run bundle -- dump           <bundle> <out.json> [--type <key>]
 //   npm run bundle -- pack           <in.json> <out-bundle> [--type <key>]
 //   npm run bundle -- roundtrip      <bundle> [--type <key>]
+//   npm run bundle -- convert        <bundle> <out-bundle> --container <bndl|bnd2> --platform <pc|x360|ps3> [--allow-unknown]
 //   npm run bundle -- export-gltf    <bundle> <out.gltf|out.glb>
 //   npm run bundle -- import-gltf    <orig-bundle> <edited.gltf> <out-bundle>
 //   npm run bundle -- roundtrip-gltf <bundle>
@@ -20,7 +21,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { parseBundle, writeBundleFresh } from '../src/lib/core/bundle';
+import { parseBundle, writeBundleFresh, convertBundle, type ConvertTarget } from '../src/lib/core/bundle';
 import { extractResourceSize } from '../src/lib/core/resourceManager';
 import {
 	registry,
@@ -200,6 +201,10 @@ function cmdList(args: CliArgs) {
 
 	console.log(`bundle: ${path.resolve(bundlePath)}`);
 	console.log(`  size: ${bytes.byteLength} bytes, sha1 ${sha1(bytes)}`);
+	const containerLabel = bundle.bundle1Extras
+		? `bndl/v${bundle.bundle1Extras.bndVersion} (Bundle 1 prototype)`
+		: `bnd2/v${bundle.header.version} (Bundle 2)`;
+	console.log(`  container: ${containerLabel}`);
 	console.log(`  platform: ${bundle.header.platform}, flags: 0x${bundle.header.flags.toString(16)}, resources: ${bundle.resources.length}`);
 	console.log(`  resourceDataOffsets: [${bundle.header.resourceDataOffsets.map((o) => '0x' + o.toString(16)).join(', ')}]`);
 	console.log('');
@@ -285,6 +290,47 @@ function cmdPack(args: CliArgs) {
 	fs.writeFileSync(outPath, new Uint8Array(outBuffer));
 	console.log(`Packed ${handler.name}: raw ${bytes.byteLength} bytes sha1 ${sha1(bytes)}`);
 	console.log(`Wrote ${outPath} (${outBuffer.byteLength} bytes)`);
+}
+
+function cmdConvert(args: CliArgs) {
+	const [bundlePath, outPath] = args.positional;
+	if (!bundlePath || !outPath) {
+		throw new Error(
+			'Usage: convert <bundle> <out-bundle> --container <bndl|bnd2> --platform <pc|x360|ps3> [--allow-unknown]',
+		);
+	}
+	const containerArg = args.options.get('container');
+	const platformArg = args.options.get('platform');
+	if (!containerArg || !platformArg) {
+		throw new Error('convert requires --container <bndl|bnd2> and --platform <pc|x360|ps3>');
+	}
+	if (containerArg !== 'bndl' && containerArg !== 'bnd2') {
+		throw new Error(`--container must be 'bndl' or 'bnd2' (got '${containerArg}')`);
+	}
+	const platformMap: Record<string, 1 | 2 | 3> = { pc: 1, x360: 2, ps3: 3 };
+	const platform = platformMap[platformArg.toLowerCase()];
+	if (!platform) {
+		throw new Error(`--platform must be pc, x360, or ps3 (got '${platformArg}')`);
+	}
+	const allowUnknown = args.options.has('allow-unknown');
+
+	const { buffer, bytes } = loadBundleBytes(bundlePath);
+	const bundle = parseBundle(buffer, { strict: false });
+	const target: ConvertTarget = {
+		container: containerArg,
+		platform,
+		unknownResourcePolicy: allowUnknown ? 'passthrough' : 'fail',
+	};
+	const out = convertBundle(bundle, buffer, target);
+	fs.writeFileSync(outPath, new Uint8Array(out));
+
+	const sourceContainer = bundle.bundle1Extras
+		? `bndl/v${bundle.bundle1Extras.bndVersion}`
+		: `bnd2/v${bundle.header.version}`;
+	const platformName = platform === 1 ? 'PC' : platform === 2 ? 'X360' : 'PS3';
+	console.log(`source: ${path.resolve(bundlePath)} (${sourceContainer}, platform ${bundle.header.platform}, ${bytes.byteLength} B)`);
+	console.log(`target: ${containerArg}/v${containerArg === 'bndl' ? '5' : '2'}, ${platformName}`);
+	console.log(`Wrote ${outPath} (${out.byteLength} B, sha1 ${sha1(new Uint8Array(out))})`);
 }
 
 function cmdRoundtrip(args: CliArgs) {
@@ -929,6 +975,7 @@ async function main() {
 			case 'dump':           return cmdDump(args);
 			case 'pack':           return cmdPack(args);
 			case 'roundtrip':      return cmdRoundtrip(args);
+			case 'convert':        return cmdConvert(args);
 			case 'stress':         return cmdStress(args);
 			case 'fuzz':           return cmdFuzz(args);
 			case 'export-gltf':    return await cmdExportGltf(args);
@@ -936,7 +983,7 @@ async function main() {
 			case 'roundtrip-gltf': return await cmdRoundtripGltf(args);
 			default:
 				console.error(
-					'Commands: list | parse | dump | pack | roundtrip | stress | fuzz | ' +
+					'Commands: list | parse | dump | pack | roundtrip | convert | stress | fuzz | ' +
 						'export-gltf | import-gltf | roundtrip-gltf',
 				);
 				console.error('Registered handlers: ' + registry.map((h) => h.key).join(', '));

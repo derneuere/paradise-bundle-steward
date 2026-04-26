@@ -10,6 +10,16 @@ import {
 } from './bundleEntry';
 export { getImportsByPtrOffset, getImportIds } from './bundleEntry';
 import { parseHeader, detectBundleLittleEndian } from './bundleHeader';
+import {
+  isBundle1Magic,
+  parseBundle1,
+  writeBundle1Fresh,
+  bnd1ToBnd2Shape,
+  bnd2ToBnd1Shape,
+  convertBnd1Platform,
+  reencodeResourceChunksForTarget,
+  type UnknownResourcePolicy,
+} from './bundle1';
 import { parseDebugDataFromBuffer } from './debugData';
 import {
   ParsedBundle,
@@ -58,6 +68,24 @@ export function writeBundleFresh(
   options: WriteOptions = {},
   progressCallback?: ProgressCallback
 ): ArrayBuffer {
+  // Bundle V1 dispatch — when `bundle1Extras` is present the source was
+  // a 'bndl' prototype container; route to the BND1 writer and stop.
+  if (bundle.bundle1Extras) {
+    reportProgress(progressCallback, 'write', 0, 'Starting BND1 bundle write');
+    const overridesRaw = (options.overrides as Record<string, unknown> | undefined) ?? undefined;
+    const overrides: Record<number, Uint8Array | unknown> = {};
+    let overridesByResourceId: Record<string, Uint8Array | unknown> | undefined;
+    if (overridesRaw) {
+      const r = overridesRaw['resources'];
+      if (r && typeof r === 'object') Object.assign(overrides, r as Record<number, unknown>);
+      const byId = overridesRaw['byResourceId'];
+      if (byId && typeof byId === 'object') overridesByResourceId = byId as Record<string, Uint8Array | unknown>;
+    }
+    const out = writeBundle1Fresh(bundle, originalBuffer, { overrides, overridesByResourceId });
+    reportProgress(progressCallback, 'write', 1.0, 'BND1 bundle write complete');
+    return out;
+  }
+
   reportProgress(progressCallback, 'write', 0, 'Starting fresh bundle write');
 
   // `options.platform` overrides the source bundle's platform — used by the
@@ -415,6 +443,17 @@ export function parseBundle(
   options: ParseOptions = {},
   progressCallback?: ProgressCallback
 ): ParsedBundle {
+  // Magic-based dispatch: BND1 ('bndl') prototype builds vs BND2 ('bnd2')
+  // retail. The two formats wrap the same resource payloads (just BE vs LE
+  // and a different container). BND1 path produces a ParsedBundle with
+  // `bundle1Extras` populated; BND2 leaves it undefined.
+  if (isBundle1Magic(buffer)) {
+    reportProgress(progressCallback, 'parse', 0, 'Starting BND1 bundle parsing');
+    const bundle = parseBundle1(buffer, { strict: options.strict });
+    reportProgress(progressCallback, 'parse', 1.0, 'BND1 bundle parsing complete');
+    return bundle;
+  }
+
   try {
     reportProgress(progressCallback, 'parse', 0, 'Starting bundle parsing');
 
@@ -486,6 +525,76 @@ export function parseBundle(
       { error, bufferSize: buffer.byteLength }
     );
   }
+}
+
+// ============================================================================
+// Cross-container conversion
+// ============================================================================
+
+export type ConvertTarget = {
+  /** Output bundle container. */
+  container: 'bnd1' | 'bnd2';
+  /** Output platform. PC=1 (LE), X360=2 (BE), PS3=3 (BE). */
+  platform: 1 | 2 | 3;
+  /**
+   * Policy for handler-less resources when endianness flips.
+   * Defaults to 'fail' (the safe choice). Pass 'passthrough' if you know
+   * an unhandled type's payload is byte-oriented and won't suffer from
+   * skipping the byte-swap (e.g. the type-0x0003 auxiliary in BND1 PVS).
+   */
+  unknownResourcePolicy?: UnknownResourcePolicy;
+};
+
+/**
+ * Convert a bundle between containers and/or platforms. Handles all four
+ * cardinal directions:
+ *   - BND1 → BND1 (different platform): chunk-array reshape
+ *   - BND1 → BND2: strip bundle1Extras, repack as Bundle 2
+ *   - BND2 → BND1: synthesize bundle1Extras, repack as Bundle 1
+ *   - BND2 → BND2 (different platform): existing cross-platform export path
+ *
+ * Endianness flips are handled per-resource by calling the registered
+ * handler's parseRaw/writeRaw with the appropriate ctx. Resources whose
+ * type has no writable handler can only round-trip when endianness stays
+ * the same — otherwise the function throws a BundleError so the caller
+ * sees the failure instead of getting silently corrupt output.
+ */
+export function convertBundle(
+  bundle: ParsedBundle,
+  originalBuffer: ArrayBuffer,
+  target: ConvertTarget,
+): ArrayBuffer {
+  const sourceIsBnd1 = !!bundle.bundle1Extras;
+
+  // 1) Re-encode every resource's primary chunk for the target endianness
+  //    (no-op when source/target endianness match — bytes pass through).
+  const overridesByResourceId = reencodeResourceChunksForTarget(
+    bundle,
+    originalBuffer,
+    target.platform,
+    target.unknownResourcePolicy ?? 'fail',
+  );
+
+  // 2) Build a target-shape ParsedBundle so writeBundleFresh dispatches to
+  //    the right writer (BND1 vs BND2 driven by `bundle1Extras` presence).
+  let shaped: ParsedBundle;
+  if (target.container === 'bnd2') {
+    shaped = sourceIsBnd1
+      ? bnd1ToBnd2Shape(bundle, target.platform)
+      : { ...bundle, header: { ...bundle.header, platform: target.platform } };
+  } else {
+    shaped = sourceIsBnd1
+      ? convertBnd1Platform(bundle, target.platform)
+      : bnd2ToBnd1Shape(bundle, originalBuffer, target.platform);
+  }
+
+  // 3) Write. Pass overrides via byResourceId so each resource gets its own
+  //    re-encoded bytes (typeId-keyed overrides would collide on bundles
+  //    with multiple resources of the same type).
+  return writeBundleFresh(shaped, originalBuffer, {
+    platform: target.platform,
+    overrides: { byResourceId: overridesByResourceId },
+  });
 }
 
 // ============================================================================

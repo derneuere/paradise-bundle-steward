@@ -133,7 +133,7 @@ These describe how each neighbour zone should be loaded relative to the player's
 
 ## Layout in memory
 
-Confirmed by inspection of `example/PVS.BNDL` (single resource named `"newgrid"`, 32-bit, little-endian, 428 zones, 1712 points). Sections appear on disk in this order, **not** the order the wiki implies:
+Confirmed by inspection of `example/PVS.BNDL` (single resource named `"newgrid"`, 32-bit, little-endian, 428 zones, 1712 points) and `example/older builds/PVS.BNDL` (Burnout 5 Nov 13 2006 / Feb 22 2007 X360 prototype, big-endian, 369 zones, 1476 points, wrapped in a Bundle V1 (`bndl`) container). Sections appear on disk in this order, **not** the order the wiki implies:
 
 | # | Section | Offset (this fixture) | Size formula | Notes |
 |---|---|---|---|---|
@@ -156,6 +156,14 @@ The steward parser stores the trailing 8 bytes as `_padA` / `_padB` (two `f32`s)
 
 For byte-exact round-trip the writer packs neighbours in **zone-index order, safe block then unsafe block per zone**. `mpSafeNeighbours` / `mpUnsafeNeighbours` point at the start of each respective slice (or `0` when the count is zero). This matches the Bundle-Manager reference implementation and is what `example/PVS.BNDL` does on disk.
 
+### Prototype-build quirks (Nov 13 / Feb 22)
+
+The BND1 prototype fixture exercises two layout edge cases the retail PC fixture never hits — both purely cosmetic but required for byte-exact round-trip:
+
+- **Orphan Neighbour records in the pool.** In some zones the bytes immediately after the zone's safe+unsafe blocks contain a few extra 16-byte records that look like Neighbour entries (valid `mpZone` pointer, `muFlags = E_NEIGHBOURFLAG_RENDER`, zero pad) but no zone's `mpSafeNeighbours` / `mpUnsafeNeighbours` ever points at them. The Nov 13 fixture has 3 such orphans (48 bytes total). Likely leftovers from authoring-tool zone deletion. The parser captures these as a per-zone `_trailingNeighbourPad: Uint8Array` and the writer re-emits them verbatim. Retail's pool is fully contiguous so the field is empty there.
+- **`zonePointCounts` aligned to 16.** Retail has 428 zones (`428 × 4 = 1712` bytes for `zonePointStarts`, naturally 16-aligned) so no padding is needed between starts and counts. The Nov 13 fixture has 369 zones (`1476 % 16 = 4`) so the format pads with 12 zero bytes to align `zonePointCounts` to 16. The writer always pads to 16 here — benign for retail (zero pad) and necessary for prototypes.
+- **Non-zero trailing tail.** The 14-byte trailing pad in the Nov 13 fixture is filled with `0x04` bytes (over-allocated authoring leftover) instead of zero. Captured as an optional `_finalPad: Uint8Array` on `ParsedZoneList`; absent when the writer should emit the standard zero pad.
+
 ### Pointer resolution
 
 `Neighbour.mpZone` and `Zone.mpPoints` / `mpSafeNeighbours` / `mpUnsafeNeighbours` are raw byte offsets into the resource payload. The parser inverts them to integer indices at read time:
@@ -165,6 +173,30 @@ For byte-exact round-trip the writer packs neighbours in **zone-index order, saf
 - `Neighbour.mpZone` → `(ptr - ptrZones) / 0x30` is the target zone index.
 
 The writer recomputes all these from the layout it lays out — pointers in the model are not authoritative, only the indices and the section ordering are.
+
+## Bundle wrapper (BND1 vs BND2)
+
+The ZoneList **payload** is byte-identical between Bundle V1 and Bundle V2 — only endianness flips. What differs is the surrounding container:
+
+| Aspect | Retail (`example/PVS.BNDL`) | Prototype (`example/older builds/PVS.BNDL`) |
+|---|---|---|
+| Bundle magic | `bnd2` (Bundle 2) | `bndl` (Bundle V1, version 5) |
+| Endianness | LE (PC, platform=1) | **BE** (X360, platform=2) |
+| ZoneList resource type ID | `0xB000` | `0xB000` (same) |
+| Compression | zlib | zlib |
+| Zones | 428 | 369 |
+
+The BND1 reader/writer lives in [`src/lib/core/bundle/bundle1.ts`](../src/lib/core/bundle/bundle1.ts). It dispatches automatically from `parseBundle` / `writeBundleFresh` based on byte 0–3 magic. Per-platform layout sizes (PC `0x4C`/`0x60`, X360 `0x58`/`0x70`, PS3 `0x64`/`0x78`) come from [burnout.wiki/wiki/Bundle](https://burnout.wiki/wiki/Bundle). Only V5 is implemented; V3/V4 error cleanly when fixtures appear.
+
+BND1-only fields that don't fit BND2's `ResourceEntry` shape — the 5-chunk size/offset descriptors, runtime pointers, V5 alignment, and the resource ID hash table — are stashed on `ParsedBundle.bundle1Extras` so the round-trip writer can reproduce byte-exact output without polluting the BND2 path.
+
+### Cross-container conversion
+
+`convertBundle(bundle, originalBuffer, target)` (exported from [`bundle/index.ts`](../src/lib/core/bundle/index.ts)) repacks a bundle into the other container and/or platform. Internally it (1) decompresses each resource's primary chunk, (2) calls the registered handler's `parseRaw`/`writeRaw` to flip endianness when the source/target byte orders differ, (3) builds a target-shape `ParsedBundle` (synthesizing or stripping `bundle1Extras` as needed), and (4) feeds it to `writeBundleFresh` which dispatches to the right writer.
+
+CLI usage: `bundle-cli convert <in> <out> --container <bndl|bnd2> --platform <pc|x360|ps3> [--allow-unknown]`. The `--allow-unknown` flag lets resources without writable handlers pass through verbatim during endianness flips (correct only when the payload is opaque/byte-oriented). Without the flag, unhandled types cause a `BUNDLE_CONVERT_NO_HANDLER` error so the failure is visible.
+
+The auxiliary resource bundled alongside the BND1 PVS ZoneList is a [`TextFile`](https://burnout.wiki/wiki/TextFile) (type `0x3`) — a development-only Bundle imports XML resource. Its `mLength` u32 prefix is **always little-endian on disk** regardless of bundle platform (the dev tool that wrote BND1 bundles ran on PC and never byte-swapped, since this type is never read back at X360 runtime). The handler is in [`textFile.ts`](../src/lib/core/textFile.ts) and is registered by default; cross-container conversion of the older PVS fixture works without `--allow-unknown` thanks to it.
 
 ## Differences vs `BrnTraffic::Pvs`
 

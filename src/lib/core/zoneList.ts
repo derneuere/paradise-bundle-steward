@@ -60,10 +60,26 @@ export type Zone = {
 	// Header padding bytes for the zone record — preserved verbatim.
 	_pad0C: number;
 	_pad24: [number, number, number];
+	// Bytes that sit IMMEDIATELY AFTER this zone's safe+unsafe blocks in the
+	// neighbour pool, before the next zone's blocks begin (or before the
+	// points section, for the last zone). Almost always empty in retail —
+	// retail packs blocks contiguously. Non-empty in some Nov 13 / Feb 22
+	// prototype zones where the pool contains orphan Neighbour records
+	// (valid-looking 16-byte slots that no zone's mpSafe/mpUnsafe references)
+	// — likely leftovers from deleted-zone cleanup. Preserved verbatim for
+	// byte-exact round-trip.
+	_trailingNeighbourPad: Uint8Array;
 };
 
 export type ParsedZoneList = {
 	zones: Zone[];
+	// Trailing padding after the zonePointCounts table, up to a 16-byte
+	// boundary. Retail pads with zeros (the writer's default); some Nov 13 /
+	// Feb 22 prototype builds leave non-zero leftovers (looks like
+	// over-allocated i16=4 count entries — possibly authoring-tool cruft).
+	// Preserved verbatim for byte-exact round-trip; defaults to zeros when a
+	// caller constructs a ParsedZoneList from scratch.
+	_finalPad?: Uint8Array;
 };
 
 // =============================================================================
@@ -218,10 +234,73 @@ export function parseZoneListData(raw: Uint8Array, littleEndian = true): ParsedZ
 			unsafeNeighbours,
 			_pad0C: rz._pad0C,
 			_pad24: rz._pad24,
+			_trailingNeighbourPad: new Uint8Array(0),
 		});
 	}
 
-	return { zones };
+	// Compute per-zone trailing neighbour-pool padding by walking the pool in
+	// pointer order. For each zone, capture any bytes between the natural end
+	// of its blocks and the next zone's first block (or ptrPoints for the
+	// last zone). Retail is contiguous so every pad is empty; prototype builds
+	// have orphan Neighbour records that we must preserve verbatim.
+	const neighbourPoolStart = ptrZones + muTotalZones * ZONE_RECORD_SIZE_32;
+	const rawBytes = raw;
+	type BlockSpan = { zoneIdx: number; start: number; end: number };
+	const allBlocks: BlockSpan[] = [];
+	for (let zi = 0; zi < muTotalZones; zi++) {
+		const rz = rawZones[zi];
+		if (rz.miNumSafe > 0) {
+			allBlocks.push({ zoneIdx: zi, start: rz.mpSafe, end: rz.mpSafe + rz.miNumSafe * NEIGHBOUR_RECORD_SIZE_32 });
+		}
+		if (rz.miNumUnsafe > 0) {
+			allBlocks.push({ zoneIdx: zi, start: rz.mpUnsafe, end: rz.mpUnsafe + rz.miNumUnsafe * NEIGHBOUR_RECORD_SIZE_32 });
+		}
+	}
+	allBlocks.sort((a, b) => a.start - b.start);
+
+	// Walk in pool order. Any gap before block[i] (or after the last block,
+	// before ptrPoints) is attributed to the zone whose blocks last touched
+	// the pool. Without prior context we attribute leading gaps to zone 0;
+	// retail and prototype both start the first block at the pool start so
+	// that branch is exercised only by malformed inputs.
+	let cursor = neighbourPoolStart;
+	let lastZone = 0;
+	for (const blk of allBlocks) {
+		if (blk.start > cursor) {
+			const padBytes = rawBytes.slice(cursor, blk.start);
+			const existing = zones[lastZone]._trailingNeighbourPad;
+			zones[lastZone]._trailingNeighbourPad = concat(existing, padBytes);
+		}
+		cursor = blk.end;
+		lastZone = blk.zoneIdx;
+	}
+	if (ptrPoints > cursor) {
+		const padBytes = rawBytes.slice(cursor, ptrPoints);
+		// Trailing pool bytes attach to the LAST zone in pool order, which
+		// matches how the writer re-emits them (last block, then trailing
+		// pad, then points section).
+		const target = allBlocks.length > 0 ? allBlocks[allBlocks.length - 1].zoneIdx : muTotalZones - 1;
+		const existing = zones[target]._trailingNeighbourPad;
+		zones[target]._trailingNeighbourPad = concat(existing, padBytes);
+	}
+
+	// Capture trailing pad after zonePointCounts (up to next 16-byte boundary).
+	// Retail pads with zeros (round-trip via the writer's default); prototype
+	// builds occasionally leave non-zero authoring leftovers there.
+	const zonePointCountsEnd = ptrZonePointCounts + muTotalZones * 2;
+	const finalPadLen = rawBytes.byteLength - zonePointCountsEnd;
+	const finalPad = finalPadLen > 0 ? rawBytes.slice(zonePointCountsEnd, rawBytes.byteLength) : new Uint8Array(0);
+
+	return { zones, _finalPad: finalPad };
+}
+
+function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
+	if (a.byteLength === 0) return b;
+	if (b.byteLength === 0) return a;
+	const out = new Uint8Array(a.byteLength + b.byteLength);
+	out.set(a, 0);
+	out.set(b, a.byteLength);
+	return out;
 }
 
 // =============================================================================
@@ -256,14 +335,29 @@ export function writeZoneListData(model: ParsedZoneList, littleEndian = true): U
 	const zonesByteLength = muTotalZones * ZONE_RECORD_SIZE_32;
 	const offNeighbours = offZones + zonesByteLength;
 	let totalNeighbours = 0;
-	for (const z of zones) totalNeighbours += z.safeNeighbours.length + z.unsafeNeighbours.length;
-	const neighboursByteLength = totalNeighbours * NEIGHBOUR_RECORD_SIZE_32;
+	let totalNeighbourPad = 0;
+	for (const z of zones) {
+		totalNeighbours += z.safeNeighbours.length + z.unsafeNeighbours.length;
+		totalNeighbourPad += z._trailingNeighbourPad.byteLength;
+	}
+	const neighboursByteLength = totalNeighbours * NEIGHBOUR_RECORD_SIZE_32 + totalNeighbourPad;
 	const offPoints = offNeighbours + neighboursByteLength;
 	const pointsByteLength = muTotalPoints * POINT_RECORD_SIZE;
 	const offZonePointStarts = offPoints + pointsByteLength;
-	const offZonePointCounts = offZonePointStarts + muTotalZones * 4;
+	// Align zonePointCounts to 16. Retail's count is naturally aligned (1712 zones
+	// → 1712 × 4 = 6848 bytes, divisible by 16), so retail bytes are unchanged;
+	// the Nov 13 prototype's 369-zone payload requires 12 bytes of pad here.
+	const startsByteLength = muTotalZones * 4;
+	const startsToCountsPad = startsByteLength % 16 === 0 ? 0 : 16 - (startsByteLength % 16);
+	const offZonePointCounts = offZonePointStarts + startsByteLength + startsToCountsPad;
 	const totalBeforeFinalPad = offZonePointCounts + muTotalZones * 2;
-	const finalPad = totalBeforeFinalPad % 16 === 0 ? 0 : 16 - (totalBeforeFinalPad % 16);
+	// If the source provided an explicit `_finalPad`, use its length verbatim
+	// (preserves prototype-build authoring leftovers). Otherwise fall back to
+	// the standard "round up to 16" rule that retail uses.
+	const explicitFinalPadLen = model._finalPad?.byteLength;
+	const finalPad = explicitFinalPadLen != null
+		? explicitFinalPadLen
+		: (totalBeforeFinalPad % 16 === 0 ? 0 : 16 - (totalBeforeFinalPad % 16));
 	const totalSize = totalBeforeFinalPad + finalPad;
 
 	const w = new BinWriter(totalSize, littleEndian);
@@ -305,7 +399,7 @@ export function writeZoneListData(model: ParsedZoneList, littleEndian = true): U
 	}
 	if (w.offset !== offNeighbours) throw new Error(`ZoneList writer: neighbour offset mismatch ${w.offset} vs ${offNeighbours}`);
 
-	// --- Neighbour pool: per zone, safe first then unsafe ---
+	// --- Neighbour pool: per zone, safe first then unsafe, then trailing pad ---
 	for (let zi = 0; zi < muTotalZones; zi++) {
 		const z = zones[zi];
 		// Safe block — patch zone's mpSafeNeighbours to point here.
@@ -330,6 +424,13 @@ export function writeZoneListData(model: ParsedZoneList, littleEndian = true): U
 				w.writeU32(n._padB);
 			}
 		}
+		// Trailing neighbour-pool padding (orphan slots in prototype builds;
+		// always empty in retail). Re-emitted verbatim so byte-exact round-trip
+		// holds even though the bytes look like Neighbour records that no
+		// zone's mpSafe / mpUnsafe ever points at.
+		if (z._trailingNeighbourPad.byteLength > 0) {
+			w.writeBytes(z._trailingNeighbourPad);
+		}
 	}
 	if (w.offset !== offPoints) throw new Error(`ZoneList writer: points offset mismatch ${w.offset} vs ${offPoints}`);
 
@@ -346,13 +447,22 @@ export function writeZoneListData(model: ParsedZoneList, littleEndian = true): U
 
 	// --- zonePointStarts ---
 	for (const s of zonePointStarts) w.writeU32(s);
+	// Align to 16 before zonePointCounts.
+	if (startsToCountsPad > 0) w.writeZeroes(startsToCountsPad);
 	if (w.offset !== offZonePointCounts) throw new Error(`ZoneList writer: zonePointCounts offset mismatch ${w.offset} vs ${offZonePointCounts}`);
 
 	// --- zonePointCounts ---
 	for (const c of zonePointCounts) w.writeI16(c);
 
-	// --- Final 16-byte pad ---
-	padTo16(w);
+	// --- Final pad ---
+	// When the model carries an explicit `_finalPad` (typically only the
+	// prototype-build parser sets this), emit those bytes verbatim. Otherwise
+	// pad with zeros up to a 16-byte boundary, matching retail.
+	if (model._finalPad && model._finalPad.byteLength > 0) {
+		w.writeBytes(model._finalPad);
+	} else {
+		padTo16(w);
+	}
 
 	return w.bytes;
 }

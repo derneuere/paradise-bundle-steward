@@ -215,10 +215,9 @@ export function resourceCtxFromBundle(
 	const platform = targetPlatform ?? bundle.header.platform;
 	return {
 		platform,
-		// PS3 is big-endian; PC (and Remastered) are little-endian. X360 is
-		// also big-endian in reality but no fixture has been validated yet,
-		// so it falls through to the LE branch by default — flip explicitly
-		// once an X360 fixture lands.
-		littleEndian: platform !== HANDLER_PLATFORM.PS3,
+		// PS3 and X360 are big-endian; PC (and Remastered) are little-endian.
+		// X360 was opted-in once the BND1 ZoneList fixture landed (a Nov 2006
+		// prototype) — see docs/zone-list-spec.md.
+		littleEndian: platform !== HANDLER_PLATFORM.PS3 && platform !== HANDLER_PLATFORM.XBOX360,
 	};
 }

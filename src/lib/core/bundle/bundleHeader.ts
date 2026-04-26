@@ -4,15 +4,31 @@ import { BufferReader, object, arrayOf, u32, type Parsed, chars } from 'typed-bi
 import { ValidationError } from '../errors';
 
 /**
- * Detect a BND2 bundle's endianness by inspecting the version field at byte 4.
- * Bundle version is always 2 — if it reads as 2 in little-endian, the bundle
- * is LE (PC / Remastered); if it only reads as 2 in big-endian, the bundle is
- * BE (PS3 / X360). Returns `true` for little-endian, defaulting to LE for
- * truncated or unrecognised buffers.
+ * Detect a Bundle's endianness by inspecting the version field at byte 4.
+ *
+ * - Bundle 2 ('bnd2'): version is always 2 — read as LE first, fall back to BE.
+ * - Bundle 1 ('bndl'): versions 3-5 known. We read as BE first because every
+ *   known BND1 fixture is X360/PS3 (BE); a hypothetical LE BND1 would still
+ *   be detected via the LE fallback.
+ *
+ * Returns `true` for little-endian, defaulting to LE for truncated or
+ * unrecognised buffers.
  */
 export function detectBundleLittleEndian(buffer: ArrayBuffer): boolean {
   if (buffer.byteLength < 8) return true;
   const view = new DataView(buffer);
+  // BND1 dispatch — magic 'bndl' (0x62 0x6E 0x64 0x6C). Versions 3-5.
+  if (
+    view.getUint8(0) === 0x62 && view.getUint8(1) === 0x6E &&
+    view.getUint8(2) === 0x64 && view.getUint8(3) === 0x6C
+  ) {
+    const versionBE = view.getUint32(4, false);
+    if (versionBE >= 3 && versionBE <= 5) return false;
+    const versionLE = view.getUint32(4, true);
+    if (versionLE >= 3 && versionLE <= 5) return true;
+    return false; // BND1 default: BE (every known fixture is X360/PS3).
+  }
+  // BND2 dispatch — magic 'bnd2'. Version is always 2.
   if (view.getUint32(4, true) === 2) return true;
   if (view.getUint32(4, false) === 2) return false;
   return true;

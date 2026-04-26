@@ -53,12 +53,19 @@ export type { ResourceEntry, ImportEntry } from './bundle/bundleEntry';
 // Import types for ParsedBundle definition
 import type { BundleHeader } from './bundle/bundleHeader';
 import type { ResourceEntry, ImportEntry } from './bundle/bundleEntry';
+import type { Bundle1Extras } from './bundle/bundle1';
 
 export type ParsedBundle = {
   header: BundleHeader;
   resources: ResourceEntry[];
   imports: ImportEntry[];
   debugData?: string;
+  // Present only when the bundle was read from a Bundle V1 (`bndl`) wrapper
+  // (Burnout 5 prototypes — Nov 13 2006, Feb 22 2007, etc). Carries the
+  // BND1-only fields (5-chunk descriptors, runtime pointers, V5 alignment)
+  // that BND2's ResourceEntry shape can't represent. The BND1 writer reads
+  // this back to reproduce byte-exact output. BND2 code never inspects it.
+  bundle1Extras?: Bundle1Extras;
 }
 
 // ============================================================================
