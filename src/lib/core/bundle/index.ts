@@ -9,7 +9,7 @@ import {
   type ResourceEntry as BundleResourceEntry,
 } from './bundleEntry';
 export { getImportsByPtrOffset, getImportIds } from './bundleEntry';
-import { parseHeader } from './bundleHeader';
+import { parseHeader, detectBundleLittleEndian } from './bundleHeader';
 import { parseDebugDataFromBuffer } from './debugData';
 import {
   ParsedBundle,
@@ -23,7 +23,8 @@ import {
 import { BundleError } from '../errors';
 import {
   validateResourceEntry,
-  calculateBundleStats
+  calculateBundleStats,
+  decompressData
 } from '../resourceManager';
 import { parseVehicleList, type ParsedVehicleList } from '../vehicleList';
 import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors';
@@ -59,8 +60,18 @@ export function writeBundleFresh(
 ): ArrayBuffer {
   reportProgress(progressCallback, 'write', 0, 'Starting fresh bundle write');
 
-  const isLittleEndian = bundle.header.platform !== PLATFORMS.PS3;
-  const ctx = resourceCtxFromBundle(bundle);
+  // `options.platform` overrides the source bundle's platform — used by the
+  // cross-platform export path so the wrapper *and* every per-resource writer
+  // emit bytes in the target's endianness instead of the source's.
+  const targetPlatform = options.platform ?? bundle.header.platform;
+  const isLittleEndian = targetPlatform !== PLATFORMS.PS3;
+  const ctx = resourceCtxFromBundle(bundle, targetPlatform);
+  // Source ctx — used to parse the original bytes when the target differs.
+  // Without this, the cross-platform path would only flip the wrapper's
+  // endianness while leaving each resource's payload encoded in the source's
+  // byte order, producing a broken output that fails to load on the target.
+  const sourceCtx = resourceCtxFromBundle(bundle);
+  const isCrossPlatformExport = targetPlatform !== bundle.header.platform;
 
   // Normalize overrides into two maps:
   //   1. `overrideMap` — keyed by resource type id. Applies the same override
@@ -176,6 +187,28 @@ export function writeBundleFresh(
         );
         finalBytes = wasCompressed ? compressData(newUncompressed) : newUncompressed;
         uncompressedSize = newUncompressed.length;
+      } else if (isCrossPlatformExport && bi === primaryBlock) {
+        // Cross-platform re-encode: the user is converting the bundle to a
+        // different platform's binary layout. Parse the original bytes in the
+        // source endianness, then re-emit through the same handler in the
+        // target endianness. Only the primary block goes through this path —
+        // secondary blocks (graphics-memory pools etc.) are platform-specific
+        // raw payloads our parsers don't model. Resources whose handler can't
+        // write the target platform should already be filtered out by
+        // getExportablePlatforms; if one slips through, fall back to the
+        // pass-through bytes (the export will be broken, but the failure is
+        // visible to the user instead of silently corrupting).
+        const handler = getHandlerByTypeId(resource.resourceTypeId);
+        const targetIsSupported = handler?.caps.writePlatforms?.includes(targetPlatform as never) ?? false;
+        if (handler && handler.caps.write && handler.writeRaw && targetIsSupported) {
+          const decoded = wasCompressed ? decompressData(rawOriginal) : rawOriginal;
+          const model = handler.parseRaw(decoded, sourceCtx);
+          const newUncompressed = handler.writeRaw(model as never, ctx);
+          finalBytes = wasCompressed ? compressData(newUncompressed) : newUncompressed;
+          uncompressedSize = newUncompressed.length;
+        } else {
+          finalBytes = rawOriginal;
+        }
       } else {
         // No override for this block: keep original bytes exactly
         finalBytes = rawOriginal;
@@ -291,7 +324,7 @@ export function writeBundleFresh(
   const writeU32 = (off: number, val: number) => dv.setUint32(off, val >>> 0, isLittleEndian);
   outBytes.set(new TextEncoder().encode('bnd2'), headerOffset);
   writeU32(headerOffset + 4, 2); // version
-  writeU32(headerOffset + 8, bundle.header.platform);
+  writeU32(headerOffset + 8, targetPlatform);
   writeU32(headerOffset + 12, debugDataOffset);
   writeU32(headerOffset + 16, resourceCount);
   writeU32(headerOffset + 20, tableOffset);
@@ -385,14 +418,21 @@ export function parseBundle(
   try {
     reportProgress(progressCallback, 'parse', 0, 'Starting bundle parsing');
 
+    // Auto-detect endianness when the caller didn't pin it. PS3/X360 bundles
+    // are big-endian; PC/Remastered are little-endian. Detection peeks the
+    // version field, which is invariant across all known bundles.
+    const littleEndian = options.littleEndian !== undefined
+      ? options.littleEndian
+      : detectBundleLittleEndian(buffer);
+
     const reader = new BufferReader(buffer, {
-      endianness: options.littleEndian !== false ? 'little' : 'big'
+      endianness: littleEndian ? 'little' : 'big'
     });
 
     reportProgress(progressCallback, 'parse', 0.1, 'Parsing bundle header');
 
     // Parse header
-    const header = parseHeader(reader, buffer, options);
+    const header = parseHeader(reader, buffer, { ...options, littleEndian });
 
     reportProgress(progressCallback, 'parse', 0.3, 'Parsing resource entries');
 

@@ -1,11 +1,15 @@
 // AISections (AIMapData / WorldMapData) parser and writer
 // Resource type ID: 0x10001
 //
-// Binary layout (32-bit LE):
+// Binary layout (32-bit, endian per bundle platform):
 //   [AISectionsData header]  0x40 bytes
 //   [AISection array]        numSections * 0x18
 //   [per-section payloads]   portals, portal BLs, nogo lines, 4 corners each
 //   [SectionResetPair array] numResetPairs * 0x8
+//
+// Both little-endian (PC) and big-endian (PS3 / X360) bundles round-trip
+// byte-exact. 64-bit pointer layout (Paradise Remastered) is not yet
+// supported — that's a separate header shape (0x48 bytes, 0x28-byte sections).
 
 import { BinReader, BinWriter } from './binTools';
 

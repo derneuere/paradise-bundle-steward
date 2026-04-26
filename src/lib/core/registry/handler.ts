@@ -10,9 +10,22 @@
 // can derive its RESOURCE_TYPES map from the registry without creating a cycle.
 export type ResourceCategory = 'Graphics' | 'Audio' | 'Data' | 'Script' | 'Camera' | 'Other';
 
+// Platform numeric ids match PLATFORMS in types.ts (1=PC, 2=X360, 3=PS3).
+// Defined here so the registry layer doesn't import from types.ts (which
+// imports parsers, which would create a cycle).
+export const HANDLER_PLATFORM = { PC: 1, XBOX360: 2, PS3: 3 } as const;
+export type HandlerPlatform = typeof HANDLER_PLATFORM[keyof typeof HANDLER_PLATFORM];
+
 export type HandlerCaps = {
 	read: boolean;
 	write: boolean;
+	/**
+	 * Platforms whose binary layout the writer is fixture-validated for.
+	 * Defaults to [PC] when omitted, matching the historical LE-only assumption.
+	 * Used by the export-platform picker to decide which platforms a bundle
+	 * can be safely converted to (intersection across all resources).
+	 */
+	writePlatforms?: HandlerPlatform[];
 };
 
 export type ResourceCtx = {
@@ -190,12 +203,22 @@ export type ResourceFixture = {
 /**
  * Build a ResourceCtx from a ParsedBundle. Centralizes the platform→littleEndian
  * derivation so handlers never compute it themselves.
+ *
+ * `targetPlatform` overrides the bundle's source platform — used by the
+ * cross-platform export path so the writer emits resource bytes in the
+ * target's endianness instead of the source's.
  */
-export function resourceCtxFromBundle(bundle: { header: { platform: number } }): ResourceCtx {
+export function resourceCtxFromBundle(
+	bundle: { header: { platform: number } },
+	targetPlatform?: number,
+): ResourceCtx {
+	const platform = targetPlatform ?? bundle.header.platform;
 	return {
-		platform: bundle.header.platform,
-		// PS3 is the only big-endian platform. Everything else is little-endian.
-		// Kept as a bit so future X360 work can flip it explicitly.
-		littleEndian: bundle.header.platform !== 3,
+		platform,
+		// PS3 is big-endian; PC (and Remastered) are little-endian. X360 is
+		// also big-endian in reality but no fixture has been validated yet,
+		// so it falls through to the LE branch by default — flip explicitly
+		// once an X360 fixture lands.
+		littleEndian: platform !== HANDLER_PLATFORM.PS3,
 	};
 }

@@ -6,7 +6,7 @@ import { u64ToBigInt } from '@/lib/core/u64';
 import { getResourceType } from '@/lib/resourceTypes';
 import { extractResourceSize, getMemoryTypeName } from '@/lib/core/resourceManager';
 import { findDebugResourceById } from '@/lib/core/bundle/debugData';
-import type { ParsedBundle } from '@/lib/core/types';
+import type { ParsedBundle, Platform } from '@/lib/core/types';
 import type { DebugResource } from '@/lib/core/bundle/debugData';
 
 export type UIResource = {
@@ -58,7 +58,14 @@ type BundleContextValue = {
    */
   setResourceAt: (key: string, index: number, next: unknown | null) => void;
   loadBundleFromFile: (file: File) => Promise<void>;
-  exportBundle: () => Promise<void>;
+  /**
+   * Export the current bundle. Pass `targetPlatform` to convert the bundle
+   * to a different platform's binary layout (LE↔BE, header platform field
+   * rewritten). The set of valid targets is `getExportablePlatforms(bundle)`;
+   * the layout layer is responsible for not offering invalid options.
+   * Omitting the argument exports as the source platform.
+   */
+  exportBundle: (targetPlatform?: number) => Promise<void>;
   /**
    * Companion bundles loaded alongside the primary bundle (e.g. WORLDTEX0.BIN
    * loaded next to SHADERS.BNDL so the shader preview can pull real textures).
@@ -247,7 +254,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     [setResourceAt],
   );
 
-  const exportBundle = async () => {
+  const exportBundle = async (targetPlatform?: number) => {
     if (!loadedBundle || !originalArrayBuffer) {
       toast.error('No bundle loaded to export');
       return;
@@ -297,6 +304,7 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
         originalArrayBuffer,
         {
           includeDebugData: true,
+          platform: targetPlatform as Platform | undefined,
           overrides: {
             resources: keyedOverridesToTypeIdMap(filteredSingleResource, loadedBundle),
             byResourceId,

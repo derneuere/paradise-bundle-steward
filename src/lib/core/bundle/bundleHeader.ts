@@ -3,6 +3,21 @@
 import { BufferReader, object, arrayOf, u32, type Parsed, chars } from 'typed-binary';
 import { ValidationError } from '../errors';
 
+/**
+ * Detect a BND2 bundle's endianness by inspecting the version field at byte 4.
+ * Bundle version is always 2 — if it reads as 2 in little-endian, the bundle
+ * is LE (PC / Remastered); if it only reads as 2 in big-endian, the bundle is
+ * BE (PS3 / X360). Returns `true` for little-endian, defaulting to LE for
+ * truncated or unrecognised buffers.
+ */
+export function detectBundleLittleEndian(buffer: ArrayBuffer): boolean {
+  if (buffer.byteLength < 8) return true;
+  const view = new DataView(buffer);
+  if (view.getUint32(4, true) === 2) return true;
+  if (view.getUint32(4, false) === 2) return false;
+  return true;
+}
+
 // Bundle header schema including magic prefix for convenience
 export const BundleHeaderSchema = object({
   magic: chars(4),         // 4 bytes, typically "bnd2"

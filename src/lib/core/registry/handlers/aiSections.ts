@@ -11,7 +11,7 @@ import {
 	AISectionFlag,
 	EResetSpeedType,
 } from '../../aiSections';
-import type { ResourceHandler } from '../handler';
+import { HANDLER_PLATFORM, type ResourceHandler } from '../handler';
 
 export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 	typeId: 0x10001,
@@ -19,7 +19,11 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 	name: 'AI Sections',
 	description: 'AI navigation mesh — sections, portals, boundary lines, speed and shortcut data',
 	category: 'Data',
-	caps: { read: true, write: true },
+	caps: {
+		read: true,
+		write: true,
+		writePlatforms: [HANDLER_PLATFORM.PC, HANDLER_PLATFORM.PS3],
+	},
 
 	parseRaw(raw, ctx) {
 		return parseAISectionsData(raw, ctx.littleEndian);
@@ -35,6 +39,10 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 	fixtures: [
 		{
 			bundle: 'example/AI.DAT',
+			expect: { parseOk: true, byteRoundTrip: true, stableWriter: true },
+		},
+		{
+			bundle: 'example/ps3/AI.DAT',
 			expect: { parseOk: true, byteRoundTrip: true, stableWriter: true },
 		},
 	],

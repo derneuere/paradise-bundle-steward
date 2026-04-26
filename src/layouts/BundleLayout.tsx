@@ -5,9 +5,9 @@ import { Upload, Download, Hexagon, Database, Box } from 'lucide-react';
 import { useBundle } from '@/context/BundleContext';
 import { useRef, useState, useMemo } from 'react';
 import { toast } from 'sonner';
-import { ExportWarningModal } from '@/components/capabilities';
+import { ExportWarningModal, ExportPlatformModal } from '@/components/capabilities';
 import { getCapabilityByTypeId, type FeatureCapability } from '@/lib/capabilities';
-import { registry } from '@/lib/core/registry';
+import { registry, getExportablePlatforms } from '@/lib/core/registry';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
 import type { ParsedAISections } from '@/lib/core/aiSections';
@@ -27,6 +27,11 @@ export const BundleLayout = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const gltfInputRef = useRef<HTMLInputElement>(null);
   const [showExportWarning, setShowExportWarning] = useState(false);
+  const [showPlatformPicker, setShowPlatformPicker] = useState(false);
+  // Holds the user-selected target platform between the platform picker
+  // closing and the unsupported-features warning resolving. `undefined`
+  // means "export as source platform" (no override).
+  const [pendingTargetPlatform, setPendingTargetPlatform] = useState<number | undefined>(undefined);
   const {
     isLoading,
     isModified,
@@ -60,17 +65,48 @@ export const BundleLayout = () => {
     return unsupported;
   }, [parsedResources]);
 
-  const handleExportClick = () => {
+  // Export flow has up to two gates before the actual write:
+  //   1. Platform picker — only when the bundle can be safely re-encoded
+  //      for >1 platform (intersection of every handler's writePlatforms).
+  //   2. Unsupported-modified-features warning — only when the user edited
+  //      a resource type whose write path is partial/missing.
+  // Either, both, or neither may apply. After all gates resolve we call
+  // exportBundle with the chosen target platform (undefined = source).
+  const exportablePlatforms = useMemo(
+    () => (loadedBundle ? getExportablePlatforms(loadedBundle) : []),
+    [loadedBundle],
+  );
+  const sourcePlatform = loadedBundle?.header.platform;
+
+  const proceedToExport = (target: number | undefined) => {
     if (isModified && unsupportedModifiedFeatures.length > 0) {
+      setPendingTargetPlatform(target);
       setShowExportWarning(true);
     } else {
-      void exportBundle();
+      void exportBundle(target);
     }
+  };
+
+  const handleExportClick = () => {
+    if (exportablePlatforms.length > 1) {
+      setShowPlatformPicker(true);
+    } else {
+      proceedToExport(undefined);
+    }
+  };
+
+  const handlePlatformConfirm = (target: number) => {
+    setShowPlatformPicker(false);
+    // Only treat as override when it differs from source — keeps the
+    // exporter's existing happy-path path-of-least-resistance behavior.
+    proceedToExport(target === sourcePlatform ? undefined : target);
   };
 
   const handleConfirmExport = () => {
     setShowExportWarning(false);
-    void exportBundle();
+    const target = pendingTargetPlatform;
+    setPendingTargetPlatform(undefined);
+    void exportBundle(target);
   };
 
   const handleExportGltf = async () => {
@@ -271,6 +307,16 @@ export const BundleLayout = () => {
         onConfirm={handleConfirmExport}
         unsupportedFeatures={unsupportedModifiedFeatures}
       />
+
+      {sourcePlatform !== undefined && exportablePlatforms.length > 1 && (
+        <ExportPlatformModal
+          open={showPlatformPicker}
+          onOpenChange={setShowPlatformPicker}
+          platforms={exportablePlatforms}
+          sourcePlatform={sourcePlatform}
+          onConfirm={handlePlatformConfirm}
+        />
+      )}
     </div>
   );
 };

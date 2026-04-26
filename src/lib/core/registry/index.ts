@@ -7,7 +7,7 @@
 // No edits to types.ts, resourceTypes.ts, capabilities.ts, BundleContext.tsx,
 // or ResourcesPage.tsx should be needed.
 
-import type { ResourceHandler } from './handler';
+import { HANDLER_PLATFORM, type HandlerPlatform, type ResourceHandler } from './handler';
 import { streetDataHandler } from './handlers/streetData';
 import { triggerDataHandler } from './handlers/triggerData';
 import { challengeListHandler } from './handlers/challengeList';
@@ -74,5 +74,54 @@ export function getHandlerByKey(key: string): ResourceHandler | undefined {
 	return byKey.get(key);
 }
 
-export { type ResourceHandler, type ResourceFixture, type HandlerCaps, type ResourceCtx, type ResourceCategory, type StressScenario, resourceCtxFromBundle } from './handler';
+/**
+ * Returns the set of platforms a bundle can be safely exported as. This is
+ * the intersection of every resource's handler-declared `writePlatforms`.
+ *
+ * - Resources whose type isn't in our registry constrain the result to the
+ *   bundle's source platform only: their bytes pass through verbatim, which
+ *   is only valid for the platform they were originally serialised for.
+ * - Handlers without an explicit `writePlatforms` default to [PC] (matches
+ *   the historical LE-only assumption).
+ *
+ * The source platform is always included even when no handler claims it,
+ * because the no-op export (target == source) is always valid.
+ */
+export function getExportablePlatforms(bundle: { header: { platform: number }, resources: { resourceTypeId: number }[] }): HandlerPlatform[] {
+	const sourcePlatform = bundle.header.platform as HandlerPlatform;
+	let intersection: Set<HandlerPlatform> | null = null;
+
+	for (const resource of bundle.resources) {
+		const handler = byTypeId.get(resource.resourceTypeId);
+		const platforms: HandlerPlatform[] = handler
+			? (handler.caps.writePlatforms ?? [HANDLER_PLATFORM.PC])
+			: [sourcePlatform]; // unknown type → pass-through bytes, source-only
+		if (intersection === null) {
+			intersection = new Set(platforms);
+		} else {
+			for (const p of [...intersection]) {
+				if (!platforms.includes(p)) intersection.delete(p);
+			}
+		}
+		if (intersection.size === 0) break;
+	}
+
+	const result = intersection ? [...intersection] : [sourcePlatform];
+	// Always include the source platform — a no-op export must always work.
+	if (!result.includes(sourcePlatform)) result.push(sourcePlatform);
+	// Stable ordering: PC, X360, PS3.
+	return result.sort((a, b) => a - b);
+}
+
+export {
+	type ResourceHandler,
+	type ResourceFixture,
+	type HandlerCaps,
+	type ResourceCtx,
+	type ResourceCategory,
+	type StressScenario,
+	type HandlerPlatform,
+	HANDLER_PLATFORM,
+	resourceCtxFromBundle,
+} from './handler';
 export { extractResourceRaw } from './extract';
