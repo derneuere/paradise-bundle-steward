@@ -20,12 +20,27 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { AlertTriangle } from 'lucide-react';
 import { getPlatformName } from '@/lib/core/bundle';
 
+export type ExportContainerInfo = {
+	/** 'bnd2' for retail Bundle 2 ('bnd2' magic) sources, 'bnd1' for the
+	 *  Bundle V1 ('bndl' magic) prototype container used in pre-release
+	 *  Burnout 5 dev builds. */
+	kind: 'bnd1' | 'bnd2';
+	/** Bundle wrapper version. 2 for bnd2; 5 for the Feb 22 2007 bnd1 fixture
+	 *  (we don't yet support v3 / v4). */
+	version: number;
+};
+
 type ExportPlatformModalProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	platforms: number[];
 	sourcePlatform: number;
 	onConfirm: (targetPlatform: number) => void;
+	/** Source bundle's container — surfaced so the user knows whether their
+	 *  output will stay as 'bndl' (BND1 prototype) or 'bnd2' (retail). The
+	 *  current export path always preserves the source container; we only
+	 *  flip endianness on cross-platform export. */
+	sourceContainer: ExportContainerInfo;
 };
 
 export const ExportPlatformModal = ({
@@ -34,6 +49,7 @@ export const ExportPlatformModal = ({
 	platforms,
 	sourcePlatform,
 	onConfirm,
+	sourceContainer,
 }: ExportPlatformModalProps) => {
 	const [selected, setSelected] = useState<number>(sourcePlatform);
 
@@ -43,6 +59,14 @@ export const ExportPlatformModal = ({
 	};
 
 	const isCrossPlatform = selected !== sourcePlatform;
+	const containerLabel =
+		sourceContainer.kind === 'bnd1'
+			? `Bundle V1 ('bndl' v${sourceContainer.version})`
+			: `Bundle 2 ('bnd2' v${sourceContainer.version})`;
+	const containerSubtitle =
+		sourceContainer.kind === 'bnd1'
+			? 'Prototype-build container — kept on export.'
+			: 'Retail container — kept on export.';
 
 	return (
 		<Dialog
@@ -60,6 +84,17 @@ export const ExportPlatformModal = ({
 						Pick the target binary layout. The source platform is selected by default.
 					</DialogDescription>
 				</DialogHeader>
+
+				{/* Container context: which wrapper format the output will use.
+				    Always shown so the user can confirm at a glance whether
+				    they're getting a BND1 or BND2 bundle back. */}
+				<div className="rounded-md border bg-muted/30 p-3 text-sm">
+					<div className="text-xs uppercase tracking-wider text-muted-foreground">
+						Container
+					</div>
+					<div className="font-mono">{containerLabel}</div>
+					<div className="text-xs text-muted-foreground mt-1">{containerSubtitle}</div>
+				</div>
 
 				<RadioGroup
 					value={String(selected)}
@@ -92,6 +127,15 @@ export const ExportPlatformModal = ({
 								Self-consistency is verified by tests, but the converted bundle
 								has not been validated against the actual game. Treat as a
 								technical preview.
+								{sourceContainer.kind === 'bnd1' && (
+									<>
+										{' '}For BND1 sources the cross-platform path runs through
+										the convert helper; in-app edits to BND1 resources are
+										<em> not yet</em> merged with the converted bytes (same-
+										platform export does pick them up). Pick the source
+										platform to keep your edits.
+									</>
+								)}
 							</div>
 						</div>
 					</div>

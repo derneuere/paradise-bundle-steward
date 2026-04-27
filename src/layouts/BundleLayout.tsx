@@ -201,6 +201,24 @@ export const BundleLayout = () => {
               <p className="text-muted-foreground">Burnout Paradise Bundle Editor & Resource Explorer</p>
             </div>
             <div className="flex items-center gap-3">
+              {hasBundle && loadedBundle && (
+                // Container badge — surfaces the source bundle's wrapper
+                // format so the user knows at a glance whether export will
+                // produce a 'bndl' (prototype) or 'bnd2' (retail) file.
+                <Badge
+                  variant="outline"
+                  title={
+                    loadedBundle.bundle1Extras
+                      ? `Bundle V1 ('bndl') v${loadedBundle.bundle1Extras.bndVersion} — pre-release prototype container; Export Bundle keeps this format.`
+                      : `Bundle 2 ('bnd2') v${loadedBundle.header.version} — retail container; Export Bundle keeps this format.`
+                  }
+                  className="font-mono"
+                >
+                  {loadedBundle.bundle1Extras
+                    ? `bndl/v${loadedBundle.bundle1Extras.bndVersion}`
+                    : `bnd2/v${loadedBundle.header.version}`}
+                </Badge>
+              )}
               {isModified && (
                 <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
                   Modified
@@ -308,13 +326,18 @@ export const BundleLayout = () => {
         unsupportedFeatures={unsupportedModifiedFeatures}
       />
 
-      {sourcePlatform !== undefined && exportablePlatforms.length > 1 && (
+      {sourcePlatform !== undefined && exportablePlatforms.length > 1 && loadedBundle && (
         <ExportPlatformModal
           open={showPlatformPicker}
           onOpenChange={setShowPlatformPicker}
           platforms={exportablePlatforms}
           sourcePlatform={sourcePlatform}
           onConfirm={handlePlatformConfirm}
+          sourceContainer={
+            loadedBundle.bundle1Extras
+              ? { kind: 'bnd1', version: loadedBundle.bundle1Extras.bndVersion }
+              : { kind: 'bnd2', version: loadedBundle.header.version }
+          }
         />
       )}
     </div>
