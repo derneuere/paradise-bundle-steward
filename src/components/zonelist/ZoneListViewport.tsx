@@ -266,7 +266,13 @@ function ZoneOverlay({ zone, color }: { zone: Zone; color: string }) {
 		}
 		shape.closePath();
 		const geo = new THREE.ShapeGeometry(shape);
-		geo.rotateX(-Math.PI / 2);
+		// ShapeGeometry produces vertices on the XY plane at (x, y, 0). We
+		// want them on the XZ plane at world (x, 0, y) — rotateX(+π/2) maps
+		// (x, y, 0) → (x, 0, y). The negative-π/2 we used earlier reflected
+		// the polygon through the world X axis (right-hand rule), which is
+		// why the fill landed on the opposite side of the map from the
+		// outline `<Line>` (whose points are placed directly on XZ).
+		geo.rotateX(Math.PI / 2);
 		return geo;
 	}, [zone.points]);
 
