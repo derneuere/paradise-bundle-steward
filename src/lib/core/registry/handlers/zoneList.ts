@@ -12,7 +12,7 @@ export const zoneListHandler: ResourceHandler<ParsedZoneList> = {
 	key: 'zoneList',
 	name: 'Zone List',
 	description: 'PVS streaming zones — polygonal cells with safe/unsafe neighbour lists for track-unit loading',
-	category: 'Map',
+	category: 'Data',
 	// PC + X360 are both fixture-validated (retail PC PVS.BNDL byte-exact;
 	// Nov 13 2006 X360 PVS.BNDL byte-exact through the BND1 wrapper).
 	caps: { read: true, write: true, writePlatforms: [HANDLER_PLATFORM.PC, HANDLER_PLATFORM.XBOX360] },

@@ -34,6 +34,11 @@ import {
 	AISectionsViewport,
 	type AISectionSelection,
 } from '@/components/aisections/AISectionsViewport';
+import type { ParsedZoneList } from '@/lib/core/zoneList';
+import {
+	ZoneListViewport,
+	type ZoneSelection,
+} from '@/components/zonelist/ZoneListViewport';
 
 // ---------------------------------------------------------------------------
 // Path ↔ TrafficDataSelection translation
@@ -272,6 +277,9 @@ function ViewportPaneInner({
 	if (resource.key === 'aiSections') {
 		return <AISectionsViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
 	}
+	if (resource.key === 'zoneList') {
+		return <ZoneListViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
+	}
 	if (resource.key === 'polygonSoupList') {
 		return <PolygonSoupListViewport />;
 	}
@@ -414,6 +422,54 @@ function AISectionsViewportShim({
 				onChange={(next) => setAtPath([], next)}
 				selected={selection}
 				onSelect={(sel) => selectPath(aiSelectionToPath(sel))}
+			/>
+		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Path ↔ ZoneSelection translation
+// ---------------------------------------------------------------------------
+
+// Recognised paths:
+//   ['zones', i]                                     → { zoneIndex: i }
+//   ['zones', i, ...sub]                             → { zoneIndex: i }
+//                                                       (sub-selection inside
+//                                                       a zone is meaningful
+//                                                       to the inspector but
+//                                                       collapses to "select
+//                                                       this zone" in the
+//                                                       viewport)
+function pathToZoneSelection(path: NodePath): ZoneSelection {
+	if (path.length < 2 || path[0] !== 'zones') return null;
+	const idx = path[1];
+	if (typeof idx !== 'number') return null;
+	return { zoneIndex: idx };
+}
+
+function zoneSelectionToPath(sel: ZoneSelection): NodePath {
+	if (!sel) return [];
+	return ['zones', sel.zoneIndex];
+}
+
+function ZoneListViewportShim({
+	data,
+	selectedPath,
+	selectPath,
+}: {
+	data: unknown;
+	selectedPath: NodePath;
+	selectPath: (path: NodePath) => void;
+}) {
+	const zoneData = data as ParsedZoneList;
+	const selection = useMemo(() => pathToZoneSelection(selectedPath), [selectedPath]);
+
+	return (
+		<div className="h-full">
+			<ZoneListViewport
+				data={zoneData}
+				selected={selection}
+				onSelect={(sel) => selectPath(zoneSelectionToPath(sel))}
 			/>
 		</div>
 	);
