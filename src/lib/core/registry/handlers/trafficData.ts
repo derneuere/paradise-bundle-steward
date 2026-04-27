@@ -8,7 +8,7 @@ import {
 	type TrafficHull,
 	type TrafficFlowType,
 } from '../../trafficData';
-import type { ResourceHandler } from '../handler';
+import { HANDLER_PLATFORM, type ResourceHandler } from '../handler';
 
 export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 	typeId: 0x10002,
@@ -16,7 +16,15 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 	name: 'Traffic Data',
 	description: 'Traffic patterns, hulls, sections, junctions, traffic lights, flow types, kill zones, and vehicle data',
 	category: 'Data',
-	caps: { read: true, write: true },
+	caps: {
+		read: true,
+		write: true,
+		// Layout is 32-bit on every shipping platform; the parser/writer flips
+		// endianness via ctx.littleEndian so PC (LE), X360 and PS3 (BE) all
+		// share the same field offsets. Burnout 5 prototype data versions
+		// (e.g. v22) are not supported and the parser rejects them.
+		writePlatforms: [HANDLER_PLATFORM.PC, HANDLER_PLATFORM.XBOX360, HANDLER_PLATFORM.PS3],
+	},
 
 	parseRaw(raw, ctx) {
 		return parseTrafficDataData(raw, ctx.littleEndian);
@@ -25,13 +33,29 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 		return writeTrafficDataData(model, ctx.littleEndian);
 	},
 	describe(model) {
+		if (model.v22Raw) {
+			const v = model.v22Raw;
+			return `v${model.muDataVersion} (read-only structural), hulls ${v.hullPointers.length}, ` +
+				`pvs cells ${v.pvs.muNumCells} (${v.pvs.muNumCells_X}×${v.pvs.muNumCells_Z}), ` +
+				`flowTypes ${v.muNumFlowTypes}, vehicleTypes ${v.muNumVehicleTypes}, ` +
+				`tail bytes A=${v.tailABytes.byteLength} B=${v.tailBBytes.byteLength} C=${v.tailCBytes.byteLength} D=${v.tailDBytes.byteLength}`;
+		}
 		const tlc = model.trafficLights;
 		return `v${model.muDataVersion}, hulls ${model.hulls.length}, flowTypes ${model.flowTypes.length}, killZones ${model.killZones.length}, vehicleTypes ${model.vehicleTypes.length}, lights ${tlc.posAndYRotations.length}, paintColours ${model.paintColours.length}`;
 	},
 
 	fixtures: [
+		// PC (LE) v45 retail bundles.
 		{ bundle: 'example/B5TRAFFIC.BNDL', expect: { parseOk: true, byteRoundTrip: true } },
 		{ bundle: 'example/BTTB5TRAFFIC.BNDL', expect: { parseOk: true, byteRoundTrip: true } },
+		// PS3 (BE) v44 retail bundle (Paradise v1.0–v1.3 era; bike events
+		// don't exist yet so JunctionLogicBox is 4 bytes shorter on the wire).
+		{ bundle: 'example/ps3/B5TRAFFIC.BNDL', expect: { parseOk: true, byteRoundTrip: true } },
+		// X360 (BE) v22 Burnout 5 prototype dev build. Read-only: header /
+		// Pvs / hull pointer table parse cleanly; hull contents and tail
+		// regions are captured raw (no spec yet). Round-trip is intentionally
+		// not asserted — there's no writer for v22.
+		{ bundle: 'example/older builds/B5Traffic.bndl', expect: { parseOk: true } },
 	],
 
 	// Structural fuzzing can easily desync paired arrays whose counts share a
@@ -42,6 +66,8 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 			/vehicleTypes\.length.*must equal vehicleTypesUpdate\.length/,
 			/TLC light arrays must all have the same length/,
 			/coronaTypes\.length.*must equal coronaPositions\.length/,
+			// v22 prototype payload is read-only by design.
+			/cannot write v22 prototype payload/,
 		],
 	},
 

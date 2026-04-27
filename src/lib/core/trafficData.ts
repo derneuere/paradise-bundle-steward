@@ -1,8 +1,24 @@
 // TrafficData parser and writer (ResourceType 0x10002)
 //
 // Layout reference: docs/TrafficData.md
-// 32-bit PC only. 64-bit (Paradise Remastered) and big-endian (X360/PS3)
-// are not supported yet (matches the existing codebase scope).
+//
+// Coverage:
+//   - 32-bit pointer layout on every shipping platform: PC (LE), X360 (BE),
+//     PS3 (BE). Endianness is selected by the `littleEndian` argument; the
+//     wire layout itself doesn't otherwise change.
+//   - Data versions 44 (Paradise v1.0-v1.3 retail; PS3 build) and 45
+//     (Paradise v1.4+ retail; current PC). The two only differ inside
+//     `BrnTraffic::JunctionLogicBox` — v45 introduced a 4-byte
+//     `miBikeStartDataIndex` field stolen from the trailing padding, so the
+//     overall struct size is identical (0x120 bytes) and every other
+//     structure is unchanged.
+//   - Data version 22 (Burnout 5 prototype, Nov-2006 X360 dev build) has
+//     read-only structural parsing — the header, Pvs, and hull pointer
+//     table decode cleanly, with hull contents and four trailing regions
+//     captured as raw bytes. The writer rejects v22 models since there's
+//     no spec for hull internals or the tail regions yet. See the
+//     `parseTrafficDataV22Internal` block lower in this file.
+// 64-bit pointer layout (Paradise Remastered) is not supported yet.
 
 import { BinReader, BinWriter } from './binTools';
 
@@ -98,9 +114,11 @@ export type TrafficJunctionLogicBox = {
   muEventJunctionID: number;
   miOfflineStartDataIndex: number;
   miOnlineStartDataIndex: number;
-  miBikeStartDataIndex: number;
+  miBikeStartDataIndex: number; // v45+ only; reads as -1 in v44 models
   maTrafficLightControllers: TrafficLightController[]; // [8]
-  _pad108: number[]; // 8 bytes
+  // Trailing padding before mPosition. 8 bytes in v45 (where the bike index
+  // ate 4 bytes of the original v44 padding); 12 bytes in v44.
+  _pad108: number[];
   mPosition: Vec4;
 };
 
@@ -223,6 +241,77 @@ export type TrafficLightCollection = {
   instanceHashToIndexLookup: number[];
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// v22 prototype layout (Burnout 5 dev builds — Nov 2006 X360 fixture)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// The v22 TrafficData payload predates retail and uses a much smaller
+// header (0x30 bytes vs 0x170 in v44/v45) plus a different hull stride
+// (0x30 bytes per hull vs 0x50 + tail-arrays in v44/v45). Every retail
+// top-level table — KillZones, VehicleTypes/Traits/Assets, the inline
+// TrafficLightCollection, paint colours — is absent from the v22 header.
+//
+// We don't have an external spec for v22, so this side of the parser is
+// READ-ONLY and structural-only: it locates the header pointer fields, the
+// recognisable `Pvs` block (whose layout we can verify by inspecting the
+// hullPvs sets that follow), the hull pointer table, and four tail regions
+// that the four "extra" header pointers reference. Everything inside the
+// hulls and the tail regions is captured as raw bytes for inspection rather
+// than re-interpreted, because confidently labelling those fields would
+// need either a v22 spec or several more fixtures to triangulate.
+//
+// `ParsedTrafficData.v22Raw` is populated only when `muDataVersion < 44`.
+// All retail-shaped fields (`hulls`, `flowTypes`, `killZones`, etc.) are
+// returned as empty arrays in that case so existing UI / glTF consumers
+// don't crash when a v22 bundle wanders through them — they just see an
+// empty bundle and can branch on `v22Raw` if they care to surface it.
+
+export type TrafficPvsV22 = {
+  // Same Vec4 grid origin convention as retail (x and z populated, y/w 0).
+  mGridMin: Vec4;
+  // v22 only stores the reciprocal cell size; the forward `mCellSize` Vec4
+  // that retail Pvs carries is absent. Cell size can be reconstructed at
+  // runtime as `1 / mRecipCellSize` per axis if needed.
+  mRecipCellSize: Vec4;
+  muNumCells_X: number;
+  muNumCells_Z: number;
+  // muNumCells is the count of populated `hullPvsSets` — NOT
+  // muNumCells_X * muNumCells_Z (retail follows the same convention).
+  muNumCells: number;
+  ptrHullPvs: number;
+  hullPvsSets: PvsHullSet[];
+};
+
+export type ParsedTrafficDataV22Raw = {
+  // Header fields preserved verbatim (offsets refer to the start of the
+  // resource payload). The 4 trailing pointers don't have stable semantic
+  // labels yet — we just preserve the raw values + their referenced bytes.
+  ptrPvs: number;             // header @0x08
+  ptrHulls: number;           // header @0x0C
+  ptrTailA: number;           // header @0x10  (likely flow types — 1792 B)
+  muNumFlowTypes: number;     // header @0x14
+  muNumVehicleTypes: number;  // header @0x16
+  ptrTailB: number;           // header @0x18  (~432 B)
+  ptrTailC: number;           // header @0x1C  (~544 B)
+  ptrTailD: number;           // header @0x20  (~324 B, runs to EOF)
+  // Pvs: same conceptual structure as v44/v45 minus the forward CellSize
+  // Vec4 (verified by walking the hullPvsSets that follow it).
+  pvs: TrafficPvsV22;
+  // Hull pointer table read off `ptrHulls`. Each hull is exactly 0x30 bytes
+  // long (the table is a uniform stride; we verified that adjacent pointers
+  // are spaced 0x30 apart). The hull contents themselves are NOT
+  // interpreted — we capture each hull's raw 0x30 bytes for inspection.
+  hullPointers: number[];
+  hullsRaw: Uint8Array[];
+  // Bytes referenced by the four trailing header pointers, sized by the
+  // distance to the next-higher pointer (or end-of-file for the last one).
+  // The "tail" labels are positional and have no semantic claim attached.
+  tailABytes: Uint8Array;
+  tailBBytes: Uint8Array;
+  tailCBytes: Uint8Array;
+  tailDBytes: Uint8Array;
+};
+
 export type ParsedTrafficData = {
   muDataVersion: number;
   muSizeInBytes: number;
@@ -238,6 +327,12 @@ export type ParsedTrafficData = {
   vehicleTraits: TrafficVehicleTraits[];
   trafficLights: TrafficLightCollection;
   paintColours: Vec4[];
+  // Populated only when the bundle is a v22 prototype (Burnout 5 dev
+  // builds). The retail-shaped fields above are returned empty in that
+  // case; this carries the structural information we *can* read out of
+  // v22. The writer rejects models with `v22Raw` set — there's no spec
+  // for re-emitting v22 yet.
+  v22Raw?: ParsedTrafficDataV22Raw;
 };
 
 // =============================================================================
@@ -341,7 +436,12 @@ function readLightController(r: BinReader): TrafficLightController {
   return { mauTrafficLightIds, mauStopLineIds, mauStopLineHulls, muNumStopLines, muNumTrafficLights };
 }
 
-function readJunction(r: BinReader): TrafficJunctionLogicBox {
+// In v44 the bike-event index doesn't exist and that 4-byte slot is part of
+// the struct's trailing padding; v45 carved it out into a real i32 field.
+// The total junction size is 0x120 bytes either way.
+const JUNCTION_BIKE_INDEX_MIN_VERSION = 45;
+
+function readJunction(r: BinReader, version: number): TrafficJunctionLogicBox {
   const muID = r.readU32();
   const mauStateTimings: number[] = [];
   for (let i = 0; i < 16; i++) mauStateTimings.push(r.readU16());
@@ -352,10 +452,12 @@ function readJunction(r: BinReader): TrafficJunctionLogicBox {
   const muEventJunctionID = r.readU32();
   const miOfflineStartDataIndex = r.readI32();
   const miOnlineStartDataIndex = r.readI32();
-  const miBikeStartDataIndex = r.readI32();
+  const miBikeStartDataIndex =
+    version >= JUNCTION_BIKE_INDEX_MIN_VERSION ? r.readI32() : -1;
   const maTrafficLightControllers: TrafficLightController[] = [];
   for (let i = 0; i < 8; i++) maTrafficLightControllers.push(readLightController(r));
-  const _pad108 = readBytes(r, 8);
+  const trailingPadLen = version >= JUNCTION_BIKE_INDEX_MIN_VERSION ? 8 : 12;
+  const _pad108 = readBytes(r, trailingPadLen);
   const mPosition = readVec4(r);
   return {
     muID, mauStateTimings, mauStoppedLightStates, muNumStates, muNumLights, _pad36,
@@ -387,7 +489,7 @@ function readLightTriggerStartData(r: BinReader): TrafficLightTriggerStartData {
   };
 }
 
-function readHull(r: BinReader): TrafficHull {
+function readHull(r: BinReader, version: number): TrafficHull {
   // Header (0x00 - 0x0F)
   const muNumSections = r.readU8();
   const muNumSectionSpans = r.readU8();
@@ -467,7 +569,7 @@ function readHull(r: BinReader): TrafficHull {
   const junctions: TrafficJunctionLogicBox[] = [];
   if (muNumJunctions > 0) {
     r.position = ptrJunctions;
-    for (let i = 0; i < muNumJunctions; i++) junctions.push(readJunction(r));
+    for (let i = 0; i < muNumJunctions; i++) junctions.push(readJunction(r, version));
   }
 
   const stopLines: TrafficStopLine[] = [];
@@ -536,14 +638,198 @@ function readLightType(r: BinReader): TrafficLightType {
 // Parsing
 // =============================================================================
 
+// Versions whose `BrnTraffic::TrafficData` outer layout is documented and
+// fully supported (parse + write + byte round-trip). v22 has a separate
+// read-only structural parser further down — it's deliberately not in
+// this set because writeTrafficDataData refuses to emit it.
+const SUPPORTED_TRAFFIC_VERSIONS = new Set<number>([44, 45]);
+// All versions the parser understands at all (including read-only v22).
+const PARSEABLE_TRAFFIC_VERSIONS = new Set<number>([22, 44, 45]);
+// Threshold above which the retail header layout (0x170 bytes, full
+// kill-zone / vehicle / TLC / paint tables) is in effect.
+const RETAIL_MIN_VERSION = 44;
+
+// v22 hull stride observed empirically in the Burnout 5 prototype X360
+// fixture — every adjacent pair of hull pointers in the table is exactly
+// 0x30 bytes apart. We don't claim to know which fields live inside.
+const V22_HULL_STRIDE = 0x30;
+// v22 inline header is exactly the bytes from offset 0 up to ptrPvs (0x30
+// in the only fixture we have); the trailing 12 bytes (0x24..0x2F) are
+// zero in the sample and treated as reserved/padding.
+const V22_HEADER_SIZE = 0x30;
+// v22 Pvs header is 0x30 bytes (vs 0x40 in retail) — retail's mCellSize
+// Vec4 is missing in v22; everything else lines up.
+const V22_PVS_HEADER_SIZE = 0x30;
+
+// Read-only structural parser for the v22 prototype TrafficData payload.
+// Exported alongside the main `parseTrafficDataData` dispatcher so callers
+// who already know they have a v22 payload can skip the version probe and
+// get the v22 fields directly via `result.v22Raw!`.
+export function parseTrafficDataV22(
+  data: Uint8Array,
+  littleEndian = false,
+): ParsedTrafficData {
+  return parseTrafficDataV22Internal(data, littleEndian);
+}
+
+// Internal implementation. Returns a `ParsedTrafficData` whose retail-shaped
+// collections are empty and whose `v22Raw` field carries everything we
+// managed to extract.
+function parseTrafficDataV22Internal(
+  data: Uint8Array,
+  littleEndian: boolean,
+): ParsedTrafficData {
+  const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  const r = new BinReader(buf, littleEndian);
+
+  // --- Header (0x30 bytes) ---
+  const muDataVersion = r.readU8();        // 0x00
+  /* pad */ r.readU8();                     // 0x01
+  const muNumHulls = r.readU16();           // 0x02
+  const muSizeInBytes = r.readU32();        // 0x04
+  const ptrPvs = r.readU32();               // 0x08
+  const ptrHulls = r.readU32();             // 0x0C
+  const ptrTailA = r.readU32();             // 0x10
+  const muNumFlowTypes = r.readU16();       // 0x14
+  const muNumVehicleTypes = r.readU16();    // 0x16
+  const ptrTailB = r.readU32();             // 0x18
+  const ptrTailC = r.readU32();             // 0x1C
+  const ptrTailD = r.readU32();             // 0x20
+  // 0x24..0x2F: 12 reserved/padding bytes — skipped.
+
+  // --- Pvs ---
+  // The Pvs we observe at ptrPvs has the same conceptual shape as retail
+  // minus the forward `mCellSize` Vec4 (only mGridMin + mRecipCellSize +
+  // 4 u32s). Verified by walking the hullPvsSets that follow it: when
+  // parsed at the v22 stride, the per-cell hull-id arrays decode as
+  // sensible u16 indices.
+  r.position = ptrPvs;
+  const mGridMin = readVec4(r);
+  const mRecipCellSize = readVec4(r);
+  const muNumCells_X = r.readU32();
+  const muNumCells_Z = r.readU32();
+  const muNumCells = r.readU32();
+  const ptrHullPvs = r.readU32();
+  const hullPvsSets: PvsHullSet[] = [];
+  if (muNumCells > 0) {
+    // The fixture has ptrHullPvs == 0 even though muNumCells > 0 — the
+    // sets follow inline immediately after the Pvs header. Use the
+    // current cursor when ptrHullPvs is zero.
+    r.position = ptrHullPvs !== 0 ? ptrHullPvs : ptrPvs + V22_PVS_HEADER_SIZE;
+    for (let i = 0; i < muNumCells; i++) hullPvsSets.push(readPvsHullSet(r));
+  }
+
+  // --- Hull pointer table + per-hull raw bytes ---
+  const hullPointers: number[] = [];
+  if (muNumHulls > 0) {
+    r.position = ptrHulls;
+    for (let i = 0; i < muNumHulls; i++) hullPointers.push(r.readU32());
+  }
+  const hullsRaw: Uint8Array[] = hullPointers.map((p) => {
+    if (p + V22_HULL_STRIDE > data.byteLength) return new Uint8Array(0);
+    return data.slice(p, p + V22_HULL_STRIDE);
+  });
+
+  // --- Tail regions ---
+  // Slice each tail by the distance to the next-higher header pointer (or
+  // end-of-file for the last one). The four tails are positional names
+  // only — we don't claim semantics for them yet.
+  const tailPtrs = [ptrTailA, ptrTailB, ptrTailC, ptrTailD]
+    .filter((p) => p > 0)
+    .sort((a, b) => a - b);
+  const sliceTail = (p: number): Uint8Array => {
+    if (p === 0 || p >= data.byteLength) return new Uint8Array(0);
+    const idx = tailPtrs.indexOf(p);
+    const end = idx >= 0 && idx + 1 < tailPtrs.length
+      ? tailPtrs[idx + 1]
+      : Math.min(muSizeInBytes, data.byteLength);
+    return data.slice(p, end);
+  };
+
+  return {
+    muDataVersion,
+    muSizeInBytes,
+    pvs: {
+      mGridMin,
+      mCellSize: { x: 0, y: 0, z: 0, w: 0 }, // not stored in v22
+      mRecipCellSize,
+      muNumCells_X,
+      muNumCells_Z,
+      muNumCells,
+      hullPvsSets,
+    },
+    hulls: [],
+    flowTypes: [],
+    killZoneIds: [],
+    killZones: [],
+    killZoneRegions: [],
+    vehicleTypes: [],
+    vehicleTypesUpdate: [],
+    vehicleAssets: [],
+    vehicleTraits: [],
+    trafficLights: {
+      posAndYRotations: [],
+      instanceIDs: [],
+      instanceTypes: [],
+      trafficLightTypes: [],
+      coronaTypes: [],
+      coronaPositions: [],
+      mauInstanceHashOffsets: new Array(129).fill(0),
+      instanceHashTable: [],
+      instanceHashToIndexLookup: [],
+    },
+    paintColours: [],
+    v22Raw: {
+      ptrPvs,
+      ptrHulls,
+      ptrTailA,
+      muNumFlowTypes,
+      muNumVehicleTypes,
+      ptrTailB,
+      ptrTailC,
+      ptrTailD,
+      pvs: {
+        mGridMin,
+        mRecipCellSize,
+        muNumCells_X,
+        muNumCells_Z,
+        muNumCells,
+        ptrHullPvs,
+        hullPvsSets,
+      },
+      hullPointers,
+      hullsRaw,
+      tailABytes: sliceTail(ptrTailA),
+      tailBBytes: sliceTail(ptrTailB),
+      tailCBytes: sliceTail(ptrTailC),
+      tailDBytes: sliceTail(ptrTailD),
+    },
+  };
+}
+
 export function parseTrafficDataData(data: Uint8Array, littleEndian = true): ParsedTrafficData {
   const r = new BinReader(
     data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
     littleEndian,
   );
 
-  // --- TrafficData header (0x170 bytes) ---
-  const muDataVersion = r.readU8();        // 0x0
+  // --- Version dispatch ---
+  // Peek the version byte without advancing past the header.
+  const muDataVersion = r.readU8();
+  r.position = 0;
+  if (!PARSEABLE_TRAFFIC_VERSIONS.has(muDataVersion)) {
+    throw new Error(
+      `TrafficData.parse: unsupported data version ${muDataVersion} (0x${muDataVersion.toString(16)}). ` +
+        `Parseable: ${[...PARSEABLE_TRAFFIC_VERSIONS].join(', ')} ` +
+        `(read+write: ${[...SUPPORTED_TRAFFIC_VERSIONS].join(', ')}; read-only structural: 22).`,
+    );
+  }
+  if (muDataVersion < RETAIL_MIN_VERSION) {
+    return parseTrafficDataV22Internal(data, littleEndian);
+  }
+  // Retail (v44/v45) — fall through to the inline parser below. Re-skip
+  // the version byte we peeked.
+  r.readU8();
   /* pad */ r.readU8();                     // 0x1
   const muNumHulls = r.readU16();           // 0x2
   const muSizeInBytes = r.readU32();        // 0x4
@@ -568,8 +854,18 @@ export function parseTrafficDataData(data: Uint8Array, littleEndian = true): Par
   // --- Inline TrafficLightCollection at 0x3C (0x12C bytes) ---
   const tlcNumLights = r.readU16();        // 0x3C + 0x0
   const tlcNumLightTypes = r.readU16();    // 0x3C + 0x2
-  const tlcNumCoronas = r.readU16();       // 0x3C + 0x4
-  /* pad */ r.readU16();                    // 0x3C + 0x6
+  // muNumCoronas is u16 in v45 but u8 (with 3 bytes trailing pad) in v44.
+  // Field width was widened in the v44→v45 transition; this matters for
+  // big-endian bundles, where reading the v44 bytes as a v45 u16 would
+  // misinterpret a one-byte value of 21 as 0x1500 (5376).
+  let tlcNumCoronas: number;
+  if (muDataVersion >= 45) {
+    tlcNumCoronas = r.readU16();           // 0x3C + 0x4 (u16 + u16 pad)
+    /* pad */ r.readU16();                  // 0x3C + 0x6
+  } else {
+    tlcNumCoronas = r.readU8();            // 0x3C + 0x4 (u8 + 3 pad)
+    /* pad */ readBytes(r, 3);              // 0x3C + 0x5..0x7
+  }
   const ptrTlcPosYRot = r.readU32();      // 0x3C + 0x8
   const ptrTlcInstanceIDs = r.readU32();   // 0x3C + 0xC
   const ptrTlcInstanceTypes = r.readU32(); // 0x3C + 0x10
@@ -616,7 +912,7 @@ export function parseTrafficDataData(data: Uint8Array, littleEndian = true): Par
     for (let i = 0; i < muNumHulls; i++) hullPtrs.push(r.readU32());
     for (let i = 0; i < muNumHulls; i++) {
       r.position = hullPtrs[i];
-      hulls.push(readHull(r));
+      hulls.push(readHull(r, muDataVersion));
     }
   }
 
@@ -867,7 +1163,7 @@ function writeLightController(w: BinWriter, lc: TrafficLightController) {
   w.writeU8(lc.muNumTrafficLights);
 }
 
-function writeJunction(w: BinWriter, j: TrafficJunctionLogicBox) {
+function writeJunction(w: BinWriter, j: TrafficJunctionLogicBox, version: number) {
   w.writeU32(j.muID);
   for (const t of j.mauStateTimings) w.writeU16(t);
   for (const s of j.mauStoppedLightStates) w.writeU8(s);
@@ -877,14 +1173,17 @@ function writeJunction(w: BinWriter, j: TrafficJunctionLogicBox) {
   w.writeU32(j.muEventJunctionID);
   w.writeI32(j.miOfflineStartDataIndex);
   w.writeI32(j.miOnlineStartDataIndex);
-  w.writeI32(j.miBikeStartDataIndex);
+  if (version >= JUNCTION_BIKE_INDEX_MIN_VERSION) {
+    w.writeI32(j.miBikeStartDataIndex);
+  }
   for (let i = 0; i < 8; i++) {
     writeLightController(w, j.maTrafficLightControllers[i] ?? {
       mauTrafficLightIds: [0, 0], mauStopLineIds: [0, 0, 0, 0, 0, 0],
       mauStopLineHulls: [0, 0, 0, 0, 0, 0], muNumStopLines: 0, muNumTrafficLights: 0,
     });
   }
-  writeBytes(w, j._pad108, 8);
+  const trailingPadLen = version >= JUNCTION_BIKE_INDEX_MIN_VERSION ? 8 : 12;
+  writeBytes(w, j._pad108, trailingPadLen);
   writeVec4(w, j.mPosition);
 }
 
@@ -928,7 +1227,7 @@ function writeLightType(w: BinWriter, lt: TrafficLightType) {
  * the fixed-16-entry `mauVehicleAssets` slots are populated", not the
  * array length (the array is always 16).
  */
-function writeHullBlock(w: BinWriter, hull: TrafficHull, hullOff: number) {
+function writeHullBlock(w: BinWriter, hull: TrafficHull, hullOff: number, version: number) {
   // Header (0x00 - 0x0F) — counts derived from array lengths
   w.writeU8(hull.sections.length);
   w.writeU8(hull.sectionSpans.length);
@@ -978,7 +1277,7 @@ function writeHullBlock(w: BinWriter, hull: TrafficHull, hullOff: number) {
 
   w.align16();
   w.setU32(hullOff + 0x2C, w.offset); // junctions
-  for (const j of hull.junctions) writeJunction(w, j);
+  for (const j of hull.junctions) writeJunction(w, j, version);
 
   w.align16();
   w.setU32(hullOff + 0x30, w.offset); // stopLines
@@ -1036,6 +1335,20 @@ function writeFlowTypeBlock(w: BinWriter, ft: TrafficFlowType, ftOff: number) {
 // =============================================================================
 
 export function writeTrafficDataData(model: ParsedTrafficData, littleEndian = true): Uint8Array {
+  if (model.v22Raw) {
+    throw new Error(
+      `TrafficData.write: cannot write v22 prototype payload — the parser is read-only ` +
+        `for that version (no on-disk spec for hull contents or tail regions). ` +
+        `Drop the \`v22Raw\` field if you intended to write a retail bundle instead.`,
+    );
+  }
+  if (!SUPPORTED_TRAFFIC_VERSIONS.has(model.muDataVersion)) {
+    throw new Error(
+      `TrafficData.write: unsupported data version ${model.muDataVersion}. ` +
+        `Supported: ${[...SUPPORTED_TRAFFIC_VERSIONS].join(', ')}.`,
+    );
+  }
+  const version = model.muDataVersion;
   // Validate paired-array invariants (header stores one count for both)
   if (model.killZoneIds.length !== model.killZones.length) {
     throw new Error(
@@ -1087,11 +1400,18 @@ export function writeTrafficDataData(model: ParsedTrafficData, littleEndian = tr
   w.writeU32(0);                              // 0x30 mpaVehicleTypesUpdate
   w.writeU32(0);                              // 0x34 mpaVehicleAssets
   w.writeU32(0);                              // 0x38 mpaVehicleTraits
-  // Inline TLC (0x3C)
+  // Inline TLC (0x3C). v44 stores muNumCoronas as u8 + 3 bytes pad; v45
+  // widened it to u16 + u16 pad. See parser comment above for why this
+  // matters for big-endian round-trip.
   w.writeU16(tlc.posAndYRotations.length);    // 0x3C muNumTrafficLights
   w.writeU16(tlc.trafficLightTypes.length);   // 0x3E muNumTrafficLightTypes
-  w.writeU16(tlc.coronaTypes.length);         // 0x40 muNumCoronas
-  w.writeU16(0);                              // 0x42 pad
+  if (version >= 45) {
+    w.writeU16(tlc.coronaTypes.length);       // 0x40 muNumCoronas (u16)
+    w.writeU16(0);                            // 0x42 pad
+  } else {
+    w.writeU8(tlc.coronaTypes.length);        // 0x40 muNumCoronas (u8)
+    w.writeU8(0); w.writeU8(0); w.writeU8(0); // 0x41..0x43 pad
+  }
   w.writeU32(0);                              // 0x44 mpaPosAndYRotations
   w.writeU32(0);                              // 0x48 mpaInstanceIDs
   w.writeU32(0);                              // 0x4C mpauInstanceTypes
@@ -1132,7 +1452,7 @@ export function writeTrafficDataData(model: ParsedTrafficData, littleEndian = tr
       w.align16();
       const hullOff = w.offset;
       w.setU32(hullTableOff + i * 4, hullOff);
-      writeHullBlock(w, model.hulls[i], hullOff);
+      writeHullBlock(w, model.hulls[i], hullOff, version);
     }
   }
 
