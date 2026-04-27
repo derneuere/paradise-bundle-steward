@@ -133,7 +133,7 @@ These describe how each neighbour zone should be loaded relative to the player's
 
 ## Layout in memory
 
-Confirmed by inspection of `example/PVS.BNDL` (single resource named `"newgrid"`, 32-bit, little-endian, 428 zones, 1712 points) and `example/older builds/PVS.BNDL` (Burnout 5 Nov 13 2006 / Feb 22 2007 X360 prototype, big-endian, 369 zones, 1476 points, wrapped in a Bundle V1 (`bndl`) container). Sections appear on disk in this order, **not** the order the wiki implies:
+Confirmed by inspection of `example/PVS.BNDL` (single resource named `"newgrid"`, 32-bit, little-endian, 428 zones, 1712 points) and `example/older builds/PVS.BNDL` (Burnout 5 Feb 22 2007 X360 prototype, big-endian, 369 zones, 1476 points, wrapped in a Bundle V1 (`bndl`) container — see [the Nov 13 2006 variant](#nov-13-2006-prototype-variant) below for an earlier layout we don't yet support). Sections appear on disk in this order, **not** the order the wiki implies:
 
 | # | Section | Offset (this fixture) | Size formula | Notes |
 |---|---|---|---|---|
@@ -156,13 +156,29 @@ The steward parser stores the trailing 8 bytes as `_padA` / `_padB` (two `f32`s)
 
 For byte-exact round-trip the writer packs neighbours in **zone-index order, safe block then unsafe block per zone**. `mpSafeNeighbours` / `mpUnsafeNeighbours` point at the start of each respective slice (or `0` when the count is zero). This matches the Bundle-Manager reference implementation and is what `example/PVS.BNDL` does on disk.
 
-### Prototype-build quirks (Nov 13 / Feb 22)
+### Feb 22 2007 prototype quirks
 
-The BND1 prototype fixture exercises two layout edge cases the retail PC fixture never hits — both purely cosmetic but required for byte-exact round-trip:
+The BND1 prototype fixture exercises three layout edge cases the retail PC fixture never hits — all purely cosmetic but required for byte-exact round-trip:
 
-- **Orphan Neighbour records in the pool.** In some zones the bytes immediately after the zone's safe+unsafe blocks contain a few extra 16-byte records that look like Neighbour entries (valid `mpZone` pointer, `muFlags = E_NEIGHBOURFLAG_RENDER`, zero pad) but no zone's `mpSafeNeighbours` / `mpUnsafeNeighbours` ever points at them. The Nov 13 fixture has 3 such orphans (48 bytes total). Likely leftovers from authoring-tool zone deletion. The parser captures these as a per-zone `_trailingNeighbourPad: Uint8Array` and the writer re-emits them verbatim. Retail's pool is fully contiguous so the field is empty there.
-- **`zonePointCounts` aligned to 16.** Retail has 428 zones (`428 × 4 = 1712` bytes for `zonePointStarts`, naturally 16-aligned) so no padding is needed between starts and counts. The Nov 13 fixture has 369 zones (`1476 % 16 = 4`) so the format pads with 12 zero bytes to align `zonePointCounts` to 16. The writer always pads to 16 here — benign for retail (zero pad) and necessary for prototypes.
-- **Non-zero trailing tail.** The 14-byte trailing pad in the Nov 13 fixture is filled with `0x04` bytes (over-allocated authoring leftover) instead of zero. Captured as an optional `_finalPad: Uint8Array` on `ParsedZoneList`; absent when the writer should emit the standard zero pad.
+- **Orphan Neighbour records in the pool.** In some zones the bytes immediately after the zone's safe+unsafe blocks contain a few extra 16-byte records that look like Neighbour entries (valid `mpZone` pointer, `muFlags = E_NEIGHBOURFLAG_RENDER`, zero pad) but no zone's `mpSafeNeighbours` / `mpUnsafeNeighbours` ever points at them. The Feb 22 2007 fixture has 3 such orphans (48 bytes total). Likely leftovers from authoring-tool zone deletion. The parser captures these as a per-zone `_trailingNeighbourPad: Uint8Array` and the writer re-emits them verbatim. Retail's pool is fully contiguous so the field is empty there.
+- **`zonePointCounts` aligned to 16.** Retail has 428 zones (`428 × 4 = 1712` bytes for `zonePointStarts`, naturally 16-aligned) so no padding is needed between starts and counts. The Feb 22 2007 fixture has 369 zones (`1476 % 16 = 4`) so the format pads with 12 zero bytes to align `zonePointCounts` to 16. The writer always pads to 16 here — benign for retail (zero pad) and necessary for prototypes.
+- **Non-zero trailing tail.** The 14-byte trailing pad in the Feb 22 2007 fixture is filled with `0x04` bytes (over-allocated authoring leftover) instead of zero. Captured as an optional `_finalPad: Uint8Array` on `ParsedZoneList`; absent when the writer should emit the standard zero pad.
+
+### Nov 13 2006 prototype variant
+
+[burnout.wiki/wiki/Zone_List](https://burnout.wiki/wiki/Zone_List) (Versions section) documents an earlier ZoneList layout used in the Nov 13 2006 Burnout 5 prototype: muFlags hadn't been added to neighbours yet, so neighbours had no dedicated struct. Instead, `mpSafeNeighbours` / `mpUnsafeNeighbours` pointed at flat arrays of `Zone**` (4 bytes per entry, just a pointer to a Zone). The dedicated `Neighbour` struct (16 bytes: pointer + flags + 8 bytes pad) didn't appear until the Feb 22 2007 build.
+
+The Zone record itself is the same shape (`0x30` bytes, identical fields) in both versions — the only difference is the **stride and contents of the neighbour pool**:
+
+| Aspect | Nov 13 2006 | Feb 22 2007 (current code) |
+|---|---|---|
+| Neighbour pool stride | 4 bytes (`Zone*` per entry) | 16 bytes (`Neighbour` struct) |
+| Per-neighbour flags | none | `RENDER` / `IMMEDIATE` |
+| `Zone` record size | `0x30` | `0x30` (same) |
+| `miZoneType` | always 0 | always 0 |
+| `muFlags` (zone-level) | always 0 | always 0 (still unused) |
+
+We don't have a Nov 13 2006 fixture, so the parser **errors cleanly** when it sees one — `parseZoneListData` divides the on-disk pool span by `Σ(safeCount + unsafeCount)` and throws if the result is closer to 4 than 16. Adding read support is straightforward (read 4 bytes per neighbour, leave `muFlags = 0`); writing back to a Nov 13 file would require a `bnd1Version` switch since the writer's pool layout would differ.
 
 ### Pointer resolution
 

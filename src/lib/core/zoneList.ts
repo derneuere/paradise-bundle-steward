@@ -63,7 +63,7 @@ export type Zone = {
 	// Bytes that sit IMMEDIATELY AFTER this zone's safe+unsafe blocks in the
 	// neighbour pool, before the next zone's blocks begin (or before the
 	// points section, for the last zone). Almost always empty in retail —
-	// retail packs blocks contiguously. Non-empty in some Nov 13 / Feb 22
+	// retail packs blocks contiguously. Non-empty in some Feb 22 2007
 	// prototype zones where the pool contains orphan Neighbour records
 	// (valid-looking 16-byte slots that no zone's mpSafe/mpUnsafe references)
 	// — likely leftovers from deleted-zone cleanup. Preserved verbatim for
@@ -74,11 +74,11 @@ export type Zone = {
 export type ParsedZoneList = {
 	zones: Zone[];
 	// Trailing padding after the zonePointCounts table, up to a 16-byte
-	// boundary. Retail pads with zeros (the writer's default); some Nov 13 /
-	// Feb 22 prototype builds leave non-zero leftovers (looks like
-	// over-allocated i16=4 count entries — possibly authoring-tool cruft).
-	// Preserved verbatim for byte-exact round-trip; defaults to zeros when a
-	// caller constructs a ParsedZoneList from scratch.
+	// boundary. Retail pads with zeros (the writer's default); the Feb 22 2007
+	// prototype build leaves non-zero leftovers (looks like over-allocated
+	// i16=4 count entries — possibly authoring-tool cruft). Preserved verbatim
+	// for byte-exact round-trip; defaults to zeros when a caller constructs a
+	// ParsedZoneList from scratch.
 	_finalPad?: Uint8Array;
 };
 
@@ -165,6 +165,36 @@ export function parseZoneListData(raw: Uint8Array, littleEndian = true): ParsedZ
 			miZoneType, miNumPoints, miNumSafe, miNumUnsafe, muFlags,
 			_pad24: [_pad24a, _pad24b, _pad24c],
 		});
+	}
+
+	// Detect the Nov 13 2006 prototype layout (per burnout.wiki/wiki/Zone_List
+	// "Versions" section). In that build, mpSafeNeighbours / mpUnsafeNeighbours
+	// pointed at an array of `Zone**` (4 bytes per entry, no flags) instead of
+	// the 16-byte Neighbour struct that landed by Feb 22 2007. The Zone record
+	// itself is the same shape, so we have to peek the pool's stride to tell
+	// the two apart. The pool sits between the zone array and the points
+	// section, so dividing the span by the total neighbour count gives 16 for
+	// Feb 22+ data and 4 for Nov 13 data.
+	{
+		const zonesEnd = ptrZones + muTotalZones * ZONE_RECORD_SIZE_32;
+		const poolSpan = ptrPoints - zonesEnd;
+		let totalNeighbours = 0;
+		for (const rz of rawZones) totalNeighbours += rz.miNumSafe + rz.miNumUnsafe;
+		if (totalNeighbours > 0 && poolSpan > 0) {
+			const bytesPerNeighbour = poolSpan / totalNeighbours;
+			// Tolerance accounts for the 0..15 bytes of alignment pad between
+			// the pool and the points section. With thousands of neighbours
+			// the rounding error is negligible; even a 100-neighbour bundle
+			// only drifts by ~0.15.
+			if (bytesPerNeighbour > 3 && bytesPerNeighbour < 5) {
+				throw new Error(
+					'ZoneList: this fixture looks like the 2006-11-13 prototype layout ' +
+					'(neighbour pool ≈ 4 bytes/record, no muFlags field). Only the ' +
+					'2007-02-22+ layout (16-byte Neighbour struct with flags) is ' +
+					'supported. See docs/zone-list-spec.md for the spec.',
+				);
+			}
+		}
 	}
 
 	// Map a Zone* pointer to its zone index. Pointers are stored as raw byte
@@ -346,7 +376,7 @@ export function writeZoneListData(model: ParsedZoneList, littleEndian = true): U
 	const offZonePointStarts = offPoints + pointsByteLength;
 	// Align zonePointCounts to 16. Retail's count is naturally aligned (1712 zones
 	// → 1712 × 4 = 6848 bytes, divisible by 16), so retail bytes are unchanged;
-	// the Nov 13 prototype's 369-zone payload requires 12 bytes of pad here.
+	// the Feb 22 2007 prototype's 369-zone payload requires 12 bytes of pad here.
 	const startsByteLength = muTotalZones * 4;
 	const startsToCountsPad = startsByteLength % 16 === 0 ? 0 : 16 - (startsByteLength % 16);
 	const offZonePointCounts = offZonePointStarts + startsByteLength + startsToCountsPad;

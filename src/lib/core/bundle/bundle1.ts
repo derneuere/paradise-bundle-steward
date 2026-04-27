@@ -1,7 +1,7 @@
 // Bundle V1 ('bndl') reader + writer.
 //
 // Container used by Criterion's pre-release dev builds: Black 2 (2006-06-29)
-// up to Burnout 5 (2007-02-22 prototype). Distinct from Bundle 2 ('bnd2')
+// up to Burnout 5 (Feb 22 2007 prototype). Distinct from Bundle 2 ('bnd2')
 // which shipped in retail. The two formats wrap the *same* resource payloads
 // (e.g. ZoneList type 0xB000 is byte-identical inside either container —
 // only endianness flips), so this module deliberately reuses the existing

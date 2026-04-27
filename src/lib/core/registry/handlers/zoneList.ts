@@ -14,7 +14,7 @@ export const zoneListHandler: ResourceHandler<ParsedZoneList> = {
 	description: 'PVS streaming zones — polygonal cells with safe/unsafe neighbour lists for track-unit loading',
 	category: 'Data',
 	// PC + X360 are both fixture-validated (retail PC PVS.BNDL byte-exact;
-	// Nov 13 2006 X360 PVS.BNDL byte-exact through the BND1 wrapper).
+	// Feb 22 2007 X360 PVS.BNDL byte-exact through the BND1 wrapper).
 	caps: { read: true, write: true, writePlatforms: [HANDLER_PLATFORM.PC, HANDLER_PLATFORM.XBOX360] },
 
 	parseRaw(raw, ctx) {
@@ -35,9 +35,13 @@ export const zoneListHandler: ResourceHandler<ParsedZoneList> = {
 
 	fixtures: [
 		{ bundle: 'example/PVS.BNDL', expect: { parseOk: true, byteRoundTrip: true } },
-		// Nov 13 2006 / Feb 22 2007 prototype builds: same ZoneList payload
-		// layout as retail (byte-identical with endianness flipped to BE),
-		// wrapped in the older Bundle V1 ('bndl') container instead of BND2.
+		// Feb 22 2007 prototype build: ZoneList payload is byte-identical with
+		// retail (just endianness flipped to BE), wrapped in the older Bundle V1
+		// ('bndl') container instead of BND2. The earlier Nov 13 2006 prototype
+		// uses a different neighbour-pool layout (4-byte Zone** array, no flags
+		// field — see docs/zone-list-spec.md "Nov 13 2006 variant"); we don't
+		// have a fixture for it so it isn't supported, but the parser detects
+		// and rejects it cleanly.
 		{ bundle: 'example/older builds/PVS.BNDL', expect: { parseOk: true, byteRoundTrip: true } },
 	],
 };

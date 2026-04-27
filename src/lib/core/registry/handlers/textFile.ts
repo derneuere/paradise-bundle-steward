@@ -1,7 +1,7 @@
 // TextFile registry handler — wraps parseTextFileData / writeTextFileData.
 //
-// Used only by Bundle V1 ('bndl') prototype builds (Burnout 5 Nov 13 2006 /
-// Feb 22 2007) to store BundleImports debug XML. Retail Bundle 2 bundles
+// Used only by Bundle V1 ('bndl') prototype builds (Burnout 5 Feb 22 2007 and
+// earlier dev builds) to store BundleImports debug XML. Retail Bundle 2 bundles
 // don't carry this type, so this handler exists primarily to make
 // cross-container conversion (BND1 → BND2) of the older PVS fixture work
 // without needing the `--allow-unknown` escape hatch.
