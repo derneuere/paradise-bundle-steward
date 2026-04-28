@@ -18,7 +18,13 @@ import type { NodePath } from '@/lib/schema/walk';
 import * as THREE from 'three';
 import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
-import { duplicateSectionThroughEdge } from '@/lib/core/aiSectionsOps';
+import {
+	duplicateSectionThroughEdge,
+	translateCornerWithShared,
+	translateSectionWithLinks,
+} from '@/lib/core/aiSectionsOps';
+import { TranslateGizmo, type GizmoOffset } from '@/components/common/three/TranslateGizmo';
+import { CornerHandles, type CornerDragOffset } from './CornerHandles';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -333,8 +339,11 @@ const portalMat = new THREE.MeshStandardMaterial({ color: 0x33cccc, roughness: 0
 const portalSelMat = new THREE.MeshStandardMaterial({ color: 0xffaa33, roughness: 0.4, metalness: 0.2, emissive: 0x664400, emissiveIntensity: 0.5 });
 
 function SelectedSectionDetail({
-	data, sectionIndex, selected, onSelect, hoveredEdge, onHoverEdge, onEdgeContextMenu,
+	section: sec, data, sectionIndex, selected, onSelect, hoveredEdge, onHoverEdge, onEdgeContextMenu,
 }: {
+	/** The section to render. During a translate-drag this is the previewed
+	 *  (offset-applied) copy, otherwise it's `data.sections[sectionIndex]`. */
+	section: AISection;
 	data: ParsedAISections;
 	sectionIndex: number;
 	selected: AISectionSelection;
@@ -343,7 +352,6 @@ function SelectedSectionDetail({
 	onHoverEdge: (edgeIdx: number | null) => void;
 	onEdgeContextMenu: (edgeIdx: number, screenX: number, screenY: number) => void;
 }) {
-	const sec = data.sections[sectionIndex];
 	if (!sec) return null;
 
 	return (
@@ -661,25 +669,149 @@ function EdgeContextMenu({
 // Main viewport component
 // ---------------------------------------------------------------------------
 
+// While a drag is in flight we keep the live offset in local state so the
+// underlying model isn't touched until release — one drag commits as one
+// undo entry. Two distinct drag flavours can be active (the gizmo translates
+// the whole section; the corner handles deform the polygon), so we model it
+// as a discriminated union with mutual exclusion.
+type ActiveDrag =
+	| { kind: 'section'; offset: GizmoOffset }
+	| { kind: 'corner'; cornerIdx: number; offset: CornerDragOffset };
+
 export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, onSelect }) => {
 	const [hovered, setHovered] = useState<AISectionSelection>(null);
 	const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
 	const [edgeMenu, setEdgeMenu] = useState<
 		{ x: number; y: number; sectionIndex: number; edgeIdx: number } | null
 	>(null);
+	const [drag, setDrag] = useState<ActiveDrag | null>(null);
 	const { center, radius } = useMemo(() => computeBounds(data), [data]);
 	const camDistance = radius * 1.5;
 
 	const selSection = selected ? data.sections[selected.sectionIndex] : null;
 	const hovSection = hovered ? data.sections[hovered.sectionIndex] : null;
 
-	// Reset transient edge UI when the selected section changes — otherwise a
-	// hover/menu from the previous selection could "leak" onto a different
-	// section's polygon.
+	// While a drag is in flight, run the relevant op on the live offset to
+	// derive a preview model. Used for the selection overlay on the source
+	// AND for highlighted neighbours that the smart-cascade affects, so the
+	// user sees the move in real time. We don't replace `data` in
+	// BatchedSections — that would rebuild ~8000 sections of geometry every
+	// frame. The per-section overlays are cheap and only touch the affected
+	// sections.
+	const previewModel: ParsedAISections | null = useMemo(() => {
+		if (!selected || !selSection || !drag) return null;
+		if (drag.offset.x === 0 && drag.offset.z === 0) return null;
+		try {
+			if (drag.kind === 'section') {
+				return translateSectionWithLinks(data, selected.sectionIndex, drag.offset);
+			}
+			return translateCornerWithShared(
+				data,
+				selected.sectionIndex,
+				drag.cornerIdx,
+				drag.offset,
+			);
+		} catch {
+			return null;
+		}
+	}, [data, selected, selSection, drag]);
+
+	// The dragged section as it'll look on commit — used for the source
+	// selection layer (highlight, portals, edges, label, gizmo position).
+	const previewSection: AISection | null = useMemo(() => {
+		if (!selSection) return null;
+		if (!previewModel || !selected) return selSection;
+		return previewModel.sections[selected.sectionIndex] ?? selSection;
+	}, [selSection, previewModel, selected]);
+
+	// Indices of sections (other than the source) whose geometry the active
+	// op also touched. We diff the previewed model against the live `data`
+	// — any section that's no longer reference-equal was modified by the
+	// cascade. This works uniformly for both drag flavours: a section-drag
+	// cascade affects linked neighbours, a corner-drag cascade affects any
+	// section with a corner at the same world point.
+	const affectedNeighbours = useMemo(() => {
+		if (!previewModel || !selected) return [];
+		const out: { idx: number; section: AISection }[] = [];
+		for (let i = 0; i < previewModel.sections.length; i++) {
+			if (i === selected.sectionIndex) continue;
+			if (previewModel.sections[i] !== data.sections[i]) {
+				out.push({ idx: i, section: previewModel.sections[i] });
+			}
+		}
+		return out;
+	}, [previewModel, selected, data]);
+
+	// Gizmo origin: the section's centroid lifted slightly so the arrows
+	// hover above the polygon outline. Tracks the preview, so the gizmo
+	// follows the section as the user drags.
+	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
+		if (!previewSection || previewSection.corners.length === 0) return null;
+		let sx = 0, sz = 0;
+		for (const c of previewSection.corners) { sx += c.x; sz += c.y; }
+		const n = previewSection.corners.length;
+		return [sx / n, 1.5, sz / n];
+	}, [previewSection]);
+
+	// Gizmo and corner-handle sizes are screen-pixel targets — the components
+	// rescale themselves per frame against the camera distance, so zooming
+	// in or out keeps them at the same on-screen size and they don't
+	// occlude polygon edges when the user pulls the camera in close.
+	const gizmoPixelSize = 90;
+	const cornerHandlePixelSize = 12;
+
+	const handleGizmoTranslate = useCallback((offset: GizmoOffset) => {
+		setDrag({ kind: 'section', offset });
+	}, []);
+
+	const handleGizmoCommit = useCallback((offset: GizmoOffset) => {
+		setDrag(null);
+		if (!selected || (offset.x === 0 && offset.z === 0)) return;
+		// Smart move: cascades into every neighbour the source shares a
+		// portal with so paired-portal connections (and the corners on the
+		// shared edge) stay coherent. See translateSectionWithLinks for
+		// the cascade rules.
+		const next = translateSectionWithLinks(data, selected.sectionIndex, offset);
+		onChange(next);
+	}, [data, selected, onChange]);
+
+	const handleGizmoCancel = useCallback(() => {
+		setDrag(null);
+	}, []);
+
+	const handleCornerDrag = useCallback((cornerIdx: number, offset: CornerDragOffset) => {
+		setDrag({ kind: 'corner', cornerIdx, offset });
+	}, []);
+
+	const handleCornerCommit = useCallback(
+		(cornerIdx: number, offset: CornerDragOffset) => {
+			setDrag(null);
+			if (!selected || (offset.x === 0 && offset.z === 0)) return;
+			// Smart corner-drag: cascades into every coincident corner / BL
+			// endpoint elsewhere in the model. See translateCornerWithShared.
+			const next = translateCornerWithShared(
+				data,
+				selected.sectionIndex,
+				cornerIdx,
+				offset,
+			);
+			onChange(next);
+		},
+		[data, selected, onChange],
+	);
+
+	const handleCornerCancel = useCallback(() => {
+		setDrag(null);
+	}, []);
+
+	// Reset transient edge / drag UI when the selected section changes —
+	// otherwise stale state from the previous selection (a hover, an open
+	// menu, an in-flight drag) could leak onto the new section.
 	const selectedSectionIndex = selected?.sectionIndex ?? null;
 	useEffect(() => {
 		setHoveredEdge(null);
 		setEdgeMenu(null);
+		setDrag(null);
 	}, [selectedSectionIndex]);
 
 	const handleEdgeContextMenu = useCallback(
@@ -772,30 +904,71 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 					onHover={setHovered}
 				/>
 
-				{/* Selection highlight (1 section) */}
-				{selSection && <SelectionOverlay section={selSection} color="#ffaa33" />}
+				{/* Selection highlight (1 section). During a translate drag we
+				    render the highlight at the previewed (offset) position so
+				    the user sees where the section is heading; the underlying
+				    batched fill stays put until commit. */}
+				{previewSection && <SelectionOverlay section={previewSection} color="#ffaa33" />}
 				{hovSection && hovered?.sectionIndex !== selected?.sectionIndex && (
 					<SelectionOverlay section={hovSection} color="#66aaff" />
 				)}
 
+				{/* Neighbour cascade preview — every section linked to the source
+				    via a portal stretches its two corners on the shared edge to
+				    follow the drag. We render those previewed shapes as faint
+				    overlays so the user can see the cascade before committing. */}
+				{drag && affectedNeighbours.map(({ idx, section }) => (
+					<SelectionOverlay key={`cascade-${idx}`} section={section} color="#ddaa66" />
+				))}
+
 				{/* Labels */}
-				{selSection && selected && (
-					<SectionLabel section={selSection} index={selected.sectionIndex} color="#ffaa33" />
+				{previewSection && selected && (
+					<SectionLabel section={previewSection} index={selected.sectionIndex} color="#ffaa33" />
 				)}
 				{hovSection && hovered && hovered.sectionIndex !== selected?.sectionIndex && (
 					<SectionLabel section={hovSection} index={hovered.sectionIndex} color="#aaaaaa" />
 				)}
 
-				{/* Detail for selected section only */}
-				{selected && (
+				{/* Detail for selected section only — fed the previewed copy
+				    so portals, boundary lines, edges and the duplicate-edge
+				    handles all track the drag in lock-step with the highlight. */}
+				{selected && previewSection && (
 					<SelectedSectionDetail
-						data={data}
+						section={previewSection}
 						sectionIndex={selected.sectionIndex}
+						data={data}
 						selected={selected}
 						onSelect={onSelect}
 						hoveredEdge={hoveredEdge}
 						onHoverEdge={setHoveredEdge}
 						onEdgeContextMenu={handleEdgeContextMenu}
+					/>
+				)}
+
+				{/* Translate gizmo — only when a section is selected. Hidden
+				    while a corner drag is active so the two gestures don't
+				    visually compete. */}
+				{gizmoPosition && drag?.kind !== 'corner' && (
+					<TranslateGizmo
+						position={gizmoPosition}
+						pixelSize={gizmoPixelSize}
+						onTranslate={handleGizmoTranslate}
+						onCommit={handleGizmoCommit}
+						onCancel={handleGizmoCancel}
+					/>
+				)}
+
+				{/* Corner-drag handles — small spheres at each polygon corner.
+				    Hidden while the section gizmo is active for the same
+				    reason. The previewed section drives positions so each
+				    handle follows the cursor during its own drag. */}
+				{previewSection && drag?.kind !== 'section' && (
+					<CornerHandles
+						section={previewSection}
+						pixelSize={cornerHandlePixelSize}
+						onDrag={handleCornerDrag}
+						onCommit={handleCornerCommit}
+						onCancel={handleCornerCancel}
 					/>
 				)}
 

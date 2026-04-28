@@ -172,6 +172,273 @@ function nextFreeId(model: ParsedAISections): number {
 }
 
 // =============================================================================
+// Smart translate (with paired-portal cascade)
+// =============================================================================
+
+const POSITION_EPS = 1e-3;
+
+const v3Approx = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+	Math.abs(a.x - b.x) < POSITION_EPS &&
+	Math.abs(a.y - b.y) < POSITION_EPS &&
+	Math.abs(a.z - b.z) < POSITION_EPS;
+
+const v2Approx = (a: Vector2, b: Vector2) =>
+	Math.abs(a.x - b.x) < POSITION_EPS && Math.abs(a.y - b.y) < POSITION_EPS;
+
+/**
+ * Translate `srcIdx` by an XZ offset and cascade the move into every
+ * neighbour the section shares a portal with — preserving the connection
+ * geometry that the duplicate-through-edge operation set up:
+ *
+ *   - Source section: corners, portal positions, portal boundary lines, and
+ *     no-go lines all shift by `(dx, dz)`. Same as a plain translate.
+ *
+ *   - For each `srcIdx` portal `P` pointing at neighbour `N`:
+ *       - Find `N`'s reverse portal (the one whose `linkSection` is `srcIdx`
+ *         AND whose pre-translate `position` matches `P`'s pre-translate
+ *         `position`). Shift its `position` and every `boundaryLine.verts`
+ *         endpoint by `(dx, dz)` so the pair stays at one shared world
+ *         coordinate.
+ *       - Shift `N`'s corners that coincide with `P`'s pre-translate boundary
+ *         endpoints by `(dx, dz)`. Other corners on `N` stay put — `N`'s
+ *         polygon "stretches" rather than translating wholesale, which keeps
+ *         `N`'s OTHER edges (and the connections through them) stationary.
+ *
+ * Cross-references via `sectionResetPairs` are not touched — they reference
+ * sections by index, not by world position, so a translate doesn't break them.
+ *
+ * Cascades exactly one hop. A neighbour's neighbour is not adjusted, because
+ * that would require deciding which of N's corners are shared with N's other
+ * neighbours and propagating again — a recursion that doesn't terminate
+ * cleanly on graphs with cycles. Two-hop drift is the user's call to fix.
+ */
+export function translateSectionWithLinks(
+	model: ParsedAISections,
+	srcIdx: number,
+	offset: { x: number; z: number },
+): ParsedAISections {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	if (offset.x === 0 && offset.z === 0) return model;
+
+	const src = model.sections[srcIdx];
+	const dx = offset.x;
+	const dz = offset.z;
+
+	// --- Source: shift everything spatial. Mirrors the schema-driven
+	// translateRecordBySpatial walker, but inlined here so the smart-move
+	// path doesn't depend on the schema layer.
+	const srcTranslated: AISection = {
+		...src,
+		corners: src.corners.map((c) => ({ x: c.x + dx, y: c.y + dz })),
+		portals: src.portals.map((p) => ({
+			...p,
+			position: { x: p.position.x + dx, y: p.position.y, z: p.position.z + dz },
+			boundaryLines: p.boundaryLines.map((bl) => ({
+				verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+			})),
+		})),
+		noGoLines: src.noGoLines.map((bl) => ({
+			verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+		})),
+	};
+
+	// --- Neighbours: collect updates keyed by section index. We use a map
+	// so a neighbour linked through multiple portals only gets one merged
+	// update (each portal's fix-up applies on top of the running state).
+	const updates = new Map<number, AISection>();
+	updates.set(srcIdx, srcTranslated);
+
+	for (const oldPortal of src.portals) {
+		const targetIdx = oldPortal.linkSection;
+		if (targetIdx === srcIdx) continue;
+		if (targetIdx < 0 || targetIdx >= model.sections.length) continue;
+
+		const current = updates.get(targetIdx) ?? model.sections[targetIdx];
+		const fixed = applyLinkFixUp(current, srcIdx, oldPortal, dx, dz);
+		if (fixed !== current) updates.set(targetIdx, fixed);
+	}
+
+	const sections = model.sections.map((s, i) => updates.get(i) ?? s);
+	return { ...model, sections };
+}
+
+/**
+ * Apply the per-neighbour cascade: translate the matching reverse portal
+ * and the corners that lie on the shared edge.
+ */
+function applyLinkFixUp(
+	target: AISection,
+	srcIdx: number,
+	oldSrcPortal: Portal,
+	dx: number,
+	dz: number,
+): AISection {
+	// Find the reverse portal in `target`. We match by both `linkSection`
+	// and `position` so a neighbour with multiple portals back to `src`
+	// (rare but possible — two separate connections between A and B on
+	// different edges) updates the right one.
+	const matchIdx = target.portals.findIndex(
+		(p) => p.linkSection === srcIdx && v3Approx(p.position, oldSrcPortal.position),
+	);
+
+	let portals = target.portals;
+	if (matchIdx >= 0) {
+		const old = target.portals[matchIdx];
+		const updated: Portal = {
+			...old,
+			position: { x: old.position.x + dx, y: old.position.y, z: old.position.z + dz },
+			boundaryLines: old.boundaryLines.map((bl) => ({
+				verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+			})),
+		};
+		portals = target.portals.slice();
+		portals[matchIdx] = updated;
+	}
+
+	// Shift the corners that coincide with the source portal's pre-translate
+	// boundary-line endpoints. Each portal usually has exactly one boundary
+	// line (a single shared edge); we walk every BL anyway to handle the
+	// general case where a portal carries multiple lines.
+	const sharedPoints: Vector2[] = [];
+	for (const bl of oldSrcPortal.boundaryLines) {
+		sharedPoints.push({ x: bl.verts.x, y: bl.verts.y });
+		sharedPoints.push({ x: bl.verts.z, y: bl.verts.w });
+	}
+
+	let corners = target.corners;
+	if (sharedPoints.length > 0) {
+		let cornersChanged = false;
+		const next = target.corners.map((c) => {
+			if (sharedPoints.some((p) => v2Approx(c, p))) {
+				cornersChanged = true;
+				return { x: c.x + dx, y: c.y + dz };
+			}
+			return c;
+		});
+		if (cornersChanged) corners = next;
+	}
+
+	if (portals === target.portals && corners === target.corners) return target;
+	return { ...target, portals, corners };
+}
+
+// =============================================================================
+// Smart corner-drag (with shared-point cascade)
+// =============================================================================
+
+/**
+ * Move a single polygon corner by an XZ offset, dragging along every other
+ * value in the model that coincides with the OLD corner position:
+ *
+ *   - Corners on neighbouring sections that lie at the same world XZ point
+ *     (a "shared corner") move with us.
+ *   - Boundary-line endpoints (portal BLs and noGo lines) anywhere in the
+ *     model whose start- or end-point matches the old corner shift the
+ *     matching endpoint by the same delta.
+ *
+ * Portal `position` (the 3D anchor at an edge midpoint) is NOT moved — the
+ * midpoint relationship is the duplicate-through-edge op's choice, not a
+ * rule the user must keep. Adjusting the anchor based on a corner drag
+ * would clobber portals the user manually placed.
+ *
+ * Sections, portals, and lines whose endpoints don't reference the old
+ * corner stay structurally identical (===-equal) so React renderers can
+ * cheaply skip them.
+ *
+ * @throws RangeError if `srcIdx` or `cornerIdx` is out of range.
+ */
+export function translateCornerWithShared(
+	model: ParsedAISections,
+	srcIdx: number,
+	cornerIdx: number,
+	offset: { x: number; z: number },
+): ParsedAISections {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	const src = model.sections[srcIdx];
+	if (cornerIdx < 0 || cornerIdx >= src.corners.length) {
+		throw new RangeError(`cornerIdx ${cornerIdx} out of range [0, ${src.corners.length})`);
+	}
+	if (offset.x === 0 && offset.z === 0) return model;
+
+	const oldCorner = src.corners[cornerIdx];
+	const dx = offset.x;
+	const dz = offset.z;
+
+	const sections = model.sections.map((sec) => {
+		let cornersChanged = false;
+		const newCorners = sec.corners.map((c) => {
+			if (v2Approx(c, oldCorner)) {
+				cornersChanged = true;
+				return { x: c.x + dx, y: c.y + dz };
+			}
+			return c;
+		});
+
+		let portalsChanged = false;
+		const newPortals = sec.portals.map((p) => {
+			let blsChanged = false;
+			const newBLs = p.boundaryLines.map((bl) => {
+				const next = shiftBoundaryEndpointsAt(bl, oldCorner, dx, dz);
+				if (next !== bl) blsChanged = true;
+				return next;
+			});
+			if (!blsChanged) return p;
+			portalsChanged = true;
+			return { ...p, boundaryLines: newBLs };
+		});
+
+		let noGoChanged = false;
+		const newNoGo = sec.noGoLines.map((bl) => {
+			const next = shiftBoundaryEndpointsAt(bl, oldCorner, dx, dz);
+			if (next !== bl) noGoChanged = true;
+			return next;
+		});
+
+		if (!cornersChanged && !portalsChanged && !noGoChanged) return sec;
+		return {
+			...sec,
+			corners: cornersChanged ? newCorners : sec.corners,
+			portals: portalsChanged ? newPortals : sec.portals,
+			noGoLines: noGoChanged ? newNoGo : sec.noGoLines,
+		};
+	});
+
+	return { ...model, sections };
+}
+
+/**
+ * Return a new BoundaryLine with any endpoint that matches `point` shifted
+ * by `(dx, dz)`. Returns the original input (`===`-equal) when no endpoint
+ * matched, so callers can detect "no change" cheaply.
+ */
+function shiftBoundaryEndpointsAt(
+	bl: BoundaryLine,
+	point: Vector2,
+	dx: number,
+	dz: number,
+): BoundaryLine {
+	const startMatches =
+		Math.abs(bl.verts.x - point.x) < POSITION_EPS &&
+		Math.abs(bl.verts.y - point.y) < POSITION_EPS;
+	const endMatches =
+		Math.abs(bl.verts.z - point.x) < POSITION_EPS &&
+		Math.abs(bl.verts.w - point.y) < POSITION_EPS;
+	if (!startMatches && !endMatches) return bl;
+	return {
+		verts: {
+			x: startMatches ? bl.verts.x + dx : bl.verts.x,
+			y: startMatches ? bl.verts.y + dz : bl.verts.y,
+			z: endMatches ? bl.verts.z + dx : bl.verts.z,
+			w: endMatches ? bl.verts.w + dz : bl.verts.w,
+		},
+	};
+}
+
+// =============================================================================
 // Delete-section
 // =============================================================================
 

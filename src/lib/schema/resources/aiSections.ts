@@ -188,6 +188,10 @@ const BoundaryLine: RecordSchema = {
 		verts: {
 			label: 'Verts (startX, startY, endX, endY)',
 			description: 'Packs a 2D start point into (x, y) and a 2D end point into (z, w). The default vec4 editor shows them as plain xyzw — the semantics are positional, not spatial.',
+			// Both endpoints live on the same XZ plane as the section's
+			// corners, so a translate gizmo on the parent section shifts
+			// every boundary line uniformly.
+			spatial: 'segment2d-xz',
 		},
 	},
 	label: (value, index) => boundaryLineLabel(value, index ?? 0),
@@ -206,6 +210,10 @@ const Portal: RecordSchema = {
 			label: 'Position',
 			description: '3D anchor point of the portal in world space (Y-up display).',
 			swapYZ: true,
+			// Full 3D translate: dragging the parent section on the XZ plane
+			// shifts the portal anchor along with it. The gizmo passes
+			// `dy = 0`, so vertical position is preserved.
+			spatial: 'vec3',
 		},
 		linkSection: { description: 'Index of the section this portal leads to.' },
 	},
@@ -243,6 +251,9 @@ const AISection: RecordSchema = {
 		corners: {
 			label: 'Corners (Vector2[4])',
 			description: 'Four 2D points on the XZ plane forming the section polygon. Always 4 in retail data.',
+			// Each Vector2 stores `(worldX, worldZ)`. The translate walker
+			// shifts every corner by the gizmo's XZ delta.
+			spatial: 'vec2-xz',
 		},
 	},
 	propertyGroups: [

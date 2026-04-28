@@ -187,6 +187,24 @@ export type FieldMetadata = {
 	// independent (e.g., grid origins, AABB endpoints) — uniform scale
 	// only makes semantic sense for sizes / extents / dimensions.
 	linkable?: boolean;
+	/**
+	 * Tag fields that carry spatial coordinates so generic ops (translate,
+	 * eventually scale/rotate) can recognise them without per-resource code.
+	 *
+	 * Vocabulary:
+	 *   - `vec2-xz`       : Vector2 `{ x, y }` representing world `(X, Z)`
+	 *                       on the ground plane. Translating by `(dx, dy, dz)`
+	 *                       adds `dx` to `.x` and `dz` to `.y`.
+	 *   - `vec3`          : Vector3 in world space. Translates fully.
+	 *   - `segment2d-xz`  : Vector4 packing two 2D points on the XZ plane
+	 *                       as `(startX, startZ, endX, endZ)` in `(x, y, z, w)`.
+	 *                       Translating shifts both endpoints.
+	 *
+	 * Applies to either a primitive field directly or a `list<primitive>`
+	 * field (e.g., `corners: Vector2[]`) — in the list case the offset is
+	 * applied to every item.
+	 */
+	spatial?: 'vec2-xz' | 'vec3' | 'segment2d-xz';
 };
 
 // Property group — splits the inspector into tabs. A group can list fields,
