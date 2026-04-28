@@ -20,11 +20,14 @@ import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
 	duplicateSectionThroughEdge,
+	snapCornerOffset,
+	snapSectionOffset,
 	translateCornerWithShared,
 	translateSectionWithLinks,
 } from '@/lib/core/aiSectionsOps';
 import { TranslateGizmo, type GizmoOffset } from '@/components/common/three/TranslateGizmo';
 import { CornerHandles, type CornerDragOffset } from './CornerHandles';
+import { Magnet } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -277,7 +280,12 @@ function SelectionOverlay({ section, color }: { section: AISection; color: strin
 		}
 		shape.closePath();
 		const geo = new THREE.ShapeGeometry(shape);
-		geo.rotateX(-Math.PI / 2);
+		// Shape lives in 2D (x, y, 0). The corners' `y` field stores world Z,
+		// so we want the rotation that lands the shape's y onto world +Z.
+		// rotateX(+π/2) takes (x, y, 0) → (x, 0, y); rotateX(-π/2) flips Z
+		// and the fill ends up on the opposite side of the map from the
+		// outline (which uses [c.x, 0.4, c.y] directly).
+		geo.rotateX(Math.PI / 2);
 		return geo;
 	}, [section.corners]);
 
@@ -685,8 +693,31 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 		{ x: number; y: number; sectionIndex: number; edgeIdx: number } | null
 	>(null);
 	const [drag, setDrag] = useState<ActiveDrag | null>(null);
+	const [snapEnabled, setSnapEnabled] = useState(false);
 	const { center, radius } = useMemo(() => computeBounds(data), [data]);
 	const camDistance = radius * 1.5;
+
+	// Snap radius is a small fraction of the scene's bounding radius — for a
+	// typical AI bundle (~200 world-unit radius) this lands at ~4 units,
+	// which feels right when sections are 10–30 units across. Memoised so
+	// the per-frame drag callbacks don't recompute the multiply.
+	const snapRadius = useMemo(() => Math.max(radius * 0.02, 0.5), [radius]);
+
+	// `S` toggles snap mode. Skip when an editable element is focused so
+	// typing the letter into the inspector doesn't flip the toggle.
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key !== 's' && e.key !== 'S') return;
+			if (e.ctrlKey || e.metaKey || e.altKey) return;
+			const target = e.target as HTMLElement | null;
+			const tag = target?.tagName;
+			if (target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+			e.preventDefault();
+			setSnapEnabled((v) => !v);
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, []);
 
 	const selSection = selected ? data.sections[selected.sectionIndex] : null;
 	const hovSection = hovered ? data.sections[hovered.sectionIndex] : null;
@@ -760,44 +791,69 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 	const gizmoPixelSize = 90;
 	const cornerHandlePixelSize = 12;
 
-	const handleGizmoTranslate = useCallback((offset: GizmoOffset) => {
-		setDrag({ kind: 'section', offset });
-	}, []);
+	const handleGizmoTranslate = useCallback(
+		(offset: GizmoOffset) => {
+			const finalOffset =
+				snapEnabled && selected
+					? snapSectionOffset(data, selected.sectionIndex, offset, snapRadius)
+					: offset;
+			setDrag({ kind: 'section', offset: finalOffset });
+		},
+		[snapEnabled, selected, data, snapRadius],
+	);
 
-	const handleGizmoCommit = useCallback((offset: GizmoOffset) => {
-		setDrag(null);
-		if (!selected || (offset.x === 0 && offset.z === 0)) return;
-		// Smart move: cascades into every neighbour the source shares a
-		// portal with so paired-portal connections (and the corners on the
-		// shared edge) stay coherent. See translateSectionWithLinks for
-		// the cascade rules.
-		const next = translateSectionWithLinks(data, selected.sectionIndex, offset);
-		onChange(next);
-	}, [data, selected, onChange]);
+	const handleGizmoCommit = useCallback(
+		(offset: GizmoOffset) => {
+			setDrag(null);
+			if (!selected || (offset.x === 0 && offset.z === 0)) return;
+			const finalOffset = snapEnabled
+				? snapSectionOffset(data, selected.sectionIndex, offset, snapRadius)
+				: offset;
+			if (finalOffset.x === 0 && finalOffset.z === 0) return;
+			// Smart move: cascades into every neighbour the source shares a
+			// portal with so paired-portal connections (and the corners on the
+			// shared edge) stay coherent. See translateSectionWithLinks for
+			// the cascade rules.
+			const next = translateSectionWithLinks(data, selected.sectionIndex, finalOffset);
+			onChange(next);
+		},
+		[data, selected, snapEnabled, snapRadius, onChange],
+	);
 
 	const handleGizmoCancel = useCallback(() => {
 		setDrag(null);
 	}, []);
 
-	const handleCornerDrag = useCallback((cornerIdx: number, offset: CornerDragOffset) => {
-		setDrag({ kind: 'corner', cornerIdx, offset });
-	}, []);
+	const handleCornerDrag = useCallback(
+		(cornerIdx: number, offset: CornerDragOffset) => {
+			const finalOffset =
+				snapEnabled && selected
+					? snapCornerOffset(data, selected.sectionIndex, cornerIdx, offset, snapRadius)
+					: offset;
+			setDrag({ kind: 'corner', cornerIdx, offset: finalOffset });
+		},
+		[snapEnabled, selected, data, snapRadius],
+	);
 
 	const handleCornerCommit = useCallback(
 		(cornerIdx: number, offset: CornerDragOffset) => {
 			setDrag(null);
 			if (!selected || (offset.x === 0 && offset.z === 0)) return;
+			const finalOffset = snapEnabled
+				? snapCornerOffset(data, selected.sectionIndex, cornerIdx, offset, snapRadius)
+				: offset;
+			if (finalOffset.x === 0 && finalOffset.z === 0) return;
 			// Smart corner-drag: cascades into every coincident corner / BL
 			// endpoint elsewhere in the model. See translateCornerWithShared.
 			const next = translateCornerWithShared(
 				data,
 				selected.sectionIndex,
 				cornerIdx,
-				offset,
+				finalOffset,
 			);
 			onChange(next);
 		},
-		[data, selected, onChange],
+		[data, selected, snapEnabled, snapRadius, onChange],
 	);
 
 	const handleCornerCancel = useCallback(() => {
@@ -986,6 +1042,40 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 				onMarquee={handleMarquee}
 				hintIdle="press B to box-select AI sections"
 			/>
+
+			{/* Snap-to-edges toggle. Rendered as a DOM overlay outside the
+			    Canvas so its hover/click events don't compete with R3F
+			    pointer events. */}
+			<button
+				type="button"
+				onClick={() => setSnapEnabled((v) => !v)}
+				title={snapEnabled
+					? 'Snap to edges: ON (S to toggle)'
+					: 'Snap to edges: OFF (S to toggle)'}
+				aria-pressed={snapEnabled}
+				style={{
+					position: 'absolute',
+					top: 8,
+					left: 8,
+					display: 'flex',
+					alignItems: 'center',
+					gap: 6,
+					padding: '4px 8px',
+					borderRadius: 6,
+					fontSize: 11,
+					fontFamily: 'monospace',
+					border: '1px solid rgba(255,255,255,0.15)',
+					background: snapEnabled ? 'rgba(80, 170, 110, 0.85)' : 'rgba(20, 22, 28, 0.85)',
+					color: snapEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
+					cursor: 'pointer',
+					userSelect: 'none',
+					boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+				}}
+			>
+				<Magnet size={14} />
+				<span>Snap{snapEnabled ? ' · on' : ' · off'}</span>
+				<span style={{ opacity: 0.5, fontSize: 10 }}>S</span>
+			</button>
 
 			{edgeMenu && (
 				<EdgeContextMenu
