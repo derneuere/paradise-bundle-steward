@@ -16,6 +16,7 @@ import { AISectionsOverview } from '@/components/aisections/AISectionsOverview';
 import { ResetPairsTable } from '@/components/aisections/ResetPairsTable';
 import { SectionsList } from '@/components/aisections/SectionsList';
 import { AddSectionDialog } from '@/components/aisections/AddSectionDialog';
+import { EdgesList } from '@/components/aisections/EdgesList';
 
 // ---------------------------------------------------------------------------
 // Overview — root-level propertyGroup extension
@@ -79,6 +80,36 @@ export const AISectionsResetPairsExtension: React.FC<SchemaExtensionProps> = ({ 
 );
 
 // ---------------------------------------------------------------------------
+// AISection edges — propertyGroup `component` on AISection
+// ---------------------------------------------------------------------------
+
+// Renders one row per implicit polygon edge (corner[i] → corner[(i+1)%N]) so
+// the user has a stable surface to right-click. Picking "Duplicate section
+// through this edge" triggers `duplicateSectionThroughEdge` and selects the
+// new section.
+//
+// `path` here is the AISection's path inside the resource — `['sections',
+// srcIdx]`. We pull `srcIdx` from the path rather than counting indices in
+// the parent, so the operation stays correct regardless of how the user
+// got here (tree click, breadcrumb, programmatic selection).
+export const AISectionEdgesExtension: React.FC<SchemaExtensionProps> = ({ path, value, data }) => {
+	if (path.length < 2 || path[0] !== 'sections' || typeof path[1] !== 'number') {
+		return (
+			<div className="text-xs text-muted-foreground">
+				Edges panel can only be rendered on a section.
+			</div>
+		);
+	}
+	const srcIdx = path[1];
+	const section = value as AISection | undefined;
+	const model = data as ParsedAISections;
+	if (!section) {
+		return <div className="text-xs text-muted-foreground">No section selected.</div>;
+	}
+	return <EdgesList section={section} srcIdx={srcIdx} model={model} />;
+};
+
+// ---------------------------------------------------------------------------
 // Registry bundle — hand this map to SchemaEditorProvider.
 // ---------------------------------------------------------------------------
 
@@ -86,4 +117,5 @@ export const aiSectionsExtensions: ExtensionRegistry = {
 	AISectionsOverview: AISectionsOverviewExtension,
 	AISectionsList: AISectionsListExtension,
 	AISectionsResetPairs: AISectionsResetPairsExtension,
+	AISectionEdges: AISectionEdgesExtension,
 };

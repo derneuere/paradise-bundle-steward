@@ -262,6 +262,14 @@ const AISection: RecordSchema = {
 			title: 'Corners',
 			properties: ['corners'],
 		},
+		{
+			// Derived view of the polygon's edges. The renderer offers a
+			// right-click action to duplicate the section through any edge
+			// and auto-wire a mirrored portal pair — see
+			// `aiSectionsOps.duplicateSectionThroughEdge`.
+			title: 'Edges',
+			component: 'AISectionEdges',
+		},
 	],
 	label: (value, index) => sectionLabel(value, index ?? 0),
 };

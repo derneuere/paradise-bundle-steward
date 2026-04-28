@@ -8,6 +8,14 @@ import { extractResourceSize, getMemoryTypeName } from '@/lib/core/resourceManag
 import { findDebugResourceById } from '@/lib/core/bundle/debugData';
 import type { ParsedBundle, Platform } from '@/lib/core/types';
 import type { DebugResource } from '@/lib/core/bundle/debugData';
+import {
+	canRedo as historyCanRedo,
+	canUndo as historyCanUndo,
+	recordCommit,
+	recordRedo,
+	recordUndo,
+	type HistoryStack,
+} from '@/lib/history';
 
 export type UIResource = {
   id: string;
@@ -57,6 +65,17 @@ type BundleContextValue = {
    * edits made through the multi-resource UI.
    */
   setResourceAt: (key: string, index: number, next: unknown | null) => void;
+  /**
+   * Undo / redo stacks live per (resourceKey, index). Every call to
+   * `setResource` / `setResourceAt` records the value being replaced onto
+   * the past stack and clears the future. Bundle reload clears all stacks.
+   *
+   * `index` defaults to 0 (the common case for most editors).
+   */
+  undo: (key: string, index?: number) => void;
+  redo: (key: string, index?: number) => void;
+  canUndo: (key: string, index?: number) => boolean;
+  canRedo: (key: string, index?: number) => boolean;
   loadBundleFromFile: (file: File) => Promise<void>;
   /**
    * Export the current bundle. Pass `targetPlatform` to convert the bundle
@@ -101,6 +120,13 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
   // back byte-exact through the pass-through path.
   const [dirtyMulti, setDirtyMulti] = useState<Set<string>>(() => new Set());
   const [secondaryBundles, setSecondaryBundles] = useState<SecondaryBundle[]>([]);
+  // Per-resource undo/redo stacks. Key shape: `${handlerKey}:${index}` to
+  // match the dirtyMulti convention. The stack only carries snapshots of
+  // values that flowed through `setResourceAt` — bundle load and other
+  // bulk replacements bypass it on purpose so they aren't undoable.
+  const [history, setHistory] = useState<Map<string, HistoryStack<unknown | null>>>(
+    () => new Map(),
+  );
 
   const loadSecondaryBundle = useCallback(async (file: File) => {
     try {
@@ -185,6 +211,8 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
       setParsedResources(modelMap);
       setParsedResourcesAll(modelMapAll);
       setDirtyMulti(new Set());
+      // Clear undo history — old entries refer to a different bundle.
+      setHistory(new Map());
       setLoadedBundle(bundle);
       setResources(uiResources);
       setDebugResources(debugData);
@@ -217,41 +245,110 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     [parsedResourcesAll],
   );
 
-  const setResourceAt = useCallback((key: string, index: number, next: unknown | null) => {
-    setParsedResourcesAll((prev) => {
-      const copy = new Map(prev);
-      const list = copy.get(key)?.slice() ?? [];
-      // Pad with nulls if caller pokes past the end — shouldn't happen for
-      // normal edits, but safer than throwing mid-render.
-      while (list.length <= index) list.push(null);
-      list[index] = next;
-      copy.set(key, list);
-      return copy;
-    });
-    // Keep the first-resource shortcut in sync so legacy editors that use
-    // getResource still observe edits made through setResourceAt.
-    if (index === 0) {
-      setParsedResources((prev) => {
+  // Internal helper: write a value into all the model maps WITHOUT recording
+  // history. Both the user-facing `setResourceAt` (which records history) and
+  // the undo/redo path (which restores from history) share this so the model
+  // updates stay identical regardless of how the value was produced.
+  const applyResourceValue = useCallback(
+    (key: string, index: number, next: unknown | null) => {
+      setParsedResourcesAll((prev) => {
         const copy = new Map(prev);
-        if (next == null) copy.delete(key);
-        else copy.set(key, next);
+        const list = copy.get(key)?.slice() ?? [];
+        // Pad with nulls if caller pokes past the end — shouldn't happen for
+        // normal edits, but safer than throwing mid-render.
+        while (list.length <= index) list.push(null);
+        list[index] = next;
+        copy.set(key, list);
         return copy;
       });
-    }
-    // Mark this (key, index) as dirty so the export path emits a per-
-    // resource-id override for it instead of overriding every resource of
-    // the same type.
-    setDirtyMulti((prev) => {
-      const copy = new Set(prev);
-      copy.add(`${key}:${index}`);
-      return copy;
-    });
-    setIsModified(true);
-  }, []);
+      // Keep the first-resource shortcut in sync so legacy editors that use
+      // getResource still observe edits made through setResourceAt.
+      if (index === 0) {
+        setParsedResources((prev) => {
+          const copy = new Map(prev);
+          if (next == null) copy.delete(key);
+          else copy.set(key, next);
+          return copy;
+        });
+      }
+      // Mark this (key, index) as dirty so the export path emits a per-
+      // resource-id override for it instead of overriding every resource of
+      // the same type.
+      setDirtyMulti((prev) => {
+        const copy = new Set(prev);
+        copy.add(`${key}:${index}`);
+        return copy;
+      });
+      setIsModified(true);
+    },
+    [],
+  );
+
+  const setResourceAt = useCallback(
+    (key: string, index: number, next: unknown | null) => {
+      // Record the value being replaced onto the past stack. Read it from
+      // the live map so we don't depend on history's bookkeeping current.
+      const oldValue = parsedResourcesAll.get(key)?.[index] ?? null;
+      const histKey = `${key}:${index}`;
+      setHistory((prev) => {
+        const copy = new Map(prev);
+        copy.set(histKey, recordCommit(copy.get(histKey), oldValue));
+        return copy;
+      });
+      applyResourceValue(key, index, next);
+    },
+    [parsedResourcesAll, applyResourceValue],
+  );
 
   const setResource = useCallback(
     (key: string, next: unknown | null) => setResourceAt(key, 0, next),
     [setResourceAt],
+  );
+
+  const undo = useCallback(
+    (key: string, index: number = 0) => {
+      const histKey = `${key}:${index}`;
+      const stack = history.get(histKey);
+      if (!stack) return;
+      const actualCurrent = parsedResourcesAll.get(key)?.[index] ?? null;
+      const out = recordUndo(stack, actualCurrent);
+      if (!out) return;
+      applyResourceValue(key, index, out.restored);
+      setHistory((prev) => {
+        const copy = new Map(prev);
+        copy.set(histKey, out.stack);
+        return copy;
+      });
+    },
+    [history, parsedResourcesAll, applyResourceValue],
+  );
+
+  const redo = useCallback(
+    (key: string, index: number = 0) => {
+      const histKey = `${key}:${index}`;
+      const stack = history.get(histKey);
+      if (!stack) return;
+      const actualCurrent = parsedResourcesAll.get(key)?.[index] ?? null;
+      const out = recordRedo(stack, actualCurrent);
+      if (!out) return;
+      applyResourceValue(key, index, out.restored);
+      setHistory((prev) => {
+        const copy = new Map(prev);
+        copy.set(histKey, out.stack);
+        return copy;
+      });
+    },
+    [history, parsedResourcesAll, applyResourceValue],
+  );
+
+  const canUndo = useCallback(
+    (key: string, index: number = 0) => historyCanUndo(history.get(`${key}:${index}`)),
+    [history],
+  );
+
+  const canRedo = useCallback(
+    (key: string, index: number = 0) => historyCanRedo(history.get(`${key}:${index}`)),
+    [history],
   );
 
   const exportBundle = async (targetPlatform?: number) => {
@@ -342,6 +439,10 @@ export const BundleProvider = ({ children }: { children: React.ReactNode }) => {
     getResources,
     setResource,
     setResourceAt,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
     loadBundleFromFile,
     exportBundle,
     secondaryBundles,

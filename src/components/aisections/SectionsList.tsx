@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
+import { deleteSection } from '@/lib/core/aiSectionsOps';
 import { SPEED_LABELS, FLAG_NAMES } from './constants';
 
 type Props = {
@@ -59,7 +60,11 @@ export const SectionsList: React.FC<Props> = ({ data, onChange, onAddClick, onDe
 	};
 
 	const removeSection = (index: number) => {
-		onChange({ ...data, sections: data.sections.filter((_, i) => i !== index) });
+		// Use the safe op so cross-references stay consistent: it drops portals
+		// pointing AT the deleted section, decrements `linkSection` indices
+		// `> index` by one, and re-threads `sectionResetPairs` the same way.
+		// A naive `sections.filter` would silently leave dangling references.
+		onChange(deleteSection(data, index));
 	};
 
 	const items = rowVirtualizer.getVirtualItems();

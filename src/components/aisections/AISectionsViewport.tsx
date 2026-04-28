@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Canvas, useThree, useFrame, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
+import { Copy } from 'lucide-react';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
@@ -17,6 +18,7 @@ import type { NodePath } from '@/lib/schema/walk';
 import * as THREE from 'three';
 import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
+import { duplicateSectionThroughEdge } from '@/lib/core/aiSectionsOps';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -331,18 +333,30 @@ const portalMat = new THREE.MeshStandardMaterial({ color: 0x33cccc, roughness: 0
 const portalSelMat = new THREE.MeshStandardMaterial({ color: 0xffaa33, roughness: 0.4, metalness: 0.2, emissive: 0x664400, emissiveIntensity: 0.5 });
 
 function SelectedSectionDetail({
-	data, sectionIndex, selected, onSelect,
+	data, sectionIndex, selected, onSelect, hoveredEdge, onHoverEdge, onEdgeContextMenu,
 }: {
 	data: ParsedAISections;
 	sectionIndex: number;
 	selected: AISectionSelection;
 	onSelect: (sel: AISectionSelection) => void;
+	hoveredEdge: number | null;
+	onHoverEdge: (edgeIdx: number | null) => void;
+	onEdgeContextMenu: (edgeIdx: number, screenX: number, screenY: number) => void;
 }) {
 	const sec = data.sections[sectionIndex];
 	if (!sec) return null;
 
 	return (
 		<>
+			{/* Edge handles — right-click to duplicate the section through an edge.
+			    Drawn slightly above the polygon outline so they're easy to pick. */}
+			<EdgeHandles
+				section={sec}
+				hoveredEdge={hoveredEdge}
+				onHoverEdge={onHoverEdge}
+				onContextMenu={onEdgeContextMenu}
+			/>
+
 			{/* Portals */}
 			{sec.portals.map((portal, pi) => {
 				const pos: [number, number, number] = [portal.position.x, portal.position.y, portal.position.z];
@@ -454,16 +468,246 @@ function SelectedSectionDetail({
 }
 
 // ---------------------------------------------------------------------------
+// Edge handles (only for selected section) — surface for right-click ops
+// ---------------------------------------------------------------------------
+//
+// One thin invisible "hit box" per polygon edge plus a visible line drawn on
+// top of the existing polygon outline. The hit box is a flattened
+// boxGeometry oriented along the edge so it's clickable from a wide range
+// of camera angles without obscuring the polygon fill underneath.
+
+function EdgeHandles({
+	section,
+	hoveredEdge,
+	onHoverEdge,
+	onContextMenu,
+}: {
+	section: AISection;
+	hoveredEdge: number | null;
+	onHoverEdge: (edgeIdx: number | null) => void;
+	onContextMenu: (edgeIdx: number, screenX: number, screenY: number) => void;
+}) {
+	const corners = section.corners;
+	const N = corners.length;
+	if (N < 2) return null;
+
+	return (
+		<>
+			{corners.map((_, i) => {
+				const A = corners[i];
+				const B = corners[(i + 1) % N];
+				const midX = (A.x + B.x) / 2;
+				const midZ = (A.y + B.y) / 2;
+				const dx = B.x - A.x;
+				const dz = B.y - A.y;
+				const length = Math.hypot(dx, dz);
+				if (length === 0) return null;
+				// Three.js rotation around Y is positive CCW looking down +Y.
+				// Our edge runs from (A.x, A.y) → (B.x, B.y) on the XZ plane.
+				// Negate the angle so the box's local +X aligns with the edge.
+				const angle = -Math.atan2(dz, dx);
+
+				const isHovered = hoveredEdge === i;
+				const lineColor = isHovered ? '#33ff66' : '#ffaa33';
+				const lineWidth = isHovered ? 4 : 2;
+				// Hit-area thickness scales with the edge length so short edges
+				// stay clickable but long edges don't swallow huge chunks of
+				// the polygon. Floor at a few world units so very short edges
+				// (e.g., near-degenerate polygons) remain pickable.
+				const hitWidth = Math.max(length * 0.05, 2);
+
+				return (
+					<group key={`edge-${i}`}>
+						<Line
+							points={[
+								[A.x, 0.6, A.y],
+								[B.x, 0.6, B.y],
+							]}
+							color={lineColor}
+							lineWidth={lineWidth}
+						/>
+						<mesh
+							position={[midX, 0.6, midZ]}
+							rotation={[0, angle, 0]}
+							onPointerOver={(e) => {
+								e.stopPropagation();
+								onHoverEdge(i);
+								document.body.style.cursor = 'context-menu';
+							}}
+							onPointerOut={(e) => {
+								e.stopPropagation();
+								onHoverEdge(null);
+								document.body.style.cursor = 'auto';
+							}}
+							onContextMenu={(e) => {
+								e.stopPropagation();
+								// `e.nativeEvent` is the underlying DOM MouseEvent;
+								// suppress the browser's default context menu so
+								// only ours opens.
+								e.nativeEvent.preventDefault();
+								onContextMenu(i, e.nativeEvent.clientX, e.nativeEvent.clientY);
+							}}
+						>
+							<boxGeometry args={[length, 1, hitWidth]} />
+							<meshBasicMaterial transparent opacity={0} />
+						</mesh>
+						{isHovered && (
+							<Html
+								position={[midX, 1.5, midZ]}
+								center
+								distanceFactor={150}
+								style={{ pointerEvents: 'none' }}
+							>
+								<div
+									style={{
+										background: 'rgba(0,0,0,0.9)',
+										color: '#33ff66',
+										padding: '2px 6px',
+										borderRadius: 4,
+										fontSize: 10,
+										whiteSpace: 'nowrap',
+										fontFamily: 'monospace',
+									}}
+								>
+									Edge {i} · right-click for actions
+								</div>
+							</Html>
+						)}
+					</group>
+				);
+			})}
+		</>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Floating context menu — DOM, positioned at click coords
+// ---------------------------------------------------------------------------
+//
+// Rendered outside the Canvas as a `position: fixed` element so it floats
+// above the WebGL surface. We don't reuse shadcn's <ContextMenu> because
+// that primitive binds to right-click on a DOM element; the trigger here is
+// a Three.js mesh onContextMenu, so we need a programmatic open path.
+
+function EdgeContextMenu({
+	x,
+	y,
+	edgeIdx,
+	onDuplicate,
+	onClose,
+}: {
+	x: number;
+	y: number;
+	edgeIdx: number;
+	onDuplicate: () => void;
+	onClose: () => void;
+}) {
+	useEffect(() => {
+		// Defer registration by a tick so the same mousedown that opened the
+		// menu doesn't immediately close it.
+		const handleClick = () => onClose();
+		const handleKey = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') onClose();
+		};
+		const handleContextMenuElsewhere = (e: MouseEvent) => {
+			// Block the browser context menu on a second right-click so the
+			// user gets their own menu replaced rather than two stacked menus.
+			e.preventDefault();
+			onClose();
+		};
+		const t = window.setTimeout(() => {
+			window.addEventListener('mousedown', handleClick);
+			window.addEventListener('keydown', handleKey);
+			window.addEventListener('contextmenu', handleContextMenuElsewhere);
+		}, 0);
+		return () => {
+			window.clearTimeout(t);
+			window.removeEventListener('mousedown', handleClick);
+			window.removeEventListener('keydown', handleKey);
+			window.removeEventListener('contextmenu', handleContextMenuElsewhere);
+		};
+	}, [onClose]);
+
+	return (
+		<div
+			style={{
+				position: 'fixed',
+				left: x,
+				top: y,
+				zIndex: 1000,
+			}}
+			className="bg-popover text-popover-foreground border rounded-md shadow-md p-1 min-w-[16rem]"
+			// Stop the inner mousedown from being read as a "click outside"
+			// by the dismiss handler above.
+			onMouseDown={(e) => e.stopPropagation()}
+			onContextMenu={(e) => e.preventDefault()}
+		>
+			<div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+				Edge {edgeIdx}
+			</div>
+			<button
+				type="button"
+				className="w-full text-left flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+				onClick={onDuplicate}
+			>
+				<Copy className="h-3.5 w-3.5" />
+				Duplicate section through this edge
+			</button>
+		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Main viewport component
 // ---------------------------------------------------------------------------
 
 export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, onSelect }) => {
 	const [hovered, setHovered] = useState<AISectionSelection>(null);
+	const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
+	const [edgeMenu, setEdgeMenu] = useState<
+		{ x: number; y: number; sectionIndex: number; edgeIdx: number } | null
+	>(null);
 	const { center, radius } = useMemo(() => computeBounds(data), [data]);
 	const camDistance = radius * 1.5;
 
 	const selSection = selected ? data.sections[selected.sectionIndex] : null;
 	const hovSection = hovered ? data.sections[hovered.sectionIndex] : null;
+
+	// Reset transient edge UI when the selected section changes — otherwise a
+	// hover/menu from the previous selection could "leak" onto a different
+	// section's polygon.
+	const selectedSectionIndex = selected?.sectionIndex ?? null;
+	useEffect(() => {
+		setHoveredEdge(null);
+		setEdgeMenu(null);
+	}, [selectedSectionIndex]);
+
+	const handleEdgeContextMenu = useCallback(
+		(edgeIdx: number, screenX: number, screenY: number) => {
+			if (selected == null) return;
+			setEdgeMenu({
+				x: screenX,
+				y: screenY,
+				sectionIndex: selected.sectionIndex,
+				edgeIdx,
+			});
+		},
+		[selected],
+	);
+
+	const handleDuplicateThroughEdge = useCallback(() => {
+		if (!edgeMenu) return;
+		const next = duplicateSectionThroughEdge(data, edgeMenu.sectionIndex, edgeMenu.edgeIdx);
+		onChange(next);
+		const dupIdx = next.sections.length - 1;
+		// Defer selection so it lands on the post-update model — avoids a
+		// brief flash where the inspector points at the new index but the
+		// model still has the old length.
+		requestAnimationFrame(() => {
+			onSelect({ sectionIndex: dupIdx });
+		});
+		setEdgeMenu(null);
+	}, [data, edgeMenu, onChange, onSelect]);
 
 	// Marquee wiring: pick AI sections whose corner-centroid is inside the
 	// dragged rectangle and union/subtract their schema paths into the
@@ -492,7 +736,15 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 	);
 
 	return (
-		<div style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0, position: 'relative' }}>
+		<div
+			style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0, position: 'relative' }}
+			// Block the browser's default context menu inside the viewport.
+			// Without this, right-clicking anywhere in the canvas — even on
+			// an edge handle that already prevents-default — sometimes lets
+			// the browser menu through (depends on the order React fires
+			// pointer events vs. the native event). Belt-and-braces.
+			onContextMenu={(e) => e.preventDefault()}
+		>
 			<Canvas
 				camera={{
 					position: [center.x, camDistance, center.z + camDistance * 0.3],
@@ -541,6 +793,9 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 						sectionIndex={selected.sectionIndex}
 						selected={selected}
 						onSelect={onSelect}
+						hoveredEdge={hoveredEdge}
+						onHoverEdge={setHoveredEdge}
+						onEdgeContextMenu={handleEdgeContextMenu}
 					/>
 				)}
 
@@ -558,6 +813,16 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 				onMarquee={handleMarquee}
 				hintIdle="press B to box-select AI sections"
 			/>
+
+			{edgeMenu && (
+				<EdgeContextMenu
+					x={edgeMenu.x}
+					y={edgeMenu.y}
+					edgeIdx={edgeMenu.edgeIdx}
+					onDuplicate={handleDuplicateThroughEdge}
+					onClose={() => setEdgeMenu(null)}
+				/>
+			)}
 		</div>
 	);
 };

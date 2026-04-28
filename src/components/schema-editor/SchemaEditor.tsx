@@ -11,16 +11,28 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { HierarchyTree } from './HierarchyTree';
 import { InspectorPanel } from './InspectorPanel';
 import { ViewportPane } from './ViewportPane';
+import { UndoRedoControls } from '@/components/UndoRedoControls';
+import { useSchemaEditor } from './context';
 
 export function SchemaEditor() {
+	const { resource } = useSchemaEditor();
 	return (
 		<div className="h-full min-h-0 border rounded-lg overflow-hidden bg-card">
 			<ResizablePanelGroup direction="horizontal">
 				{/* Left — Hierarchy */}
 				<ResizablePanel defaultSize={20} minSize={14} className="bg-background">
 					<div className="h-full flex flex-col">
-						<div className="px-3 py-2 border-b text-xs font-semibold tracking-wide text-muted-foreground">
-							Hierarchy
+						<div className="flex items-center justify-between px-3 py-1 border-b">
+							<span className="text-xs font-semibold tracking-wide text-muted-foreground">
+								Hierarchy
+							</span>
+							{/* Mounted here so it lives once per editor instance and the
+							    Ctrl+Z / Ctrl+Y shortcut listener is registered as long as
+							    a resource is being edited. Placement in the hierarchy
+							    header keeps it close to the model navigation, which is
+							    where the user is when they realise something needs
+							    undoing. */}
+							<UndoRedoControls resourceKey={resource.key} />
 						</div>
 						<div className="flex-1 min-h-0">
 							<HierarchyTree />
