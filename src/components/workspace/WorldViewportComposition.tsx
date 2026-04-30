@@ -27,6 +27,14 @@
 // instance toggles (the cascade is one-way — see `isVisibleIn` in the
 // helpers module).
 //
+// PolygonSoupList: the overlay renders the *union* of every PSL instance in
+// its Bundle as one batched mesh, but it no longer reads the workspace to
+// find those siblings — the composition hands them down via the
+// `bundleSoups` prop (sourced from `descriptor.bundleSiblings`). This closes
+// the multi-Bundle leak from ADR-0004's original single-Bundle deviation
+// (issue #23): a PSL instance in `bundles[1]` now batches its own Bundle's
+// soups, not whatever `bundles[0]` happened to be.
+//
 // What this DOESN'T own:
 //   - Mounting / dismounting the WorldViewport on Selection change. As
 //     long as both selections are world-family the chrome stays mounted —
@@ -36,9 +44,6 @@
 //   - Selection. Hiding a selected resource does NOT clear the Selection
 //     (CONTEXT.md / "Selection") — the inspector keeps showing its Tools,
 //     the overlay just stops contributing to the scene.
-//   - PolygonSoupList Workspace-awareness. The overlay still reads
-//     `useFirstLoadedBundle()` internally (ADR-0004) — multi-Bundle
-//     PolygonSoupList rendering is deferred and tracked separately.
 
 import { useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -129,17 +134,17 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange }: Overlay
 				/>
 			);
 		case 'polygonSoupList':
-			// PolygonSoupList still reads `useFirstLoadedBundle()` internally
-			// (ADR-0004) — until that's Workspace-aware (out of scope, per
-			// issue #18) only bundles[0]'s polygon soups will actually
-			// render data, regardless of how many descriptors we mount.
-			// Mounting it once per Bundle anyway keeps the overlay
-			// participating in the composition for the day the deeper
-			// refactor lands.
+			// PolygonSoupList renders the *union* of every PSL instance in its
+			// Bundle as one batched mesh. The composition supplies that union
+			// via `bundleSoups` (ADR-0004 multi-Bundle resolution) so the
+			// overlay never has to read the workspace itself — that's the bit
+			// that used to leak across Bundles by always reaching for
+			// `bundles[0]`.
 			return (
 				<PolygonSoupListOverlay
 					key={key}
 					data={descriptor.model as ParsedPolygonSoupList}
+					bundleSoups={descriptor.bundleSiblings as (ParsedPolygonSoupList | null)[]}
 					selectedPath={selectedPath}
 					onSelect={onSelect}
 					onChange={onChange as (next: ParsedPolygonSoupList) => void}

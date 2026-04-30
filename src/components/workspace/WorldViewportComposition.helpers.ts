@@ -60,12 +60,19 @@ export function isWorldViewportFamilyKey(key: string): key is WorldViewportFamil
  *
  * `model` is `unknown` here — the per-key switch in the composition casts
  * it to the right `ParsedX` shape before handing it to the overlay.
+ *
+ * `bundleSiblings` is the full per-bundle parsed-instance list for this
+ * resource key (same reference shared across siblings — entries that failed
+ * to parse stay as `null` to keep indexes aligned). The PolygonSoupList
+ * overlay consumes this for its multi-resource batched-mesh union (ADR-0004
+ * resolution for the multi-Bundle case); single-resource overlays ignore it.
  */
 export type OverlayDescriptor = {
 	bundleId: string;
 	resourceKey: WorldViewportFamilyKey;
 	index: number;
 	model: unknown;
+	bundleSiblings: (unknown | null)[];
 };
 
 /**
@@ -98,6 +105,7 @@ export function listWorldOverlays(
 					resourceKey: key,
 					index: i,
 					model,
+					bundleSiblings: instances,
 				});
 			}
 		}

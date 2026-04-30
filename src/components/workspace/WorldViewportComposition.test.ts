@@ -109,8 +109,8 @@ describe('listWorldOverlays', () => {
 		const overlays = listWorldOverlays([bundle]);
 
 		expect(overlays).toEqual([
-			{ bundleId: 'TRK_UNIT_07.BUN', resourceKey: 'aiSections', index: 0, model: ai },
-			{ bundleId: 'TRK_UNIT_07.BUN', resourceKey: 'streetData', index: 0, model: street },
+			{ bundleId: 'TRK_UNIT_07.BUN', resourceKey: 'aiSections', index: 0, model: ai, bundleSiblings: [ai] },
+			{ bundleId: 'TRK_UNIT_07.BUN', resourceKey: 'streetData', index: 0, model: street, bundleSiblings: [street] },
 		]);
 	});
 
@@ -132,12 +132,28 @@ describe('listWorldOverlays', () => {
 		// succeeded. The descriptor for index 1 must keep its index — selection
 		// addresses are stored as `(key, index)` and the renderer uses that
 		// index to wire onSelect / onChange back to setResourceAt.
+		const instances = [null, { tag: 'soup-1' }, { tag: 'soup-2' }];
 		const bundle = makeBundle('WORLDCOL.BIN', {
-			polygonSoupList: [null, { tag: 'soup-1' }, { tag: 'soup-2' }],
+			polygonSoupList: instances,
 		});
+		// The Bundle's full PSL list (including the null at index 0) is
+		// preserved as `bundleSiblings` so the PolygonSoupList overlay still
+		// gets the union it needs for batched-mesh rendering.
 		expect(listWorldOverlays([bundle])).toEqual([
-			{ bundleId: 'WORLDCOL.BIN', resourceKey: 'polygonSoupList', index: 1, model: { tag: 'soup-1' } },
-			{ bundleId: 'WORLDCOL.BIN', resourceKey: 'polygonSoupList', index: 2, model: { tag: 'soup-2' } },
+			{
+				bundleId: 'WORLDCOL.BIN',
+				resourceKey: 'polygonSoupList',
+				index: 1,
+				model: { tag: 'soup-1' },
+				bundleSiblings: instances,
+			},
+			{
+				bundleId: 'WORLDCOL.BIN',
+				resourceKey: 'polygonSoupList',
+				index: 2,
+				model: { tag: 'soup-2' },
+				bundleSiblings: instances,
+			},
 		]);
 	});
 });
@@ -186,6 +202,38 @@ describe('listWorldOverlays — cross-Bundle composition', () => {
 			{ b: 'B.BIN', i: 1 },
 			{ b: 'B.BIN', i: 2 },
 		]);
+	});
+
+	it('issue #23: routes per-Bundle siblings even when the soups live outside bundles[0]', () => {
+		// Acceptance criterion for issue #23: in a Workspace with two Bundles
+		// loaded where only the SECOND contains polygon soups, those soups
+		// must reach the WorldViewport batch path. The fallback used to
+		// resolve to `bundles[0]` regardless, so a non-PSL bundle at index 0
+		// silently masked all soups in subsequent bundles. Now the descriptor
+		// carries the correct per-Bundle list itself.
+		const trk = makeBundle('TRK_UNIT_07.BUN', {
+			aiSections: [{ tag: 'trk-ai' }],
+			// no polygonSoupList here
+		});
+		const worldcolSoups = [{ tag: 'soup-0' }, { tag: 'soup-1' }];
+		const worldcol = makeBundle('WORLDCOL.BIN', {
+			polygonSoupList: worldcolSoups,
+		});
+
+		const overlays = listWorldOverlays([trk, worldcol]);
+
+		const psl = overlays.filter((d) => d.resourceKey === 'polygonSoupList');
+		expect(psl).toHaveLength(2);
+		// Both PSL descriptors must point at WORLDCOL's soup list — NOT at
+		// TRK_UNIT_07's (which doesn't even carry one). Same reference shared
+		// across siblings so React doesn't re-batch on identity changes.
+		expect(psl[0].bundleId).toBe('WORLDCOL.BIN');
+		expect(psl[1].bundleId).toBe('WORLDCOL.BIN');
+		expect(psl[0].bundleSiblings).toBe(worldcolSoups);
+		expect(psl[1].bundleSiblings).toBe(worldcolSoups);
+		// And each descriptor's `model` is its own indexed entry.
+		expect(psl[0].model).toBe(worldcolSoups[0]);
+		expect(psl[1].model).toBe(worldcolSoups[1]);
 	});
 
 	it('within a Bundle, orders descriptors by WORLD_VIEWPORT_FAMILY_KEYS', () => {
@@ -300,11 +348,16 @@ describe('selectedPathFor', () => {
 
 describe('filterOverlaysByVisibility', () => {
 	function descriptors(): OverlayDescriptor[] {
+		const aAi = { tag: 'a-ai' };
+		const aStreet = { tag: 'a-street' };
+		const bSoup0 = { tag: 'b-soup-0' };
+		const bSoup1 = { tag: 'b-soup-1' };
+		const bSoups = [bSoup0, bSoup1];
 		return [
-			{ bundleId: 'A.BNDL', resourceKey: 'aiSections', index: 0, model: { tag: 'a-ai' } },
-			{ bundleId: 'A.BNDL', resourceKey: 'streetData', index: 0, model: { tag: 'a-street' } },
-			{ bundleId: 'B.BNDL', resourceKey: 'polygonSoupList', index: 0, model: { tag: 'b-soup-0' } },
-			{ bundleId: 'B.BNDL', resourceKey: 'polygonSoupList', index: 1, model: { tag: 'b-soup-1' } },
+			{ bundleId: 'A.BNDL', resourceKey: 'aiSections', index: 0, model: aAi, bundleSiblings: [aAi] },
+			{ bundleId: 'A.BNDL', resourceKey: 'streetData', index: 0, model: aStreet, bundleSiblings: [aStreet] },
+			{ bundleId: 'B.BNDL', resourceKey: 'polygonSoupList', index: 0, model: bSoup0, bundleSiblings: bSoups },
+			{ bundleId: 'B.BNDL', resourceKey: 'polygonSoupList', index: 1, model: bSoup1, bundleSiblings: bSoups },
 		];
 	}
 

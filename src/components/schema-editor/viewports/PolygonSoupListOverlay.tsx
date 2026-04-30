@@ -16,15 +16,13 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
-import { parseAllBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
 import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useLineSegmentsGeometry, type Edge } from '@/components/common/three/SelectionOutline';
 import type { NodePath } from '@/lib/schema/walk';
-import type { WorldOverlayComponent } from './WorldViewport.types';
+import type { WorldOverlayProps } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
 
 // ---------------------------------------------------------------------------
@@ -393,37 +391,30 @@ function applyHighlight(
 }
 
 // ---------------------------------------------------------------------------
-// Fallback parser — when the overlay is rendered WITHOUT a page-level
-// PolygonSoupListContext (for instance from a different host), parse the
-// bundle ourselves. Keeps the overlay useful as a standalone component.
-// ---------------------------------------------------------------------------
-
-function useFallbackModels(): (ParsedPolygonSoupList | null)[] {
-	const activeBundle = useFirstLoadedBundle();
-	const loadedBundle = activeBundle?.parsed ?? null;
-	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
-	return useMemo(() => {
-		if (!loadedBundle || !originalArrayBuffer) return [];
-		const all = parseAllBundleResourcesViaRegistry(originalArrayBuffer, loadedBundle);
-		return (all.get('polygonSoupList') as (ParsedPolygonSoupList | null)[] | undefined) ?? [];
-	}, [loadedBundle, originalArrayBuffer]);
-}
-
-// ---------------------------------------------------------------------------
 // Overlay
 // ---------------------------------------------------------------------------
 
 const EMPTY_POLY_SELECTION: ReadonlySet<number> = new Set();
+const EMPTY_BUNDLE_SOUPS: (ParsedPolygonSoupList | null)[] = [];
 
-type Props = {
-	data: ParsedPolygonSoupList;
-	selectedPath: NodePath;
-	onSelect: (path: NodePath) => void;
-	onChange?: (next: ParsedPolygonSoupList) => void;
+type Props = WorldOverlayProps<ParsedPolygonSoupList> & {
+	/** The full per-Bundle list of PSL instances the overlay should render
+	 *  as a single batched mesh — same reference for every overlay descriptor
+	 *  inside the same Bundle (entries are `null` where parsing failed).
+	 *  Supplied by `WorldViewportComposition` so the overlay no longer needs
+	 *  to read `useFirstLoadedBundle()` to fish them out itself (closes the
+	 *  multi-Bundle leak in ADR-0004's deviation). When a
+	 *  `PolygonSoupListContext` is provided (the legacy `PolygonSoupListPage`
+	 *  flow) the context's `models` wins. */
+	bundleSoups?: (ParsedPolygonSoupList | null)[];
 };
 
-export const PolygonSoupListOverlay: WorldOverlayComponent<ParsedPolygonSoupList> = ({
+// Note: not typed as `WorldOverlayComponent<ParsedPolygonSoupList>` because
+// PSL extends the base props with `bundleSoups` (the per-Bundle multi-resource
+// union — see ADR-0004). Every other overlay still satisfies the bare contract.
+export const PolygonSoupListOverlay = ({
 	selectedPath,
+	bundleSoups,
 	// `data` (the active resource) is accepted for contract symmetry but not
 	// directly used — the multi-resource state below covers it.
 	// `onSelect` is unused: the page provides a richer click API via
@@ -431,8 +422,7 @@ export const PolygonSoupListOverlay: WorldOverlayComponent<ParsedPolygonSoupList
 	// modifiers)` which can switch the active resource and toggle bulk.
 }: Props) => {
 	const ctx = usePolygonSoupListContext();
-	const fallback = useFallbackModels();
-	const models = ctx?.models ?? fallback;
+	const models = ctx?.models ?? bundleSoups ?? EMPTY_BUNDLE_SOUPS;
 	const selectedModelIndex = ctx?.selectedModelIndex ?? 0;
 	const onPickFromCtx = ctx?.onSelect;
 	const selectedPolysInCurrentModel = ctx?.selectedPolysInCurrentModel ?? EMPTY_POLY_SELECTION;
