@@ -8,7 +8,7 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
@@ -18,8 +18,9 @@ import { aiSectionsResourceSchema } from '@/lib/schema/resources/aiSections';
 import type { ParsedAISections } from '@/lib/core/aiSections';
 
 const AISectionsPage = () => {
-	const { getResource, setResource } = useBundle();
-	const data = getResource<ParsedAISections>('aiSections');
+	const { getResource, setResource } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const data = bundleId ? getResource<ParsedAISections>(bundleId, 'aiSections') : null;
 	const bulk = useGenericBulkSelection();
 	const bulkValue = useMemo(
 		() => ({
@@ -52,7 +53,7 @@ const AISectionsPage = () => {
 				<SchemaEditorProvider
 					resource={aiSectionsResourceSchema}
 					data={data}
-					onChange={(next) => setResource('aiSections', next as ParsedAISections)}
+					onChange={(next) => bundleId && setResource(bundleId, 'aiSections', next as ParsedAISections)}
 					extensions={aiSectionsExtensions}
 				>
 					<SchemaEditor />

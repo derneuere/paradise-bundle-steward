@@ -3,7 +3,7 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
@@ -13,8 +13,9 @@ import { streetDataExtensions } from '@/components/schema-editor/extensions/stre
 import type { ParsedStreetData } from '@/lib/core/streetData';
 
 const StreetDataPage = () => {
-	const { getResource, setResource } = useBundle();
-	const data = getResource<ParsedStreetData>('streetData');
+	const { getResource, setResource } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const data = bundleId ? getResource<ParsedStreetData>(bundleId, 'streetData') : null;
 	const bulk = useGenericBulkSelection();
 	const bulkValue = useMemo(
 		() => ({
@@ -47,7 +48,7 @@ const StreetDataPage = () => {
 				<SchemaEditorProvider
 					resource={streetDataResourceSchema}
 					data={data}
-					onChange={(next) => setResource('streetData', next as ParsedStreetData)}
+					onChange={(next) => bundleId && setResource(bundleId, 'streetData', next as ParsedStreetData)}
 					extensions={streetDataExtensions}
 				>
 					<SchemaEditor />

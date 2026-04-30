@@ -8,7 +8,7 @@
 //
 // Data flow:
 //
-//   useBundle + getResources('renderable')
+//   useWorkspace().getResources(bundleId, 'renderable')
 //         │
 //         │  (decode pipeline: parseRenderable → imports → textures)
 //         ▼
@@ -33,7 +33,7 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundle, useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { renderableResourceSchema } from '@/lib/schema/resources/renderable';
@@ -69,15 +69,18 @@ const RENDERABLE_SHORTCUT_GROUPS: ShortcutGroup[] = [
 // Inner body — rendered inside RenderableDecodedProvider so it can consume
 // the filtered/aligned data via useRenderableDecoded.
 function RenderablePageInner() {
-	const { loadedBundle, getResources } = useBundle();
+	const { getResources } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const activeBundle = useActiveBundle();
+	const loadedBundle = activeBundle?.parsed ?? null;
 	const decoded = useRenderableDecoded();
 
 	// Quick guard for the "no renderables in this bundle" case. The
 	// decoded context will also report this, but we want a friendly empty
 	// state before the first decode pass completes.
 	const anyRenderables = useMemo(
-		() => getResources<ParsedRenderable>('renderable').length > 0,
-		[getResources],
+		() => (bundleId ? getResources<ParsedRenderable>(bundleId, 'renderable').length > 0 : false),
+		[bundleId, getResources],
 	);
 
 	// Wrap the decoded, aligned ParsedRenderable array into the schema

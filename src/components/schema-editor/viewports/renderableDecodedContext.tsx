@@ -25,7 +25,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundle } from '@/context/WorkspaceContext';
 import {
 	RENDERABLE_TYPE_ID,
 	VERTEX_DESCRIPTOR_TYPE_ID,
@@ -387,7 +387,10 @@ export function useRenderableDecoded(): RenderableDecodedValue | null {
 }
 
 export function RenderableDecodedProvider({ children }: { children: React.ReactNode }) {
-	const { loadedBundle, originalArrayBuffer, debugResources } = useBundle();
+	const activeBundle = useActiveBundle();
+	const loadedBundle = activeBundle?.parsed ?? null;
+	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
+	const debugResources = activeBundle?.debugResources ?? [];
 	const [decodeMode, setDecodeMode] = useState<DecodeMode>('graphics');
 	const [includeNonLOD0, setIncludeNonLOD0] = useState(false);
 	const [textureBundles, setTextureBundles] = useState<TextureSourceBundle[]>([]);

@@ -1,14 +1,14 @@
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundle } from '@/context/WorkspaceContext';
 import { HexViewer } from '@/components/hexviewer/HexViewer';
 
 const HexViewPage = () => {
-  const { originalArrayBuffer, loadedBundle, resources, isModified } = useBundle();
+  const activeBundle = useActiveBundle();
   return (
     <HexViewer
-      originalData={originalArrayBuffer}
-      bundle={loadedBundle}
-      isModified={isModified}
-      resources={resources}
+      originalData={activeBundle?.originalArrayBuffer ?? null}
+      bundle={activeBundle?.parsed ?? null}
+      isModified={activeBundle?.isModified ?? false}
+      resources={activeBundle?.resources ?? []}
     />
   );
 };

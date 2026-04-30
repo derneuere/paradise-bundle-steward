@@ -1,9 +1,14 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Upload, Download, Hexagon, Database, Box } from 'lucide-react';
-import { useBundle } from '@/context/BundleContext';
-import { useRef, useState, useMemo } from 'react';
+import { Upload, Download, Hexagon, Database, Box, Layers } from 'lucide-react';
+import {
+  useActiveBundle,
+  useActiveBundleId,
+  useWorkspace,
+  useWorkspaceCompanion,
+} from '@/context/WorkspaceContext';
+import { useCallback, useRef, useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import { ExportWarningModal, ExportPlatformModal } from '@/components/capabilities';
 import { getCapabilityByTypeId, type FeatureCapability } from '@/lib/capabilities';
@@ -32,16 +37,19 @@ export const BundleLayout = () => {
   // closing and the unsupported-features warning resolving. `undefined`
   // means "export as source platform" (no override).
   const [pendingTargetPlatform, setPendingTargetPlatform] = useState<number | undefined>(undefined);
-  const {
-    isLoading,
-    isModified,
-    loadedBundle,
-    loadBundleFromFile,
-    exportBundle,
-    parsedResources,
-    getResource,
-    setResource,
-  } = useBundle();
+  const { loadBundle, saveBundle, getResource, setResource } = useWorkspace();
+  const { isLoading } = useWorkspaceCompanion();
+  const activeBundle = useActiveBundle();
+  const activeBundleId = useActiveBundleId();
+  const isModified = activeBundle?.isModified ?? false;
+  const loadedBundle = activeBundle?.parsed ?? null;
+  const parsedResources = activeBundle?.parsedResources ?? new Map();
+  const loadBundleFromFile = loadBundle;
+  const exportBundle = useCallback(
+    (target?: number) =>
+      activeBundleId ? saveBundle(activeBundleId, target) : Promise.resolve(),
+    [saveBundle, activeBundleId],
+  );
 
   const hasBundle = !!loadedBundle;
 
@@ -110,7 +118,7 @@ export const BundleLayout = () => {
   };
 
   const handleExportGltf = async () => {
-    if (!hasWorldLogic) {
+    if (!hasWorldLogic || !activeBundleId) {
       toast.error('No world-logic resources in this bundle', {
         description: 'Expected StreetData, TrafficData, AISections, or TriggerData.',
       });
@@ -119,16 +127,16 @@ export const BundleLayout = () => {
     try {
       const payload: WorldLogicPayload = {};
       if (parsedResources.has('streetData')) {
-        payload.streetData = getResource<ParsedStreetData>('streetData') ?? undefined;
+        payload.streetData = getResource<ParsedStreetData>(activeBundleId, 'streetData') ?? undefined;
       }
       if (parsedResources.has('trafficData')) {
-        payload.trafficData = getResource<ParsedTrafficData>('trafficData') ?? undefined;
+        payload.trafficData = getResource<ParsedTrafficData>(activeBundleId, 'trafficData') ?? undefined;
       }
       if (parsedResources.has('aiSections')) {
-        payload.aiSections = getResource<ParsedAISections>('aiSections') ?? undefined;
+        payload.aiSections = getResource<ParsedAISections>(activeBundleId, 'aiSections') ?? undefined;
       }
       if (parsedResources.has('triggerData')) {
-        payload.triggerData = getResource<ParsedTriggerData>('triggerData') ?? undefined;
+        payload.triggerData = getResource<ParsedTriggerData>(activeBundleId, 'triggerData') ?? undefined;
       }
       const bytes = await exportWorldLogicToGltf(payload);
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
@@ -167,10 +175,14 @@ export const BundleLayout = () => {
       const bytes = new Uint8Array(buffer);
       const payload = await importWorldLogicFromGltf(bytes);
       const applied: WorldLogicKey[] = [];
+      if (!activeBundleId) {
+        toast.error('Load a bundle first');
+        return;
+      }
       for (const key of WORLD_LOGIC_KEYS) {
         const model = payload[key];
         if (model !== undefined) {
-          setResource(key, model);
+          setResource(activeBundleId, key, model);
           applied.push(key);
         }
       }
@@ -289,6 +301,9 @@ export const BundleLayout = () => {
         <div className="flex items-center gap-2">
           <NavLink to="/resources" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
             <Database className="inline w-4 h-4 mr-1" /> Resources
+          </NavLink>
+          <NavLink to="/workspace" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
+            <Layers className="inline w-4 h-4 mr-1" /> Workspace
           </NavLink>
           <div className="ml-auto" />
           <NavLink to="/hexview" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>

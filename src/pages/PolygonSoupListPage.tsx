@@ -31,7 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundle, useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
@@ -192,8 +192,14 @@ function foldBulk(polys: PolygonSoupPoly[]): BulkSummary {
 // ---------------------------------------------------------------------------
 
 const PolygonSoupListPage = () => {
-	const { getResources, setResourceAt, resources: uiResources } = useBundle();
-	const models = getResources<ParsedPolygonSoupList>(PSL_HANDLER_KEY);
+	const { getResources, setResourceAt } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const activeBundle = useActiveBundle();
+	const uiResources = activeBundle?.resources ?? [];
+	const models = useMemo(
+		() => (bundleId ? [...getResources<ParsedPolygonSoupList>(bundleId, PSL_HANDLER_KEY)] : []),
+		[bundleId, getResources],
+	);
 
 	// Correlate parsed models with their bundle-level UIResource (carries
 	// debug-name, id, flags). parseAllBundleResourcesViaRegistry walks
@@ -385,8 +391,11 @@ const PolygonSoupListPage = () => {
 	const currentModel = selectedIndex >= 0 ? (models[selectedIndex] ?? null) : null;
 
 	const handleChange = useCallback(
-		(next: unknown) => setResourceAt(PSL_HANDLER_KEY, selectedIndex, next),
-		[setResourceAt, selectedIndex],
+		(next: unknown) => {
+			if (!bundleId) return;
+			setResourceAt(bundleId, PSL_HANDLER_KEY, selectedIndex, next);
+		},
+		[setResourceAt, selectedIndex, bundleId],
 	);
 
 	const onBulkToggle = useCallback((path: NodePath) => {
@@ -515,7 +524,7 @@ const PolygonSoupListPage = () => {
 
 	const applyBulk = useCallback(
 		(updater: (raw: number) => number) => {
-			if (!currentModel || selectedPolyRecords.length === 0) return;
+			if (!currentModel || selectedPolyRecords.length === 0 || !bundleId) return;
 			const soupPatches = new Map<number, PolygonSoup>();
 			for (const rec of selectedPolyRecords) {
 				let soup = soupPatches.get(rec.addr.soup);
@@ -534,9 +543,9 @@ const PolygonSoupListPage = () => {
 				...currentModel,
 				soups: currentModel.soups.map((s, i) => soupPatches.get(i) ?? s),
 			};
-			setResourceAt(PSL_HANDLER_KEY, selectedIndex, next);
+			setResourceAt(bundleId, PSL_HANDLER_KEY, selectedIndex, next);
 		},
-		[currentModel, selectedPolyRecords, selectedIndex, setResourceAt],
+		[currentModel, selectedPolyRecords, selectedIndex, setResourceAt, bundleId],
 	);
 
 	const bulkSelectionContextValue = useMemo(

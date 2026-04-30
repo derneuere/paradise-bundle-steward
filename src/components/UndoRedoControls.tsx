@@ -1,14 +1,11 @@
-// Undo/redo controls for a single resource.
+// Undo/redo controls for the Workspace.
 //
-// Pages mount this once near their toolbar. It renders two icon buttons that
-// reflect the current per-resource history state (disabled when the relevant
-// stack is empty) and registers global Ctrl+Z / Ctrl+Y / Cmd+Z keyboard
-// listeners scoped to the same (resourceKey, index) pair.
-//
-// Why a single component instead of separate buttons + hook: every page that
-// uses model-level undo needs both halves, and putting them together keeps
-// the wiring identical across pages — drop in `<UndoRedoControls />` and you
-// get matching UI + shortcut behavior.
+// Pages mount this once near their toolbar. Per ADR-0006 the Workspace has
+// a single global undo stack — ⌘Z always undoes the most recent edit
+// anywhere in the Workspace. The component still accepts a `resourceKey`
+// for placement context (the SchemaEditor mounts it next to the active
+// resource's hierarchy header), but it no longer scopes the stack to that
+// key.
 
 import React, { useEffect } from 'react';
 import { Redo2, Undo2 } from 'lucide-react';
@@ -19,13 +16,15 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { useBundle } from '@/context/BundleContext';
+import { useWorkspace } from '@/context/WorkspaceContext';
 
 type Props = {
-	/** Handler key for the resource whose history to drive (e.g. 'aiSections'). */
-	resourceKey: string;
-	/** Defaults to 0 — the common case for single-resource bundles. */
-	index?: number;
+	/**
+	 * Optional placement context — present so call sites that pass it (the
+	 * schema editor mounts it as `resourceKey={resource.key}`) keep
+	 * compiling. The Workspace stack is global, so the value is unused.
+	 */
+	resourceKey?: string;
 	/** Optional className applied to the wrapping `<div>`. */
 	className?: string;
 };
@@ -40,10 +39,8 @@ function isInRichTextEditor(target: EventTarget | null): boolean {
 	return !!el?.isContentEditable;
 }
 
-export const UndoRedoControls: React.FC<Props> = ({ resourceKey, index = 0, className }) => {
-	const { undo, redo, canUndo, canRedo } = useBundle();
-	const undoEnabled = canUndo(resourceKey, index);
-	const redoEnabled = canRedo(resourceKey, index);
+export const UndoRedoControls: React.FC<Props> = ({ className }) => {
+	const { undo, redo, canUndo, canRedo } = useWorkspace();
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -54,15 +51,15 @@ export const UndoRedoControls: React.FC<Props> = ({ resourceKey, index = 0, clas
 			const k = e.key.toLowerCase();
 			if (k === 'z' && !e.shiftKey) {
 				e.preventDefault();
-				undo(resourceKey, index);
+				undo();
 			} else if (k === 'y' || (k === 'z' && e.shiftKey)) {
 				e.preventDefault();
-				redo(resourceKey, index);
+				redo();
 			}
 		};
 		window.addEventListener('keydown', handler);
 		return () => window.removeEventListener('keydown', handler);
-	}, [resourceKey, index, undo, redo]);
+	}, [undo, redo]);
 
 	return (
 		<TooltipProvider delayDuration={300}>
@@ -73,8 +70,8 @@ export const UndoRedoControls: React.FC<Props> = ({ resourceKey, index = 0, clas
 							variant="outline"
 							size="icon"
 							className="h-8 w-8"
-							disabled={!undoEnabled}
-							onClick={() => undo(resourceKey, index)}
+							disabled={!canUndo}
+							onClick={() => undo()}
 							aria-label="Undo"
 						>
 							<Undo2 className="h-4 w-4" />
@@ -90,8 +87,8 @@ export const UndoRedoControls: React.FC<Props> = ({ resourceKey, index = 0, clas
 							variant="outline"
 							size="icon"
 							className="h-8 w-8"
-							disabled={!redoEnabled}
-							onClick={() => redo(resourceKey, index)}
+							disabled={!canRedo}
+							onClick={() => redo()}
 							aria-label="Redo"
 						>
 							<Redo2 className="h-4 w-4" />

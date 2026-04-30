@@ -6,7 +6,7 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
@@ -16,8 +16,9 @@ import { trafficDataResourceSchema } from '@/lib/schema/resources/trafficData';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
 
 const TrafficDataPage = () => {
-	const { getResource, setResource } = useBundle();
-	const data = getResource<ParsedTrafficData>('trafficData');
+	const { getResource, setResource } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const data = bundleId ? getResource<ParsedTrafficData>(bundleId, 'trafficData') : null;
 	const bulk = useGenericBulkSelection();
 	const bulkValue = useMemo(
 		() => ({
@@ -50,7 +51,7 @@ const TrafficDataPage = () => {
 				<SchemaEditorProvider
 					resource={trafficDataResourceSchema}
 					data={data}
-					onChange={(next) => setResource('trafficData', next as ParsedTrafficData)}
+					onChange={(next) => bundleId && setResource(bundleId, 'trafficData', next as ParsedTrafficData)}
 					extensions={trafficDataExtensions}
 				>
 					<SchemaEditor />

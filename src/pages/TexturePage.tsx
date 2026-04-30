@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundle, useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import {
@@ -52,8 +52,16 @@ const TEXTURE_SHORTCUT_GROUPS: ShortcutGroup[] = [
 ];
 
 const TexturePage = () => {
-	const { getResources, setResourceAt, loadedBundle, originalArrayBuffer, resources: uiResources } = useBundle();
-	const headers = getResources<ParsedTextureHeader>(TEXTURE_HANDLER_KEY);
+	const { getResources, setResourceAt } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const activeBundle = useActiveBundle();
+	const loadedBundle = activeBundle?.parsed ?? null;
+	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
+	const uiResources = activeBundle?.resources ?? [];
+	const headers = useMemo(
+		() => (bundleId ? [...getResources<ParsedTextureHeader>(bundleId, TEXTURE_HANDLER_KEY)] : []),
+		[bundleId, getResources],
+	);
 
 	// The resources the decoder maps onto. `getResources('texture')` gives
 	// us one model per resource in bundle order, but the decoder also needs
@@ -221,8 +229,11 @@ const TexturePage = () => {
 	}, [loadedBundle, originalArrayBuffer, textureResources, selectedIndex]);
 
 	const handleChange = useCallback(
-		(next: unknown) => setResourceAt(TEXTURE_HANDLER_KEY, selectedIndex, next),
-		[setResourceAt, selectedIndex],
+		(next: unknown) => {
+			if (!bundleId) return;
+			setResourceAt(bundleId, TEXTURE_HANDLER_KEY, selectedIndex, next);
+		},
+		[setResourceAt, selectedIndex, bundleId],
 	);
 
 	const pickerContextValue = useMemo<MultiResourcePickerValue | null>(() => {

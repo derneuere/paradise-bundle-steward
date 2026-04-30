@@ -6,7 +6,7 @@
 // wraps the legacy 5-tab form as a custom renderer.
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { vehicleListResourceSchema } from '@/lib/schema/resources/vehicleList';
@@ -14,8 +14,9 @@ import { vehicleListExtensions } from '@/components/schema-editor/extensions/veh
 import type { ParsedVehicleList } from '@/lib/core/vehicleList';
 
 const VehiclesPage = () => {
-  const { getResource, setResource } = useBundle();
-  const data = getResource<ParsedVehicleList>('vehicleList');
+  const { getResource, setResource } = useWorkspace();
+  const bundleId = useActiveBundleId();
+  const data = bundleId ? getResource<ParsedVehicleList>(bundleId, 'vehicleList') : null;
 
   if (!data) {
     return (
@@ -37,7 +38,7 @@ const VehiclesPage = () => {
       <SchemaEditorProvider
         resource={vehicleListResourceSchema}
         data={data}
-        onChange={(next) => setResource('vehicleList', next as ParsedVehicleList)}
+        onChange={(next) => bundleId && setResource(bundleId, 'vehicleList', next as ParsedVehicleList)}
         extensions={vehicleListExtensions}
       >
         <SchemaEditor />

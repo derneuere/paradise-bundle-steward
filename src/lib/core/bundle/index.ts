@@ -713,3 +713,29 @@ export function parseBundleResources(
 // ============================================================================
 // Import helpers are re-exported from bundleEntry.ts at the top of this file:
 // getImportsByPtrOffset, getImportIds
+
+// ============================================================================
+// UIResource — display-friendly view of a ResourceEntry
+// ============================================================================
+
+/**
+ * A bundle resource flattened for display in trees, tables, and pickers.
+ * Created by `toUIResource` once at bundle load. Carries a back-pointer to
+ * the underlying ResourceEntry via `raw` for callers that need the parser
+ * inputs (resourceTypeId, resourceId, etc.).
+ */
+export type UIResource = {
+  id: string;
+  name: string;
+  type: string;
+  typeName: string;
+  category: string;
+  platform: string;
+  uncompressedSize: number;
+  compressedSize: number;
+  memoryType: string;
+  imports: string[];
+  flags: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  raw: any;
+};

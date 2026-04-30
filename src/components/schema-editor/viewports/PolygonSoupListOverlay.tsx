@@ -8,7 +8,7 @@
 // `PolygonSoupListPage` — and click events on the 3D scene can switch the
 // active resource (via the page's `handleViewportSelect`).
 //
-// Why this overlay reads BundleContext directly (deviating from ADR-0002):
+// Why this overlay reads the active Bundle directly (deviating from ADR-0002):
 // see docs/adr/0004-polygon-soup-list-overlay-reads-bundle-context.md.
 //
 // DOM siblings (marquee, status badge) ride the WorldViewport HTML slot.
@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundle } from '@/context/WorkspaceContext';
 import { parseAllBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
 import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
@@ -399,7 +399,9 @@ function applyHighlight(
 // ---------------------------------------------------------------------------
 
 function useFallbackModels(): (ParsedPolygonSoupList | null)[] {
-	const { loadedBundle, originalArrayBuffer } = useBundle();
+	const activeBundle = useActiveBundle();
+	const loadedBundle = activeBundle?.parsed ?? null;
+	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	return useMemo(() => {
 		if (!loadedBundle || !originalArrayBuffer) return [];
 		const all = parseAllBundleResourcesViaRegistry(originalArrayBuffer, loadedBundle);

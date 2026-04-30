@@ -1,0 +1,3 @@
+# Saves remain browser downloads; File System Access API deferred
+
+Steward saves modified **Bundles** by triggering a browser download — every save effectively a "Save As," with the user manually replacing the original file on disk. We considered adopting the File System Access API to persist a writable file handle per **Bundle** and write back in-place, especially attractive once **Workspaces** hold many editable **Bundles** at once. We deliberately deferred this: in-place saves would directly mutate the user's game install with no easy rollback if a bad save corrupts a file, and **Steward** has no working-copy isolation, no backup-on-write, and no versioned save history yet. Revisit when the **Workspace** has a safety story that makes in-place writes recoverable.

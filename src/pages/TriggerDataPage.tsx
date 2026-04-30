@@ -7,7 +7,7 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
@@ -17,8 +17,9 @@ import { triggerDataResourceSchema } from '@/lib/schema/resources/triggerData';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 
 const TriggerDataPage = () => {
-	const { getResource, setResource } = useBundle();
-	const data = getResource<ParsedTriggerData>('triggerData');
+	const { getResource, setResource } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const data = bundleId ? getResource<ParsedTriggerData>(bundleId, 'triggerData') : null;
 	const bulk = useGenericBulkSelection();
 	const bulkValue = useMemo(
 		() => ({
@@ -51,7 +52,7 @@ const TriggerDataPage = () => {
 				<SchemaEditorProvider
 					resource={triggerDataResourceSchema}
 					data={data}
-					onChange={(next) => setResource('triggerData', next as ParsedTriggerData)}
+					onChange={(next) => bundleId && setResource(bundleId, 'triggerData', next as ParsedTriggerData)}
 					extensions={triggerDataExtensions}
 				>
 					<SchemaEditor />

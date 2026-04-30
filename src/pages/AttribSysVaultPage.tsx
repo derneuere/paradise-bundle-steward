@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import type { ParsedAttribSys } from '@/lib/core/attribSys';
 import {
 	getSchemaByClassHash,
@@ -535,20 +535,21 @@ function FieldRow({
 // ── Main page ─────────────────────────────────────────────────────────────
 
 const AttribSysVaultPage = () => {
-	const { getResource, setResource } = useBundle();
-	const data = getResource<ParsedAttribSys>('attribSysVault');
+	const { getResource, setResource } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const data = bundleId ? getResource<ParsedAttribSys>(bundleId, 'attribSysVault') : null;
 	const [showAdvanced, setShowAdvanced] = useState(false);
 
 	const update = useCallback<UpdateField>(
 		(attrIndex, fieldName, newValue) => {
-			if (!data) return;
+			if (!data || !bundleId) return;
 			const nextAttributes: ParsedAttribute[] = data.attributes.map((attr, i) => {
 				if (i !== attrIndex) return attr;
 				return { ...attr, fields: { ...attr.fields, [fieldName]: newValue } };
 			});
-			setResource('attribSysVault', { ...data, attributes: nextAttributes });
+			setResource(bundleId, 'attribSysVault', { ...data, attributes: nextAttributes });
 		},
-		[data, setResource],
+		[data, bundleId, setResource],
 	);
 
 	const defaultOpen = useMemo(() => {

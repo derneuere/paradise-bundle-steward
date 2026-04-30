@@ -5,7 +5,7 @@
 // the editor to remind users that edits won't round-trip to disk.
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { CapabilityWarning } from '@/components/capabilities';
@@ -13,8 +13,9 @@ import { iceTakeDictionaryResourceSchema } from '@/lib/schema/resources/iceTakeD
 import type { ParsedIceTakeDictionary } from '@/lib/core/iceTakeDictionary';
 
 const IcePage = () => {
-  const { getResource, setResource } = useBundle();
-  const data = getResource<ParsedIceTakeDictionary>('iceTakeDictionary');
+  const { getResource, setResource } = useWorkspace();
+  const bundleId = useActiveBundleId();
+  const data = bundleId ? getResource<ParsedIceTakeDictionary>(bundleId, 'iceTakeDictionary') : null;
 
   if (!data) {
     return (
@@ -38,7 +39,7 @@ const IcePage = () => {
         <SchemaEditorProvider
           resource={iceTakeDictionaryResourceSchema}
           data={data}
-          onChange={(next) => setResource('iceTakeDictionary', next as ParsedIceTakeDictionary)}
+          onChange={(next) => bundleId && setResource(bundleId, 'iceTakeDictionary', next as ParsedIceTakeDictionary)}
         >
           <SchemaEditor />
         </SchemaEditorProvider>

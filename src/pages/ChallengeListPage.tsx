@@ -6,7 +6,7 @@
 // default schema form via propertyGroups.
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { challengeListExtensions } from '@/components/schema-editor/extensions/challengeListExtensions';
@@ -14,8 +14,9 @@ import { challengeListResourceSchema } from '@/lib/schema/resources/challengeLis
 import type { ParsedChallengeList } from '@/lib/core/challengeList';
 
 const ChallengeListPage = () => {
-	const { getResource, setResource } = useBundle();
-	const data = getResource<ParsedChallengeList>('challengeList');
+	const { getResource, setResource } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const data = bundleId ? getResource<ParsedChallengeList>(bundleId, 'challengeList') : null;
 
 	if (!data) {
 		return (
@@ -37,7 +38,7 @@ const ChallengeListPage = () => {
 			<SchemaEditorProvider
 				resource={challengeListResourceSchema}
 				data={data}
-				onChange={(next) => setResource('challengeList', next as ParsedChallengeList)}
+				onChange={(next) => bundleId && setResource(bundleId, 'challengeList', next as ParsedChallengeList)}
 				extensions={challengeListExtensions}
 			>
 				<SchemaEditor />

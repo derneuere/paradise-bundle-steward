@@ -32,7 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundle, useActiveBundleId, useWorkspace, useWorkspaceCompanion } from '@/context/WorkspaceContext';
 import type { ParsedShader } from '@/lib/core/shader';
 import { SHADER_TYPE_ID, SHADER_PROGRAM_BUFFER_TYPE_ID } from '@/lib/core/shader';
 import { getImportIds } from '@/lib/core/bundle';
@@ -73,7 +73,9 @@ type LinkedTechnique = {
 };
 
 function useLinkedShader(model: ParsedShader | null, bundleResourceIndex: number) {
-	const { loadedBundle, originalArrayBuffer } = useBundle();
+	const activeBundle = useActiveBundle();
+	const loadedBundle = activeBundle?.parsed ?? null;
+	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	return useMemo<LinkedTechnique[]>(() => {
 		if (!model || !loadedBundle || !originalArrayBuffer) return [];
 		const importIds = getImportIds(
@@ -939,11 +941,18 @@ function ProgramSource({
 // ---------------------------------------------------------------------------
 
 const ShaderPage = () => {
-	const {
-		getResources, loadedBundle, originalArrayBuffer, debugResources,
-		resources: uiResources, secondaryBundles, loadSecondaryBundle, removeSecondaryBundle,
-	} = useBundle();
-	const models = getResources<ParsedShader>(HANDLER_KEY);
+	const { getResources } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const activeBundle = useActiveBundle();
+	const loadedBundle = activeBundle?.parsed ?? null;
+	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
+	const debugResources = activeBundle?.debugResources ?? [];
+	const uiResources = activeBundle?.resources ?? [];
+	const { secondaryBundles, loadSecondaryBundle, removeSecondaryBundle } = useWorkspaceCompanion();
+	const models = useMemo(
+		() => (bundleId ? [...getResources<ParsedShader>(bundleId, HANDLER_KEY)] : []),
+		[bundleId, getResources],
+	);
 	const shaderUIResources = useMemo(
 		() => uiResources.filter((r) => r.raw?.resourceTypeId === SHADER_TYPE_ID),
 		[uiResources],

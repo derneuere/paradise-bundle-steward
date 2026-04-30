@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import type {
 	ParsedDeformationSpec,
 	Vec3,
@@ -734,15 +734,16 @@ function GlassPanesTab({
 // ── Main page ────────────────────────────────────────────────────────────
 
 const DeformationSpecPage = () => {
-	const { getResource, setResource } = useBundle();
-	const data = getResource<ParsedDeformationSpec>('deformationSpec');
+	const { getResource, setResource } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const data = bundleId ? getResource<ParsedDeformationSpec>(bundleId, 'deformationSpec') : null;
 
 	const set = useCallback(
 		(patch: Partial<ParsedDeformationSpec>) => {
-			if (!data) return;
-			setResource('deformationSpec', { ...data, ...patch });
+			if (!data || !bundleId) return;
+			setResource(bundleId, 'deformationSpec', { ...data, ...patch });
 		},
-		[data, setResource],
+		[data, bundleId, setResource],
 	);
 
 	const summary = useMemo(() => {

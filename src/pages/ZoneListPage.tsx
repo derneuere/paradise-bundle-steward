@@ -7,7 +7,7 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
@@ -16,8 +16,9 @@ import { zoneListResourceSchema } from '@/lib/schema/resources/zoneList';
 import type { ParsedZoneList } from '@/lib/core/zoneList';
 
 const ZoneListPage = () => {
-	const { getResource, setResource } = useBundle();
-	const data = getResource<ParsedZoneList>('zoneList');
+	const { getResource, setResource } = useWorkspace();
+	const bundleId = useActiveBundleId();
+	const data = bundleId ? getResource<ParsedZoneList>(bundleId, 'zoneList') : null;
 	const bulk = useGenericBulkSelection();
 	const bulkValue = useMemo(
 		() => ({
@@ -50,7 +51,7 @@ const ZoneListPage = () => {
 				<SchemaEditorProvider
 					resource={zoneListResourceSchema}
 					data={data}
-					onChange={(next) => setResource('zoneList', next as ParsedZoneList)}
+					onChange={(next) => bundleId && setResource(bundleId, 'zoneList', next as ParsedZoneList)}
 				>
 					<SchemaEditor />
 				</SchemaEditorProvider>

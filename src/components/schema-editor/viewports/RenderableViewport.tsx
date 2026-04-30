@@ -27,7 +27,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
-import { useBundle } from '@/context/BundleContext';
+import { useActiveBundle, useWorkspaceCompanion } from '@/context/WorkspaceContext';
 import { RENDERABLE_TYPE_ID } from '@/lib/core/renderable';
 import { extractResourceRaw } from '@/lib/core/registry/extract';
 import type { ResolvedMaterial } from '@/lib/core/materialChain';
@@ -400,7 +400,11 @@ function RenderableMeshes({
 	onHover: (sel: { ri: number; mi: number } | null) => void;
 	useTranslatedShaders: boolean;
 }) {
-	const { loadedBundle, originalArrayBuffer, debugResources, secondaryBundles } = useBundle();
+	const activeBundle = useActiveBundle();
+	const loadedBundle = activeBundle?.parsed ?? null;
+	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
+	const debugResources = activeBundle?.debugResources ?? [];
+	const { secondaryBundles } = useWorkspaceCompanion();
 	const decoded = useRenderableDecoded();
 
 	// Cross-bundle catalog + material index, only computed when the user
@@ -716,13 +720,6 @@ function RenderableMeshes({
 					const meshMaterial = isSelected ? selectedMaterial
 						: isHovered ? hoverMaterial
 						: (translatedMat ?? texturedMat ?? baseMaterial);
-					// onBeforeRender hooks the cb0 update for translated
-					// materials so the world / viewproj / camera-pos / time
-					// slots refresh per frame. No-op for MeshStandardMaterial.
-					const onBeforeRender = (_r: THREE.WebGLRenderer, _s: THREE.Scene, camera: THREE.Camera, _g: THREE.BufferGeometry, material: THREE.Material, _group: THREE.Group) => {
-						const upd = (material as TranslatedMaterial).__updateCb0;
-						if (upd) upd(camera, _group ?? (material as any).__owner ?? { matrixWorld: new THREE.Matrix4() });
-					};
 					return (
 						<mesh
 							key={`${r.resourceId.toString(16)}-${mi}`}
@@ -730,32 +727,33 @@ function RenderableMeshes({
 							material={meshMaterial}
 							matrixAutoUpdate={mat === null}
 							matrix={mat ?? undefined}
-							onBeforeRender={(_r, _s, camera, _g, material, _group) => {
+							onBeforeRender={function (
+								this: THREE.Mesh,
+								_r: THREE.WebGLRenderer, _s: THREE.Scene,
+								camera: THREE.Camera, _g: THREE.BufferGeometry,
+								material: THREE.Material, _group: THREE.Group,
+							) {
+								// Three.js invokes `mesh.onBeforeRender.call(mesh, ...)`
+								// so `this` is the mesh being drawn. Earlier this code
+								// fetched the mesh via `material.userData.__mesh` set
+								// in a ref callback, but ShaderMaterials are shared
+								// across all meshes that use the same material — the
+								// userData stash got overwritten by whichever mesh
+								// mounted last, so every LOD/part received the SAME
+								// matrixWorld and renderables piled up on top of each
+								// other instead of each landing at its own
+								// partLocator. Using `this` per-call gives the correct
+								// world matrix for every draw.
 								const upd = (material as TranslatedMaterial).__updateCb0;
 								if (upd) {
-									// Need the mesh itself for matrixWorld, but
-									// onBeforeRender doesn't pass it directly —
-									// `_group` is the THREE.Group containing
-									// instanced draw calls, not the mesh. Three.js
-									// does pass `this` as the binding context;
-									// we instead use the ref via a closure trick:
-									// the mesh updates its own matrixWorld before
-									// onBeforeRender fires, and we can grab it
-									// via `material.userData.__mesh` set below.
-									const owner = (material.userData as any).__mesh;
-									if (owner) upd(camera, owner);
+									// DEBUG: verify `this` is the mesh — should log
+									// the mesh's id and its own matrixWorld diagonal
+									// (different per mesh).
+									const w = (this as THREE.Object3D)?.matrixWorld?.elements;
+									if (w) console.log('onBeforeRender mesh id=', (this as THREE.Object3D).id, 'mw[12,13,14]=', w[12].toFixed(2), w[13].toFixed(2), w[14].toFixed(2));
+									upd(camera, this);
 								}
-								// Suppress unused-args lint
-								void _r; void _s; void _g; void _group; void onBeforeRender;
-							}}
-							ref={(meshRef) => {
-								// Stash mesh reference on the material so the
-								// onBeforeRender callback can fetch matrixWorld.
-								if (!meshRef) return;
-								const mat = meshRef.material as THREE.Material;
-								if ((mat as TranslatedMaterial).__updateCb0) {
-									(mat.userData as Record<string, unknown>).__mesh = meshRef;
-								}
+								void _r; void _s; void _g; void _group;
 							}}
 							onClick={(e) => {
 								e.stopPropagation();
@@ -784,7 +782,9 @@ function RenderableMeshes({
 // =============================================================================
 
 export function RenderableViewport() {
-	const { loadedBundle, originalArrayBuffer } = useBundle();
+	const activeBundle = useActiveBundle();
+	const loadedBundle = activeBundle?.parsed ?? null;
+	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	const decoded = useRenderableDecoded();
 	const { selectPath, selectedPath } = useSchemaEditor();
 
