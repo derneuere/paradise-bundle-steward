@@ -16,7 +16,8 @@ import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import { TriggerDataOverlay } from './viewports/TriggerDataOverlay';
 import { useSchemaEditor } from './context';
 import type { NodePath } from '@/lib/schema/walk';
-import { PolygonSoupListViewport } from './viewports/PolygonSoupListViewport';
+import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
+import { PolygonSoupListOverlay } from './viewports/PolygonSoupListOverlay';
 import { RenderableViewport } from './viewports/RenderableViewport';
 import { TextureViewport } from './viewports/TextureViewport';
 import type { ParsedAISections } from '@/lib/core/aiSections';
@@ -73,7 +74,7 @@ function ViewportPaneInner({
 		return <ZoneListViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
 	}
 	if (resource.key === 'polygonSoupList') {
-		return <PolygonSoupListViewport />;
+		return <PolygonSoupListViewportShim data={data} selectedPath={selectedPath} selectPath={selectPath} />;
 	}
 	if (resource.key === 'renderable') {
 		// Renderable's 3D preview is the main user-facing value of the
@@ -199,6 +200,36 @@ function AISectionsViewportShim({
 		<WorldViewport>
 			<AISectionsOverlay
 				data={aiData}
+				selectedPath={selectedPath}
+				onSelect={selectPath}
+				onChange={(next) => setAtPath([], next)}
+			/>
+		</WorldViewport>
+	);
+}
+
+// PolygonSoupList runs through the WorldViewport chrome (issue #15). The
+// overlay matches `['soups', S, 'polygons', P]` paths directly. The
+// multi-resource state (all models + visibility + click routing across
+// resources) comes from PolygonSoupListContext provided by
+// PolygonSoupListPage — see the HITL comment on issue #15 for the
+// page-level picker rationale.
+function PolygonSoupListViewportShim({
+	data,
+	selectedPath,
+	selectPath,
+}: {
+	data: unknown;
+	selectedPath: NodePath;
+	selectPath: (path: NodePath) => void;
+}) {
+	const { setAtPath } = useSchemaEditor();
+	const pslData = data as ParsedPolygonSoupList;
+
+	return (
+		<WorldViewport>
+			<PolygonSoupListOverlay
+				data={pslData}
 				selectedPath={selectedPath}
 				onSelect={selectPath}
 				onChange={(next) => setAtPath([], next)}
