@@ -35,7 +35,7 @@ type Props = {
 // Scene bounds (all hulls)
 // ---------------------------------------------------------------------------
 
-function computeAllBounds(hulls: TrafficHull[]): { center: THREE.Vector3; radius: number } {
+export function computeAllBounds(hulls: TrafficHull[]): { center: THREE.Vector3; radius: number } {
 	const box = new THREE.Box3();
 	let hasPoints = false;
 	for (const hull of hulls) {
@@ -74,7 +74,7 @@ function AutoFit({ center, radius }: { center: THREE.Vector3; radius: number }) 
 // the list leaves the viewport wherever it was last aimed and you never see
 // the highlight. Only reacts to staticVehicle selections so browsing other
 // sub-types (sections, junctions, etc.) doesn't move the camera.
-function FocusOnVehicle({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
+export function FocusOnVehicle({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
 	const { camera, controls } = useThree() as { camera: THREE.Camera; controls: { target: THREE.Vector3; update: () => void } | null };
 	useEffect(() => {
 		if (selected?.sub?.type !== 'staticVehicle') return;
@@ -161,7 +161,7 @@ function buildAllRungLines(hulls: TrafficHull[], activeHullIndex: number): AllRu
 
 const rungMaterial = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 });
 
-function AllRungLines({
+export function AllRungLines({
 	hulls, activeHullIndex,
 }: {
 	hulls: TrafficHull[];
@@ -218,7 +218,7 @@ function buildPickingIndex(hulls: TrafficHull[]): PickingIndex {
 
 const pickPlaneMat = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
 
-function PickingPlane({
+export function PickingPlane({
 	hulls, center, radius, onSelect, pvs, pvsActive, onHoverCell,
 }: {
 	hulls: TrafficHull[];
@@ -361,7 +361,7 @@ function buildAllLaneConnections(hulls: TrafficHull[], activeHullIndex: number):
 
 const laneConnMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.35 });
 
-function AllLaneConnections({ hulls, activeHullIndex }: { hulls: TrafficHull[]; activeHullIndex: number }) {
+export function AllLaneConnections({ hulls, activeHullIndex }: { hulls: TrafficHull[]; activeHullIndex: number }) {
 	const geo = useMemo(() => buildAllLaneConnections(hulls, activeHullIndex), [hulls, activeHullIndex]);
 	return <lineSegments geometry={geo} material={laneConnMat} />;
 }
@@ -370,7 +370,7 @@ function AllLaneConnections({ hulls, activeHullIndex }: { hulls: TrafficHull[]; 
 // Section highlight (rungs belonging to selected section in active hull)
 // ---------------------------------------------------------------------------
 
-function SectionHighlight({ hull, sectionIndex }: { hull: TrafficHull; sectionIndex: number }) {
+export function SectionHighlight({ hull, sectionIndex }: { hull: TrafficHull; sectionIndex: number }) {
 	const sec = hull.sections[sectionIndex];
 	if (!sec) return null;
 
@@ -407,7 +407,7 @@ const junctionMat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 
 
 type InstanceMapping = { hullIndex: number; localIndex: number }[];
 
-function AllJunctionInstances({
+export function AllJunctionInstances({
 	hulls, activeHullIndex, selected, onSelect,
 }: {
 	hulls: TrafficHull[];
@@ -479,7 +479,7 @@ function AllJunctionInstances({
 const triggerGeo = new THREE.BoxGeometry(1, 1, 1);
 const triggerMat = new THREE.MeshBasicMaterial({ color: 0x33cccc, wireframe: true, transparent: true, opacity: 0.6 });
 
-function AllLightTriggerInstances({
+export function AllLightTriggerInstances({
 	hulls, activeHullIndex, onSelect,
 }: {
 	hulls: TrafficHull[];
@@ -560,7 +560,7 @@ const vehicleEdgesMat = new THREE.LineBasicMaterial({
 	transparent: true,
 });
 
-function AllStaticVehicleInstances({
+export function AllStaticVehicleInstances({
 	hulls, activeHullIndex, selected, onSelect,
 }: {
 	hulls: TrafficHull[];
@@ -644,7 +644,7 @@ function AllStaticVehicleInstances({
 // Colored wireframe outline drawn on top of the currently-selected static
 // vehicle. Keeps the car at its true 3×2×5 footprint while still making the
 // selection pop against the map (coloured fill + depth-test-off border).
-function SelectedVehicleOutline({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
+export function SelectedVehicleOutline({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
 	const lineRef = useRef<THREE.LineSegments>(null!);
 
 	const matrix = useMemo(() => {
@@ -682,7 +682,7 @@ function SelectedVehicleOutline({ hulls, selected }: { hulls: TrafficHull[]; sel
 const lightGeo = new THREE.SphereGeometry(2, 12, 8);
 const lightMat = new THREE.MeshStandardMaterial({ color: 0x44ff44, roughness: 0.3, metalness: 0.3, emissive: 0x114411, emissiveIntensity: 0.5 });
 
-function TrafficLightInstances({ data }: { data: ParsedTrafficData }) {
+export function TrafficLightInstances({ data }: { data: ParsedTrafficData }) {
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const tl = data.trafficLights;
 	const count = tl.posAndYRotations.length;
@@ -715,7 +715,7 @@ function TrafficLightInstances({ data }: { data: ParsedTrafficData }) {
 // Selection label
 // ---------------------------------------------------------------------------
 
-function SelectionLabel({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
+export function SelectionLabel({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
 	if (!selected?.sub) return null;
 	const hull = hulls[selected.hullIndex];
 	if (!hull) return null;
@@ -964,7 +964,7 @@ function findCellsListingHull(pvs: TrafficPvs, hullIndex: number): number[] {
 	return out;
 }
 
-function PvsGridOverlay({
+export function PvsGridOverlay({
 	pvs, hulls, selected,
 }: {
 	pvs: TrafficPvs;
@@ -1088,7 +1088,7 @@ function PvsGridOverlay({
 // Floating tooltip that follows the mouse over the grid. Reads the cell's
 // hull list from `pvs.hullPvsSets` so the user sees exactly which hulls a
 // click would reference.
-function PvsCellTooltip({
+export function PvsCellTooltip({
 	pvs, hoverCellIndex, hoverWorld,
 }: {
 	pvs: TrafficPvs;
