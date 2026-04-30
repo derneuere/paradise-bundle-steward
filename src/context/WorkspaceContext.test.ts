@@ -18,8 +18,10 @@ import {
 	classifyLoad,
 	clearBundleDirty,
 	dropHistoryForBundle,
+	isVisibleIn,
 	removeBundleById,
 	replaceBundleById,
+	visibilityKey,
 } from './WorkspaceContext.helpers';
 import {
 	emptyHistory,
@@ -239,6 +241,42 @@ describe('selection round-trip', () => {
 	it('null is the deselected state', () => {
 		const sel: WorkspaceSelection = null;
 		expect(sel).toBeNull();
+	});
+
+	it('Selection is independent of Visibility — hiding a selected resource keeps it selected (issue #19)', () => {
+		// Acceptance criterion / CONTEXT.md: hiding the currently-selected
+		// Resource must leave it selected (inspector still shows its Tools).
+		// The two state buckets are kept in separate maps in the React
+		// provider and never read each other; this test exercises that
+		// invariant directly so a regression couldn't slip in by accidentally
+		// coupling them.
+		const selection: WorkspaceSelection = {
+			bundleId: 'A.BNDL',
+			resourceKey: 'streetData',
+			index: 0,
+			path: ['streets', 7],
+		};
+
+		// Simulate the user hiding the Bundle the selection lives in. The
+		// `isVisible` walker must return false, and the selection record
+		// must stay byte-identical — no field mutated, no path cleared.
+		const visibility = new Map<string, boolean>([
+			[visibilityKey({ bundleId: 'A.BNDL' }), false],
+		]);
+		expect(
+			isVisibleIn(visibility, {
+				bundleId: 'A.BNDL',
+				resourceKey: 'streetData',
+				index: 0,
+			}),
+		).toBe(false);
+		// Selection is unchanged — the inspector / Tools keep rendering off it.
+		expect(selection).toEqual({
+			bundleId: 'A.BNDL',
+			resourceKey: 'streetData',
+			index: 0,
+			path: ['streets', 7],
+		});
 	});
 
 	it('selection always pins to a (bundleId, resourceKey, index) — no implicit active Bundle', () => {

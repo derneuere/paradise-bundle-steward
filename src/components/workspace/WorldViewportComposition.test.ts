@@ -13,11 +13,17 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	WORLD_VIEWPORT_FAMILY_KEYS,
+	filterOverlaysByVisibility,
 	isWorldViewportFamilyKey,
 	listWorldOverlays,
 	selectedPathFor,
+	type OverlayDescriptor,
 } from './WorldViewportComposition.helpers';
-import type { EditableBundle } from '@/context/WorkspaceContext.types';
+import { isVisibleIn } from '@/context/WorkspaceContext.helpers';
+import type {
+	EditableBundle,
+	VisibilityNode,
+} from '@/context/WorkspaceContext.types';
 import type { ParsedBundle } from '@/lib/core/types';
 
 // ---------------------------------------------------------------------------
@@ -278,5 +284,126 @@ describe('selectedPathFor', () => {
 		const a = selectedPathFor(selection, baseDesc);
 		const b = selectedPathFor(null, baseDesc);
 		expect(a).toBe(b);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// filterOverlaysByVisibility — issue #19 mount-filter
+//
+// The composition feeds its overlay descriptor list through this filter
+// before mounting; descriptors whose `(bundleId, resourceKey, index)` are
+// hidden by the Workspace's Visibility cascade do not reach the
+// WorldViewport. Compose with `isVisibleIn` from WorkspaceContext.helpers
+// to exercise the same predicate the live React provider supplies via
+// `isVisible`.
+// ---------------------------------------------------------------------------
+
+describe('filterOverlaysByVisibility', () => {
+	function descriptors(): OverlayDescriptor[] {
+		return [
+			{ bundleId: 'A.BNDL', resourceKey: 'aiSections', index: 0, model: { tag: 'a-ai' } },
+			{ bundleId: 'A.BNDL', resourceKey: 'streetData', index: 0, model: { tag: 'a-street' } },
+			{ bundleId: 'B.BNDL', resourceKey: 'polygonSoupList', index: 0, model: { tag: 'b-soup-0' } },
+			{ bundleId: 'B.BNDL', resourceKey: 'polygonSoupList', index: 1, model: { tag: 'b-soup-1' } },
+		];
+	}
+
+	it('keeps every overlay when the visibility map is empty (default-visible)', () => {
+		const v = new Map<string, boolean>();
+		const isVisible = (n: VisibilityNode) => isVisibleIn(v, n);
+		const out = filterOverlaysByVisibility(descriptors(), isVisible);
+		expect(out).toHaveLength(4);
+	});
+
+	it('cascade: hiding a Bundle drops every overlay under it', () => {
+		// Acceptance criterion: toggling a Bundle off makes every descendant
+		// return false from `isVisible`. The composition then drops all of
+		// Bundle A's overlays, but B's stay mounted.
+		const v = new Map<string, boolean>([['A.BNDL', false]]);
+		const out = filterOverlaysByVisibility(
+			descriptors(),
+			(n) => isVisibleIn(v, n),
+		);
+		expect(out.map((d) => d.bundleId)).toEqual(['B.BNDL', 'B.BNDL']);
+	});
+
+	it('hides a single resource type without affecting siblings under the same Bundle', () => {
+		const v = new Map<string, boolean>([['A.BNDL::aiSections', false]]);
+		const out = filterOverlaysByVisibility(
+			descriptors(),
+			(n) => isVisibleIn(v, n),
+		);
+		// A.BNDL/aiSections gone; A.BNDL/streetData stays; B.BNDL untouched.
+		expect(out.map((d) => `${d.bundleId}/${d.resourceKey}`)).toEqual([
+			'A.BNDL/streetData',
+			'B.BNDL/polygonSoupList',
+			'B.BNDL/polygonSoupList',
+		]);
+	});
+
+	it('multi-instance: hiding one PolygonSoupList instance keeps its siblings', () => {
+		// Every soup gets its own tree node and its own toggle, so multiple
+		// soups can be visible simultaneously while one is hidden.
+		const v = new Map<string, boolean>([
+			['B.BNDL::polygonSoupList::0', false],
+		]);
+		const out = filterOverlaysByVisibility(
+			descriptors(),
+			(n) => isVisibleIn(v, n),
+		);
+		expect(out.map((d) => `${d.bundleId}#${d.index}`)).toEqual([
+			'A.BNDL#0',
+			'A.BNDL#0',
+			'B.BNDL#1',
+		]);
+	});
+
+	it('toggling a Bundle back on restores the prior per-instance state', () => {
+		// User flow:
+		//   1. Hide B.BNDL/polygonSoupList #0 (per-instance hide).
+		//   2. Hide B.BNDL (cascade hides BOTH soups).
+		//   3. Show B.BNDL again — the per-instance hide for #0 must
+		//      reassert itself (only #1 comes back, not #0).
+		// The cascade is one-way (`isVisibleIn`), so we don't need to clear
+		// the per-instance entry when toggling the Bundle off — toggling the
+		// Bundle back on automatically restores the prior layer.
+		const v = new Map<string, boolean>([
+			['B.BNDL::polygonSoupList::0', false],
+			['B.BNDL', false],
+		]);
+		// Step 2 state: every B.BNDL overlay hidden by the Bundle-level cascade.
+		const hiddenAll = filterOverlaysByVisibility(
+			descriptors(),
+			(n) => isVisibleIn(v, n),
+		);
+		expect(hiddenAll.map((d) => d.bundleId)).toEqual(['A.BNDL', 'A.BNDL']);
+
+		// Step 3: re-enable the Bundle. The per-instance entry for #0 is
+		// untouched, so it stays hidden; #1 comes back.
+		const restored = new Map(v);
+		restored.set('B.BNDL', true);
+		const after = filterOverlaysByVisibility(
+			descriptors(),
+			(n) => isVisibleIn(restored, n),
+		);
+		expect(after.map((d) => `${d.bundleId}#${d.index}`)).toEqual([
+			'A.BNDL#0',
+			'A.BNDL#0',
+			'B.BNDL#1',
+		]);
+	});
+
+	it('preserves descriptor order and identity for survivors', () => {
+		// Stable ordering matters: WorldViewport draws layers in the order
+		// it receives children. The filter must not reshuffle.
+		const v = new Map<string, boolean>([['A.BNDL::aiSections', false]]);
+		const input = descriptors();
+		const out = filterOverlaysByVisibility(
+			input,
+			(n) => isVisibleIn(v, n),
+		);
+		expect(out[0]).toBe(input[1]);
+		expect(out[1]).toBe(input[2]);
+		expect(out[2]).toBe(input[3]);
 	});
 });

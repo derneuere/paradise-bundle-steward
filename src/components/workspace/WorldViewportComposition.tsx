@@ -20,13 +20,22 @@
 //   - The `onChange` wrapper that funnels in-scene edits to
 //     `setResourceAt(bundleId, key, index, next)`.
 //
+// Issue #19 (Visibility cascade): the inner component drops every overlay
+// whose `(bundleId, resourceKey, index)` reads as hidden via the
+// Workspace's `isVisible`. Toggling a Bundle off makes every descendant
+// disappear from the scene; toggling it back on restores any prior per-
+// instance toggles (the cascade is one-way — see `isVisibleIn` in the
+// helpers module).
+//
 // What this DOESN'T own:
 //   - Mounting / dismounting the WorldViewport on Selection change. As
 //     long as both selections are world-family the chrome stays mounted —
 //     CenterViewport is the gate that swaps in renderable / texture
 //     viewports for those non-world-coord resource types (those WILL
 //     remount, since they're not WorldViewport's at all).
-//   - Per-overlay visibility toggles. That's issue #4 / #19.
+//   - Selection. Hiding a selected resource does NOT clear the Selection
+//     (CONTEXT.md / "Selection") — the inspector keeps showing its Tools,
+//     the overlay just stops contributing to the scene.
 //   - PolygonSoupList Workspace-awareness. The overlay still reads
 //     `useActiveBundle()` internally (ADR-0004) — multi-Bundle
 //     PolygonSoupList rendering is deferred and tracked separately.
@@ -49,6 +58,7 @@ import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorkspaceContextValue } from '@/context/WorkspaceContext.types';
 import {
+	filterOverlaysByVisibility,
 	listWorldOverlays,
 	selectedPathFor,
 	type OverlayDescriptor,
@@ -162,13 +172,18 @@ export function WorldViewportCompositionInner({
 	selection,
 	select,
 	setResourceAt,
+	isVisible,
 }: {
 	bundles: WorkspaceContextValue['bundles'];
 	selection: WorkspaceContextValue['selection'];
 	select: WorkspaceContextValue['select'];
 	setResourceAt: WorkspaceContextValue['setResourceAt'];
+	isVisible: WorkspaceContextValue['isVisible'];
 }) {
-	const overlays = useMemo(() => listWorldOverlays(bundles), [bundles]);
+	const overlays = useMemo(
+		() => filterOverlaysByVisibility(listWorldOverlays(bundles), isVisible),
+		[bundles, isVisible],
+	);
 
 	// Stable per-(bundleId, key, index) callback factories. We can't memoise
 	// each one with useCallback (the descriptor list is dynamic), but a
@@ -215,13 +230,14 @@ export function WorldViewportCompositionInner({
  * hook lookup so the composition stays straightforward to reason about.
  */
 export function WorldViewportComposition() {
-	const { bundles, selection, select, setResourceAt } = useWorkspace();
+	const { bundles, selection, select, setResourceAt, isVisible } = useWorkspace();
 	return (
 		<WorldViewportCompositionInner
 			bundles={bundles}
 			selection={selection}
 			select={select}
 			setResourceAt={setResourceAt}
+			isVisible={isVisible}
 		/>
 	);
 }

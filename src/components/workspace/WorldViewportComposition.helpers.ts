@@ -11,6 +11,7 @@
 
 import type {
 	EditableBundle,
+	VisibilityNode,
 	WorkspaceSelection,
 } from '@/context/WorkspaceContext.types';
 import type { NodePath } from '@/lib/schema/walk';
@@ -135,4 +136,32 @@ export function selectedPathFor(
 		return selection.path;
 	}
 	return EMPTY_PATH;
+}
+
+// ---------------------------------------------------------------------------
+// Visibility filter (issue #19)
+// ---------------------------------------------------------------------------
+
+/**
+ * Drop overlay descriptors whose `(bundleId, resourceKey, index)` reads as
+ * hidden by the Workspace's Visibility cascade. The composition mounts only
+ * the survivors — a hidden Bundle / resource type / instance simply doesn't
+ * contribute to the WorldViewport scene.
+ *
+ * Selection is intentionally *not* consulted here: the WorkspaceContext
+ * keeps Selection independent of Visibility (CONTEXT.md / "Selection"), so
+ * a hidden-but-selected resource still has its inspector / Tools mounted
+ * even though its overlay is dropped.
+ */
+export function filterOverlaysByVisibility(
+	overlays: readonly OverlayDescriptor[],
+	isVisible: (node: VisibilityNode) => boolean,
+): OverlayDescriptor[] {
+	return overlays.filter((d) =>
+		isVisible({
+			bundleId: d.bundleId,
+			resourceKey: d.resourceKey,
+			index: d.index,
+		}),
+	);
 }

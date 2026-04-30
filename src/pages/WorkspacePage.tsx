@@ -9,8 +9,18 @@
 // <WorldViewport> hosts overlays from EVERY loaded Bundle simultaneously.
 // Two Bundles loaded → potentially many overlay children, all in one
 // shared scene. Cross-Bundle clicks update the Selection only — the URL
-// doesn't change and the WorldViewport doesn't remount. Per-Bundle
-// visibility toggles still don't exist (that's #19).
+// doesn't change and the WorldViewport doesn't remount.
+//
+// Phase #19 (Visibility tree toggles): every Bundle / Resource / multi-
+// instance row in the tree gets an eye-icon toggle (except resources in
+// the Standard-viewport family — challenge list, vehicle list, etc. —
+// which have no scene contribution). The cascade lives in
+// WorkspaceContext: hiding a Bundle hides every descendant for the
+// `isVisible` query, regardless of per-instance overrides. The
+// composition layer drops every overlay whose `(bundleId, resourceKey,
+// index)` reads as hidden — the WorldViewport receives only what's
+// visible. Selection is independent of Visibility (CONTEXT.md /
+// "Selection"): a hidden-but-selected resource keeps its inspector / Tools.
 //
 //   ┌──────────────────────┬───────────────────────┬──────────────────┐
 //   │  Workspace tree      │  WorldViewport host   │  Inspector       │
@@ -36,6 +46,8 @@ import { Button } from '@/components/ui/button';
 import {
 	ChevronDown,
 	ChevronRight,
+	Eye,
+	EyeOff,
 	Folder,
 	FileText,
 	Plus,
@@ -51,6 +63,7 @@ import {
 	WorldViewportComposition,
 	isWorldViewportFamilyKey,
 } from '@/components/workspace/WorldViewportComposition';
+import type { VisibilityNode } from '@/context/WorkspaceContext.types';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
 import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
 import { getSchemaByKey } from '@/lib/schema/resources';
@@ -80,6 +93,62 @@ const EXTENSIONS_BY_KEY: Record<string, ExtensionRegistry> = {
 	triggerData: triggerDataExtensions,
 	vehicleList: vehicleListExtensions,
 };
+
+// ---------------------------------------------------------------------------
+// Visibility — toggle UX
+// ---------------------------------------------------------------------------
+
+// A Visibility toggle is meaningful only for resources that contribute to the
+// WorldViewport scene (CONTEXT.md / "Visibility"). Standard-viewport-family
+// resources (challenge list, vehicle list, attrib sys vault, etc.) and
+// non-world viewports (renderable, texture) have no scene contribution in
+// the Workspace's WorldViewport, so their tree rows skip the eye icon.
+function isVisibilityRelevantKey(key: string): boolean {
+	return isWorldViewportFamilyKey(key);
+}
+
+// True if any resource in this Bundle has a Visibility-relevant node — used
+// to hide the Bundle-level toggle for Bundles that contain only Standard /
+// non-world resources, where the toggle would be a no-op.
+function bundleHasVisibilityRelevantResource(
+	bundle: EditableBundle,
+): boolean {
+	for (const [key, list] of bundle.parsedResourcesAll) {
+		if (!isVisibilityRelevantKey(key)) continue;
+		if (list.some((m) => m != null)) return true;
+	}
+	return false;
+}
+
+function VisibilityToggle({
+	node,
+	label,
+}: {
+	node: VisibilityNode;
+	label: string;
+}) {
+	const { isVisible, setVisibility } = useWorkspace();
+	const visible = isVisible(node);
+	const onClick = useCallback(
+		(e: React.MouseEvent) => {
+			e.stopPropagation();
+			setVisibility(node, !visible);
+		},
+		[node, visible, setVisibility],
+	);
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			className="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+			title={visible ? `Hide ${label}` : `Show ${label}`}
+			aria-label={visible ? `Hide ${label}` : `Show ${label}`}
+			aria-pressed={visible}
+		>
+			{visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3 opacity-60" />}
+		</button>
+	);
+}
 
 // ---------------------------------------------------------------------------
 // Tree — list of Bundle nodes, each expandable to its resources
@@ -157,6 +226,11 @@ function BundleNode({
 		return out;
 	}, [bundle.parsedResourcesAll]);
 
+	const showVisibility = useMemo(
+		() => bundleHasVisibilityRelevantResource(bundle),
+		[bundle],
+	);
+
 	const onSave = useCallback(
 		(e: React.MouseEvent) => {
 			e.stopPropagation();
@@ -196,6 +270,12 @@ function BundleNode({
 					>
 						●
 					</span>
+				)}
+				{showVisibility && (
+					<VisibilityToggle
+						node={{ bundleId: bundle.id }}
+						label={bundle.id}
+					/>
 				)}
 				<button
 					type="button"
@@ -246,6 +326,7 @@ function BundleNode({
 										path: [],
 									})
 								}
+								showVisibility={isVisibilityRelevantKey(e.key)}
 							/>
 						) : (
 							<MultiResourceGroup
@@ -273,11 +354,14 @@ function BundleNode({
 }
 
 function ResourceRow({
+	bundleId,
 	resourceKey,
+	index,
 	label,
 	active,
 	onClick,
 	depth = 1,
+	showVisibility = false,
 }: {
 	bundleId: string;
 	resourceKey: string;
@@ -286,20 +370,31 @@ function ResourceRow({
 	active: boolean;
 	onClick: () => void;
 	depth?: number;
+	showVisibility?: boolean;
 }) {
 	return (
-		<button
-			type="button"
-			onClick={onClick}
-			className={`flex w-full items-center gap-1.5 px-2 py-0.5 text-left hover:bg-muted/60 ${
+		<div
+			className={`flex w-full items-center gap-1.5 px-2 py-0.5 hover:bg-muted/60 ${
 				active ? 'bg-muted text-foreground' : 'text-muted-foreground'
 			}`}
 			style={{ paddingLeft: 8 + depth * 14 }}
 			title={resourceKey}
 		>
-			<FileText className="h-3 w-3 shrink-0" />
-			<span className="truncate">{label}</span>
-		</button>
+			<button
+				type="button"
+				onClick={onClick}
+				className="flex flex-1 min-w-0 items-center gap-1.5 text-left"
+			>
+				<FileText className="h-3 w-3 shrink-0" />
+				<span className="truncate">{label}</span>
+			</button>
+			{showVisibility && (
+				<VisibilityToggle
+					node={{ bundleId, resourceKey, index }}
+					label={`${resourceKey} #${index}`}
+				/>
+			)}
+		</div>
 	);
 }
 
@@ -321,27 +416,39 @@ function MultiResourceGroup({
 	// Multi-instance keys (polygonSoupList, texture, shader, …) collapse to
 	// a single header row by default. Auto-expand when one of their entries
 	// is selected so the active row is always visible — keeps the user from
-	// losing track after picking from a long shader bundle.
+	// losing track after picking from a long shader bundle. Users can also
+	// expand the group manually to reach per-instance Visibility toggles
+	// (issue #19) without first picking a row to select.
 	const someActive =
 		selection?.bundleId === bundleId && selection.resourceKey === resourceKey;
+	const [manualExpanded, setManualExpanded] = useState(false);
+	const expanded = manualExpanded || someActive;
+	const showVisibility = isVisibilityRelevantKey(resourceKey);
 	return (
 		<div>
 			<div
-				className="flex items-center gap-1.5 px-2 py-0.5 text-muted-foreground"
+				className="flex items-center gap-1.5 px-2 py-0.5 text-muted-foreground hover:bg-muted/40 cursor-pointer"
 				style={{ paddingLeft: 8 + 14 }}
 				title={resourceKey}
+				onClick={() => setManualExpanded((v) => !v)}
 			>
-				{someActive ? (
+				{expanded ? (
 					<ChevronDown className="h-3 w-3 shrink-0" />
 				) : (
 					<ChevronRight className="h-3 w-3 shrink-0" />
 				)}
 				<Folder className="h-3 w-3 shrink-0" />
-				<span className="truncate">
+				<span className="truncate flex-1 min-w-0">
 					{label} <span className="text-[10px] opacity-70">({count})</span>
 				</span>
+				{showVisibility && (
+					<VisibilityToggle
+						node={{ bundleId, resourceKey }}
+						label={`all ${resourceKey}`}
+					/>
+				)}
 			</div>
-			{someActive && (
+			{expanded && (
 				<>
 					{Array.from({ length: count }).map((_, i) => (
 						<ResourceRow
@@ -350,9 +457,12 @@ function MultiResourceGroup({
 							resourceKey={resourceKey}
 							index={i}
 							label={`${label} #${i}`}
-							active={selection.index === i}
+							active={
+								someActive && selection!.index === i
+							}
 							onClick={() => onSelect(i)}
 							depth={2}
+							showVisibility={showVisibility}
 						/>
 					))}
 				</>

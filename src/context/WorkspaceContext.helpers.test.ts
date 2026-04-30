@@ -124,6 +124,46 @@ describe('isVisibleIn — default-true semantics + ancestor cascade', () => {
 		expect(isVisibleIn(v, { bundleId: 'A', resourceKey: 'streetData' })).toBe(false);
 		expect(isVisibleIn(v, { bundleId: 'A', resourceKey: 'aiSections' })).toBe(true);
 	});
+
+	it('Bundle toggle round-trip restores prior per-instance state (issue #19)', () => {
+		// Acceptance criterion: toggling a Bundle off cascades every descendant
+		// hidden; toggling it back on restores the per-instance state set
+		// before the Bundle was hidden. We verify this works without ever
+		// touching the per-instance entries — the cascade is one-way, so the
+		// Bundle toggle is the only key that needs to flip.
+		const before = new Map<string, boolean>([
+			['A::polygonSoupList::5', false],
+		]);
+		// User had hidden #5 individually; #6 is still default-visible.
+		expect(
+			isVisibleIn(before, { bundleId: 'A', resourceKey: 'polygonSoupList', index: 5 }),
+		).toBe(false);
+		expect(
+			isVisibleIn(before, { bundleId: 'A', resourceKey: 'polygonSoupList', index: 6 }),
+		).toBe(true);
+
+		// Step 1: toggle the Bundle off — every soup hides, regardless of
+		// per-instance state.
+		const hidden = new Map(before);
+		hidden.set('A', false);
+		expect(
+			isVisibleIn(hidden, { bundleId: 'A', resourceKey: 'polygonSoupList', index: 5 }),
+		).toBe(false);
+		expect(
+			isVisibleIn(hidden, { bundleId: 'A', resourceKey: 'polygonSoupList', index: 6 }),
+		).toBe(false);
+
+		// Step 2: toggle the Bundle back on — #5 must stay hidden (the
+		// pre-toggle per-instance state), #6 must come back.
+		const restored = new Map(hidden);
+		restored.set('A', true);
+		expect(
+			isVisibleIn(restored, { bundleId: 'A', resourceKey: 'polygonSoupList', index: 5 }),
+		).toBe(false);
+		expect(
+			isVisibleIn(restored, { bundleId: 'A', resourceKey: 'polygonSoupList', index: 6 }),
+		).toBe(true);
+	});
 });
 
 describe('visibilityKeysForBundle', () => {
