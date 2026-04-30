@@ -12,10 +12,15 @@ import { HierarchyTree } from './HierarchyTree';
 import { InspectorPanel } from './InspectorPanel';
 import { ViewportPane } from './ViewportPane';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
+import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
 import { useSchemaEditor } from './context';
 
 export function SchemaEditor() {
 	const { resource } = useSchemaEditor();
+	// Wire ⌘Z / ⌘⇧Z / ⌘Y at the legacy single-Bundle page level so the
+	// shortcut still flows into the Workspace's global undo stack
+	// (ADR-0006) when a per-resource page is active.
+	useWorkspaceUndoRedoShortcuts();
 	return (
 		<div className="h-full min-h-0 border rounded-lg overflow-hidden bg-card">
 			<ResizablePanelGroup direction="horizontal">

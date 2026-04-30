@@ -1,39 +1,47 @@
 // WorkspaceEditor — three-pane editor for the multi-Bundle Workspace.
 //
-// Phase #16 (foundation slice): one Bundle, one selected resource, one
-// overlay in the WorldViewport. Cross-Bundle scene composition is #3;
-// per-Bundle visibility toggles are #4. The chrome is already wired to the
-// Workspace surface so adding additional Bundles in #2 will Just Work
-// without restructuring the layout.
+// Phase #17 (multi-Bundle slice): the tree is now a list of Bundle nodes,
+// each with its own resources nested below. Per-Bundle dirty indicator,
+// Save, and close (×) live on the Bundle row. The toolbar adds an
+// "Add Bundle" affordance plus a "Save All" command. WorldViewport scene
+// composition stays single-overlay (that's #3); per-Bundle visibility
+// toggles still don't exist (that's #4).
 //
-//   ┌──────────────┬─────────────────────────────┬──────────────────┐
-//   │  Tree        │  WorldViewport host         │  Inspector       │
-//   │  (left)      │  (centre)                   │  (right)         │
-//   │              │                             │                  │
-//   │  Bundle A    │  three.js scene; renders    │  Schema-driven   │
-//   │   ├ aiSec…   │  the overlay for the        │  form for the    │
-//   │   ├ trgr…    │  *currently selected*       │  selected node   │
-//   │   └ stre…    │  resource only.             │  (or a generic   │
-//   │              │                             │  empty state).   │
-//   └──────────────┴─────────────────────────────┴──────────────────┘
+//   ┌──────────────────────┬───────────────────────┬──────────────────┐
+//   │  Workspace tree      │  WorldViewport host   │  Inspector       │
+//   │  (left)              │  (centre)             │  (right)         │
+//   │                      │                       │                  │
+//   │  ▾ TRK_UNIT_07.BUN ●  │  three.js scene;      │  Schema-driven   │
+//   │     ├ aiSec…          │  renders the overlay  │  form for the    │
+//   │     ├ trgr…           │  for the *currently   │  selected node   │
+//   │     └ stre…           │  selected* resource   │  (or generic     │
+//   │  ▸ WORLDCOL.BIN       │  only.                │  empty state).   │
+//   │  + Add Bundle         │                       │                  │
+//   └──────────────────────┴───────────────────────┴──────────────────┘
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	ResizableHandle,
 	ResizablePanel,
 	ResizablePanelGroup,
 } from '@/components/ui/resizable';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ChevronDown, ChevronRight, Folder, FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
-	useActiveBundle,
-	useWorkspace,
-} from '@/context/WorkspaceContext';
+	ChevronDown,
+	ChevronRight,
+	Folder,
+	FileText,
+	Plus,
+	Save,
+	X,
+} from 'lucide-react';
+import { useWorkspace } from '@/context/WorkspaceContext';
 import { InspectorPanel } from '@/components/schema-editor/InspectorPanel';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { ViewportPane } from '@/components/schema-editor/ViewportPane';
 import { ViewportErrorBoundary } from '@/components/common/ViewportErrorBoundary';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
+import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
 import { getSchemaByKey } from '@/lib/schema/resources';
 import { getHandlerByKey } from '@/lib/core/registry';
 import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
@@ -63,15 +71,72 @@ const EXTENSIONS_BY_KEY: Record<string, ExtensionRegistry> = {
 };
 
 // ---------------------------------------------------------------------------
-// Tree — Bundle row plus one row per resource key the Bundle holds
+// Tree — list of Bundle nodes, each expandable to its resources
 // ---------------------------------------------------------------------------
 
-function WorkspaceTree({ bundle }: { bundle: EditableBundle }) {
-	const { selection, select } = useWorkspace();
-	// `parsedResourcesAll` is the source of truth for "what resource keys
-	// does this Bundle have, and at what indices?" Iterating it yields
-	// (key, instances[]) — most keys have one instance, polygonSoupList /
-	// shader / texture have many.
+function WorkspaceTree({
+	bundles,
+	addBundle,
+}: {
+	bundles: readonly EditableBundle[];
+	addBundle: () => void;
+}) {
+	// Default-expanded behaviour: with one Bundle the tree is fully open
+	// (single-Bundle workflow stays as it always was). Once a second
+	// Bundle is loaded, every Bundle collapses by default — the tree turns
+	// into a Bundle picker. The user can still expand any of them manually
+	// and we remember those overrides.
+	const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+	const isExpanded = useCallback(
+		(bundleId: string): boolean => {
+			if (overrides[bundleId] !== undefined) return overrides[bundleId];
+			return bundles.length <= 1;
+		},
+		[bundles.length, overrides],
+	);
+	const toggle = useCallback(
+		(bundleId: string) => {
+			setOverrides((prev) => {
+				const current = prev[bundleId] !== undefined ? prev[bundleId] : bundles.length <= 1;
+				return { ...prev, [bundleId]: !current };
+			});
+		},
+		[bundles.length],
+	);
+
+	return (
+		<div className="flex flex-col text-xs">
+			{bundles.map((bundle) => (
+				<BundleNode
+					key={bundle.id}
+					bundle={bundle}
+					expanded={isExpanded(bundle.id)}
+					onToggle={() => toggle(bundle.id)}
+				/>
+			))}
+			<button
+				type="button"
+				onClick={addBundle}
+				className="flex items-center gap-1.5 px-2 py-1.5 mx-2 mt-2 mb-2 text-xs text-muted-foreground border border-dashed rounded hover:bg-muted/60 hover:text-foreground transition-colors"
+				title="Load another bundle into this workspace"
+			>
+				<Plus className="h-3 w-3" />
+				<span>Add Bundle</span>
+			</button>
+		</div>
+	);
+}
+
+function BundleNode({
+	bundle,
+	expanded,
+	onToggle,
+}: {
+	bundle: EditableBundle;
+	expanded: boolean;
+	onToggle: () => void;
+}) {
+	const { selection, select, saveBundle, closeBundle } = useWorkspace();
 	const entries = useMemo(() => {
 		const out: { key: string; count: number }[] = [];
 		for (const [key, list] of bundle.parsedResourcesAll) {
@@ -81,71 +146,117 @@ function WorkspaceTree({ bundle }: { bundle: EditableBundle }) {
 		return out;
 	}, [bundle.parsedResourcesAll]);
 
-	// Bundle row is rendered as always-expanded; folding it would just hide
-	// the resource list which is the point of the tree. The user can collapse
-	// the panel via the resizable handle if they want more viewport space.
+	const onSave = useCallback(
+		(e: React.MouseEvent) => {
+			e.stopPropagation();
+			void saveBundle(bundle.id);
+		},
+		[bundle.id, saveBundle],
+	);
+	const onClose = useCallback(
+		(e: React.MouseEvent) => {
+			e.stopPropagation();
+			void closeBundle(bundle.id);
+		},
+		[bundle.id, closeBundle],
+	);
+
 	return (
-		<div className="flex flex-col text-xs">
-			<div className="flex items-center gap-1 px-2 py-1 font-medium border-b">
-				<ChevronDown className="h-3 w-3 text-muted-foreground" />
-				<Folder className="h-3.5 w-3.5 text-muted-foreground" />
-				<span className="truncate" title={bundle.id}>
+		<div>
+			<div
+				className="flex items-center gap-1 px-2 py-1 font-medium border-b hover:bg-muted/40 cursor-pointer group"
+				onClick={onToggle}
+				title={`Toggle ${bundle.id}`}
+			>
+				{expanded ? (
+					<ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+				) : (
+					<ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+				)}
+				<Folder className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+				<span className="truncate flex-1 min-w-0" title={bundle.id}>
 					{bundle.id}
 				</span>
 				{bundle.isModified && (
 					<span
-						className="ml-auto text-[10px] text-yellow-600"
+						className="text-[10px] text-yellow-600 shrink-0"
 						title="Bundle has unsaved edits"
+						aria-label="modified"
 					>
 						●
 					</span>
 				)}
+				<button
+					type="button"
+					onClick={onSave}
+					disabled={!bundle.isModified}
+					className="shrink-0 p-0.5 rounded text-muted-foreground enabled:hover:bg-muted enabled:hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+					title={
+						bundle.isModified
+							? 'Save this bundle (downloads to original filename)'
+							: 'No changes to save'
+					}
+					aria-label={`Save ${bundle.id}`}
+				>
+					<Save className="h-3 w-3" />
+				</button>
+				<button
+					type="button"
+					onClick={onClose}
+					className="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+					title="Close this bundle"
+					aria-label={`Close ${bundle.id}`}
+				>
+					<X className="h-3 w-3" />
+				</button>
 			</div>
-			<div className="py-1">
-				{entries.map((e) => {
-					const handler = getHandlerByKey(e.key);
-					const label = handler?.name ?? e.key;
-					return e.count === 1 ? (
-						<ResourceRow
-							key={e.key}
-							bundleId={bundle.id}
-							resourceKey={e.key}
-							index={0}
-							label={label}
-							active={
-								selection?.bundleId === bundle.id &&
-								selection.resourceKey === e.key &&
-								selection.index === 0
-							}
-							onClick={() =>
-								select({
-									bundleId: bundle.id,
-									resourceKey: e.key,
-									index: 0,
-									path: [],
-								})
-							}
-						/>
-					) : (
-						<MultiResourceGroup
-							key={e.key}
-							bundleId={bundle.id}
-							resourceKey={e.key}
-							label={label}
-							count={e.count}
-							selection={selection}
-							onSelect={(index) =>
-								select({
-									bundleId: bundle.id,
-									resourceKey: e.key,
-									index,
-									path: [],
-								})
-							}
-						/>
-					);
-				})}
-			</div>
+			{expanded && (
+				<div className="py-1">
+					{entries.map((e) => {
+						const handler = getHandlerByKey(e.key);
+						const label = handler?.name ?? e.key;
+						return e.count === 1 ? (
+							<ResourceRow
+								key={e.key}
+								bundleId={bundle.id}
+								resourceKey={e.key}
+								index={0}
+								label={label}
+								active={
+									selection?.bundleId === bundle.id &&
+									selection.resourceKey === e.key &&
+									selection.index === 0
+								}
+								onClick={() =>
+									select({
+										bundleId: bundle.id,
+										resourceKey: e.key,
+										index: 0,
+										path: [],
+									})
+								}
+							/>
+						) : (
+							<MultiResourceGroup
+								key={e.key}
+								bundleId={bundle.id}
+								resourceKey={e.key}
+								label={label}
+								count={e.count}
+								selection={selection}
+								onSelect={(index) =>
+									select({
+										bundleId: bundle.id,
+										resourceKey: e.key,
+										index,
+										path: [],
+									})
+								}
+							/>
+						);
+					})}
+				</div>
+			)}
 		</div>
 	);
 }
@@ -244,10 +355,8 @@ function MultiResourceGroup({
 // ---------------------------------------------------------------------------
 
 function SelectedResourceShell({
-	bundle,
 	children,
 }: {
-	bundle: EditableBundle;
 	children: (args: {
 		schema: ReturnType<typeof getSchemaByKey>;
 		data: unknown;
@@ -256,14 +365,18 @@ function SelectedResourceShell({
 		onChange: (next: unknown) => void;
 	}) => React.ReactNode;
 }) {
-	const { selection, select, setResourceAt } = useWorkspace();
+	const { bundles, selection, select, setResourceAt } = useWorkspace();
 
+	const selectedBundle = useMemo(
+		() => (selection ? bundles.find((b) => b.id === selection.bundleId) : undefined),
+		[bundles, selection],
+	);
 	const schema = selection ? getSchemaByKey(selection.resourceKey) : undefined;
 	const data = useMemo(() => {
-		if (!selection) return undefined;
-		const list = bundle.parsedResourcesAll.get(selection.resourceKey);
+		if (!selection || !selectedBundle) return undefined;
+		const list = selectedBundle.parsedResourcesAll.get(selection.resourceKey);
 		return list?.[selection.index] ?? undefined;
-	}, [selection, bundle.parsedResourcesAll]);
+	}, [selection, selectedBundle]);
 
 	const onChange = useCallback(
 		(next: unknown) => {
@@ -362,48 +475,155 @@ function RightInspector() {
 }
 
 // ---------------------------------------------------------------------------
+// Toolbar — Add Bundle + Save All + UndoRedo
+// ---------------------------------------------------------------------------
+
+function WorkspaceToolbar({ onAddBundle }: { onAddBundle: () => void }) {
+	const { bundles, saveAll } = useWorkspace();
+	const dirtyCount = useMemo(
+		() => bundles.filter((b) => b.isModified).length,
+		[bundles],
+	);
+	const hasDirty = dirtyCount > 0;
+
+	return (
+		<div className="flex items-center gap-1 px-3 py-1 border-b">
+			<span className="text-xs font-semibold tracking-wide text-muted-foreground">
+				Workspace
+			</span>
+			<div className="ml-auto flex items-center gap-1">
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					onClick={onAddBundle}
+					title="Load another bundle into this workspace"
+					className="h-6 px-1.5 text-xs gap-1"
+				>
+					<Plus className="h-3 w-3" />
+					<span>Add</span>
+				</Button>
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					onClick={() => void saveAll()}
+					disabled={!hasDirty}
+					title={
+						hasDirty
+							? `Save all ${dirtyCount} modified bundle${dirtyCount === 1 ? '' : 's'}`
+							: 'No bundles need saving'
+					}
+					className="h-6 px-1.5 text-xs gap-1"
+				>
+					<Save className="h-3 w-3" />
+					<span>Save All</span>
+				</Button>
+				<UndoRedoControls />
+			</div>
+		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 const WorkspacePage = () => {
-	const bundle = useActiveBundle();
+	const { bundles, loadBundle, selection, select } = useWorkspace();
+	// Page-level keyboard binding for the Workspace's global undo stack
+	// (ADR-0006). Mounted regardless of whether a Bundle is loaded so the
+	// shortcut wires up consistently with the page's lifecycle.
+	useWorkspaceUndoRedoShortcuts();
+	// Hidden file input drives both the empty-state CTA and the "Add Bundle"
+	// button in the toolbar / tree. `multiple` lets users drop several files
+	// in one shot; loadBundle is sequenced one at a time so the same-name
+	// prompt stays a single dialog at a time.
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const triggerAdd = useCallback(() => {
+		fileInputRef.current?.click();
+	}, []);
+	const onPickFiles = useCallback(
+		async (files: FileList | null) => {
+			if (!files) return;
+			const list = Array.from(files);
+			for (const f of list) {
+				await loadBundle(f);
+			}
+		},
+		[loadBundle],
+	);
 
-	if (!bundle) {
+	// Reset selection if the bundle it pointed at is no longer loaded.
+	// Belt-and-braces: the provider's closeBundle / replace paths already
+	// clear the selection, but if a downstream caller ever drops a bundle
+	// without going through them, this keeps the inspector / viewport from
+	// reading off stale state.
+	useEffect(() => {
+		if (selection && !bundles.some((b) => b.id === selection.bundleId)) {
+			select(null);
+		}
+	}, [bundles, selection, select]);
+
+	if (bundles.length === 0) {
 		return (
-			<Card className="m-6">
-				<CardHeader>
-					<CardTitle>Workspace</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<div className="text-sm text-muted-foreground">
-						Load a Bundle to populate the workspace. Use the &ldquo;Load Bundle&rdquo;
-						button in the header above.
+			<div className="h-full min-h-0 border rounded-lg overflow-hidden bg-card m-6">
+				<div className="h-full flex flex-col items-center justify-center gap-4 text-center p-8">
+					<div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+						<Plus className="w-6 h-6 text-muted-foreground" />
 					</div>
-				</CardContent>
-			</Card>
+					<div>
+						<h3 className="text-base font-medium">No bundles in this workspace</h3>
+						<p className="text-sm text-muted-foreground">
+							Load one or more bundle files to get started.
+						</p>
+					</div>
+					<Button onClick={triggerAdd} className="gap-2">
+						<Plus className="w-4 h-4" />
+						Add Bundle
+					</Button>
+					<input
+						ref={fileInputRef}
+						type="file"
+						accept=".bundle,.bndl,.bin,.dat,.bun"
+						multiple
+						onChange={(e) => {
+							void onPickFiles(e.target.files);
+							e.target.value = '';
+						}}
+						className="hidden"
+					/>
+				</div>
+			</div>
 		);
 	}
 
 	return (
 		<div className="h-full min-h-0 border rounded-lg overflow-hidden bg-card m-6">
+			<input
+				ref={fileInputRef}
+				type="file"
+				accept=".bundle,.bndl,.bin,.dat,.bun"
+				multiple
+				onChange={(e) => {
+					void onPickFiles(e.target.files);
+					e.target.value = '';
+				}}
+				className="hidden"
+			/>
 			<ResizablePanelGroup direction="horizontal">
 				<ResizablePanel id="ws-tree" order={1} defaultSize={20} minSize={14} className="bg-background">
 					<div className="h-full flex flex-col">
-						<div className="flex items-center justify-between px-3 py-1 border-b">
-							<span className="text-xs font-semibold tracking-wide text-muted-foreground">
-								Workspace
-							</span>
-							<UndoRedoControls />
-						</div>
+						<WorkspaceToolbar onAddBundle={triggerAdd} />
 						<div className="flex-1 min-h-0 overflow-auto">
-							<WorkspaceTree bundle={bundle} />
+							<WorkspaceTree bundles={bundles} addBundle={triggerAdd} />
 						</div>
 					</div>
 				</ResizablePanel>
 
 				<ResizableHandle withHandle />
 
-				<SelectedResourceShell bundle={bundle}>
+				<SelectedResourceShell>
 					{() => (
 						<>
 							<ResizablePanel id="ws-scene" order={2} defaultSize={50} minSize={20}>

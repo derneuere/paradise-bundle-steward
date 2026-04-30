@@ -1,13 +1,16 @@
 // WorkspaceContext — implementation of the multi-Bundle Workspace described
 // in WorkspaceContext.types.ts.
 //
-// Phase #16 (foundation slice): the provider is wired for the multi-Bundle
-// shape from day one — internal storage is a list-of-EditableBundle, every
-// API takes `(bundleId, key)`, history and selection are Workspace-scoped —
-// but this slice still only loads ONE Bundle at a time. `loadBundle`
-// replaces whatever is currently loaded, just like the legacy single-Bundle
-// editor; the same-name prompt, additive load, and `closeBundle` semantics
-// land in #2.
+// `loadBundle` is additive (issue #17): every call appends a new
+// EditableBundle to the Workspace, never replaces the existing one. If a
+// candidate's filename matches a Bundle already loaded, a Replace / Cancel
+// prompt surfaces — there is no "add as duplicate" because the game
+// references files by exact name (CONTEXT.md / "Bundle filename").
+//
+// `closeBundle` warns when the Bundle is dirty, then drops the Bundle plus
+// any Selection / Visibility / history entries that referenced it. Both
+// prompts are rendered as siblings of the provider's `children` so the
+// surface stays a Promise-returning method on the typed context value.
 //
 // What's typed and what's not: every member of WorkspaceContextValue is
 // satisfied. Companion bundles (the shader-page texture sources) and the
@@ -58,12 +61,19 @@ import type {
 	WorkspaceSelection,
 } from './WorkspaceContext.types';
 import {
+	appendBundle,
 	applyResourceWriteToBundle,
+	classifyLoad,
 	clearBundleDirty,
+	dropHistoryForBundle,
 	isVisibleIn,
+	removeBundleById,
+	replaceBundleById,
 	visibilityKey as makeVisibilityKey,
 	visibilityKeysForBundle,
 } from './WorkspaceContext.helpers';
+import { ReplaceBundleDialog } from '@/components/workspace/ReplaceBundleDialog';
+import { CloseBundleDialog } from '@/components/workspace/CloseBundleDialog';
 
 // ---------------------------------------------------------------------------
 // Companion bundles — read-only "loaded alongside" bundles
@@ -92,6 +102,25 @@ async function parseEditableBundle(file: File): Promise<EditableBundle> {
 // ---------------------------------------------------------------------------
 // Internal context value — superset of WorkspaceContextValue
 // ---------------------------------------------------------------------------
+
+/**
+ * Pending same-name replace. Surfaced when `loadBundle` parses a file whose
+ * id (filename) is already loaded — the typed `loadBundle` Promise stays
+ * pending until the user resolves the prompt one way or the other.
+ */
+type PendingReplace = {
+	candidate: EditableBundle;
+	resolve: (replaced: boolean) => void;
+};
+
+/**
+ * Pending dirty-close. Surfaced when `closeBundle` is called on a Bundle
+ * whose `isModified === true`. Same Promise-bridge shape as PendingReplace.
+ */
+type PendingClose = {
+	bundleId: BundleId;
+	resolve: (confirmed: boolean) => void;
+};
 
 type InternalValue = WorkspaceContextValue & {
 	// Companion-bundle handles + transient flags. Read via dedicated hooks
@@ -122,6 +151,21 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 	}));
 	const [isLoading, setIsLoading] = useState(false);
 	const [secondaryBundles, setSecondaryBundles] = useState<SecondaryBundle[]>([]);
+	// Pending UI prompts. The deferred resolver lets `loadBundle` /
+	// `closeBundle` return a Promise that completes when the user clicks
+	// through the dialog — mirrors how a `confirm()` shaped API would work
+	// without blocking the React render loop.
+	const [pendingReplace, setPendingReplace] = useState<PendingReplace | null>(null);
+	const [pendingClose, setPendingClose] = useState<PendingClose | null>(null);
+
+	// Mirror the bundles array into a ref so callbacks can read the freshest
+	// list without tearing their dep arrays. `loadBundle` and `saveAll` need
+	// the up-to-date list across `await` boundaries — closing over `bundles`
+	// alone would snapshot it at the time the callback was constructed.
+	const bundlesRef = useRef<EditableBundle[]>([]);
+	useEffect(() => {
+		bundlesRef.current = bundles;
+	}, [bundles]);
 
 	// Bundle helpers ---------------------------------------------------------
 
@@ -268,34 +312,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
 	// Load / close / save ----------------------------------------------------
 
-	const loadBundle = useCallback(async (file: File) => {
-		setIsLoading(true);
-		try {
-			const next = await parseEditableBundle(file);
-			// Phase #16: open replaces. The same-name prompt and additive
-			// multi-Bundle load land in #2.
-			setBundles([next]);
-			setSelection(null);
-			setVisibility(new Map());
-			setHistory({ past: [], future: [] });
-			toast.success(`Loaded bundle: ${file.name}`, {
-				description: `${next.parsed.resources.length} resources found, Platform: ${getPlatformName(next.parsed.header.platform)}`,
-			});
-		} catch (error) {
-			console.error('Error parsing bundle:', error);
-			toast.error('Failed to parse bundle file', {
-				description: error instanceof Error ? error.message : 'Unknown error occurred',
-			});
-		} finally {
-			setIsLoading(false);
-		}
-	}, []);
-
-	const closeBundle = useCallback(async (bundleId: BundleId) => {
-		setBundles((prev) => prev.filter((b) => b.id !== bundleId));
-		// Drop selection / visibility / history entries that referenced the
-		// closed Bundle. History prunes to keep undo coherent — restoring a
-		// closed Bundle's previous value would resurrect the Bundle silently.
+	// Bundle-side state drop used by replace and close. Selection /
+	// visibility / history all reference Bundles by id, so wiping them in
+	// lockstep is what keeps the Workspace coherent when a Bundle leaves
+	// (close) or its bytes change underneath (replace).
+	const dropBundleSideEffects = useCallback((bundleId: BundleId) => {
 		setSelection((prev) => (prev?.bundleId === bundleId ? null : prev));
 		setVisibility((prev) => {
 			const dropped = visibilityKeysForBundle(prev, bundleId);
@@ -304,10 +325,84 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 			for (const key of dropped) next.delete(key);
 			return next;
 		});
-		setHistory((prev) => ({
-			past: prev.past.filter((c) => c.bundleId !== bundleId),
-			future: prev.future.filter((c) => c.bundleId !== bundleId),
-		}));
+		setHistory((prev) => dropHistoryForBundle(prev, bundleId));
+	}, []);
+
+	const loadBundle = useCallback(
+		async (file: File) => {
+			setIsLoading(true);
+			let candidate: EditableBundle;
+			try {
+				candidate = await parseEditableBundle(file);
+			} catch (error) {
+				console.error('Error parsing bundle:', error);
+				toast.error('Failed to parse bundle file', {
+					description: error instanceof Error ? error.message : 'Unknown error occurred',
+				});
+				setIsLoading(false);
+				return;
+			}
+
+			const decision = classifyLoad(bundlesRef.current, candidate);
+			if (decision.kind === 'append') {
+				setBundles((prev) => appendBundle(prev, candidate));
+				toast.success(`Loaded bundle: ${candidate.id}`, {
+					description: `${candidate.parsed.resources.length} resources found, Platform: ${getPlatformName(candidate.parsed.header.platform)}`,
+				});
+				setIsLoading(false);
+				return;
+			}
+
+			// Same-name re-load — surface the prompt and wait for the user.
+			// `loadBundle` does not resolve until they pick Replace or Cancel
+			// (CONTEXT.md / "Bundle filename" forbids two with the same id).
+			const replaced = await new Promise<boolean>((resolve) => {
+				setPendingReplace({ candidate, resolve });
+			});
+			if (replaced) {
+				setBundles((prev) => replaceBundleById(prev, candidate));
+				dropBundleSideEffects(candidate.id);
+				toast.success(`Replaced bundle: ${candidate.id}`, {
+					description: `${candidate.parsed.resources.length} resources found, Platform: ${getPlatformName(candidate.parsed.header.platform)}`,
+				});
+			}
+			setIsLoading(false);
+		},
+		[dropBundleSideEffects],
+	);
+
+	const closeBundle = useCallback(
+		async (bundleId: BundleId) => {
+			const target = bundlesRef.current.find((b) => b.id === bundleId);
+			if (!target) return;
+			if (target.isModified) {
+				const confirmed = await new Promise<boolean>((resolve) => {
+					setPendingClose({ bundleId, resolve });
+				});
+				if (!confirmed) return;
+			}
+			setBundles((prev) => removeBundleById(prev, bundleId));
+			dropBundleSideEffects(bundleId);
+		},
+		[dropBundleSideEffects],
+	);
+
+	// Same-name replace prompt handlers — close the dialog by resolving the
+	// pending Promise on the loadBundle side; the loadBundle effect picks up
+	// from there (replace state updates + toast or no-op for cancel).
+	const handleReplaceDecision = useCallback((replaced: boolean) => {
+		setPendingReplace((prev) => {
+			if (prev) prev.resolve(replaced);
+			return null;
+		});
+	}, []);
+
+	// Same shape for the dirty-close prompt.
+	const handleCloseDecision = useCallback((confirmed: boolean) => {
+		setPendingClose((prev) => {
+			if (prev) prev.resolve(confirmed);
+			return null;
+		});
 	}, []);
 
 	const saveBundle = useCallback(
@@ -470,6 +565,16 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 	return (
 		<WorkspaceContext.Provider value={value}>
 			{children}
+			<ReplaceBundleDialog
+				bundleId={pendingReplace?.candidate.id ?? null}
+				open={pendingReplace !== null}
+				onDecision={handleReplaceDecision}
+			/>
+			<CloseBundleDialog
+				bundleId={pendingClose?.bundleId ?? null}
+				open={pendingClose !== null}
+				onDecision={handleCloseDecision}
+			/>
 		</WorkspaceContext.Provider>
 	);
 }
@@ -518,10 +623,9 @@ export function useWorkspaceCompanion(): {
  * threading it through a prop chain.
  *
  * This is a *single-Bundle convenience*, not an "active Bundle" fallback —
- * once #2 lands additive load and the WorkspaceEditor manages selection
- * across many Bundles, the legacy pages will still pin to bundles[0] (the
- * single-Bundle workflow stays single-Bundle), and the WorkspaceEditor
- * itself won't use this hook at all.
+ * the WorkspaceEditor manages selection across many Bundles itself and
+ * doesn't use this hook. The legacy per-resource pages stay pinned to
+ * bundles[0] (the single-Bundle workflow stays single-Bundle).
  */
 export function useActiveBundleId(): BundleId | null {
 	const { bundles } = useWorkspace();
@@ -579,7 +683,3 @@ function buildByResourceIdOverrides(
 	return out;
 }
 
-// Silence dead-import warnings if a future refactor stops using one of
-// these — keeps the diff minimal when adding/removing exports.
-void useEffect;
-void useRef;

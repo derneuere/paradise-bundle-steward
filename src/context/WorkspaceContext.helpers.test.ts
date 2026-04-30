@@ -7,13 +7,22 @@
 import { describe, expect, it } from 'vitest';
 import {
 	ancestorKeys,
+	appendBundle,
 	applyResourceWriteToBundle,
+	classifyLoad,
 	clearBundleDirty,
+	dropHistoryForBundle,
 	isVisibleIn,
+	removeBundleById,
+	replaceBundleById,
 	visibilityKey,
 	visibilityKeysForBundle,
 } from './WorkspaceContext.helpers';
-import type { EditableBundle } from './WorkspaceContext.types';
+import type { HistoryStack } from '@/lib/history';
+import type {
+	EditableBundle,
+	HistoryCommit,
+} from './WorkspaceContext.types';
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -196,5 +205,160 @@ describe('clearBundleDirty', () => {
 		// for reverting edits.
 		expect(cleaned.parsedResourcesAll.get('streetData')).toEqual([{ v: 1 }]);
 		expect(cleaned.parsedResources.get('streetData')).toEqual({ v: 1 });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Load classification + multi-Bundle list helpers (issue #17)
+// ---------------------------------------------------------------------------
+
+describe('classifyLoad', () => {
+	it('returns "append" when the candidate id is not yet loaded', () => {
+		const decision = classifyLoad([makeBundle('A.BNDL')], makeBundle('B.BNDL'));
+		expect(decision.kind).toBe('append');
+	});
+
+	it('returns "replace" with the existing Bundle when the id collides', () => {
+		const a = makeBundle('A.BNDL');
+		const decision = classifyLoad([a], makeBundle('A.BNDL'));
+		expect(decision.kind).toBe('replace');
+		if (decision.kind === 'replace') {
+			expect(decision.existing).toBe(a);
+		}
+	});
+
+	it('returns "append" against an empty Workspace', () => {
+		// Day-one state: no Bundles loaded. First load must always append.
+		const decision = classifyLoad([], makeBundle('X.BNDL'));
+		expect(decision.kind).toBe('append');
+	});
+});
+
+describe('appendBundle', () => {
+	it('preserves load order — new entries go on the end', () => {
+		const next = appendBundle([makeBundle('A.BNDL')], makeBundle('B.BNDL'));
+		expect(next.map((b) => b.id)).toEqual(['A.BNDL', 'B.BNDL']);
+	});
+
+	it('does NOT mutate the input array', () => {
+		const before = [makeBundle('A.BNDL')];
+		appendBundle(before, makeBundle('B.BNDL'));
+		expect(before.map((b) => b.id)).toEqual(['A.BNDL']);
+	});
+});
+
+describe('replaceBundleById', () => {
+	it('swaps in the candidate at the matching id, preserving order', () => {
+		const before = [makeBundle('A.BNDL'), makeBundle('B.BNDL'), makeBundle('C.BNDL')];
+		const newB = makeBundle('B.BNDL');
+		const after = replaceBundleById(before, newB);
+		expect(after.length).toBe(3);
+		expect(after[0]).toBe(before[0]);
+		expect(after[1]).toBe(newB);
+		expect(after[2]).toBe(before[2]);
+	});
+
+	it('is a no-op when the id is not present (defensive)', () => {
+		// Caller of replaceBundleById is expected to have already classified
+		// via classifyLoad. The defensive no-op keeps the helper from
+		// silently extending the list when the upstream check is missed.
+		const before = [makeBundle('A.BNDL')];
+		const after = replaceBundleById(before, makeBundle('Z.BNDL'));
+		expect(after.map((b) => b.id)).toEqual(['A.BNDL']);
+	});
+});
+
+describe('removeBundleById', () => {
+	it('drops only the targeted Bundle', () => {
+		const before = [makeBundle('A.BNDL'), makeBundle('B.BNDL'), makeBundle('C.BNDL')];
+		const after = removeBundleById(before, 'B.BNDL');
+		expect(after.map((b) => b.id)).toEqual(['A.BNDL', 'C.BNDL']);
+	});
+
+	it('is a no-op when the id is missing', () => {
+		const before = [makeBundle('A.BNDL')];
+		const after = removeBundleById(before, 'Z.BNDL');
+		expect(after).toEqual(before);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// History pruning
+// ---------------------------------------------------------------------------
+
+describe('dropHistoryForBundle', () => {
+	const commit = (bundleId: string, key = 'streetData', index = 0): HistoryCommit => ({
+		bundleId,
+		resourceKey: key,
+		index,
+		previous: null,
+		next: { v: 1 },
+	});
+
+	it('removes commits referencing the closed Bundle from past and future', () => {
+		const before: HistoryStack<HistoryCommit> = {
+			past: [commit('A'), commit('B'), commit('A')],
+			future: [commit('A'), commit('C')],
+		};
+		const after = dropHistoryForBundle(before, 'A');
+		expect(after.past.map((c) => c.bundleId)).toEqual(['B']);
+		expect(after.future.map((c) => c.bundleId)).toEqual(['C']);
+	});
+
+	it('returns the same stack identity when no commits match (no-op short-circuit)', () => {
+		// React state setters compare by reference — handing back the same
+		// object on a no-op prevents an unnecessary render of every consumer.
+		const before: HistoryStack<HistoryCommit> = {
+			past: [commit('B')],
+			future: [commit('C')],
+		};
+		const after = dropHistoryForBundle(before, 'A');
+		expect(after).toBe(before);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// History pruning — closeBundle / replace-on-load side of the global stack
+// ---------------------------------------------------------------------------
+
+describe('dropHistoryForBundle', () => {
+	function commit(bundleId: string, key = 'aiSections'): HistoryCommit {
+		return { bundleId, resourceKey: key, index: 0, previous: null, next: { v: 1 } };
+	}
+
+	it('returns the same stack identity when no entries match (avoids React churn)', () => {
+		const stack: HistoryStack<HistoryCommit> = {
+			past: [commit('A.BNDL'), commit('B.BNDL')],
+			future: [commit('A.BNDL')],
+		};
+		const out = dropHistoryForBundle(stack, 'C.BNDL');
+		// Reference equality — a no-op prune must not allocate a fresh stack,
+		// or every closeBundle on a Bundle without history would needlessly
+		// re-render every consumer reading `canUndo` / `canRedo`.
+		expect(out).toBe(stack);
+	});
+
+	it('drops entries from past and future that referenced the closed Bundle', () => {
+		const stack: HistoryStack<HistoryCommit> = {
+			past: [commit('A.BNDL'), commit('B.BNDL'), commit('A.BNDL')],
+			future: [commit('A.BNDL'), commit('B.BNDL')],
+		};
+		const out = dropHistoryForBundle(stack, 'A.BNDL');
+		expect(out.past.map((c) => c.bundleId)).toEqual(['B.BNDL']);
+		expect(out.future.map((c) => c.bundleId)).toEqual(['B.BNDL']);
+	});
+
+	it('preserves order of surviving entries — undo cadence stays intact', () => {
+		const stack: HistoryStack<HistoryCommit> = {
+			past: [
+				commit('A.BNDL', 'aiSections'),
+				commit('B.BNDL', 'streetData'),
+				commit('A.BNDL', 'triggerData'),
+				commit('B.BNDL', 'aiSections'),
+			],
+			future: [],
+		};
+		const out = dropHistoryForBundle(stack, 'A.BNDL');
+		expect(out.past.map((c) => c.resourceKey)).toEqual(['streetData', 'aiSections']);
 	});
 });

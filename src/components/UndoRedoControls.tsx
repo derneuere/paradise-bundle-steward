@@ -1,13 +1,14 @@
-// Undo/redo controls for the Workspace.
+// Undo/redo buttons for the Workspace.
 //
-// Pages mount this once near their toolbar. Per ADR-0006 the Workspace has
-// a single global undo stack — ⌘Z always undoes the most recent edit
-// anywhere in the Workspace. The component still accepts a `resourceKey`
-// for placement context (the SchemaEditor mounts it next to the active
-// resource's hierarchy header), but it no longer scopes the stack to that
-// key.
+// Per ADR-0006 the Workspace has a single global undo stack — ⌘Z always
+// undoes the most recent edit anywhere in the Workspace. The buttons here
+// just dispatch into that stack and reflect `canUndo` / `canRedo`.
+//
+// The keyboard binding (⌘Z / ⌘⇧Z / ⌘Y) is owned by the page, not the
+// buttons — see `useWorkspaceUndoRedoShortcuts`. Pages can mount the
+// buttons zero or many times without changing the shortcut behaviour.
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Redo2, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,37 +30,8 @@ type Props = {
 	className?: string;
 };
 
-// Detecting whether to skip our keyboard handler when the user is editing
-// rich text (contentEditable). For normal `<input>` / `<textarea>` we still
-// override Ctrl+Z because the schema editor commits every keystroke into
-// the model — so model-level undo IS the input's logical undo, no double-
-// undo problem.
-function isInRichTextEditor(target: EventTarget | null): boolean {
-	const el = target as HTMLElement | null;
-	return !!el?.isContentEditable;
-}
-
 export const UndoRedoControls: React.FC<Props> = ({ className }) => {
 	const { undo, redo, canUndo, canRedo } = useWorkspace();
-
-	useEffect(() => {
-		const handler = (e: KeyboardEvent) => {
-			if (isInRichTextEditor(e.target)) return;
-			const ctrlOrCmd = e.ctrlKey || e.metaKey;
-			if (!ctrlOrCmd) return;
-
-			const k = e.key.toLowerCase();
-			if (k === 'z' && !e.shiftKey) {
-				e.preventDefault();
-				undo();
-			} else if (k === 'y' || (k === 'z' && e.shiftKey)) {
-				e.preventDefault();
-				redo();
-			}
-		};
-		window.addEventListener('keydown', handler);
-		return () => window.removeEventListener('keydown', handler);
-	}, [undo, redo]);
 
 	return (
 		<TooltipProvider delayDuration={300}>

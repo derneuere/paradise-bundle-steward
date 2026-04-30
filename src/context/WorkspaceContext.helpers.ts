@@ -6,9 +6,11 @@
 // them keeps the heavy lifting testable; the provider just wires React
 // state to these and dispatches toasts.
 
+import type { HistoryStack } from '@/lib/history';
 import type {
 	BundleId,
 	EditableBundle,
+	HistoryCommit,
 	VisibilityNode,
 } from './WorkspaceContext.types';
 
@@ -121,4 +123,87 @@ export function clearBundleDirty(bundle: EditableBundle): EditableBundle {
 		dirtyMulti: new Set(),
 		isModified: false,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Load / replace / close helpers
+//
+// These exist so the multi-Bundle load path can be unit-tested without a DOM.
+// The React provider wires them to its `bundles` state and the deferred
+// resolver pattern that drives the same-name and dirty-close prompts.
+// ---------------------------------------------------------------------------
+
+/**
+ * Decide whether a candidate Bundle should be appended to the Workspace or
+ * whether the loader needs to ask the user "Replace? Cancel?" before doing
+ * anything. The Bundle's filename is its identity (CONTEXT.md / "Bundle
+ * filename"), so two Bundles with the same id can never coexist — that's
+ * what forces the prompt.
+ */
+export function classifyLoad(
+	bundles: readonly EditableBundle[],
+	candidate: EditableBundle,
+): { kind: 'append' } | { kind: 'replace'; existing: EditableBundle } {
+	const existing = bundles.find((b) => b.id === candidate.id);
+	return existing ? { kind: 'replace', existing } : { kind: 'append' };
+}
+
+/** Append a candidate Bundle. Order is load order. */
+export function appendBundle(
+	bundles: readonly EditableBundle[],
+	candidate: EditableBundle,
+): EditableBundle[] {
+	return [...bundles, candidate];
+}
+
+/**
+ * Swap in a candidate by id. Used after the user picks Replace on the
+ * same-name prompt. Caller is responsible for clearing dependent state
+ * (Selection, Visibility, history) — those concerns live above the bundle
+ * list itself.
+ */
+export function replaceBundleById(
+	bundles: readonly EditableBundle[],
+	candidate: EditableBundle,
+): EditableBundle[] {
+	return bundles.map((b) => (b.id === candidate.id ? candidate : b));
+}
+
+/** Drop a Bundle by id — the bundle-list side of `closeBundle`. */
+export function removeBundleById(
+	bundles: readonly EditableBundle[],
+	bundleId: BundleId,
+): EditableBundle[] {
+	return bundles.filter((b) => b.id !== bundleId);
+}
+
+// ---------------------------------------------------------------------------
+// History pruning — the closeBundle / replace-on-load side of the global
+// undo stack (ADR-0006).
+//
+// Loading a Bundle does NOT clear history (the stack is per-Workspace, not
+// per-Bundle, and persists across loads); but closing a Bundle, or
+// replacing one in place via the same-name prompt, has to drop entries
+// pointing at it. Restoring a closed Bundle's previous value would
+// resurrect the Bundle silently — far worse than losing a few undo entries.
+// ---------------------------------------------------------------------------
+
+/**
+ * Drop every history commit that referenced a Bundle that no longer exists.
+ * Used by both close (after user confirms) and replace (the new bytes shadow
+ * the old ones at the same id, so prior commits no longer apply cleanly).
+ *
+ * Stack identity is preserved when no entries match, so a no-op prune
+ * doesn't churn React state.
+ */
+export function dropHistoryForBundle(
+	history: HistoryStack<HistoryCommit>,
+	bundleId: BundleId,
+): HistoryStack<HistoryCommit> {
+	const past = history.past.filter((c) => c.bundleId !== bundleId);
+	const future = history.future.filter((c) => c.bundleId !== bundleId);
+	if (past.length === history.past.length && future.length === history.future.length) {
+		return history;
+	}
+	return { past, future };
 }
