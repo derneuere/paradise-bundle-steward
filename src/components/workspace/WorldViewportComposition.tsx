@@ -243,14 +243,18 @@ export function WorldViewportCompositionInner({
 				// to the lead so the highlight/outline tracks the user's actual
 				// selection instead of just the lead's index.
 				const isPSLLead = descriptor.resourceKey === 'polygonSoupList';
+				// Only an Instance-level (or deeper) selection focuses a
+				// specific PSL instance — Bundle / Resource-type-level selections
+				// leave the lead pointing at its own descriptor index.
 				const psLeadHasSelection =
 					isPSLLead &&
 					selection?.bundleId === descriptor.bundleId &&
-					selection.resourceKey === 'polygonSoupList';
+					selection.resourceKey === 'polygonSoupList' &&
+					selection.index !== undefined;
 				const selectedPath = psLeadHasSelection
 					? selection!.path
 					: selectedPathFor(selection, descriptor);
-				const activeSoupIndex = psLeadHasSelection ? selection!.index : descriptor.index;
+				const activeSoupIndex = psLeadHasSelection ? selection!.index! : descriptor.index;
 				// 3D-pick handler for PSL: the clicked face's `modelIndex` may
 				// differ from the lead descriptor's own index (one lead covers
 				// every PSL instance in the Bundle), so we route the pick

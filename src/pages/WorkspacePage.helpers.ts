@@ -1,5 +1,5 @@
-// Pure helpers backing the WorkspacePage's selected-resource schema subtree
-// (issue #21).
+// Pure helpers backing the WorkspacePage's selected-resource schema editor
+// (issue #21, ADR-0007 unified hierarchy).
 //
 // Lives in a `.ts` (not `.tsx`) so the unit tests can exercise it without
 // dragging in React + the Vite-only `@vitejs/plugin-react-swc` graph that
@@ -51,7 +51,12 @@ export function makeSchemaSelectionPathHandler(
 	select: (next: WorkspaceSelection) => void,
 ): (next: NodePath) => void {
 	return (next) => {
+		// Schema-row clicks only flow when an Instance/Schema-level selection
+		// is active. For Bundle / Resource-type-level selections (or no
+		// selection at all) the schema editor isn't mounted, so this handler
+		// is never called — but we guard anyway to keep the contract narrow.
 		if (!selection) return;
+		if (selection.resourceKey === undefined || selection.index === undefined) return;
 		select({
 			bundleId: selection.bundleId,
 			resourceKey: selection.resourceKey,

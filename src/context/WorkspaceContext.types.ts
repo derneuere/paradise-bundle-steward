@@ -131,21 +131,50 @@ export type EditableBundle = {
 // ---------------------------------------------------------------------------
 
 /**
- * A focus into one resource within one Bundle. The path may go arbitrarily
- * deep (e.g. `['sections', 3, 'portals', 1]`). An empty Selection (`null`)
- * means nothing is focused — inspector is empty, type-specific Tools hide.
+ * A focus into one node of the unified Workspace hierarchy (ADR-0007). The
+ * unified tree spans four selectable levels — `resourceKey` and `index` are
+ * left undefined to encode the coarser levels:
  *
- * There is *no* "active Bundle" concept independent of Selection — the
+ *   - **Bundle**: `{ bundleId, path: [] }` — `resourceKey`, `index` undefined.
+ *     Inspector renders Bundle metadata.
+ *   - **Resource type** (multi-instance): `{ bundleId, resourceKey, path: [] }` —
+ *     `index` undefined. Inspector renders the instance list. Single-instance
+ *     resources never produce this level — clicking the only row jumps
+ *     straight to the Instance level (there is no `[N]` to pick from).
+ *   - **Instance**: `{ bundleId, resourceKey, index, path: [] }`. Inspector
+ *     renders the schema-root form via SchemaEditorProvider + InspectorPanel.
+ *   - **Schema**: `{ bundleId, resourceKey, index, path: [...non-empty] }` —
+ *     drilled into a sub-path inside an instance. Inspector renders the
+ *     field form for that path.
+ *
+ * `null` means nothing is focused — inspector is empty, type-specific Tools
+ * hide. There is *no* "active Bundle" concept independent of Selection — the
  * selected resource's Bundle is the only sense in which a Bundle is "active."
  */
 export type WorkspaceSelection = {
 	bundleId: BundleId;
-	resourceKey: string;
-	/** 0 for single-instance resources; 0..N for multi-instance types. */
-	index: number;
-	/** Sub-path inside the resource. Empty array means "the resource root." */
+	/** Undefined for Bundle-level selection. */
+	resourceKey?: string;
+	/** Undefined for Bundle / Resource-type-level selection. 0..N for instance-level. */
+	index?: number;
+	/** Sub-path inside the resource. Empty array means "the resource/instance root."
+	 *  Always `[]` for Bundle and Resource-type-level selections. */
 	path: NodePath;
 } | null;
+
+/**
+ * Discriminated view of a non-null selection — derive once and switch on
+ * `kind`. Cheaper than re-checking optional fields at every consumer.
+ */
+export type SelectionLevel = 'bundle' | 'resourceType' | 'instance' | 'schema';
+
+export function selectionLevel(selection: WorkspaceSelection): SelectionLevel | null {
+	if (!selection) return null;
+	if (selection.resourceKey === undefined) return 'bundle';
+	if (selection.index === undefined) return 'resourceType';
+	if (selection.path.length === 0) return 'instance';
+	return 'schema';
+}
 
 // ---------------------------------------------------------------------------
 // Visibility — what contributes to the WorldViewport scene

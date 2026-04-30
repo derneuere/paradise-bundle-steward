@@ -1,61 +1,53 @@
 // WorkspaceEditor — three-pane editor for the multi-Bundle Workspace.
 //
-// Phase #17 (multi-Bundle slice): the tree is a list of Bundle nodes,
-// each with its own resources nested below. Per-Bundle dirty indicator,
-// Save, and close (×) live on the Bundle row. The toolbar adds an
-// "Add Bundle" affordance plus a "Save All" command.
+// Issue #24 (ADR-0007): the left pane mounts a single `WorkspaceHierarchy`
+// component that owns the entire tree — Bundle, Resource type, Instance, and
+// schema rows in one virtualised flat list, Unity-hierarchy-style. Replaces
+// the previous split between `WorkspaceTree` (Bundle/Resource/Instance) and
+// the separately-mounted `HierarchyTree` (schema rows under the selected
+// resource).
 //
-// Phase #18 (multi-Bundle WorldViewport composition): the centre pane's
-// <WorldViewport> hosts overlays from EVERY loaded Bundle simultaneously.
-// Two Bundles loaded → potentially many overlay children, all in one
-// shared scene. Cross-Bundle clicks update the Selection only — the URL
-// doesn't change and the WorldViewport doesn't remount.
+// Selection now encodes four levels — Bundle, Resource type, Instance, Schema
+// — via WorkspaceSelection's optional fields. The right-side panes dispatch
+// off `selectionLevel(selection)`:
 //
-// Phase #19 (Visibility tree toggles): every Bundle / Resource / multi-
-// instance row in the tree gets an eye-icon toggle (except resources in
-// the Standard-viewport family — challenge list, vehicle list, etc. —
-// which have no scene contribution). The cascade lives in
-// WorkspaceContext: hiding a Bundle hides every descendant for the
-// `isVisible` query, regardless of per-instance overrides. The
-// composition layer drops every overlay whose `(bundleId, resourceKey,
-// index)` reads as hidden — the WorldViewport receives only what's
-// visible. Selection is independent of Visibility (CONTEXT.md /
-// "Selection"): a hidden-but-selected resource keeps its inspector / Tools.
+//   - Bundle row selected        → BundleInspector (filename, dirty state,
+//                                  resource count, save/close affordances)
+//   - Resource type row selected → ResourceTypeInspector (instance list w/
+//                                  quick links, "this resource has N
+//                                  instances" / "single-instance resource")
+//   - Instance row selected      → SchemaEditorProvider + InspectorPanel
+//                                  (schema-root form, today's behaviour)
+//   - Schema row selected        → SchemaEditorProvider + InspectorPanel
+//                                  (field form for that path)
 //
 //   ┌──────────────────────┬───────────────────────┬──────────────────┐
-//   │  Workspace tree      │  WorldViewport host   │  Inspector       │
+//   │  WorkspaceHierarchy  │  WorldViewport host   │  Inspector       │
 //   │  (left)              │  (centre)             │  (right)         │
 //   │                      │                       │                  │
-//   │  ▾ TRK_UNIT_07.BUN ●  │  three.js scene;      │  Schema-driven   │
-//   │     ├ aiSec…          │  every loaded         │  form for the    │
-//   │     ├ trgr…           │  Bundle's overlays    │  selected node   │
-//   │     └ stre…           │  render here in a     │  (or generic     │
-//   │  ▾ WORLDCOL.BIN       │  single scene.        │  empty state).   │
-//   │     ├ pSoupList #0    │                       │                  │
-//   │     └ pSoupList #1    │                       │                  │
+//   │  ▾ TRK_UNIT_07.BUN ●  │  three.js scene;      │  Form for the    │
+//   │     ▾ aiSec…          │  every loaded         │  selection level │
+//   │       ▸ Header        │  Bundle's overlays    │  (bundle /       │
+//   │       ▾ Sections      │  render here in a     │  resource-type / │
+//   │         ▾ #0          │  single scene.        │  instance /      │
+//   │           ▸ portals   │                       │  schema row).    │
+//   │     ▾ pSoupList (2)   │                       │                  │
+//   │       ▸ #0            │                       │                  │
+//   │       ▾ #1            │                       │                  │
 //   │  + Add Bundle         │                       │                  │
 //   └──────────────────────┴───────────────────────┴──────────────────┘
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
 	ResizableHandle,
 	ResizablePanel,
 	ResizablePanelGroup,
 } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
-import {
-	ChevronDown,
-	ChevronRight,
-	Eye,
-	EyeOff,
-	Folder,
-	FileText,
-	Plus,
-	Save,
-	X,
-} from 'lucide-react';
+import { FileText, Folder, Plus, Save, X } from 'lucide-react';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { HierarchyTree } from '@/components/schema-editor/HierarchyTree';
+import { selectionLevel } from '@/context/WorkspaceContext.types';
+import type { EditableBundle } from '@/context/WorkspaceContext.types';
 import { InspectorPanel } from '@/components/schema-editor/InspectorPanel';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { ViewportPane } from '@/components/schema-editor/ViewportPane';
@@ -64,7 +56,7 @@ import {
 	WorldViewportComposition,
 	isWorldViewportFamilyKey,
 } from '@/components/workspace/WorldViewportComposition';
-import type { VisibilityNode } from '@/context/WorkspaceContext.types';
+import { WorkspaceHierarchy } from '@/components/workspace/WorkspaceHierarchy';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
 import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
 import { getSchemaByKey } from '@/lib/schema/resources';
@@ -79,11 +71,6 @@ import { triggerDataExtensions } from '@/components/schema-editor/extensions/tri
 import { vehicleListExtensions } from '@/components/schema-editor/extensions/vehicleListExtensions';
 import type { ExtensionRegistry } from '@/components/schema-editor/context';
 import type { NodePath } from '@/lib/schema/walk';
-import type { EditableBundle } from '@/context/WorkspaceContext.types';
-import {
-	hasNavigableSchemaDepth,
-	makeSchemaSelectionPathHandler,
-} from './WorkspacePage.helpers';
 
 // Extension registry per resource key. Mirrors what each per-resource page
 // passes to its `SchemaEditorProvider`, so the workspace inspector renders
@@ -100,473 +87,13 @@ const EXTENSIONS_BY_KEY: Record<string, ExtensionRegistry> = {
 };
 
 // ---------------------------------------------------------------------------
-// Visibility — toggle UX
+// Inspector / viewport host — both consume the Selection
 // ---------------------------------------------------------------------------
 
-// A Visibility toggle is meaningful only for resources that contribute to the
-// WorldViewport scene (CONTEXT.md / "Visibility"). Standard-viewport-family
-// resources (challenge list, vehicle list, attrib sys vault, etc.) and
-// non-world viewports (renderable, texture) have no scene contribution in
-// the Workspace's WorldViewport, so their tree rows skip the eye icon.
-function isVisibilityRelevantKey(key: string): boolean {
-	return isWorldViewportFamilyKey(key);
-}
-
-// True if any resource in this Bundle has a Visibility-relevant node — used
-// to hide the Bundle-level toggle for Bundles that contain only Standard /
-// non-world resources, where the toggle would be a no-op.
-function bundleHasVisibilityRelevantResource(
-	bundle: EditableBundle,
-): boolean {
-	for (const [key, list] of bundle.parsedResourcesAll) {
-		if (!isVisibilityRelevantKey(key)) continue;
-		if (list.some((m) => m != null)) return true;
-	}
-	return false;
-}
-
-function VisibilityToggle({
-	node,
-	label,
-}: {
-	node: VisibilityNode;
-	label: string;
-}) {
-	const { isVisible, setVisibility } = useWorkspace();
-	const visible = isVisible(node);
-	const onClick = useCallback(
-		(e: React.MouseEvent) => {
-			e.stopPropagation();
-			setVisibility(node, !visible);
-		},
-		[node, visible, setVisibility],
-	);
-	return (
-		<button
-			type="button"
-			onClick={onClick}
-			className="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-			title={visible ? `Hide ${label}` : `Show ${label}`}
-			aria-label={visible ? `Hide ${label}` : `Show ${label}`}
-			aria-pressed={visible}
-		>
-			{visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3 opacity-60" />}
-		</button>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Selected-resource schema subtree (issue #21)
-// ---------------------------------------------------------------------------
-//
-// Integration-shape choice (HITL note from the issue): we picked option A —
-// hoist a small "selected-resource hierarchy" sub-component into the tree
-// pane, rendered nested under the matching ResourceRow, with its OWN
-// SchemaEditorProvider scoped to the selected resource. The right-side
-// SelectedResourceShell still mounts its own provider for Scene + Inspector;
-// both providers are controlled by `WorkspaceContext.selection.path`, so a
-// click in either tree updates the same global selection and the other side
-// follows.
-//
-// We didn't pick option B (render the tree pane inside SelectedResourceShell's
-// render-prop) because that mounts the provider conditionally above the tree
-// pane — toggling between "no selection" and "selected" changes the tree
-// pane's React parent (Fragment vs Provider), forcing WorkspaceTree to
-// remount and losing its bundle expand/collapse state. Two providers cost a
-// duplicate context dispatch on every selection move (cheap), but the tree
-// pane stays mounted across selection changes.
-
-function SelectedSchemaSubtree() {
-	const { bundles, selection, select, setResourceAt } = useWorkspace();
-
-	const selectedBundle = useMemo(
-		() => (selection ? bundles.find((b) => b.id === selection.bundleId) : undefined),
-		[bundles, selection],
-	);
-	const schema = selection ? getSchemaByKey(selection.resourceKey) : undefined;
-	const data = useMemo(() => {
-		if (!selection || !selectedBundle) return undefined;
-		const list = selectedBundle.parsedResourcesAll.get(selection.resourceKey);
-		return list?.[selection.index] ?? undefined;
-	}, [selection, selectedBundle]);
-
-	const onChange = useCallback(
-		(next: unknown) => {
-			if (!selection) return;
-			setResourceAt(selection.bundleId, selection.resourceKey, selection.index, next);
-		},
-		[selection, setResourceAt],
-	);
-
-	const setPath = useMemo(
-		() => makeSchemaSelectionPathHandler(selection, select),
-		[selection, select],
-	);
-
-	if (!selection || !schema || data === undefined) return null;
-	if (!hasNavigableSchemaDepth(schema)) return null;
-
-	// Bounded height keeps HierarchyTree's virtualizer happy (it needs a
-	// scrollable parent with finite height) while leaving the workspace-tree
-	// scroll above it intact. The min-h floor stops the tree from collapsing
-	// to nothing when several Bundles are loaded and the pane is short.
-	return (
-		<div
-			className="border-t border-b bg-muted/10 flex flex-col"
-			style={{ height: 'min(60vh, 420px)', minHeight: 200 }}
-		>
-			<SchemaEditorProvider
-				resource={schema}
-				data={data}
-				onChange={onChange}
-				selectedPath={selection.path}
-				onSelectedPathChange={setPath}
-				extensions={EXTENSIONS_BY_KEY[selection.resourceKey]}
-			>
-				<HierarchyTree />
-			</SchemaEditorProvider>
-		</div>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Tree — list of Bundle nodes, each expandable to its resources
-// ---------------------------------------------------------------------------
-
-function WorkspaceTree({
-	bundles,
-	addBundle,
-}: {
-	bundles: readonly EditableBundle[];
-	addBundle: () => void;
-}) {
-	// Default-expanded behaviour: with one Bundle the tree is fully open
-	// (single-Bundle workflow stays as it always was). Once a second
-	// Bundle is loaded, every Bundle collapses by default — the tree turns
-	// into a Bundle picker. The user can still expand any of them manually
-	// and we remember those overrides.
-	const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-	const isExpanded = useCallback(
-		(bundleId: string): boolean => {
-			if (overrides[bundleId] !== undefined) return overrides[bundleId];
-			return bundles.length <= 1;
-		},
-		[bundles.length, overrides],
-	);
-	const toggle = useCallback(
-		(bundleId: string) => {
-			setOverrides((prev) => {
-				const current = prev[bundleId] !== undefined ? prev[bundleId] : bundles.length <= 1;
-				return { ...prev, [bundleId]: !current };
-			});
-		},
-		[bundles.length],
-	);
-
-	return (
-		<div className="flex flex-col text-xs">
-			{bundles.map((bundle) => (
-				<BundleNode
-					key={bundle.id}
-					bundle={bundle}
-					expanded={isExpanded(bundle.id)}
-					onToggle={() => toggle(bundle.id)}
-				/>
-			))}
-			<button
-				type="button"
-				onClick={addBundle}
-				className="flex items-center gap-1.5 px-2 py-1.5 mx-2 mt-2 mb-2 text-xs text-muted-foreground border border-dashed rounded hover:bg-muted/60 hover:text-foreground transition-colors"
-				title="Load another bundle into this workspace"
-			>
-				<Plus className="h-3 w-3" />
-				<span>Add Bundle</span>
-			</button>
-		</div>
-	);
-}
-
-function BundleNode({
-	bundle,
-	expanded,
-	onToggle,
-}: {
-	bundle: EditableBundle;
-	expanded: boolean;
-	onToggle: () => void;
-}) {
-	const { selection, select, saveBundle, closeBundle } = useWorkspace();
-	const entries = useMemo(() => {
-		const out: { key: string; count: number }[] = [];
-		for (const [key, list] of bundle.parsedResourcesAll) {
-			if (list.length > 0) out.push({ key, count: list.length });
-		}
-		out.sort((a, b) => a.key.localeCompare(b.key));
-		return out;
-	}, [bundle.parsedResourcesAll]);
-
-	const showVisibility = useMemo(
-		() => bundleHasVisibilityRelevantResource(bundle),
-		[bundle],
-	);
-
-	const onSave = useCallback(
-		(e: React.MouseEvent) => {
-			e.stopPropagation();
-			void saveBundle(bundle.id);
-		},
-		[bundle.id, saveBundle],
-	);
-	const onClose = useCallback(
-		(e: React.MouseEvent) => {
-			e.stopPropagation();
-			void closeBundle(bundle.id);
-		},
-		[bundle.id, closeBundle],
-	);
-
-	return (
-		<div>
-			<div
-				className="flex items-center gap-1 px-2 py-1 font-medium border-b hover:bg-muted/40 cursor-pointer group"
-				onClick={onToggle}
-				title={`Toggle ${bundle.id}`}
-			>
-				{expanded ? (
-					<ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
-				) : (
-					<ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
-				)}
-				<Folder className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-				<span className="truncate flex-1 min-w-0" title={bundle.id}>
-					{bundle.id}
-				</span>
-				{bundle.isModified && (
-					<span
-						className="text-[10px] text-yellow-600 shrink-0"
-						title="Bundle has unsaved edits"
-						aria-label="modified"
-					>
-						●
-					</span>
-				)}
-				{showVisibility && (
-					<VisibilityToggle
-						node={{ bundleId: bundle.id }}
-						label={bundle.id}
-					/>
-				)}
-				<button
-					type="button"
-					onClick={onSave}
-					disabled={!bundle.isModified}
-					className="shrink-0 p-0.5 rounded text-muted-foreground enabled:hover:bg-muted enabled:hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
-					title={
-						bundle.isModified
-							? 'Save this bundle (downloads to original filename)'
-							: 'No changes to save'
-					}
-					aria-label={`Save ${bundle.id}`}
-				>
-					<Save className="h-3 w-3" />
-				</button>
-				<button
-					type="button"
-					onClick={onClose}
-					className="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-					title="Close this bundle"
-					aria-label={`Close ${bundle.id}`}
-				>
-					<X className="h-3 w-3" />
-				</button>
-			</div>
-			{expanded && (
-				<div className="py-1">
-					{entries.map((e) => {
-						const handler = getHandlerByKey(e.key);
-						const label = handler?.name ?? e.key;
-						const isActiveSingle =
-							e.count === 1 &&
-							selection?.bundleId === bundle.id &&
-							selection.resourceKey === e.key &&
-							selection.index === 0;
-						return e.count === 1 ? (
-							<div key={e.key}>
-								<ResourceRow
-									bundleId={bundle.id}
-									resourceKey={e.key}
-									index={0}
-									label={label}
-									active={isActiveSingle}
-									onClick={() =>
-										select({
-											bundleId: bundle.id,
-											resourceKey: e.key,
-											index: 0,
-											path: [],
-										})
-									}
-									showVisibility={isVisibilityRelevantKey(e.key)}
-								/>
-								{/* Schema subtree appears nested under the active ResourceRow
-								    (issue #21). Only one ResourceRow can match the global
-								    selection, so this never renders twice. */}
-								{isActiveSingle && <SelectedSchemaSubtree />}
-							</div>
-						) : (
-							<MultiResourceGroup
-								key={e.key}
-								bundleId={bundle.id}
-								resourceKey={e.key}
-								label={label}
-								count={e.count}
-								selection={selection}
-								onSelect={(index) =>
-									select({
-										bundleId: bundle.id,
-										resourceKey: e.key,
-										index,
-										path: [],
-									})
-								}
-							/>
-						);
-					})}
-				</div>
-			)}
-		</div>
-	);
-}
-
-function ResourceRow({
-	bundleId,
-	resourceKey,
-	index,
-	label,
-	active,
-	onClick,
-	depth = 1,
-	showVisibility = false,
-}: {
-	bundleId: string;
-	resourceKey: string;
-	index: number;
-	label: string;
-	active: boolean;
-	onClick: () => void;
-	depth?: number;
-	showVisibility?: boolean;
-}) {
-	return (
-		<div
-			className={`flex w-full items-center gap-1.5 px-2 py-0.5 hover:bg-muted/60 ${
-				active ? 'bg-muted text-foreground' : 'text-muted-foreground'
-			}`}
-			style={{ paddingLeft: 8 + depth * 14 }}
-			title={resourceKey}
-		>
-			<button
-				type="button"
-				onClick={onClick}
-				className="flex flex-1 min-w-0 items-center gap-1.5 text-left"
-			>
-				<FileText className="h-3 w-3 shrink-0" />
-				<span className="truncate">{label}</span>
-			</button>
-			{showVisibility && (
-				<VisibilityToggle
-					node={{ bundleId, resourceKey, index }}
-					label={`${resourceKey} #${index}`}
-				/>
-			)}
-		</div>
-	);
-}
-
-function MultiResourceGroup({
-	bundleId,
-	resourceKey,
-	label,
-	count,
-	selection,
-	onSelect,
-}: {
-	bundleId: string;
-	resourceKey: string;
-	label: string;
-	count: number;
-	selection: ReturnType<typeof useWorkspace>['selection'];
-	onSelect: (index: number) => void;
-}) {
-	// Multi-instance keys (polygonSoupList, texture, shader, …) collapse to
-	// a single header row by default. Auto-expand when one of their entries
-	// is selected so the active row is always visible — keeps the user from
-	// losing track after picking from a long shader bundle. Users can also
-	// expand the group manually to reach per-instance Visibility toggles
-	// (issue #19) without first picking a row to select.
-	const someActive =
-		selection?.bundleId === bundleId && selection.resourceKey === resourceKey;
-	const [manualExpanded, setManualExpanded] = useState(false);
-	const expanded = manualExpanded || someActive;
-	const showVisibility = isVisibilityRelevantKey(resourceKey);
-	return (
-		<div>
-			<div
-				className="flex items-center gap-1.5 px-2 py-0.5 text-muted-foreground hover:bg-muted/40 cursor-pointer"
-				style={{ paddingLeft: 8 + 14 }}
-				title={resourceKey}
-				onClick={() => setManualExpanded((v) => !v)}
-			>
-				{expanded ? (
-					<ChevronDown className="h-3 w-3 shrink-0" />
-				) : (
-					<ChevronRight className="h-3 w-3 shrink-0" />
-				)}
-				<Folder className="h-3 w-3 shrink-0" />
-				<span className="truncate flex-1 min-w-0">
-					{label} <span className="text-[10px] opacity-70">({count})</span>
-				</span>
-				{showVisibility && (
-					<VisibilityToggle
-						node={{ bundleId, resourceKey }}
-						label={`all ${resourceKey}`}
-					/>
-				)}
-			</div>
-			{expanded && (
-				<>
-					{Array.from({ length: count }).map((_, i) => {
-						const isActive = someActive && selection!.index === i;
-						return (
-							<div key={i}>
-								<ResourceRow
-									bundleId={bundleId}
-									resourceKey={resourceKey}
-									index={i}
-									label={`${label} #${i}`}
-									active={isActive}
-									onClick={() => onSelect(i)}
-									depth={2}
-									showVisibility={showVisibility}
-								/>
-								{/* Multi-instance: schema subtree mounts under the
-								    actively-selected instance row (issue #21 acceptance:
-								    "selecting a specific instance row shows that
-								    instance's HierarchyTree"). */}
-								{isActive && <SelectedSchemaSubtree />}
-							</div>
-						);
-					})}
-				</>
-			)}
-		</div>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Inspector + viewport host — both consume the Selection
-// ---------------------------------------------------------------------------
-
+// Wraps the children with a SchemaEditorProvider when the selection is at
+// Instance / Schema level, so SchemaEditorPanel + ViewportPane share one
+// provider. Bundle / Resource-type-level selections render directly without
+// a provider — they don't drive the schema editor.
 function SelectedResourceShell({
 	children,
 }: {
@@ -579,14 +106,21 @@ function SelectedResourceShell({
 	}) => React.ReactNode;
 }) {
 	const { bundles, selection, select, setResourceAt } = useWorkspace();
+	const level = selectionLevel(selection);
 
 	const selectedBundle = useMemo(
 		() => (selection ? bundles.find((b) => b.id === selection.bundleId) : undefined),
 		[bundles, selection],
 	);
-	const schema = selection ? getSchemaByKey(selection.resourceKey) : undefined;
+	const isInstanceOrSchema = level === 'instance' || level === 'schema';
+	const schema = isInstanceOrSchema && selection?.resourceKey
+		? getSchemaByKey(selection.resourceKey)
+		: undefined;
 	const data = useMemo(() => {
 		if (!selection || !selectedBundle) return undefined;
+		if (selection.resourceKey === undefined || selection.index === undefined) {
+			return undefined;
+		}
 		const list = selectedBundle.parsedResourcesAll.get(selection.resourceKey);
 		return list?.[selection.index] ?? undefined;
 	}, [selection, selectedBundle]);
@@ -594,6 +128,7 @@ function SelectedResourceShell({
 	const onChange = useCallback(
 		(next: unknown) => {
 			if (!selection) return;
+			if (selection.resourceKey === undefined || selection.index === undefined) return;
 			setResourceAt(selection.bundleId, selection.resourceKey, selection.index, next);
 		},
 		[selection, setResourceAt],
@@ -602,6 +137,7 @@ function SelectedResourceShell({
 	const setPath = useCallback(
 		(next: NodePath) => {
 			if (!selection) return;
+			if (selection.resourceKey === undefined || selection.index === undefined) return;
 			select({
 				bundleId: selection.bundleId,
 				resourceKey: selection.resourceKey,
@@ -612,16 +148,21 @@ function SelectedResourceShell({
 		[selection, select],
 	);
 
-	// No selection: render whatever the children fallback wants.
-	if (!selection) {
-		return <>{children({ schema: undefined, data: undefined, path: [], setPath, onChange })}</>;
-	}
-
-	// Selection but no schema (e.g. shader, attribSysVault) — surface the
-	// reason instead of silently failing. The legacy per-resource pages
-	// remain the way to edit those resources today.
-	if (!schema || data === undefined) {
-		return <>{children({ schema: undefined, data, path: selection.path, setPath, onChange })}</>;
+	// Provider only mounts when there's a selectable instance + schema. Other
+	// selection levels (Bundle / Resource type) render the children fallback
+	// — those panes don't read the SchemaEditor context.
+	if (!isInstanceOrSchema || !schema || data === undefined || !selection?.resourceKey) {
+		return (
+			<>
+				{children({
+					schema: undefined,
+					data,
+					path: selection?.path ?? [],
+					setPath,
+					onChange,
+				})}
+			</>
+		);
 	}
 
 	return (
@@ -640,19 +181,19 @@ function SelectedResourceShell({
 
 function CenterViewport() {
 	const { bundles, selection } = useWorkspace();
+	const level = selectionLevel(selection);
 
 	// World-viewport-family resources (AI sections, street/traffic/trigger
 	// data, zone list, polygon soups) compose into a single shared
-	// <WorldViewport> across every loaded Bundle (issue #18). Selection
-	// changes within that family swap the inspector's Tools but DON'T
-	// remount the chrome — the scene keeps every overlay rendered.
-	//
-	// Renderable / texture viewports are non-world-coord (per-vehicle 3D
-	// scene; 2D image preview) so they get the legacy single-resource
-	// ViewportPane shim. Switching to/from those WILL remount, since
-	// they're not WorldViewport's at all.
+	// <WorldViewport> across every loaded Bundle (issue #18). Bundle and
+	// Resource-type-level selections also use the composition — there's no
+	// instance-specific overlay focus, but the cross-Bundle scene still
+	// renders.
 	const useComposition =
-		!selection || isWorldViewportFamilyKey(selection.resourceKey);
+		!selection ||
+		level === 'bundle' ||
+		(selection.resourceKey !== undefined &&
+			isWorldViewportFamilyKey(selection.resourceKey));
 
 	if (useComposition) {
 		// Empty Workspace + no Selection — the WorldViewport renders an
@@ -673,6 +214,13 @@ function CenterViewport() {
 		);
 	}
 
+	if (!selection?.resourceKey) {
+		return (
+			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
+				Select a resource from the tree to view it.
+			</div>
+		);
+	}
 	const schema = getSchemaByKey(selection.resourceKey);
 	if (!schema) {
 		return (
@@ -686,22 +234,80 @@ function CenterViewport() {
 	// ViewportPane reads the active resource from the SchemaEditorProvider
 	// — the SelectedResourceShell parent provides it.
 	return (
-		<ViewportErrorBoundary resetKey={`${selection.bundleId}/${selection.resourceKey}/${selection.index}`}>
+		<ViewportErrorBoundary
+			resetKey={`${selection.bundleId}/${selection.resourceKey}/${selection.index}`}
+		>
 			<ViewportPane />
 		</ViewportErrorBoundary>
 	);
 }
 
 function RightInspector() {
-	const { selection } = useWorkspace();
-	if (!selection) {
+	const { bundles, selection, select, saveBundle, closeBundle } = useWorkspace();
+	const level = selectionLevel(selection);
+
+	if (!selection || level == null) {
 		return (
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
 				Nothing selected.
 			</div>
 		);
 	}
-	const schema = getSchemaByKey(selection.resourceKey);
+
+	if (level === 'bundle') {
+		const bundle = bundles.find((b) => b.id === selection.bundleId);
+		if (!bundle) {
+			return (
+				<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
+					Bundle no longer loaded.
+				</div>
+			);
+		}
+		return (
+			<BundleInspector
+				bundle={bundle}
+				saveBundle={saveBundle}
+				closeBundle={closeBundle}
+				onSelectResourceType={(key, isMulti) =>
+					select(
+						isMulti
+							? { bundleId: bundle.id, resourceKey: key, path: [] }
+							: { bundleId: bundle.id, resourceKey: key, index: 0, path: [] },
+					)
+				}
+			/>
+		);
+	}
+
+	if (level === 'resourceType') {
+		const bundle = bundles.find((b) => b.id === selection.bundleId);
+		if (!bundle || !selection.resourceKey) {
+			return (
+				<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
+					Resource type no longer available.
+				</div>
+			);
+		}
+		return (
+			<ResourceTypeInspector
+				bundle={bundle}
+				resourceKey={selection.resourceKey}
+				onSelectInstance={(idx) =>
+					select({
+						bundleId: bundle.id,
+						resourceKey: selection.resourceKey!,
+						index: idx,
+						path: [],
+					})
+				}
+			/>
+		);
+	}
+
+	// Instance / Schema → the schema editor inspector takes over.
+	const schema = selection.resourceKey
+		? getSchemaByKey(selection.resourceKey)
+		: undefined;
 	if (!schema) {
 		return (
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
@@ -710,6 +316,172 @@ function RightInspector() {
 		);
 	}
 	return <InspectorPanel />;
+}
+
+// ---------------------------------------------------------------------------
+// Bundle-level inspector (issue #24)
+// ---------------------------------------------------------------------------
+
+function BundleInspector({
+	bundle,
+	saveBundle,
+	closeBundle,
+	onSelectResourceType,
+}: {
+	bundle: EditableBundle;
+	saveBundle: (id: string) => Promise<void>;
+	closeBundle: (id: string) => Promise<void>;
+	onSelectResourceType: (key: string, isMulti: boolean) => void;
+}) {
+	const entries = useMemo(() => {
+		const out: { key: string; count: number }[] = [];
+		for (const [key, list] of bundle.parsedResourcesAll) {
+			if (list.length > 0) out.push({ key, count: list.length });
+		}
+		out.sort((a, b) => a.key.localeCompare(b.key));
+		return out;
+	}, [bundle.parsedResourcesAll]);
+	const totalCount = useMemo(
+		() => entries.reduce((sum, e) => sum + e.count, 0),
+		[entries],
+	);
+	return (
+		<div className="h-full flex flex-col min-h-0 overflow-auto">
+			<div className="px-4 pt-4 pb-2 border-b bg-card/60 shrink-0">
+				<div className="flex items-center gap-2">
+					<Folder className="h-4 w-4 text-muted-foreground shrink-0" />
+					<h3 className="text-sm font-semibold truncate" title={bundle.id}>
+						{bundle.id}
+					</h3>
+					{bundle.isModified && (
+						<span
+							className="text-[10px] text-yellow-600"
+							title="Bundle has unsaved edits"
+						>
+							● modified
+						</span>
+					)}
+				</div>
+				<p className="text-[11px] text-muted-foreground mt-1">
+					{totalCount} resource{totalCount === 1 ? '' : 's'} across{' '}
+					{entries.length} type{entries.length === 1 ? '' : 's'}
+				</p>
+			</div>
+			<div className="px-4 py-3 flex items-center gap-2 border-b">
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
+					onClick={() => void saveBundle(bundle.id)}
+					disabled={!bundle.isModified}
+					className="gap-1"
+				>
+					<Save className="h-3 w-3" />
+					Save Bundle
+				</Button>
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
+					onClick={() => void closeBundle(bundle.id)}
+					className="gap-1"
+				>
+					<X className="h-3 w-3" />
+					Close
+				</Button>
+			</div>
+			<div className="flex-1 min-h-0 overflow-auto p-4">
+				<div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+					Resource types
+				</div>
+				<ul className="space-y-1">
+					{entries.map((e) => {
+						const handler = getHandlerByKey(e.key);
+						const label = handler?.name ?? e.key;
+						const isMulti = e.count > 1;
+						return (
+							<li key={e.key}>
+								<button
+									type="button"
+									onClick={() => onSelectResourceType(e.key, isMulti)}
+									className="w-full flex items-center gap-2 px-2 py-1 rounded text-left hover:bg-muted/60 text-xs"
+								>
+									{isMulti ? (
+										<Folder className="h-3 w-3 text-muted-foreground shrink-0" />
+									) : (
+										<FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+									)}
+									<span className="flex-1 truncate">{label}</span>
+									<span className="text-[10px] text-muted-foreground tabular-nums">
+										{e.count}
+									</span>
+								</button>
+							</li>
+						);
+					})}
+				</ul>
+			</div>
+		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Resource-type-level inspector (issue #24)
+// ---------------------------------------------------------------------------
+
+function ResourceTypeInspector({
+	bundle,
+	resourceKey,
+	onSelectInstance,
+}: {
+	bundle: EditableBundle;
+	resourceKey: string;
+	onSelectInstance: (index: number) => void;
+}) {
+	const handler = getHandlerByKey(resourceKey);
+	const label = handler?.name ?? resourceKey;
+	const list = bundle.parsedResourcesAll.get(resourceKey) ?? [];
+	const count = list.length;
+	const isMulti = count > 1;
+
+	return (
+		<div className="h-full flex flex-col min-h-0">
+			<div className="px-4 pt-4 pb-2 border-b bg-card/60 shrink-0">
+				<div className="flex items-center gap-2">
+					<Folder className="h-4 w-4 text-muted-foreground shrink-0" />
+					<h3 className="text-sm font-semibold truncate" title={resourceKey}>
+						{label}
+					</h3>
+				</div>
+				<p className="text-[11px] text-muted-foreground mt-1">
+					{isMulti
+						? `This resource type has ${count} instances in ${bundle.id}`
+						: `Single-instance resource in ${bundle.id}`}
+				</p>
+			</div>
+			<div className="flex-1 min-h-0 overflow-auto p-4">
+				<div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+					Instances
+				</div>
+				<ul className="space-y-1">
+					{Array.from({ length: count }).map((_, i) => (
+						<li key={i}>
+							<button
+								type="button"
+								onClick={() => onSelectInstance(i)}
+								className="w-full flex items-center gap-2 px-2 py-1 rounded text-left hover:bg-muted/60 text-xs"
+							>
+								<FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+								<span className="flex-1 truncate">
+									{label} #{i}
+								</span>
+							</button>
+						</li>
+					))}
+				</ul>
+			</div>
+		</div>
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -853,8 +625,8 @@ const WorkspacePage = () => {
 				<ResizablePanel id="ws-tree" order={1} defaultSize={20} minSize={14} className="bg-background">
 					<div className="h-full flex flex-col">
 						<WorkspaceToolbar onAddBundle={triggerAdd} />
-						<div className="flex-1 min-h-0 overflow-auto">
-							<WorkspaceTree bundles={bundles} addBundle={triggerAdd} />
+						<div className="flex-1 min-h-0 overflow-hidden">
+							<WorkspaceHierarchy onAddBundle={triggerAdd} />
 						</div>
 					</div>
 				</ResizablePanel>

@@ -135,6 +135,9 @@ export function selectedPathFor(
 	selection: WorkspaceSelection,
 	descriptor: Pick<OverlayDescriptor, 'bundleId' | 'resourceKey' | 'index'>,
 ): NodePath {
+	// Bundle / Resource-type-level selections leave `resourceKey` or `index`
+	// undefined, in which case no overlay matches — every overlay gets the
+	// empty path and renders unselected.
 	if (
 		selection &&
 		selection.bundleId === descriptor.bundleId &&
