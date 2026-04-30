@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import type { ParsedAttribSys } from '@/lib/core/attribSys';
 import {
 	getSchemaByClassHash,
@@ -536,7 +536,7 @@ function FieldRow({
 
 const AttribSysVaultPage = () => {
 	const { getResource, setResource } = useWorkspace();
-	const bundleId = useActiveBundleId();
+	const bundleId = useFirstLoadedBundleId();
 	const data = bundleId ? getResource<ParsedAttribSys>(bundleId, 'attribSysVault') : null;
 	const [showAdvanced, setShowAdvanced] = useState(false);
 

@@ -6,7 +6,7 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
@@ -17,7 +17,7 @@ import type { ParsedTrafficData } from '@/lib/core/trafficData';
 
 const TrafficDataPage = () => {
 	const { getResource, setResource } = useWorkspace();
-	const bundleId = useActiveBundleId();
+	const bundleId = useFirstLoadedBundleId();
 	const data = bundleId ? getResource<ParsedTrafficData>(bundleId, 'trafficData') : null;
 	const bulk = useGenericBulkSelection();
 	const bulkValue = useMemo(

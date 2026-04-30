@@ -33,7 +33,7 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useActiveBundle, useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle, useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { renderableResourceSchema } from '@/lib/schema/resources/renderable';
@@ -70,8 +70,8 @@ const RENDERABLE_SHORTCUT_GROUPS: ShortcutGroup[] = [
 // the filtered/aligned data via useRenderableDecoded.
 function RenderablePageInner() {
 	const { getResources } = useWorkspace();
-	const bundleId = useActiveBundleId();
-	const activeBundle = useActiveBundle();
+	const bundleId = useFirstLoadedBundleId();
+	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const decoded = useRenderableDecoded();
 

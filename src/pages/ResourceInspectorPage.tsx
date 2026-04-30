@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useActiveBundle } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getResourceData, extractResourceSize, isCompressed, decompressData } from '@/lib/core/resourceManager';
 import { getResourceType } from '@/lib/resourceTypes';
@@ -10,7 +10,7 @@ import { ResourceInspectorView } from '@/components/hexviewer/ResourceInspectorV
 const ResourceInspectorPage = () => {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
-  const activeBundle = useActiveBundle();
+  const activeBundle = useFirstLoadedBundle();
   const loadedBundle = activeBundle?.parsed ?? null;
   const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 

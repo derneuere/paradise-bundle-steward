@@ -13,7 +13,7 @@
 import React, { useMemo, useState } from 'react';
 import { Check, ChevronsUpDown, Copy } from 'lucide-react';
 import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
-import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import type { ParsedAISections } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
@@ -85,7 +85,7 @@ export function AISectionPicker({
 	compact,
 }: AISectionPickerProps) {
 	const { getResource } = useWorkspace();
-	const bundleId = useActiveBundleId();
+	const bundleId = useFirstLoadedBundleId();
 	const aiSections = bundleId ? getResource<ParsedAISections>(bundleId, 'aiSections') : null;
 	const sections = aiSections?.sections;
 	const hasSections = !!sections && sections.length > 0;

@@ -37,7 +37,7 @@
 //     (CONTEXT.md / "Selection") — the inspector keeps showing its Tools,
 //     the overlay just stops contributing to the scene.
 //   - PolygonSoupList Workspace-awareness. The overlay still reads
-//     `useActiveBundle()` internally (ADR-0004) — multi-Bundle
+//     `useFirstLoadedBundle()` internally (ADR-0004) — multi-Bundle
 //     PolygonSoupList rendering is deferred and tracked separately.
 
 import { useCallback, useMemo } from 'react';
@@ -129,7 +129,7 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange }: Overlay
 				/>
 			);
 		case 'polygonSoupList':
-			// PolygonSoupList still reads `useActiveBundle()` internally
+			// PolygonSoupList still reads `useFirstLoadedBundle()` internally
 			// (ADR-0004) — until that's Workspace-aware (out of scope, per
 			// issue #18) only bundles[0]'s polygon soups will actually
 			// render data, regardless of how many descriptors we mount.

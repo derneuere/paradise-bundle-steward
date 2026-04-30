@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useActiveBundle } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import type { UIResource } from '@/lib/core/bundle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +29,7 @@ const getCategoryIcon = (category: string) => {
 };
 
 const ResourcesPage = () => {
-  const activeBundle = useActiveBundle();
+  const activeBundle = useFirstLoadedBundle();
   const resources = activeBundle?.resources ?? [];
   const loadedBundle = activeBundle?.parsed ?? null;
   const [searchQuery, setSearchQuery] = useState('');

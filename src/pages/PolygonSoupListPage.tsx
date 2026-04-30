@@ -31,7 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useActiveBundle, useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle, useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelectionContext';
@@ -193,8 +193,8 @@ function foldBulk(polys: PolygonSoupPoly[]): BulkSummary {
 
 const PolygonSoupListPage = () => {
 	const { getResources, setResourceAt } = useWorkspace();
-	const bundleId = useActiveBundleId();
-	const activeBundle = useActiveBundle();
+	const bundleId = useFirstLoadedBundleId();
+	const activeBundle = useFirstLoadedBundle();
 	const uiResources = activeBundle?.resources ?? [];
 	const models = useMemo(
 		() => (bundleId ? [...getResources<ParsedPolygonSoupList>(bundleId, PSL_HANDLER_KEY)] : []),

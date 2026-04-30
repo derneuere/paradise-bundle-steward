@@ -1,8 +1,8 @@
-import { useActiveBundle } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import { HexViewer } from '@/components/hexviewer/HexViewer';
 
 const HexViewPage = () => {
-  const activeBundle = useActiveBundle();
+  const activeBundle = useFirstLoadedBundle();
   return (
     <HexViewer
       originalData={activeBundle?.originalArrayBuffer ?? null}

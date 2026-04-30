@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useActiveBundle } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import { parseAllBundleResourcesViaRegistry } from '@/lib/core/registry/bundleOps';
 import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
@@ -399,7 +399,7 @@ function applyHighlight(
 // ---------------------------------------------------------------------------
 
 function useFallbackModels(): (ParsedPolygonSoupList | null)[] {
-	const activeBundle = useActiveBundle();
+	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	return useMemo(() => {

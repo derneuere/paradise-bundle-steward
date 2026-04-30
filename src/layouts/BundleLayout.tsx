@@ -3,8 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Upload, Download, Hexagon, Database, Box, Layers } from 'lucide-react';
 import {
-  useActiveBundle,
-  useActiveBundleId,
+  useFirstLoadedBundle,
+  useFirstLoadedBundleId,
   useWorkspace,
   useWorkspaceCompanion,
 } from '@/context/WorkspaceContext';
@@ -39,8 +39,8 @@ export const BundleLayout = () => {
   const [pendingTargetPlatform, setPendingTargetPlatform] = useState<number | undefined>(undefined);
   const { loadBundle, saveBundle, getResource, setResource } = useWorkspace();
   const { isLoading } = useWorkspaceCompanion();
-  const activeBundle = useActiveBundle();
-  const activeBundleId = useActiveBundleId();
+  const activeBundle = useFirstLoadedBundle();
+  const activeBundleId = useFirstLoadedBundleId();
   const isModified = activeBundle?.isModified ?? false;
   const loadedBundle = activeBundle?.parsed ?? null;
   const parsedResources = activeBundle?.parsedResources ?? new Map();

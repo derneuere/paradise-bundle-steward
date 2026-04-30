@@ -25,7 +25,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
-import { useActiveBundle } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import {
 	RENDERABLE_TYPE_ID,
 	VERTEX_DESCRIPTOR_TYPE_ID,
@@ -387,7 +387,7 @@ export function useRenderableDecoded(): RenderableDecodedValue | null {
 }
 
 export function RenderableDecodedProvider({ children }: { children: React.ReactNode }) {
-	const activeBundle = useActiveBundle();
+	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	const debugResources = activeBundle?.debugResources ?? [];

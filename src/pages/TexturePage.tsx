@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useActiveBundle, useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle, useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import {
@@ -53,8 +53,8 @@ const TEXTURE_SHORTCUT_GROUPS: ShortcutGroup[] = [
 
 const TexturePage = () => {
 	const { getResources, setResourceAt } = useWorkspace();
-	const bundleId = useActiveBundleId();
-	const activeBundle = useActiveBundle();
+	const bundleId = useFirstLoadedBundleId();
+	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	const uiResources = activeBundle?.resources ?? [];

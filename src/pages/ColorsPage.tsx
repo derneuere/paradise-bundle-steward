@@ -6,7 +6,7 @@
 // and the f32 channel inputs with no extensions needed.
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { playerCarColoursResourceSchema } from '@/lib/schema/resources/playerCarColours';
@@ -14,7 +14,7 @@ import type { PlayerCarColours } from '@/lib/core/playerCarColors';
 
 const ColorsPage = () => {
 	const { getResource, setResource } = useWorkspace();
-	const bundleId = useActiveBundleId();
+	const bundleId = useFirstLoadedBundleId();
 	const data = bundleId ? getResource<PlayerCarColours>(bundleId, 'playerCarColours') : null;
 
 	if (!data) {

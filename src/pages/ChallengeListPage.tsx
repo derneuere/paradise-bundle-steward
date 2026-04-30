@@ -6,7 +6,7 @@
 // default schema form via propertyGroups.
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { challengeListExtensions } from '@/components/schema-editor/extensions/challengeListExtensions';
@@ -15,7 +15,7 @@ import type { ParsedChallengeList } from '@/lib/core/challengeList';
 
 const ChallengeListPage = () => {
 	const { getResource, setResource } = useWorkspace();
-	const bundleId = useActiveBundleId();
+	const bundleId = useFirstLoadedBundleId();
 	const data = bundleId ? getResource<ParsedChallengeList>(bundleId, 'challengeList') : null;
 
 	if (!data) {

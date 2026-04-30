@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import type {
 	ParsedDeformationSpec,
 	Vec3,
@@ -735,7 +735,7 @@ function GlassPanesTab({
 
 const DeformationSpecPage = () => {
 	const { getResource, setResource } = useWorkspace();
-	const bundleId = useActiveBundleId();
+	const bundleId = useFirstLoadedBundleId();
 	const data = bundleId ? getResource<ParsedDeformationSpec>(bundleId, 'deformationSpec') : null;
 
 	const set = useCallback(

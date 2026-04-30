@@ -616,25 +616,35 @@ export function useWorkspaceCompanion(): {
 }
 
 /**
- * Convenience hook for legacy single-Bundle pages and layouts: returns the
- * first loaded Bundle's id, or null if the Workspace is empty. Pages that
- * still operate on "the" loaded Bundle (every per-resource page right now)
- * use this to feed `bundleId` into the Bundle-keyed resource APIs without
- * threading it through a prop chain.
+ * **Legacy single-Bundle pages only** — new code should accept `bundleId`
+ * as a prop (or read it from the URL) instead of calling this.
  *
- * This is a *single-Bundle convenience*, not an "active Bundle" fallback —
- * the WorkspaceEditor manages selection across many Bundles itself and
- * doesn't use this hook. The legacy per-resource pages stay pinned to
- * bundles[0] (the single-Bundle workflow stays single-Bundle).
+ * Returns the first loaded Bundle's id, or null if the Workspace is empty.
+ * Per-resource pages that still operate on "the" loaded Bundle use this to
+ * feed `bundleId` into the Bundle-keyed resource APIs without threading it
+ * through a prop chain.
+ *
+ * This is a *single-Bundle convenience*, **not an "active Bundle" fallback**
+ * — there is no separate "active Bundle" concept independent of Selection
+ * (see CONTEXT.md). The WorkspaceEditor manages selection across many
+ * Bundles itself and doesn't use this hook. Legacy per-resource pages stay
+ * pinned to `bundles[0]` until they're either retired or refactored to
+ * take `bundleId` from the URL.
  */
-export function useActiveBundleId(): BundleId | null {
+export function useFirstLoadedBundleId(): BundleId | null {
 	const { bundles } = useWorkspace();
 	return bundles[0]?.id ?? null;
 }
 
-// Effect helper used by some pages to react to bundle changes. Kept here
-// so the import surface is symmetrical with `useWorkspace`.
-export function useActiveBundle(): EditableBundle | null {
+/**
+ * **Legacy single-Bundle pages only** — new code should accept `bundleId`
+ * as a prop and resolve the Bundle via `useWorkspace()` instead.
+ *
+ * Returns the first loaded Bundle, or null if the Workspace is empty. See
+ * `useFirstLoadedBundleId` for the rationale: this is a single-Bundle
+ * convenience, not an "active Bundle" fallback.
+ */
+export function useFirstLoadedBundle(): EditableBundle | null {
 	const { bundles } = useWorkspace();
 	return bundles[0] ?? null;
 }

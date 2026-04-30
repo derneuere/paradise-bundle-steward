@@ -27,7 +27,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
-import { useActiveBundle, useWorkspaceCompanion } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle, useWorkspaceCompanion } from '@/context/WorkspaceContext';
 import { RENDERABLE_TYPE_ID } from '@/lib/core/renderable';
 import { extractResourceRaw } from '@/lib/core/registry/extract';
 import type { ResolvedMaterial } from '@/lib/core/materialChain';
@@ -400,7 +400,7 @@ function RenderableMeshes({
 	onHover: (sel: { ri: number; mi: number } | null) => void;
 	useTranslatedShaders: boolean;
 }) {
-	const activeBundle = useActiveBundle();
+	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	const debugResources = activeBundle?.debugResources ?? [];
@@ -782,7 +782,7 @@ function RenderableMeshes({
 // =============================================================================
 
 export function RenderableViewport() {
-	const activeBundle = useActiveBundle();
+	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	const decoded = useRenderableDecoded();

@@ -32,7 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useActiveBundle, useActiveBundleId, useWorkspace, useWorkspaceCompanion } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle, useFirstLoadedBundleId, useWorkspace, useWorkspaceCompanion } from '@/context/WorkspaceContext';
 import type { ParsedShader } from '@/lib/core/shader';
 import { SHADER_TYPE_ID, SHADER_PROGRAM_BUFFER_TYPE_ID } from '@/lib/core/shader';
 import { getImportIds } from '@/lib/core/bundle';
@@ -73,7 +73,7 @@ type LinkedTechnique = {
 };
 
 function useLinkedShader(model: ParsedShader | null, bundleResourceIndex: number) {
-	const activeBundle = useActiveBundle();
+	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	return useMemo<LinkedTechnique[]>(() => {
@@ -942,8 +942,8 @@ function ProgramSource({
 
 const ShaderPage = () => {
 	const { getResources } = useWorkspace();
-	const bundleId = useActiveBundleId();
-	const activeBundle = useActiveBundle();
+	const bundleId = useFirstLoadedBundleId();
+	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	const debugResources = activeBundle?.debugResources ?? [];

@@ -6,7 +6,7 @@
 // wraps the legacy 5-tab form as a custom renderer.
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useActiveBundleId, useWorkspace } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { vehicleListResourceSchema } from '@/lib/schema/resources/vehicleList';
@@ -15,7 +15,7 @@ import type { ParsedVehicleList } from '@/lib/core/vehicleList';
 
 const VehiclesPage = () => {
   const { getResource, setResource } = useWorkspace();
-  const bundleId = useActiveBundleId();
+  const bundleId = useFirstLoadedBundleId();
   const data = bundleId ? getResource<ParsedVehicleList>(bundleId, 'vehicleList') : null;
 
   if (!data) {

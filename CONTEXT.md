@@ -65,7 +65,7 @@ A route component that wires `BundleContext` → `SchemaEditorProvider` → `Sch
 A route component for a resource that needs custom UI beyond what the schema-driven form provides — synthetic roots, decode pipelines, format-specific previews, multi-resource pickers. Currently 6 of these in `src/pages/` (Renderable, Texture, AttribSysVault, DeformationSpec, PolygonSoupList, Shader). Not a target for genericization.
 
 **Workspace editor**:
-The single new top-level page that hosts a multi-**Bundle** **Workspace**. Combines the tree (multi-**Bundle**, with **Visibility** toggles), the **WorldViewport** (composing overlays from every visible **Resource**), and an inspector pane that shows the **Tools** for the current **Selection**. Distinct from the per-resource **Schema-driven page** / **Bespoke page** routes, which remain for single-**Bundle** focused workflows.
+The single new top-level page that hosts a multi-**Bundle** **Workspace**. Combines the tree (multi-**Bundle**, with **Visibility** toggles), the **WorldViewport** (composing overlays from every visible **Resource**), and an inspector pane that shows the **Tools** for the current **Selection**. Distinct from the per-resource **Schema-driven page** / **Bespoke page** routes, which remain for single-**Bundle** focused workflows. Those legacy per-resource routes are pinned to the first-loaded **Bundle** (via `useFirstLoadedBundle` / `useFirstLoadedBundleId` in `WorkspaceContext`) — a single-**Bundle** convenience, not an "active **Bundle**" fallback — until they're either retired or refactored to take `bundleId` from the URL.
 
 ## Relationships
 
