@@ -137,10 +137,12 @@ type Props = {
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
 	onChange?: (next: ParsedTrafficData) => void;
+	/** True when this overlay owns the active selection — gates tool registration. */
+	isActive?: boolean;
 };
 
 export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficData> = ({
-	data, selectedPath, onSelect,
+	data, selectedPath, onSelect, isActive = true,
 }: Props) => {
 	const hulls = data.hulls;
 
@@ -237,7 +239,9 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficData> = ({
 		),
 		[handleMarquee, hasPvsGrid, showPvsGrid, data.pvs.muNumCells_X, data.pvs.muNumCells_Z],
 	);
-	useWorldViewportHtmlSlot(htmlNode);
+	// Drop our marquee + PVS toggle when this overlay isn't the focused
+	// resource — see ADR-0007 / issue #24.
+	useWorldViewportHtmlSlot(isActive ? htmlNode : null);
 
 	if (hulls.length === 0) return null;
 

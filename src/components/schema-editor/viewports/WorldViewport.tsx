@@ -67,7 +67,9 @@ const HtmlSlotContext = createContext<HtmlSlotApi | null>(null);
  *
  * Pass `node` reactively from your render: this hook re-registers on every
  * render where `node` changes, so closures stay live with overlay state.
- * Passing `null` or omitting the call removes the overlay's registration.
+ * Pass `null` (or `false`) to skip / unregister — overlays that aren't the
+ * currently-active resource use this to avoid stacking their tools on top
+ * of the active overlay's (issue #24 inspector dispatch).
  *
  * The chrome positions the slot as `absolute inset-0` with
  * `pointer-events: none` so individual children opt into pointer events
@@ -83,6 +85,12 @@ export function useWorldViewportHtmlSlot(node: ReactNode): void {
 	);
 	useEffect(() => {
 		if (!api) return;
+		// `null` / `false` means "do not register". The cleanup still
+		// unregisters in case a previous render had a non-null node.
+		if (node == null || node === false) {
+			api.unregister(id);
+			return;
+		}
 		api.register(id, node);
 		return () => api.unregister(id);
 	}, [api, id, node]);
@@ -141,6 +149,7 @@ export const WorldViewport: WorldViewportComponent = ({ children }) => {
 						target={CAMERA_TARGET}
 						enableDamping
 						dampingFactor={0.1}
+						zoomSpeed={2}
 						makeDefault
 					/>
 					<HtmlSlotContext.Provider value={api}>

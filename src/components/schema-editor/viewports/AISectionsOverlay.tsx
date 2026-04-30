@@ -639,10 +639,12 @@ type Props = {
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
 	onChange?: (next: ParsedAISections) => void;
+	/** True when this overlay owns the active selection — gates tool registration. */
+	isActive?: boolean;
 };
 
 export const AISectionsOverlay: WorldOverlayComponent<ParsedAISections> = ({
-	data, selectedPath, onSelect, onChange,
+	data, selectedPath, onSelect, onChange, isActive = true,
 }: Props) => {
 	const [hoverSectionIndex, setHoverSectionIndex] = useState<number | null>(null);
 	const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
@@ -931,6 +933,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISections> = ({
 			    renders these outside the Canvas in React-DOM-land, avoiding
 			    cross-reconciler portal quirks. */}
 			<HtmlSiblings
+				isActive={isActive}
 				snapEnabled={snapEnabled}
 				toggleSnap={() => setSnapEnabled((v) => !v)}
 				cameraBridge={cameraBridge}
@@ -948,6 +951,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISections> = ({
 // the chrome's slot; re-registers only when the snapshot of overlay state
 // it captures actually changes.
 function HtmlSiblings({
+	isActive,
 	snapEnabled,
 	toggleSnap,
 	cameraBridge,
@@ -956,6 +960,7 @@ function HtmlSiblings({
 	onDuplicateThroughEdge,
 	onCloseEdgeMenu,
 }: {
+	isActive: boolean;
 	snapEnabled: boolean;
 	toggleSnap: () => void;
 	cameraBridge: React.MutableRefObject<CameraBridgeData | null>;
@@ -1019,7 +1024,9 @@ function HtmlSiblings({
 		),
 		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu],
 	);
-	useWorldViewportHtmlSlot(node);
+	// Pass `null` when this overlay isn't the active resource so the chrome
+	// drops our marquee / snap / context menu — see ADR-0007 / issue #24.
+	useWorldViewportHtmlSlot(isActive ? node : null);
 	return null;
 }
 

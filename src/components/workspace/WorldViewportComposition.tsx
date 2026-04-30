@@ -80,6 +80,11 @@ type OverlayBindings = {
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
 	onChange: (next: unknown) => void;
+	/** True when this descriptor's `(bundleId, resourceKey, index)` is the
+	 *  current Workspace selection — gates the overlay's HTML-slot tools so
+	 *  inactive sibling overlays don't stack their box-select / snap toggles
+	 *  on top of the active one (issue #24 follow-up). */
+	isActive: boolean;
 	/** PSL-only — the selected instance index inside this Bundle, propagated
 	 *  from the workspace selection. The lead PSL overlay needs this to
 	 *  highlight the right slice of the batched union even when the user
@@ -95,7 +100,7 @@ type OverlayBindings = {
 	) => void;
 };
 
-function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSoupIndex, onPickInstancePoly }: OverlayBindings) {
+function renderOverlay({ descriptor, selectedPath, onSelect, onChange, isActive, activeSoupIndex, onPickInstancePoly }: OverlayBindings) {
 	const key = `${descriptor.bundleId}::${descriptor.resourceKey}::${descriptor.index}`;
 	switch (descriptor.resourceKey) {
 		case 'aiSections':
@@ -106,6 +111,7 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSou
 					selectedPath={selectedPath}
 					onSelect={onSelect}
 					onChange={onChange as (next: ParsedAISections) => void}
+					isActive={isActive}
 				/>
 			);
 		case 'streetData':
@@ -126,6 +132,7 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSou
 					selectedPath={selectedPath}
 					onSelect={onSelect}
 					onChange={onChange as (next: ParsedTrafficData) => void}
+					isActive={isActive}
 				/>
 			);
 		case 'triggerData':
@@ -136,6 +143,7 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSou
 					selectedPath={selectedPath}
 					onSelect={onSelect}
 					onChange={onChange as (next: ParsedTriggerData) => void}
+					isActive={isActive}
 				/>
 			);
 		case 'zoneList':
@@ -166,6 +174,7 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSou
 					selectedPath={selectedPath}
 					onSelect={onSelect}
 					onChange={onChange as (next: ParsedPolygonSoupList) => void}
+					isActive={isActive}
 				/>
 			);
 		default: {
@@ -255,6 +264,19 @@ export function WorldViewportCompositionInner({
 					? selection!.path
 					: selectedPathFor(selection, descriptor);
 				const activeSoupIndex = psLeadHasSelection ? selection!.index! : descriptor.index;
+				// `isActive` gates whether this overlay's HTML-slot tools
+				// (marquee, snap toggle, status badge, context menus) register
+				// with the chrome. Only the descriptor matching the current
+				// instance- or schema-level selection is "active". For PSL,
+				// the single lead overlay represents the whole batched union,
+				// so any PSL-instance selection in its Bundle activates the
+				// lead — `psLeadHasSelection` already captures that.
+				const isActive = isPSLLead
+					? psLeadHasSelection
+					: selection != null &&
+						selection.bundleId === descriptor.bundleId &&
+						selection.resourceKey === descriptor.resourceKey &&
+						selection.index === descriptor.index;
 				// 3D-pick handler for PSL: the clicked face's `modelIndex` may
 				// differ from the lead descriptor's own index (one lead covers
 				// every PSL instance in the Bundle), so we route the pick
@@ -276,6 +298,7 @@ export function WorldViewportCompositionInner({
 					selectedPath,
 					onSelect: makeOnSelect(descriptor),
 					onChange: makeOnChange(descriptor),
+					isActive,
 					activeSoupIndex: isPSLLead ? activeSoupIndex : undefined,
 					onPickInstancePoly,
 				});

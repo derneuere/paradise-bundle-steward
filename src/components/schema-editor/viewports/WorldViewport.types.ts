@@ -74,6 +74,21 @@ export type WorldOverlayProps<T = unknown> = {
 	 * Read-only overlays (Renderable, ZoneList today) simply omit this prop.
 	 */
 	onChange?: (next: T) => void;
+
+	/**
+	 * True when this overlay's `(bundleId, resourceKey, index)` matches the
+	 * Workspace's current Selection at instance- or schema-level — i.e. the
+	 * resource the user is actively editing. Drives whether the overlay
+	 * registers its tools (marquee selector, snap toggle, context menus) into
+	 * the chrome's HTML slot. Defaults to `true` so single-resource (legacy
+	 * per-page) routes don't have to thread it.
+	 *
+	 * Multiple overlays from different Bundles render simultaneously in the
+	 * Workspace composition (issue #18); without this gate every overlay's
+	 * tools would stack and the user would see e.g. AI Sections' box-select
+	 * while editing a polygonSoupList instance (issue #24 follow-up).
+	 */
+	isActive?: boolean;
 };
 
 /**

@@ -442,6 +442,7 @@ export const PolygonSoupListOverlay = ({
 	bundleSoups,
 	activeSoupIndex,
 	onPickInstancePoly,
+	isActive = true,
 	// `data` (the active resource) is accepted for contract symmetry but not
 	// directly used — the multi-resource state below covers it.
 	// `onSelect` is unused: the page provides a richer click API via
@@ -595,7 +596,10 @@ export const PolygonSoupListOverlay = ({
 			</>
 		);
 	}, [batched, onMarqueeApply, onPickFromCtx, selectedModelIndex, selectedPolysInCurrentModel]);
-	useWorldViewportHtmlSlot(htmlNode);
+	// Drop our marquee + status badge when this overlay isn't the focused
+	// resource; a sibling Bundle's overlay would otherwise stack tools on
+	// top (issue #24 follow-up).
+	useWorldViewportHtmlSlot(isActive ? htmlNode : null);
 
 	if (batched.triangleCount === 0) {
 		return null;

@@ -389,10 +389,12 @@ type Props = {
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
 	onChange?: (next: ParsedTriggerData) => void;
+	/** True when this overlay owns the active selection — gates tool registration. */
+	isActive?: boolean;
 };
 
 export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
-	data, selectedPath, onSelect,
+	data, selectedPath, onSelect, isActive = true,
 }: Props) => {
 	const marker = useMemo(() => triggerPathMarker(selectedPath), [selectedPath]);
 	const [hovered, setHovered] = useState<TriggerMarker>(null);
@@ -461,7 +463,9 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 		),
 		[handleMarquee],
 	);
-	useWorldViewportHtmlSlot(htmlNode);
+	// Drop our marquee when this overlay isn't the focused resource — see
+	// ADR-0007 / issue #24.
+	useWorldViewportHtmlSlot(isActive ? htmlNode : null);
 
 	return (
 		<>
