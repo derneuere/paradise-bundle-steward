@@ -21,7 +21,7 @@
 // to thread it.
 //
 // DOM siblings (PVS-grid toggle, marquee bulk-select for static vehicles)
-// ride the WorldViewport HTML slot via `useWorldViewportHtmlOverlay`.
+// ride the WorldViewport HTML slot via `useWorldViewportHtmlSlot`.
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -51,7 +51,7 @@ import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
-import { useWorldViewportHtmlOverlay } from './WorldViewport';
+import { useWorldViewportHtmlSlot } from './WorldViewport';
 
 // ---------------------------------------------------------------------------
 // Path ↔ TrafficDataSelection translation (exported for tests)
@@ -237,7 +237,7 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficData> = ({
 		),
 		[handleMarquee, hasPvsGrid, showPvsGrid, data.pvs.muNumCells_X, data.pvs.muNumCells_Z],
 	);
-	useWorldViewportHtmlOverlay(htmlNode);
+	useWorldViewportHtmlSlot(htmlNode);
 
 	if (hulls.length === 0) return null;
 

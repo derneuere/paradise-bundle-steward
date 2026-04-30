@@ -33,7 +33,7 @@ import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
-import { useWorldViewportHtmlOverlay } from './WorldViewport';
+import { useWorldViewportHtmlSlot } from './WorldViewport';
 
 // ---------------------------------------------------------------------------
 // Path ↔ trigger marker (exported for tests)
@@ -461,7 +461,7 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 		),
 		[handleMarquee],
 	);
-	useWorldViewportHtmlOverlay(htmlNode);
+	useWorldViewportHtmlSlot(htmlNode);
 
 	return (
 		<>

@@ -73,7 +73,7 @@ const HtmlSlotContext = createContext<HtmlSlotApi | null>(null);
  * `pointer-events: none` so individual children opt into pointer events
  * locally (matches the marquee selector / snap-toggle conventions).
  */
-export function useWorldViewportHtmlOverlay(node: ReactNode): void {
+export function useWorldViewportHtmlSlot(node: ReactNode): void {
 	const api = useContext(HtmlSlotContext);
 	// Stable id per hook-call site — generated lazily so React's strict-mode
 	// double-invoke doesn't churn the registry.
@@ -149,7 +149,7 @@ export const WorldViewport: WorldViewportComponent = ({ children }) => {
 				</Canvas>
 			</ViewportErrorBoundary>
 			{/* DOM siblings of the Canvas — registered via
-			    useWorldViewportHtmlOverlay() from inside an overlay. The
+			    useWorldViewportHtmlSlot() from inside an overlay. The
 			    wrapper has `pointer-events: none` so the Canvas keeps
 			    receiving orbit / pick events; individual overlay children
 			    re-enable pointer events on themselves where they need to

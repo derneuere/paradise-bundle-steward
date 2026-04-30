@@ -31,7 +31,7 @@ import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useLineSegmentsGeometry, type Edge } from '@/components/common/three/SelectionOutline';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
-import { useWorldViewportHtmlOverlay } from './WorldViewport';
+import { useWorldViewportHtmlSlot } from './WorldViewport';
 
 // ---------------------------------------------------------------------------
 // Path → polygon address (exported for tests)
@@ -574,7 +574,7 @@ export const PolygonSoupListOverlay: WorldOverlayComponent<ParsedPolygonSoupList
 			</>
 		);
 	}, [batched, onMarqueeApply, onPickFromCtx, selectedModelIndex, selectedPolysInCurrentModel]);
-	useWorldViewportHtmlOverlay(htmlNode);
+	useWorldViewportHtmlSlot(htmlNode);
 
 	if (batched.triangleCount === 0) {
 		return null;

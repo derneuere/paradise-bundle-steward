@@ -41,7 +41,7 @@ import { CornerHandles, type CornerDragOffset } from '@/components/aisections/Co
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
-import { useWorldViewportHtmlOverlay } from './WorldViewport';
+import { useWorldViewportHtmlSlot } from './WorldViewport';
 
 // ---------------------------------------------------------------------------
 // Path → AISection selection (exported for tests)
@@ -1019,7 +1019,7 @@ function HtmlSiblings({
 		),
 		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu],
 	);
-	useWorldViewportHtmlOverlay(node);
+	useWorldViewportHtmlSlot(node);
 	return null;
 }
 
