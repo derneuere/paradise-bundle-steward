@@ -45,7 +45,7 @@
 //     (CONTEXT.md / "Selection") — the inspector keeps showing its Tools,
 //     the overlay just stops contributing to the scene.
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { WorldViewport } from '@/components/schema-editor/viewports/WorldViewport';
 import { AISectionsOverlay } from '@/components/schema-editor/viewports/AISectionsOverlay';
@@ -54,6 +54,11 @@ import { TrafficDataOverlay } from '@/components/schema-editor/viewports/Traffic
 import { TriggerDataOverlay } from '@/components/schema-editor/viewports/TriggerDataOverlay';
 import { ZoneListOverlay } from '@/components/schema-editor/viewports/ZoneListOverlay';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
+import {
+	PolygonSoupListContext,
+	encodeSoupPoly,
+	type PolygonSoupListContextValue,
+} from '@/components/schema-editor/viewports/polygonSoupListContext';
 import type { ParsedAISections } from '@/lib/core/aiSections';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
@@ -306,7 +311,185 @@ export function WorldViewportCompositionInner({
 		[overlays, selection, select, makeOnSelect, makeOnChange],
 	);
 
-	return <WorldViewport>{children}</WorldViewport>;
+	return (
+		<PSLBulkProvider
+			bundles={bundles}
+			selection={selection}
+			select={select}
+			isVisible={isVisible}
+		>
+			<WorldViewport>{children}</WorldViewport>
+		</PSLBulkProvider>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// PSL bulk-selection provider
+// ---------------------------------------------------------------------------
+//
+// Re-creates the legacy PolygonSoupListPage's box-select / bulk-poly state
+// for the unified Workspace. The legacy page owned a `Set<string>` of poly
+// path keys plus the `PolygonSoupListContext` callbacks the overlay reads
+// to (a) render the marquee selector at all, and (b) highlight bulk polys
+// in 3D. None of that survived the move to `WorldViewportComposition`, so
+// PSL's box-select went missing once the legacy /polygonsoups route was
+// retired.
+//
+// Bulk state is reset whenever the active `(bundleId, index)` changes — the
+// legacy page did the same in `switchResource(...)`. We don't currently
+// surface the bulk-edit panel in the workspace; this provider just makes
+// the marquee + 3D highlight available so the user can build a selection
+// visually. Wiring the bulk-edit UI is a follow-up.
+
+const POLY_PATH_RE = /^soups\/(\d+)\/polygons\/(\d+)$/;
+
+function parsePolyPathKey(key: string): { soup: number; poly: number } | null {
+	const m = POLY_PATH_RE.exec(key);
+	if (!m) return null;
+	return { soup: Number(m[1]), poly: Number(m[2]) };
+}
+
+function pathToKey(path: NodePath): string {
+	return path.join('/');
+}
+
+function selectionPolyAddress(
+	selection: WorkspaceContextValue['selection'],
+): { soup: number; poly: number } | null {
+	if (!selection || selection.path.length < 4) return null;
+	if (selection.path[0] !== 'soups' || selection.path[2] !== 'polygons') return null;
+	const soup = selection.path[1];
+	const poly = selection.path[3];
+	if (typeof soup !== 'number' || typeof poly !== 'number') return null;
+	return { soup, poly };
+}
+
+function PSLBulkProvider({
+	bundles,
+	selection,
+	select,
+	isVisible,
+	children,
+}: {
+	bundles: WorkspaceContextValue['bundles'];
+	selection: WorkspaceContextValue['selection'];
+	select: WorkspaceContextValue['select'];
+	isVisible: WorkspaceContextValue['isVisible'];
+	children: ReactNode;
+}) {
+	// Bulk path-keys for the currently-active PSL resource. Reset whenever
+	// the user switches to a different `(bundleId, index)` so each instance
+	// gets a fresh box-select session — same UX as the legacy page.
+	const [bulkPaths, setBulkPaths] = useState<Set<string>>(() => new Set());
+	const activeKey =
+		selection?.resourceKey === 'polygonSoupList' && selection.index !== undefined
+			? `${selection.bundleId}:${selection.index}`
+			: null;
+	useEffect(() => {
+		setBulkPaths(new Set());
+	}, [activeKey]);
+
+	const ctxValue = useMemo<PolygonSoupListContextValue | null>(() => {
+		if (
+			!selection ||
+			selection.resourceKey !== 'polygonSoupList' ||
+			selection.index === undefined
+		) {
+			return null;
+		}
+		const bundle = bundles.find((b) => b.id === selection.bundleId);
+		if (!bundle) return null;
+		const list = bundle.parsedResourcesAll.get('polygonSoupList') as
+			| (ParsedPolygonSoupList | null)[]
+			| undefined;
+		if (!list) return null;
+		const selectedModelIndex = selection.index;
+
+		const visibleSet = new Set<number>();
+		for (let i = 0; i < list.length; i++) {
+			if (
+				isVisible({
+					bundleId: selection.bundleId,
+					resourceKey: 'polygonSoupList',
+					index: i,
+				})
+			) {
+				visibleSet.add(i);
+			}
+		}
+
+		const selectedPolys = new Set<number>();
+		for (const key of bulkPaths) {
+			const addr = parsePolyPathKey(key);
+			if (addr) selectedPolys.add(encodeSoupPoly(addr.soup, addr.poly));
+		}
+
+		const onSelect = (
+			modelIndex: number,
+			soupIndex: number,
+			polyIndex: number,
+			modifiers?: { shift?: boolean; ctrl?: boolean },
+		) => {
+			const targetPath: NodePath = ['soups', soupIndex, 'polygons', polyIndex];
+			if (modifiers?.ctrl) {
+				// Ctrl/Cmd+click: toggle this polygon in the bulk set without
+				// moving the inspector — same semantics as the legacy page.
+				if (modelIndex !== selectedModelIndex) return;
+				setBulkPaths((prev) => {
+					const k = pathToKey(targetPath);
+					const next = new Set(prev);
+					if (next.has(k)) next.delete(k);
+					else next.add(k);
+					return next;
+				});
+				return;
+			}
+			// Plain / shift click: navigate the inspector to the clicked poly.
+			// (Shift-extend across the bulk range needs the schema tree's
+			// anchor path, which the workspace's hierarchy doesn't expose
+			// here — fall back to plain navigation for now.)
+			select({
+				bundleId: selection.bundleId,
+				resourceKey: 'polygonSoupList',
+				index: modelIndex,
+				path: targetPath,
+			});
+		};
+
+		const onMarqueeApply = (
+			modelIndex: number,
+			polys: ReadonlyArray<{ soup: number; poly: number }>,
+			mode: 'add' | 'remove',
+		) => {
+			if (modelIndex !== selectedModelIndex || polys.length === 0) return;
+			setBulkPaths((prev) => {
+				const next = new Set(prev);
+				for (const { soup, poly } of polys) {
+					const k = pathToKey(['soups', soup, 'polygons', poly]);
+					if (mode === 'add') next.add(k);
+					else next.delete(k);
+				}
+				return next;
+			});
+		};
+
+		return {
+			models: list,
+			selectedModelIndex,
+			onSelect,
+			selectedPolysInCurrentModel: selectedPolys,
+			visibleModelIndexes: visibleSet,
+			treeSelectedPoly: selectionPolyAddress(selection),
+			onMarqueeApply,
+		};
+	}, [bundles, selection, select, isVisible, bulkPaths]);
+
+	if (!ctxValue) return <>{children}</>;
+	return (
+		<PolygonSoupListContext.Provider value={ctxValue}>
+			{children}
+		</PolygonSoupListContext.Provider>
+	);
 }
 
 /**

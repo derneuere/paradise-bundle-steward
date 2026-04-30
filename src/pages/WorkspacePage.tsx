@@ -59,6 +59,12 @@ import {
 import { WorkspaceHierarchy } from '@/components/workspace/WorkspaceHierarchy';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
 import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
+import {
+	ShortcutsHelp,
+	BULK_SHORTCUTS,
+	SCHEMA_TREE_SHORTCUTS,
+	type ShortcutGroup,
+} from '@/components/schema-editor/ShortcutsHelp';
 import { getSchemaByKey } from '@/lib/schema/resources';
 import { getHandlerByKey } from '@/lib/core/registry';
 import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
@@ -488,13 +494,40 @@ function ResourceTypeInspector({
 // Toolbar — Add Bundle + Save All + UndoRedo
 // ---------------------------------------------------------------------------
 
+// Always-on workspace shortcut group — covers Bundle / Resource / Instance
+// row clicks at the top of the unified hierarchy. Composed with resource-
+// type-specific groups below as the user drills in.
+const WORKSPACE_HIERARCHY_SHORTCUTS: ShortcutGroup = {
+	title: 'Workspace hierarchy',
+	items: [
+		{ keys: ['Click'], label: 'Select a Bundle / Resource / Instance / schema row' },
+		{ keys: ['Click', '▶'], label: 'Expand or collapse a row' },
+		{ keys: ['Click', 'eye'], label: 'Toggle visibility for a Bundle / Resource / Instance' },
+	],
+};
+
+// Pick the shortcut groups for the active selection level. PSL surfaces the
+// bulk-edit shortcuts because its overlay is the only one that consumes
+// them today; other resources just show the hierarchy + tree shortcuts.
+function shortcutGroupsForSelection(
+	resourceKey: string | undefined,
+): ShortcutGroup[] {
+	const groups: ShortcutGroup[] = [WORKSPACE_HIERARCHY_SHORTCUTS, SCHEMA_TREE_SHORTCUTS];
+	if (resourceKey === 'polygonSoupList') groups.push(BULK_SHORTCUTS);
+	return groups;
+}
+
 function WorkspaceToolbar({ onAddBundle }: { onAddBundle: () => void }) {
-	const { bundles, saveAll } = useWorkspace();
+	const { bundles, saveAll, selection } = useWorkspace();
 	const dirtyCount = useMemo(
 		() => bundles.filter((b) => b.isModified).length,
 		[bundles],
 	);
 	const hasDirty = dirtyCount > 0;
+	const shortcutGroups = useMemo(
+		() => shortcutGroupsForSelection(selection?.resourceKey),
+		[selection?.resourceKey],
+	);
 
 	return (
 		<div className="flex items-center gap-1 px-3 py-1 border-b">
@@ -502,6 +535,7 @@ function WorkspaceToolbar({ onAddBundle }: { onAddBundle: () => void }) {
 				Workspace
 			</span>
 			<div className="ml-auto flex items-center gap-1">
+				<ShortcutsHelp groups={shortcutGroups} />
 				<Button
 					type="button"
 					variant="ghost"
