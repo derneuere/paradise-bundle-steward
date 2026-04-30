@@ -400,13 +400,23 @@ const EMPTY_BUNDLE_SOUPS: (ParsedPolygonSoupList | null)[] = [];
 type Props = WorldOverlayProps<ParsedPolygonSoupList> & {
 	/** The full per-Bundle list of PSL instances the overlay should render
 	 *  as a single batched mesh — same reference for every overlay descriptor
-	 *  inside the same Bundle (entries are `null` where parsing failed).
+	 *  inside the same Bundle (entries are `null` where parsing failed *or*
+	 *  where the instance was filtered out by per-instance visibility).
 	 *  Supplied by `WorldViewportComposition` so the overlay no longer needs
 	 *  to read `useFirstLoadedBundle()` to fish them out itself (closes the
 	 *  multi-Bundle leak in ADR-0004's deviation). When a
 	 *  `PolygonSoupListContext` is provided (the legacy `PolygonSoupListPage`
 	 *  flow) the context's `models` wins. */
 	bundleSoups?: (ParsedPolygonSoupList | null)[];
+	/** Bundle-relative resource index of the currently-selected PSL instance,
+	 *  used to drive per-instance highlighting in the batched mesh. The
+	 *  composition path supplies this from the workspace selection so a
+	 *  selection on instance 7 still highlights the right slice of the
+	 *  union, even though only one (lead) overlay is mounted per Bundle.
+	 *  When a `PolygonSoupListContext` is provided the context's
+	 *  `selectedModelIndex` wins; when neither is supplied this falls back
+	 *  to 0 to preserve the legacy single-Bundle shape. */
+	activeSoupIndex?: number;
 };
 
 // Note: not typed as `WorldOverlayComponent<ParsedPolygonSoupList>` because
@@ -415,6 +425,7 @@ type Props = WorldOverlayProps<ParsedPolygonSoupList> & {
 export const PolygonSoupListOverlay = ({
 	selectedPath,
 	bundleSoups,
+	activeSoupIndex,
 	// `data` (the active resource) is accepted for contract symmetry but not
 	// directly used — the multi-resource state below covers it.
 	// `onSelect` is unused: the page provides a richer click API via
@@ -423,7 +434,7 @@ export const PolygonSoupListOverlay = ({
 }: Props) => {
 	const ctx = usePolygonSoupListContext();
 	const models = ctx?.models ?? bundleSoups ?? EMPTY_BUNDLE_SOUPS;
-	const selectedModelIndex = ctx?.selectedModelIndex ?? 0;
+	const selectedModelIndex = ctx?.selectedModelIndex ?? activeSoupIndex ?? 0;
 	const onPickFromCtx = ctx?.onSelect;
 	const selectedPolysInCurrentModel = ctx?.selectedPolysInCurrentModel ?? EMPTY_POLY_SELECTION;
 	const visibleModelIndexes = ctx?.visibleModelIndexes ?? null;

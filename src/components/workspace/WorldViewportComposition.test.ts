@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	WORLD_VIEWPORT_FAMILY_KEYS,
+	dedupePolygonSoupOverlays,
 	filterOverlaysByVisibility,
 	isWorldViewportFamilyKey,
 	listWorldOverlays,
@@ -458,5 +459,122 @@ describe('filterOverlaysByVisibility', () => {
 		expect(out[0]).toBe(input[1]);
 		expect(out[1]).toBe(input[2]);
 		expect(out[2]).toBe(input[3]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// dedupePolygonSoupOverlays — perf collapse for multi-instance PSL bundles
+//
+// Issue #23 follow-up: WORLDCOL holds ~256 PSL instances. With one overlay
+// per instance each rendering the full N-instance batched union, the
+// renderer pegs. The dedupe step keeps one "lead" overlay per (Bundle, PSL)
+// while still letting per-instance visibility hide individual indexes from
+// the union.
+// ---------------------------------------------------------------------------
+
+describe('dedupePolygonSoupOverlays', () => {
+	it('passes non-PSL descriptors through untouched', () => {
+		const ai = { tag: 'ai-model' };
+		const street = { tag: 'street-model' };
+		const input: OverlayDescriptor[] = [
+			{ bundleId: 'X', resourceKey: 'aiSections', index: 0, model: ai, bundleSiblings: [ai] },
+			{ bundleId: 'X', resourceKey: 'streetData', index: 0, model: street, bundleSiblings: [street] },
+		];
+		const out = dedupePolygonSoupOverlays(input);
+		// Same length, same references — non-PSL is a pure pass-through.
+		expect(out).toHaveLength(2);
+		expect(out[0]).toBe(input[0]);
+		expect(out[1]).toBe(input[1]);
+	});
+
+	it('collapses N PSL descriptors per Bundle to one lead, preserving sibling reference when nothing is hidden', () => {
+		// Three PSL instances in one Bundle, all visible (the visibility
+		// filter ran first and let everything through). The lead is index 0.
+		const a = { tag: 'a' };
+		const b = { tag: 'b' };
+		const c = { tag: 'c' };
+		const siblings = [a, b, c];
+		const input: OverlayDescriptor[] = [
+			{ bundleId: 'WORLDCOL.BIN', resourceKey: 'polygonSoupList', index: 0, model: a, bundleSiblings: siblings },
+			{ bundleId: 'WORLDCOL.BIN', resourceKey: 'polygonSoupList', index: 1, model: b, bundleSiblings: siblings },
+			{ bundleId: 'WORLDCOL.BIN', resourceKey: 'polygonSoupList', index: 2, model: c, bundleSiblings: siblings },
+		];
+		const out = dedupePolygonSoupOverlays(input);
+		expect(out).toHaveLength(1);
+		expect(out[0].index).toBe(0);
+		// Same reference: when no instance is hidden we must NOT allocate a
+		// new array — keeps useMemo identities stable inside the overlay.
+		expect(out[0].bundleSiblings).toBe(siblings);
+	});
+
+	it('rewrites bundleSiblings so visibility-hidden instances become null in the lead', () => {
+		// The visibility filter dropped index 1 — only 0 and 2 survive. The
+		// lead's bundleSiblings should expose [a, null, c] so buildGeometry
+		// renders nothing for instance 1 inside the union.
+		const a = { tag: 'a' };
+		const b = { tag: 'b' };
+		const c = { tag: 'c' };
+		const fullSiblings = [a, b, c];
+		const input: OverlayDescriptor[] = [
+			{ bundleId: 'WORLDCOL.BIN', resourceKey: 'polygonSoupList', index: 0, model: a, bundleSiblings: fullSiblings },
+			// (index 1 absent: dropped by visibility filter)
+			{ bundleId: 'WORLDCOL.BIN', resourceKey: 'polygonSoupList', index: 2, model: c, bundleSiblings: fullSiblings },
+		];
+		const out = dedupePolygonSoupOverlays(input);
+		expect(out).toHaveLength(1);
+		expect(out[0].bundleSiblings).toEqual([a, null, c]);
+	});
+
+	it('picks the first survivor as the lead even when index 0 was hidden', () => {
+		// Instance 0 was hidden by the visibility filter. The lead becomes
+		// the first surviving descriptor (index 1 here), and its
+		// bundleSiblings nulls out the dropped 0.
+		const a = { tag: 'a' };
+		const b = { tag: 'b' };
+		const fullSiblings = [a, b];
+		const input: OverlayDescriptor[] = [
+			{ bundleId: 'WORLDCOL.BIN', resourceKey: 'polygonSoupList', index: 1, model: b, bundleSiblings: fullSiblings },
+		];
+		const out = dedupePolygonSoupOverlays(input);
+		expect(out).toHaveLength(1);
+		expect(out[0].index).toBe(1);
+		expect(out[0].bundleSiblings).toEqual([null, b]);
+	});
+
+	it('dedupes per-Bundle, not globally — different Bundles each get their own lead', () => {
+		const a0 = { tag: 'a0' };
+		const a1 = { tag: 'a1' };
+		const b0 = { tag: 'b0' };
+		const aSiblings = [a0, a1];
+		const bSiblings = [b0];
+		const input: OverlayDescriptor[] = [
+			{ bundleId: 'A.BIN', resourceKey: 'polygonSoupList', index: 0, model: a0, bundleSiblings: aSiblings },
+			{ bundleId: 'A.BIN', resourceKey: 'polygonSoupList', index: 1, model: a1, bundleSiblings: aSiblings },
+			{ bundleId: 'B.BIN', resourceKey: 'polygonSoupList', index: 0, model: b0, bundleSiblings: bSiblings },
+		];
+		const out = dedupePolygonSoupOverlays(input);
+		expect(out).toHaveLength(2);
+		expect(out[0].bundleId).toBe('A.BIN');
+		expect(out[1].bundleId).toBe('B.BIN');
+	});
+
+	it('preserves the position of the lead among non-PSL siblings', () => {
+		// The PSL group was interleaved with an aiSections descriptor. The
+		// dedupe step should keep the aiSections overlay where it was and
+		// emit the PSL lead in place of the first PSL it sees.
+		const ai = { tag: 'ai' };
+		const a = { tag: 'a' };
+		const b = { tag: 'b' };
+		const siblings = [a, b];
+		const input: OverlayDescriptor[] = [
+			{ bundleId: 'X', resourceKey: 'polygonSoupList', index: 0, model: a, bundleSiblings: siblings },
+			{ bundleId: 'X', resourceKey: 'aiSections', index: 0, model: ai, bundleSiblings: [ai] },
+			{ bundleId: 'X', resourceKey: 'polygonSoupList', index: 1, model: b, bundleSiblings: siblings },
+		];
+		const out = dedupePolygonSoupOverlays(input);
+		expect(out).toHaveLength(2);
+		expect(out[0].resourceKey).toBe('polygonSoupList');
+		expect(out[0].index).toBe(0);
+		expect(out[1].resourceKey).toBe('aiSections');
 	});
 });

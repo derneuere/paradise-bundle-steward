@@ -173,3 +173,71 @@ export function filterOverlaysByVisibility(
 		}),
 	);
 }
+
+// ---------------------------------------------------------------------------
+// PolygonSoupList dedupe (perf)
+//
+// PSL is the only overlay whose render output is a *union* of every PSL
+// instance in its Bundle (one batched mesh covering the whole world chunk).
+// `listWorldOverlays` still emits one descriptor per instance (so per-
+// instance visibility toggles + selection routing keep working), but if
+// every one of those descriptors actually mounted a `<PolygonSoupListOverlay>`
+// we'd build the same N-instance batched mesh N times and draw it N times
+// each frame. WORLDCOL has ~256 PSL instances, so the naive shape pegs the
+// renderer (issue #23 follow-up).
+//
+// `dedupePolygonSoupOverlays` collapses every PSL group within a Bundle to a
+// single "lead" descriptor — the first survivor of the visibility filter.
+// The lead's `bundleSiblings` is rewritten so any instance whose descriptor
+// did NOT survive visibility filtering becomes `null`, which `buildGeometry`
+// already treats as "render nothing for that index." So per-instance hides
+// still work — they just collapse into one render pass per Bundle instead
+// of N.
+//
+// Non-PSL descriptors are passed through untouched.
+// ---------------------------------------------------------------------------
+
+export function dedupePolygonSoupOverlays(
+	overlays: readonly OverlayDescriptor[],
+): OverlayDescriptor[] {
+	// First pass: per-Bundle index of which PSL instance indexes survived
+	// visibility filtering, and which survivor came first (the lead).
+	const survivingByBundle = new Map<string, Set<number>>();
+	const leadByBundle = new Map<string, OverlayDescriptor>();
+	for (const d of overlays) {
+		if (d.resourceKey !== 'polygonSoupList') continue;
+		let s = survivingByBundle.get(d.bundleId);
+		if (!s) {
+			s = new Set<number>();
+			survivingByBundle.set(d.bundleId, s);
+			leadByBundle.set(d.bundleId, d);
+		}
+		s.add(d.index);
+	}
+
+	// Second pass: emit each non-PSL descriptor untouched, and emit ONE
+	// PSL descriptor per Bundle (the lead) with siblings rewritten so hidden
+	// indexes become null. Non-lead PSL descriptors are dropped — their
+	// geometry is already covered by the lead's batched mesh.
+	const out: OverlayDescriptor[] = [];
+	const emittedLeads = new Set<string>();
+	for (const d of overlays) {
+		if (d.resourceKey !== 'polygonSoupList') {
+			out.push(d);
+			continue;
+		}
+		if (emittedLeads.has(d.bundleId)) continue;
+		emittedLeads.add(d.bundleId);
+		const lead = leadByBundle.get(d.bundleId)!;
+		const surviving = survivingByBundle.get(d.bundleId)!;
+		const fullSiblings = lead.bundleSiblings;
+		const allVisible = surviving.size === fullSiblings.length;
+		// Skip the array allocation when nothing is hidden — same reference
+		// keeps useMemo identities stable for the overlay's geometry build.
+		const filteredSiblings = allVisible
+			? fullSiblings
+			: fullSiblings.map((m, i) => (surviving.has(i) ? m : null));
+		out.push({ ...lead, bundleSiblings: filteredSiblings });
+	}
+	return out;
+}

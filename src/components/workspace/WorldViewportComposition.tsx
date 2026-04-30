@@ -63,6 +63,7 @@ import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorkspaceContextValue } from '@/context/WorkspaceContext.types';
 import {
+	dedupePolygonSoupOverlays,
 	filterOverlaysByVisibility,
 	listWorldOverlays,
 	selectedPathFor,
@@ -79,9 +80,14 @@ type OverlayBindings = {
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
 	onChange: (next: unknown) => void;
+	/** PSL-only — the selected instance index inside this Bundle, propagated
+	 *  from the workspace selection. The lead PSL overlay needs this to
+	 *  highlight the right slice of the batched union even when the user
+	 *  selected a non-lead instance. Ignored for other overlay types. */
+	activeSoupIndex?: number;
 };
 
-function renderOverlay({ descriptor, selectedPath, onSelect, onChange }: OverlayBindings) {
+function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSoupIndex }: OverlayBindings) {
 	const key = `${descriptor.bundleId}::${descriptor.resourceKey}::${descriptor.index}`;
 	switch (descriptor.resourceKey) {
 		case 'aiSections':
@@ -139,12 +145,15 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange }: Overlay
 			// via `bundleSoups` (ADR-0004 multi-Bundle resolution) so the
 			// overlay never has to read the workspace itself — that's the bit
 			// that used to leak across Bundles by always reaching for
-			// `bundles[0]`.
+			// `bundles[0]`. Only ONE PSL overlay is mounted per Bundle (see
+			// `dedupePolygonSoupOverlays`); rendering the same N-instance
+			// union from N descriptors used to peg the renderer.
 			return (
 				<PolygonSoupListOverlay
 					key={key}
 					data={descriptor.model as ParsedPolygonSoupList}
 					bundleSoups={descriptor.bundleSiblings as (ParsedPolygonSoupList | null)[]}
+					activeSoupIndex={activeSoupIndex}
 					selectedPath={selectedPath}
 					onSelect={onSelect}
 					onChange={onChange as (next: ParsedPolygonSoupList) => void}
@@ -185,8 +194,12 @@ export function WorldViewportCompositionInner({
 	setResourceAt: WorkspaceContextValue['setResourceAt'];
 	isVisible: WorkspaceContextValue['isVisible'];
 }) {
+	// Visibility-filter first, then dedupe PSL: keeping the order means
+	// per-instance hides still drop their indexes from the lead's
+	// bundleSoups (the dedupe step reads the surviving set out of the
+	// post-filter list).
 	const overlays = useMemo(
-		() => filterOverlaysByVisibility(listWorldOverlays(bundles), isVisible),
+		() => dedupePolygonSoupOverlays(filterOverlaysByVisibility(listWorldOverlays(bundles), isVisible)),
 		[bundles, isVisible],
 	);
 
@@ -215,14 +228,28 @@ export function WorldViewportCompositionInner({
 
 	const children = useMemo(
 		() =>
-			overlays.map((descriptor) =>
-				renderOverlay({
+			overlays.map((descriptor) => {
+				// PSL-specific routing: only one overlay is mounted per Bundle's
+				// PSL (the lead). Forward any PSL selection inside that Bundle
+				// to the lead so the highlight/outline tracks the user's actual
+				// selection instead of just the lead's index.
+				const isPSLLead = descriptor.resourceKey === 'polygonSoupList';
+				const psLeadHasSelection =
+					isPSLLead &&
+					selection?.bundleId === descriptor.bundleId &&
+					selection.resourceKey === 'polygonSoupList';
+				const selectedPath = psLeadHasSelection
+					? selection!.path
+					: selectedPathFor(selection, descriptor);
+				const activeSoupIndex = psLeadHasSelection ? selection!.index : descriptor.index;
+				return renderOverlay({
 					descriptor,
-					selectedPath: selectedPathFor(selection, descriptor),
+					selectedPath,
 					onSelect: makeOnSelect(descriptor),
 					onChange: makeOnChange(descriptor),
-				}),
-			),
+					activeSoupIndex: isPSLLead ? activeSoupIndex : undefined,
+				});
+			}),
 		[overlays, selection, makeOnSelect, makeOnChange],
 	);
 
