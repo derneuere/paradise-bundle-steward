@@ -15,10 +15,7 @@ import {
 	type TrafficDataSelection,
 } from '@/components/trafficdata/useTrafficSelection';
 import type { ParsedStreetData } from '@/lib/core/streetData';
-import {
-	StreetDataViewport,
-	type StreetDataSelection,
-} from '@/components/streetdata/StreetDataViewport';
+import { StreetDataOverlay } from './viewports/StreetDataOverlay';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import {
 	TriggerDataViewport,
@@ -110,32 +107,6 @@ function selectionToActiveTab(sel: TrafficDataSelection): string {
 		case 'junction': return 'junctions';
 		case 'lightTrigger': return 'lightTriggers';
 		case 'staticVehicle': return 'staticVehicles';
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Path ↔ StreetDataSelection translation
-// ---------------------------------------------------------------------------
-
-// StreetData paths are flat: ['streets' | 'junctions' | 'roads', N]. Anything
-// outside those three lists collapses to no selection.
-function pathToStreetDataSelection(path: NodePath): StreetDataSelection {
-	if (path.length < 2) return null;
-	const list = path[0];
-	const idx = path[1];
-	if (typeof list !== 'string' || typeof idx !== 'number') return null;
-	if (list === 'streets') return { type: 'street', index: idx };
-	if (list === 'junctions') return { type: 'junction', index: idx };
-	if (list === 'roads') return { type: 'road', index: idx };
-	return null;
-}
-
-function streetDataSelectionToPath(sel: StreetDataSelection): NodePath {
-	if (!sel) return [];
-	switch (sel.type) {
-		case 'street':   return ['streets', sel.index];
-		case 'junction': return ['junctions', sel.index];
-		case 'road':     return ['roads', sel.index];
 	}
 }
 
@@ -334,9 +305,9 @@ function TrafficDataViewportShim({
 	);
 }
 
-// StreetData viewport shim. StreetDataViewport takes a `{ data, onChange,
-// selected, onSelect }` API — we forward the schema editor's data and
-// translate the selection shape.
+// StreetData runs through the WorldViewport chrome with a NodePath-driven
+// overlay (issue #11). The overlay matches `['streets'|'junctions'|'roads', i]`
+// directly; in-scene edits flow through `onChange` to setAtPath([], next).
 function StreetDataViewportShim({
 	data,
 	selectedPath,
@@ -348,17 +319,16 @@ function StreetDataViewportShim({
 }) {
 	const { setAtPath } = useSchemaEditor();
 	const streetData = data as ParsedStreetData;
-	const selection = useMemo(() => pathToStreetDataSelection(selectedPath), [selectedPath]);
 
 	return (
-		<div className="h-full">
-			<StreetDataViewport
+		<WorldViewport>
+			<StreetDataOverlay
 				data={streetData}
+				selectedPath={selectedPath}
+				onSelect={selectPath}
 				onChange={(next) => setAtPath([], next)}
-				selected={selection}
-				onSelect={(sel) => selectPath(streetDataSelectionToPath(sel))}
 			/>
-		</div>
+		</WorldViewport>
 	);
 }
 
