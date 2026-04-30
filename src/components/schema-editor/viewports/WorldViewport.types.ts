@@ -106,6 +106,10 @@ export type WorldViewportProps = {
  *   - `<OrbitControls>` with sensible defaults
  *   - default scene lighting and background
  *   - a `<ViewportErrorBoundary>` that resets when the editor route changes
+ *   - an HTML sibling slot (`useWorldViewportHtmlSlot()` from
+ *     `./WorldViewport.tsx`) — overlays portal DOM siblings of the Canvas
+ *     into the chrome's wrapping element for things that don't belong inside
+ *     R3F: snap toggles, marquee rectangles, context menus.
  *
  * The chrome explicitly does NOT own:
  *
