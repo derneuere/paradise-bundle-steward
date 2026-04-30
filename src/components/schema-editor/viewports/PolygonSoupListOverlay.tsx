@@ -8,14 +8,8 @@
 // `PolygonSoupListPage` — and click events on the 3D scene can switch the
 // active resource (via the page's `handleViewportSelect`).
 //
-// HITL decision (issue #15): the multi-resource picker stays page-level
-// (rendered inside `HierarchyTree` via `MultiResourcePickerContext`). The
-// overlay reads the multi-resource state (all models, visibility, marquee,
-// click routing) from `PolygonSoupListContext` and the active-resource
-// path from the standard `selectedPath` prop. This is a documented
-// exception to ADR-0002's "data via props" rule for the structurally
-// multi-resource case — single-resource overlays still get all data via
-// props.
+// Why this overlay reads BundleContext directly (deviating from ADR-0002):
+// see docs/adr/0004-polygon-soup-list-overlay-reads-bundle-context.md.
 //
 // DOM siblings (marquee, status badge) ride the WorldViewport HTML slot.
 
