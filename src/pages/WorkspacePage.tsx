@@ -265,7 +265,7 @@ function RightInspector() {
 	// / Instance / Schema) — switching the inspector form doesn't drop
 	// the user's bulk selection.
 	const wrapWithBulk = (inner: React.ReactNode) => {
-		if (!bulk) return inner;
+		if (!bulk || bulk.count === 0) return inner;
 		return (
 			<div className="h-full flex flex-col min-h-0">
 				<div className="shrink-0 max-h-[60%] overflow-auto border-b">

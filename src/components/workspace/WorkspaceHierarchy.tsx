@@ -26,7 +26,8 @@ import {
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import type { VisibilityNode } from '@/context/WorkspaceContext.types';
+import type { VisibilityNode, WorkspaceSelection } from '@/context/WorkspaceContext.types';
+import { useWorkspacePSLBulk } from './PSLBulkProvider';
 import type { NodePath } from '@/lib/schema/walk';
 import {
 	bundleKey,
@@ -37,6 +38,16 @@ import {
 	type ResourceTypeFlatNode,
 	type SchemaFlatNode,
 } from './WorkspaceHierarchy.helpers';
+
+// Return the path the bulk-range "from" anchor should use. We read the
+// inspector's current schema path; if the current selection isn't in PSL
+// territory we hand back an empty path so `onBulkRange` falls through to
+// its "no-anchor → just add the endpoint" branch.
+function selectionAnchorPath(selection: WorkspaceSelection): NodePath {
+	if (!selection) return [];
+	if (selection.resourceKey !== 'polygonSoupList') return [];
+	return selection.path ?? [];
+}
 
 // ---------------------------------------------------------------------------
 // Visibility toggle button
@@ -82,6 +93,9 @@ export type WorkspaceHierarchyProps = {
 
 export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 	const { bundles, selection, select, saveBundle, closeBundle } = useWorkspace();
+	// PSL bulk handle — null when no PSL is active. Drives the schema-row
+	// Ctrl/Shift-click semantics + the amber-accent highlight on bulk rows.
+	const bulk = useWorkspacePSLBulk();
 
 	// Persisted expansion state. Default-expanded behaviour mirrors the
 	// pre-WorkspaceHierarchy tree:
@@ -157,10 +171,38 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 		[select],
 	);
 	const onSelectSchema = useCallback(
-		(bundleId: string, resourceKey: string, index: number, schemaPath: NodePath) => {
+		(
+			bundleId: string,
+			resourceKey: string,
+			index: number,
+			schemaPath: NodePath,
+			modifiers?: { shift?: boolean; ctrl?: boolean },
+		) => {
+			// Bulk semantics on schema rows live behind a PSL handle — only PSL
+			// instances support polygon-row Ctrl/Shift bulk-edit. Other
+			// resources fall through to plain selection unconditionally.
+			if (bulk && resourceKey === 'polygonSoupList') {
+				if (modifiers?.ctrl) {
+					// Ctrl/Cmd-click: toggle this row in the bulk set without
+					// moving the inspector — same semantics as the legacy
+					// HierarchyTree bulk-pick flow.
+					bulk.onBulkToggle(schemaPath);
+					return;
+				}
+				if (modifiers?.shift) {
+					// Shift-click: extend the bulk range from the inspector's
+					// current path to the clicked row, then move the inspector
+					// so subsequent shifts extend outward (matching the
+					// legacy "anchor advances with shift" behaviour).
+					const fromPath: NodePath = selectionAnchorPath(selection);
+					bulk.onBulkRange(fromPath, schemaPath);
+					select({ bundleId, resourceKey, index, path: schemaPath });
+					return;
+				}
+			}
 			select({ bundleId, resourceKey, index, path: schemaPath });
 		},
-		[select],
+		[select, bulk, selection],
 	);
 
 	// ---------------------- Virtualizer ----------------------
@@ -259,6 +301,7 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 									onSelectSchema={onSelectSchema}
 									saveBundle={saveBundle}
 									closeBundle={closeBundle}
+									bulkPathKeys={bulk?.bulkPathKeys ?? null}
 								/>
 							</div>
 						);
@@ -297,9 +340,14 @@ type HierarchyRowProps = {
 		resourceKey: string,
 		index: number,
 		schemaPath: NodePath,
+		modifiers?: { shift?: boolean; ctrl?: boolean },
 	) => void;
 	saveBundle: (bundleId: string) => Promise<void>;
 	closeBundle: (bundleId: string) => Promise<void>;
+	/** Path-key set of polys currently in the PSL bulk — drives amber tint
+	 *  on schema rows that match. `null` when no PSL is active or no bulk
+	 *  context is available. */
+	bulkPathKeys: ReadonlySet<string> | null;
 };
 
 function HierarchyRow(props: HierarchyRowProps) {
@@ -530,13 +578,27 @@ function SchemaRow({
 	node,
 	onToggleExpansion,
 	onSelectSchema,
+	bulkPathKeys,
 }: HierarchyRowProps & { node: SchemaFlatNode }) {
+	// Polygon rows that match the active PSL bulk set wear an amber border +
+	// faint amber tint — same accent as the legacy schema HierarchyTree so
+	// users coming from the per-resource page see the same cue.
+	const isInBulk =
+		bulkPathKeys != null &&
+		// Schema-row pathKey is "sch:bundle::key::index::path" — the bulk set
+		// uses the bare schema-path-only key, so we strip the prefix before
+		// comparing.
+		bulkPathKeys.has(node.schemaPath.join('/'));
 	return (
 		<div
 			className={cn(
-				'flex items-center gap-1 py-0.5 pr-1 cursor-pointer',
+				// border-l-2 transparent by default keeps the amber accent
+				// from shifting layout when a row enters the bulk set.
+				'flex items-center gap-1 py-0.5 pr-1 cursor-pointer border-l-2 border-transparent',
+				isInBulk && 'border-amber-500',
 				node.isSelected && 'bg-primary/15 text-primary font-medium',
-				!node.isSelected && node.isOnPath && 'bg-muted/30',
+				!node.isSelected && isInBulk && 'bg-amber-500/10',
+				!node.isSelected && !isInBulk && node.isOnPath && 'bg-muted/30',
 				!node.isSelected && 'hover:bg-muted/40',
 			)}
 			style={{ paddingLeft: node.depth * 12 + 4 }}
@@ -547,6 +609,10 @@ function SchemaRow({
 					node.resourceKey,
 					node.index,
 					node.schemaPath,
+					{
+						shift: e.shiftKey,
+						ctrl: e.ctrlKey || e.metaKey,
+					},
 				);
 			}}
 		>

@@ -49,21 +49,37 @@ import type { WorkspaceContextValue } from '@/context/WorkspaceContext.types';
 const PSL_KEY = 'polygonSoupList';
 
 // ---------------------------------------------------------------------------
-// Workspace-side context — for the inspector pane's BulkEditPanel
+// Workspace-side context — for the inspector pane's BulkEditPanel and the
+// hierarchy tree's Ctrl/Shift-click bulk semantics on polygon rows.
 // ---------------------------------------------------------------------------
 
 export type WorkspacePSLBulkValue = {
+	/** Number of polygons currently in the bulk set. */
 	count: number;
+	/** Folded collisionTag values across the bulk — drives `BulkEditPanel`. */
 	summary: BulkSummary;
+	/** Apply a collisionTag rewrite to every polygon in the bulk set. */
 	applyBulk: (updater: (raw: number) => number) => void;
+	/** Clear the bulk set; `BulkEditPanel`'s "Clear" button. */
 	onClear: () => void;
+	/** Path-key set ('soups/S/polygons/P') the hierarchy tree paints amber to
+	 *  show which rows are in the bulk. */
+	bulkPathKeys: ReadonlySet<string>;
+	/** Toggle a single polygon row in the bulk — Ctrl/Cmd-click on a tree
+	 *  row. No-op when the path isn't a polygon path. */
+	onBulkToggle: (path: NodePath) => void;
+	/** Union every polygon between `from` and `to` into the bulk — Shift-
+	 *  click on a tree row uses the inspector's current path as `from`.
+	 *  Same-soup only; a different-soup pair just adds the endpoint. */
+	onBulkRange: (from: NodePath, to: NodePath) => void;
 };
 
 const WorkspacePSLBulkContext = createContext<WorkspacePSLBulkValue | null>(null);
 
-/** Returns the active PSL bulk-edit handle when the user has at least one
- *  polygon in the bulk set; `null` otherwise. The inspector pane mounts
- *  `BulkEditPanel` only when this returns a non-null value. */
+/** Returns the active PSL bulk-edit handle when a polygonSoupList instance
+ *  is the current Workspace selection; `null` otherwise. The inspector pane
+ *  mounts `BulkEditPanel` only when `count > 0`; the hierarchy tree
+ *  consumes the same value to wire Ctrl/Shift-click bulk semantics. */
 export function useWorkspacePSLBulk(): WorkspacePSLBulkValue | null {
 	return useContext(WorkspacePSLBulkContext);
 }
@@ -104,6 +120,43 @@ export function PSLBulkProvider({
 	}, [activeKey]);
 
 	const onClear = useCallback(() => setBulkPaths(new Set()), []);
+
+	// Hierarchy-tree bulk operations. Ctrl-click on a polygon row calls
+	// `onBulkToggle`; Shift-click on a polygon row calls `onBulkRange` from
+	// the inspector's current anchor to the clicked row. Both no-op when
+	// the path isn't a polygon path so non-polygon schema rows fall through
+	// to the row's plain navigation handler.
+	const onBulkToggle = useCallback((path: NodePath) => {
+		if (!parsePolyPath(path)) return;
+		setBulkPaths((prev) => {
+			const k = path.join('/');
+			const next = new Set(prev);
+			if (next.has(k)) next.delete(k);
+			else next.add(k);
+			return next;
+		});
+	}, []);
+
+	const onBulkRange = useCallback((from: NodePath, to: NodePath) => {
+		const toAddr = parsePolyPath(to);
+		if (!toAddr) return;
+		const fromAddr = parsePolyPath(from);
+		setBulkPaths((prev) => {
+			const next = new Set(prev);
+			// Cross-soup or no anchor: just add the endpoint so shift-click
+			// always extends the bulk by at least one row.
+			if (!fromAddr || fromAddr.soup !== toAddr.soup) {
+				next.add(to.join('/'));
+				return next;
+			}
+			const lo = Math.min(fromAddr.poly, toAddr.poly);
+			const hi = Math.max(fromAddr.poly, toAddr.poly);
+			for (let p = lo; p <= hi; p++) {
+				next.add(['soups', toAddr.soup, 'polygons', p].join('/'));
+			}
+			return next;
+		});
+	}, []);
 
 	// Resolve the active PSL bundle + model once per render so both the
 	// overlay-side and inspector-side context values can reuse it.
@@ -208,6 +261,10 @@ export function PSLBulkProvider({
 			modifiers?: { shift?: boolean; ctrl?: boolean },
 		) => {
 			const targetPath: NodePath = ['soups', soupIndex, 'polygons', polyIndex];
+
+			// Ctrl/Cmd-click: toggle this polygon in the bulk set without
+			// moving the inspector. Same-instance only — toggling polygons
+			// across instances would silently re-bind the bulk set.
 			if (modifiers?.ctrl) {
 				if (modelIndex !== active.selectedModelIndex) return;
 				setBulkPaths((prev) => {
@@ -219,6 +276,38 @@ export function PSLBulkProvider({
 				});
 				return;
 			}
+
+			// Shift-click: extend the bulk range from the inspector's current
+			// poly anchor to the clicked poly, same-soup only. The inspector
+			// follows the click so subsequent shifts extend outward. When
+			// the anchor isn't a polygon (or the soups don't match) just add
+			// the clicked poly so the user gets at least one new entry.
+			if (modifiers?.shift && modelIndex === active.selectedModelIndex) {
+				const fromAddr =
+					selection?.path != null ? parsePolyPath(selection.path) : null;
+				setBulkPaths((prev) => {
+					const next = new Set(prev);
+					if (!fromAddr || fromAddr.soup !== soupIndex) {
+						next.add(pathToKey(targetPath));
+						return next;
+					}
+					const lo = Math.min(fromAddr.poly, polyIndex);
+					const hi = Math.max(fromAddr.poly, polyIndex);
+					for (let p = lo; p <= hi; p++) {
+						next.add(pathToKey(['soups', soupIndex, 'polygons', p]));
+					}
+					return next;
+				});
+				select({
+					bundleId: active.bundleId,
+					resourceKey: PSL_KEY,
+					index: modelIndex,
+					path: targetPath,
+				});
+				return;
+			}
+
+			// Plain click: navigate the inspector to the clicked polygon.
 			select({
 				bundleId: active.bundleId,
 				resourceKey: PSL_KEY,
@@ -256,18 +345,31 @@ export function PSLBulkProvider({
 		};
 	}, [active, selectedPolyRecords, isVisible, select, selection?.path]);
 
-	// Workspace-side context: drives the BulkEditPanel mount. Null when
-	// either no PSL is active or the bulk set is empty — the inspector
-	// pane uses null to mean "don't render the panel."
+	// Workspace-side context: exposed whenever a PSL instance is active so
+	// the hierarchy tree can wire Ctrl/Shift-click bulk semantics on
+	// polygon rows even before the bulk set has any entries. Consumers gate
+	// on `count > 0` to decide whether to mount the BulkEditPanel.
 	const workspaceBulkValue = useMemo<WorkspacePSLBulkValue | null>(() => {
-		if (!active || selectedPolyRecords.length === 0) return null;
+		if (!active) return null;
 		return {
 			count: selectedPolyRecords.length,
 			summary,
 			applyBulk,
 			onClear,
+			bulkPathKeys: bulkPaths,
+			onBulkToggle,
+			onBulkRange,
 		};
-	}, [active, selectedPolyRecords.length, summary, applyBulk, onClear]);
+	}, [
+		active,
+		selectedPolyRecords.length,
+		summary,
+		applyBulk,
+		onClear,
+		bulkPaths,
+		onBulkToggle,
+		onBulkRange,
+	]);
 
 	// PolygonSoupListContext only mounts when there's an active PSL — keeps
 	// the overlay's `usePolygonSoupListContext()` returning null on
