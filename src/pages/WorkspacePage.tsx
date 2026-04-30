@@ -1,21 +1,28 @@
 // WorkspaceEditor — three-pane editor for the multi-Bundle Workspace.
 //
-// Phase #17 (multi-Bundle slice): the tree is now a list of Bundle nodes,
+// Phase #17 (multi-Bundle slice): the tree is a list of Bundle nodes,
 // each with its own resources nested below. Per-Bundle dirty indicator,
 // Save, and close (×) live on the Bundle row. The toolbar adds an
-// "Add Bundle" affordance plus a "Save All" command. WorldViewport scene
-// composition stays single-overlay (that's #3); per-Bundle visibility
-// toggles still don't exist (that's #4).
+// "Add Bundle" affordance plus a "Save All" command.
+//
+// Phase #18 (multi-Bundle WorldViewport composition): the centre pane's
+// <WorldViewport> hosts overlays from EVERY loaded Bundle simultaneously.
+// Two Bundles loaded → potentially many overlay children, all in one
+// shared scene. Cross-Bundle clicks update the Selection only — the URL
+// doesn't change and the WorldViewport doesn't remount. Per-Bundle
+// visibility toggles still don't exist (that's #19).
 //
 //   ┌──────────────────────┬───────────────────────┬──────────────────┐
 //   │  Workspace tree      │  WorldViewport host   │  Inspector       │
 //   │  (left)              │  (centre)             │  (right)         │
 //   │                      │                       │                  │
 //   │  ▾ TRK_UNIT_07.BUN ●  │  three.js scene;      │  Schema-driven   │
-//   │     ├ aiSec…          │  renders the overlay  │  form for the    │
-//   │     ├ trgr…           │  for the *currently   │  selected node   │
-//   │     └ stre…           │  selected* resource   │  (or generic     │
-//   │  ▸ WORLDCOL.BIN       │  only.                │  empty state).   │
+//   │     ├ aiSec…          │  every loaded         │  form for the    │
+//   │     ├ trgr…           │  Bundle's overlays    │  selected node   │
+//   │     └ stre…           │  render here in a     │  (or generic     │
+//   │  ▾ WORLDCOL.BIN       │  single scene.        │  empty state).   │
+//   │     ├ pSoupList #0    │                       │                  │
+//   │     └ pSoupList #1    │                       │                  │
 //   │  + Add Bundle         │                       │                  │
 //   └──────────────────────┴───────────────────────┴──────────────────┘
 
@@ -40,6 +47,10 @@ import { InspectorPanel } from '@/components/schema-editor/InspectorPanel';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { ViewportPane } from '@/components/schema-editor/ViewportPane';
 import { ViewportErrorBoundary } from '@/components/common/ViewportErrorBoundary';
+import {
+	WorldViewportComposition,
+	isWorldViewportFamilyKey,
+} from '@/components/workspace/WorldViewportComposition';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
 import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
 import { getSchemaByKey } from '@/lib/schema/resources';
@@ -426,14 +437,40 @@ function SelectedResourceShell({
 }
 
 function CenterViewport() {
-	const { selection } = useWorkspace();
-	if (!selection) {
+	const { bundles, selection } = useWorkspace();
+
+	// World-viewport-family resources (AI sections, street/traffic/trigger
+	// data, zone list, polygon soups) compose into a single shared
+	// <WorldViewport> across every loaded Bundle (issue #18). Selection
+	// changes within that family swap the inspector's Tools but DON'T
+	// remount the chrome — the scene keeps every overlay rendered.
+	//
+	// Renderable / texture viewports are non-world-coord (per-vehicle 3D
+	// scene; 2D image preview) so they get the legacy single-resource
+	// ViewportPane shim. Switching to/from those WILL remount, since
+	// they're not WorldViewport's at all.
+	const useComposition =
+		!selection || isWorldViewportFamilyKey(selection.resourceKey);
+
+	if (useComposition) {
+		// Empty Workspace + no Selection — the WorldViewport renders an
+		// empty scene which is just a black canvas, so we skip it for a
+		// clearer empty-state message. Once any Bundle is loaded the
+		// composition takes over.
+		if (bundles.length === 0) {
+			return (
+				<div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+					Select a resource from the tree to view it.
+				</div>
+			);
+		}
 		return (
-			<div className="h-full flex items-center justify-center text-xs text-muted-foreground">
-				Select a resource from the tree to view it.
-			</div>
+			<ViewportErrorBoundary resetKey="workspace-world-composition">
+				<WorldViewportComposition />
+			</ViewportErrorBoundary>
 		);
 	}
+
 	const schema = getSchemaByKey(selection.resourceKey);
 	if (!schema) {
 		return (
@@ -445,8 +482,7 @@ function CenterViewport() {
 		);
 	}
 	// ViewportPane reads the active resource from the SchemaEditorProvider
-	// — the SelectedResourceShell parent provides it. Multi-overlay
-	// composition (every visible resource at once) lands in #3.
+	// — the SelectedResourceShell parent provides it.
 	return (
 		<ViewportErrorBoundary resetKey={`${selection.bundleId}/${selection.resourceKey}/${selection.index}`}>
 			<ViewportPane />
