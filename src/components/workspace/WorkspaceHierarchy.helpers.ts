@@ -201,18 +201,53 @@ function buildSchemaFlat(
 		selection.index === addr.index;
 	const selectionPath = matchesSelection ? selection!.path : null;
 
-	visitRecord(
-		[],
-		rootRecord,
-		data,
-		addr.baseDepth,
-		resource.name,
-		out,
-		ctx,
-		expanded,
-		addr,
-		selectionPath,
-	);
+	// Walk the root record's children directly, without emitting a row for
+	// the root itself. The Resource type / Instance row above already
+	// represents the `path: []` selection — emitting another row labelled
+	// `resource.name` (which is identical to the handler's name for every
+	// schema we ship today) would be redundant duplication of the parent.
+	if (data == null || typeof data !== 'object') return out;
+	for (const [fieldName, fieldSchema] of Object.entries(rootRecord.fields)) {
+		const meta = rootRecord.fieldMetadata?.[fieldName];
+		if (meta?.hidden) continue;
+		if (!isExpandableField(fieldSchema)) continue;
+
+		const childPath: NodePath = [fieldName];
+		const childValue = (data as Record<string, unknown>)[fieldName];
+		const childLabel = meta?.label ?? fieldName;
+
+		if (fieldSchema.kind === 'record') {
+			const rf = fieldSchema as RecordFieldSchema;
+			const childRecord = ctx.resource.registry[rf.type];
+			if (childRecord) {
+				visitRecord(
+					childPath,
+					childRecord,
+					childValue,
+					addr.baseDepth,
+					childLabel,
+					out,
+					ctx,
+					expanded,
+					addr,
+					selectionPath,
+				);
+			}
+		} else if (fieldSchema.kind === 'list') {
+			visitList(
+				childPath,
+				fieldSchema,
+				childValue,
+				addr.baseDepth,
+				childLabel,
+				out,
+				ctx,
+				expanded,
+				addr,
+				selectionPath,
+			);
+		}
+	}
 	return out;
 }
 

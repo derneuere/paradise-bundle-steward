@@ -372,7 +372,10 @@ describe('buildWorkspaceFlat — Schema rows', () => {
 		expect(flat.filter((n) => n.kind === 'schema')).toHaveLength(0);
 	});
 
-	it('emits a schema-root row beneath the selected Instance (multi-instance)', () => {
+	it('emits schema rows beneath the selected Instance (multi-instance), skipping a redundant root', () => {
+		// The Instance row above already represents `path: []`, so the schema
+		// subtree skips the would-be root row (whose label duplicates the
+		// Instance row's) and starts at the root record's first-level fields.
 		const bundles = [
 			makeBundle('A.BUN', {
 				polygonSoupList: [{ soups: [], boundingBox: {} }, {}],
@@ -396,18 +399,21 @@ describe('buildWorkspaceFlat — Schema rows', () => {
 			(n): n is SchemaFlatNode => n.kind === 'schema',
 		);
 		expect(schemaRows.length).toBeGreaterThan(0);
-		expect(schemaRows[0].bundleId).toBe('A.BUN');
-		expect(schemaRows[0].resourceKey).toBe('polygonSoupList');
-		expect(schemaRows[0].index).toBe(0);
-		// Root schema row is selected when path === [].
-		expect(schemaRows[0].isSelected).toBe(true);
-		expect(schemaRows[0].schemaPath).toEqual([]);
+		// No row carries `schemaPath: []` — the root is suppressed.
+		expect(schemaRows.find((r) => r.schemaPath.length === 0)).toBeUndefined();
+		// Every emitted row addresses the right (bundle, key, index).
+		for (const row of schemaRows) {
+			expect(row.bundleId).toBe('A.BUN');
+			expect(row.resourceKey).toBe('polygonSoupList');
+			expect(row.index).toBe(0);
+		}
 	});
 
 	it('emits schema rows directly under a single-instance ResourceType when selected', () => {
 		// Single-instance: schema subtree hangs under the ResourceType row
-		// (no separate Instance row). The schema-root row's depth is 2 — one
-		// below the ResourceType row at depth 1.
+		// (no separate Instance row, no schema-root row). The first-level
+		// schema rows render at depth 2 — one indent below the ResourceType
+		// row at depth 1.
 		const bundles = [makeBundle('A.BUN', { aiSections: [{ sections: [] }] })];
 		const selection: WorkspaceSelection = {
 			bundleId: 'A.BUN',
@@ -424,9 +430,10 @@ describe('buildWorkspaceFlat — Schema rows', () => {
 			(n): n is SchemaFlatNode => n.kind === 'schema',
 		);
 		expect(schemaRows.length).toBeGreaterThan(0);
-		// Root row at depth 2 (not 3 — there's no Instance row above it).
-		const rootRow = schemaRows.find((r) => r.schemaPath.length === 0);
-		expect(rootRow?.depth).toBe(2);
+		// First-level rows (path length 1) at depth 2; no root row.
+		expect(schemaRows.find((r) => r.schemaPath.length === 0)).toBeUndefined();
+		const firstLevel = schemaRows.find((r) => r.schemaPath.length === 1);
+		expect(firstLevel?.depth).toBe(2);
 	});
 
 	it('only the selected Instance gets a schema subtree (compact list)', () => {
