@@ -85,9 +85,17 @@ type OverlayBindings = {
 	 *  highlight the right slice of the batched union even when the user
 	 *  selected a non-lead instance. Ignored for other overlay types. */
 	activeSoupIndex?: number;
+	/** PSL-only — 3D-pick callback that routes the clicked instance index
+	 *  (which may differ from the lead's own index after dedupe) through
+	 *  `select(...)`. Ignored for other overlay types. */
+	onPickInstancePoly?: (
+		modelIndex: number,
+		soupIndex: number,
+		polyIndex: number,
+	) => void;
 };
 
-function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSoupIndex }: OverlayBindings) {
+function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSoupIndex, onPickInstancePoly }: OverlayBindings) {
 	const key = `${descriptor.bundleId}::${descriptor.resourceKey}::${descriptor.index}`;
 	switch (descriptor.resourceKey) {
 		case 'aiSections':
@@ -154,6 +162,7 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange, activeSou
 					data={descriptor.model as ParsedPolygonSoupList}
 					bundleSoups={descriptor.bundleSiblings as (ParsedPolygonSoupList | null)[]}
 					activeSoupIndex={activeSoupIndex}
+					onPickInstancePoly={onPickInstancePoly}
 					selectedPath={selectedPath}
 					onSelect={onSelect}
 					onChange={onChange as (next: ParsedPolygonSoupList) => void}
@@ -242,15 +251,32 @@ export function WorldViewportCompositionInner({
 					? selection!.path
 					: selectedPathFor(selection, descriptor);
 				const activeSoupIndex = psLeadHasSelection ? selection!.index : descriptor.index;
+				// 3D-pick handler for PSL: the clicked face's `modelIndex` may
+				// differ from the lead descriptor's own index (one lead covers
+				// every PSL instance in the Bundle), so we route the pick
+				// through `select(...)` with the picked index instead of going
+				// through the lead's `onSelect` (which would be locked to the
+				// lead's index).
+				const onPickInstancePoly = isPSLLead
+					? (modelIndex: number, soupIndex: number, polyIndex: number) => {
+						select({
+							bundleId: descriptor.bundleId,
+							resourceKey: 'polygonSoupList',
+							index: modelIndex,
+							path: ['soups', soupIndex, 'polygons', polyIndex],
+						});
+					}
+					: undefined;
 				return renderOverlay({
 					descriptor,
 					selectedPath,
 					onSelect: makeOnSelect(descriptor),
 					onChange: makeOnChange(descriptor),
 					activeSoupIndex: isPSLLead ? activeSoupIndex : undefined,
+					onPickInstancePoly,
 				});
 			}),
-		[overlays, selection, makeOnSelect, makeOnChange],
+		[overlays, selection, select, makeOnSelect, makeOnChange],
 	);
 
 	return <WorldViewport>{children}</WorldViewport>;

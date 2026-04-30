@@ -417,6 +417,21 @@ type Props = WorldOverlayProps<ParsedPolygonSoupList> & {
 	 *  `selectedModelIndex` wins; when neither is supplied this falls back
 	 *  to 0 to preserve the legacy single-Bundle shape. */
 	activeSoupIndex?: number;
+	/** 3D-pick callback for the composition path (no `PolygonSoupListContext`).
+	 *  Receives the clicked instance index — which can differ from the lead
+	 *  overlay's own index when N descriptors collapsed to one — so the
+	 *  composition can route the selection to the correct PSL resource via
+	 *  `select(...)`. The standard `onSelect(NodePath)` prop is unsuitable
+	 *  for PSL because a NodePath alone can't carry the multi-instance
+	 *  index (the workspace selection's `(bundleId, resourceKey, index,
+	 *  path)` tuple is what actually addresses a polygon). The legacy page
+	 *  flow's `PolygonSoupListContext.onSelect` takes priority when present. */
+	onPickInstancePoly?: (
+		modelIndex: number,
+		soupIndex: number,
+		polyIndex: number,
+		modifiers?: { shift?: boolean; ctrl?: boolean },
+	) => void;
 };
 
 // Note: not typed as `WorldOverlayComponent<ParsedPolygonSoupList>` because
@@ -426,11 +441,14 @@ export const PolygonSoupListOverlay = ({
 	selectedPath,
 	bundleSoups,
 	activeSoupIndex,
+	onPickInstancePoly,
 	// `data` (the active resource) is accepted for contract symmetry but not
 	// directly used — the multi-resource state below covers it.
 	// `onSelect` is unused: the page provides a richer click API via
 	// `PolygonSoupListContext.onSelect(modelIndex, soupIndex, polyIndex,
 	// modifiers)` which can switch the active resource and toggle bulk.
+	// In the composition path (no context) the equivalent richer API comes
+	// in via `onPickInstancePoly` instead — see Props doc.
 }: Props) => {
 	const ctx = usePolygonSoupListContext();
 	const models = ctx?.models ?? bundleSoups ?? EMPTY_BUNDLE_SOUPS;
@@ -509,7 +527,12 @@ export const PolygonSoupListOverlay = ({
 	}, [batched.geometry]);
 
 	const handleClick = (event: ThreeEvent<MouseEvent>) => {
-		if (!onPickFromCtx) return;
+		// Resolve the receiver: page-level context (richer bulk-aware API)
+		// wins, otherwise the composition's `onPickInstancePoly` prop. If
+		// neither is supplied (truly standalone mount) we'd have nothing to
+		// route the pick to, so bail.
+		const sink = onPickFromCtx ?? onPickInstancePoly;
+		if (!sink) return;
 		const faceIdx = event.faceIndex;
 		if (faceIdx == null) return;
 		const map = batched.faceToLocation;
@@ -518,12 +541,13 @@ export const PolygonSoupListOverlay = ({
 		const soupIndex = map[faceIdx * 3 + 1];
 		const polyIndex = map[faceIdx * 3 + 2];
 		event.stopPropagation();
-		// Forward modifier keys so the page can branch on ctrl (toggle into
-		// bulk) / shift (extend bulk range). The page's onSelect can also
-		// switch the active resource — that's why we go through
-		// PolygonSoupListContext rather than the standard `onSelect(path)`.
+		// Forward modifier keys so the page (or composition) can branch on
+		// ctrl (toggle into bulk) / shift (extend bulk range). The composition
+		// path doesn't currently honour modifiers — it just navigates to the
+		// clicked polygon — but the signature is identical so the workspace
+		// can grow bulk-select later without churning the overlay.
 		const ne = event.nativeEvent as PointerEvent | undefined;
-		onPickFromCtx(modelIndex, soupIndex, polyIndex, {
+		sink(modelIndex, soupIndex, polyIndex, {
 			shift: ne?.shiftKey ?? false,
 			ctrl: (ne?.ctrlKey || ne?.metaKey) ?? false,
 		});
