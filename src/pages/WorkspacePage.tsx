@@ -57,6 +57,11 @@ import {
 	isWorldViewportFamilyKey,
 } from '@/components/workspace/WorldViewportComposition';
 import { WorkspaceHierarchy } from '@/components/workspace/WorkspaceHierarchy';
+import {
+	PSLBulkProvider,
+	useWorkspacePSLBulk,
+} from '@/components/workspace/PSLBulkProvider';
+import { BulkEditPanel } from '@/components/polygonSoupList/BulkEditPanel';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
 import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
 import {
@@ -250,10 +255,34 @@ function CenterViewport() {
 
 function RightInspector() {
 	const { bundles, selection, select, saveBundle, closeBundle } = useWorkspace();
+	const bulk = useWorkspacePSLBulk();
 	const level = selectionLevel(selection);
 
-	if (!selection || level == null) {
+	// PSL bulk-edit panel: stacks above the regular inspector form when
+	// the user has at least one polygon in the bulk set. Wrapping every
+	// branch with the same shell keeps the panel attached regardless of
+	// which inspector level is currently rendered (Bundle / Resource type
+	// / Instance / Schema) — switching the inspector form doesn't drop
+	// the user's bulk selection.
+	const wrapWithBulk = (inner: React.ReactNode) => {
+		if (!bulk) return inner;
 		return (
+			<div className="h-full flex flex-col min-h-0">
+				<div className="shrink-0 max-h-[60%] overflow-auto border-b">
+					<BulkEditPanel
+						count={bulk.count}
+						summary={bulk.summary}
+						onClear={bulk.onClear}
+						applyBulk={bulk.applyBulk}
+					/>
+				</div>
+				<div className="flex-1 min-h-0 overflow-auto">{inner}</div>
+			</div>
+		);
+	};
+
+	if (!selection || level == null) {
+		return wrapWithBulk(
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
 				Nothing selected.
 			</div>
@@ -263,13 +292,13 @@ function RightInspector() {
 	if (level === 'bundle') {
 		const bundle = bundles.find((b) => b.id === selection.bundleId);
 		if (!bundle) {
-			return (
+			return wrapWithBulk(
 				<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
 					Bundle no longer loaded.
 				</div>
 			);
 		}
-		return (
+		return wrapWithBulk(
 			<BundleInspector
 				bundle={bundle}
 				saveBundle={saveBundle}
@@ -288,13 +317,13 @@ function RightInspector() {
 	if (level === 'resourceType') {
 		const bundle = bundles.find((b) => b.id === selection.bundleId);
 		if (!bundle || !selection.resourceKey) {
-			return (
+			return wrapWithBulk(
 				<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
 					Resource type no longer available.
 				</div>
 			);
 		}
-		return (
+		return wrapWithBulk(
 			<ResourceTypeInspector
 				bundle={bundle}
 				resourceKey={selection.resourceKey}
@@ -315,13 +344,13 @@ function RightInspector() {
 		? getSchemaByKey(selection.resourceKey)
 		: undefined;
 	if (!schema) {
-		return (
+		return wrapWithBulk(
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
 				No inspector for {selection.resourceKey}.
 			</div>
 		);
 	}
-	return <InspectorPanel />;
+	return wrapWithBulk(<InspectorPanel />);
 }
 
 // ---------------------------------------------------------------------------
@@ -570,6 +599,28 @@ function WorkspaceToolbar({ onAddBundle }: { onAddBundle: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
+// PSL bulk wrapper — mounts PSLBulkProvider with the live Workspace handles
+// so the centre viewport (overlay) and the right inspector (BulkEditPanel)
+// share one bulk-selection store. Lives at page scope so switching the
+// inspector form doesn't drop the user's bulk set.
+// ---------------------------------------------------------------------------
+
+function WorkspaceBulkWrapper({ children }: { children: React.ReactNode }) {
+	const { bundles, selection, select, setResourceAt, isVisible } = useWorkspace();
+	return (
+		<PSLBulkProvider
+			bundles={bundles}
+			selection={selection}
+			select={select}
+			setResourceAt={setResourceAt}
+			isVisible={isVisible}
+		>
+			{children}
+		</PSLBulkProvider>
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -643,6 +694,7 @@ const WorkspacePage = () => {
 	}
 
 	return (
+		<WorkspaceBulkWrapper>
 		<div className="h-full min-h-0 border rounded-lg overflow-hidden bg-card m-6">
 			<input
 				ref={fileInputRef}
@@ -698,6 +750,7 @@ const WorkspacePage = () => {
 				</SelectedResourceShell>
 			</ResizablePanelGroup>
 		</div>
+		</WorkspaceBulkWrapper>
 	);
 };
 
