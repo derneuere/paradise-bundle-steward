@@ -1,6 +1,6 @@
-// Shared state between PolygonSoupListPage and PolygonSoupListViewport.
+// Shared state between PolygonSoupListPage and PolygonSoupListOverlay.
 //
-// The viewport needs:
+// The overlay needs:
 //   1. The full list of parsed PSL resources (so it can render all of them
 //      in a single batched draw call — not just the one the schema editor
 //      is currently editing).
@@ -11,11 +11,11 @@
 //      to the page's bulk selection, for extra highlighting.
 //
 // The bulk-selection mechanics (building the set, toggling membership) live
-// ENTIRELY outside the viewport now — on PolygonSoupListPage, driven by
-// ctrl/cmd+click in the hierarchy tree. The viewport only reads the derived
+// ENTIRELY outside the overlay — on PolygonSoupListPage, driven by
+// ctrl/cmd+click in the hierarchy tree. The overlay only reads the derived
 // index set to paint highlighted polys.
 //
-// Kept in its own tiny file (no JSX) so both the page and the viewport can
+// Kept in its own tiny file (no JSX) so both the page and the overlay can
 // import it without dragging React component code into each other.
 
 import { createContext, useContext } from 'react';
