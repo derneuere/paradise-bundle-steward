@@ -1,0 +1,3 @@
+# WorldViewport uses one fixed camera; overlays do not declare scene bounds
+
+The natural design — and what every per-resource viewport does today — is to compute scene bounds from the resource's data and auto-fit the camera on load. We deliberately rejected this: every **Resource** a **World viewport** hosts (AI sections, street data, traffic data, trigger data, zone list, polygon soup list) lives in the same Burnout Paradise world coordinate system, so one fixed camera position serves all of them and the user can orbit/pan from there. Auto-fit would have added a `getBounds(data)` method to the overlay interface plus a union-and-fit step in the chrome — complexity buying nothing because there is no scale variation across overlays to fit to.

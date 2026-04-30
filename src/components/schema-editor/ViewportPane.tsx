@@ -35,10 +35,8 @@ import {
 	type AISectionSelection,
 } from '@/components/aisections/AISectionsViewport';
 import type { ParsedZoneList } from '@/lib/core/zoneList';
-import {
-	ZoneListViewport,
-	type ZoneSelection,
-} from '@/components/zonelist/ZoneListViewport';
+import { WorldViewport } from './viewports/WorldViewport';
+import { ZoneListOverlay } from './viewports/ZoneListOverlay';
 
 // ---------------------------------------------------------------------------
 // Path ↔ TrafficDataSelection translation
@@ -427,31 +425,9 @@ function AISectionsViewportShim({
 	);
 }
 
-// ---------------------------------------------------------------------------
-// Path ↔ ZoneSelection translation
-// ---------------------------------------------------------------------------
-
-// Recognised paths:
-//   ['zones', i]                                     → { zoneIndex: i }
-//   ['zones', i, ...sub]                             → { zoneIndex: i }
-//                                                       (sub-selection inside
-//                                                       a zone is meaningful
-//                                                       to the inspector but
-//                                                       collapses to "select
-//                                                       this zone" in the
-//                                                       viewport)
-function pathToZoneSelection(path: NodePath): ZoneSelection {
-	if (path.length < 2 || path[0] !== 'zones') return null;
-	const idx = path[1];
-	if (typeof idx !== 'number') return null;
-	return { zoneIndex: idx };
-}
-
-function zoneSelectionToPath(sel: ZoneSelection): NodePath {
-	if (!sel) return [];
-	return ['zones', sel.zoneIndex];
-}
-
+// ZoneList is the WorldViewport pilot: chrome owns the Canvas + camera +
+// lighting, the overlay speaks NodePath directly. No path↔selection
+// translation needed — the overlay matches `['zones', i]` shapes itself.
 function ZoneListViewportShim({
 	data,
 	selectedPath,
@@ -462,15 +438,14 @@ function ZoneListViewportShim({
 	selectPath: (path: NodePath) => void;
 }) {
 	const zoneData = data as ParsedZoneList;
-	const selection = useMemo(() => pathToZoneSelection(selectedPath), [selectedPath]);
 
 	return (
-		<div className="h-full">
-			<ZoneListViewport
+		<WorldViewport>
+			<ZoneListOverlay
 				data={zoneData}
-				selected={selection}
-				onSelect={(sel) => selectPath(zoneSelectionToPath(sel))}
+				selectedPath={selectedPath}
+				onSelect={selectPath}
 			/>
-		</div>
+		</WorldViewport>
 	);
 }
