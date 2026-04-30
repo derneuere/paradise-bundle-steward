@@ -55,6 +55,7 @@ import {
 	X,
 } from 'lucide-react';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { HierarchyTree } from '@/components/schema-editor/HierarchyTree';
 import { InspectorPanel } from '@/components/schema-editor/InspectorPanel';
 import { SchemaEditorProvider } from '@/components/schema-editor/context';
 import { ViewportPane } from '@/components/schema-editor/ViewportPane';
@@ -79,6 +80,10 @@ import { vehicleListExtensions } from '@/components/schema-editor/extensions/veh
 import type { ExtensionRegistry } from '@/components/schema-editor/context';
 import type { NodePath } from '@/lib/schema/walk';
 import type { EditableBundle } from '@/context/WorkspaceContext.types';
+import {
+	hasNavigableSchemaDepth,
+	makeSchemaSelectionPathHandler,
+} from './WorkspacePage.helpers';
 
 // Extension registry per resource key. Mirrors what each per-resource page
 // passes to its `SchemaEditorProvider`, so the workspace inspector renders
@@ -147,6 +152,80 @@ function VisibilityToggle({
 		>
 			{visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3 opacity-60" />}
 		</button>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Selected-resource schema subtree (issue #21)
+// ---------------------------------------------------------------------------
+//
+// Integration-shape choice (HITL note from the issue): we picked option A —
+// hoist a small "selected-resource hierarchy" sub-component into the tree
+// pane, rendered nested under the matching ResourceRow, with its OWN
+// SchemaEditorProvider scoped to the selected resource. The right-side
+// SelectedResourceShell still mounts its own provider for Scene + Inspector;
+// both providers are controlled by `WorkspaceContext.selection.path`, so a
+// click in either tree updates the same global selection and the other side
+// follows.
+//
+// We didn't pick option B (render the tree pane inside SelectedResourceShell's
+// render-prop) because that mounts the provider conditionally above the tree
+// pane — toggling between "no selection" and "selected" changes the tree
+// pane's React parent (Fragment vs Provider), forcing WorkspaceTree to
+// remount and losing its bundle expand/collapse state. Two providers cost a
+// duplicate context dispatch on every selection move (cheap), but the tree
+// pane stays mounted across selection changes.
+
+function SelectedSchemaSubtree() {
+	const { bundles, selection, select, setResourceAt } = useWorkspace();
+
+	const selectedBundle = useMemo(
+		() => (selection ? bundles.find((b) => b.id === selection.bundleId) : undefined),
+		[bundles, selection],
+	);
+	const schema = selection ? getSchemaByKey(selection.resourceKey) : undefined;
+	const data = useMemo(() => {
+		if (!selection || !selectedBundle) return undefined;
+		const list = selectedBundle.parsedResourcesAll.get(selection.resourceKey);
+		return list?.[selection.index] ?? undefined;
+	}, [selection, selectedBundle]);
+
+	const onChange = useCallback(
+		(next: unknown) => {
+			if (!selection) return;
+			setResourceAt(selection.bundleId, selection.resourceKey, selection.index, next);
+		},
+		[selection, setResourceAt],
+	);
+
+	const setPath = useMemo(
+		() => makeSchemaSelectionPathHandler(selection, select),
+		[selection, select],
+	);
+
+	if (!selection || !schema || data === undefined) return null;
+	if (!hasNavigableSchemaDepth(schema)) return null;
+
+	// Bounded height keeps HierarchyTree's virtualizer happy (it needs a
+	// scrollable parent with finite height) while leaving the workspace-tree
+	// scroll above it intact. The min-h floor stops the tree from collapsing
+	// to nothing when several Bundles are loaded and the pane is short.
+	return (
+		<div
+			className="border-t border-b bg-muted/10 flex flex-col"
+			style={{ height: 'min(60vh, 420px)', minHeight: 200 }}
+		>
+			<SchemaEditorProvider
+				resource={schema}
+				data={data}
+				onChange={onChange}
+				selectedPath={selection.path}
+				onSelectedPathChange={setPath}
+				extensions={EXTENSIONS_BY_KEY[selection.resourceKey]}
+			>
+				<HierarchyTree />
+			</SchemaEditorProvider>
+		</div>
 	);
 }
 
@@ -306,28 +385,34 @@ function BundleNode({
 					{entries.map((e) => {
 						const handler = getHandlerByKey(e.key);
 						const label = handler?.name ?? e.key;
+						const isActiveSingle =
+							e.count === 1 &&
+							selection?.bundleId === bundle.id &&
+							selection.resourceKey === e.key &&
+							selection.index === 0;
 						return e.count === 1 ? (
-							<ResourceRow
-								key={e.key}
-								bundleId={bundle.id}
-								resourceKey={e.key}
-								index={0}
-								label={label}
-								active={
-									selection?.bundleId === bundle.id &&
-									selection.resourceKey === e.key &&
-									selection.index === 0
-								}
-								onClick={() =>
-									select({
-										bundleId: bundle.id,
-										resourceKey: e.key,
-										index: 0,
-										path: [],
-									})
-								}
-								showVisibility={isVisibilityRelevantKey(e.key)}
-							/>
+							<div key={e.key}>
+								<ResourceRow
+									bundleId={bundle.id}
+									resourceKey={e.key}
+									index={0}
+									label={label}
+									active={isActiveSingle}
+									onClick={() =>
+										select({
+											bundleId: bundle.id,
+											resourceKey: e.key,
+											index: 0,
+											path: [],
+										})
+									}
+									showVisibility={isVisibilityRelevantKey(e.key)}
+								/>
+								{/* Schema subtree appears nested under the active ResourceRow
+								    (issue #21). Only one ResourceRow can match the global
+								    selection, so this never renders twice. */}
+								{isActiveSingle && <SelectedSchemaSubtree />}
+							</div>
 						) : (
 							<MultiResourceGroup
 								key={e.key}
@@ -450,21 +535,28 @@ function MultiResourceGroup({
 			</div>
 			{expanded && (
 				<>
-					{Array.from({ length: count }).map((_, i) => (
-						<ResourceRow
-							key={i}
-							bundleId={bundleId}
-							resourceKey={resourceKey}
-							index={i}
-							label={`${label} #${i}`}
-							active={
-								someActive && selection!.index === i
-							}
-							onClick={() => onSelect(i)}
-							depth={2}
-							showVisibility={showVisibility}
-						/>
-					))}
+					{Array.from({ length: count }).map((_, i) => {
+						const isActive = someActive && selection!.index === i;
+						return (
+							<div key={i}>
+								<ResourceRow
+									bundleId={bundleId}
+									resourceKey={resourceKey}
+									index={i}
+									label={`${label} #${i}`}
+									active={isActive}
+									onClick={() => onSelect(i)}
+									depth={2}
+									showVisibility={showVisibility}
+								/>
+								{/* Multi-instance: schema subtree mounts under the
+								    actively-selected instance row (issue #21 acceptance:
+								    "selecting a specific instance row shows that
+								    instance's HierarchyTree"). */}
+								{isActive && <SelectedSchemaSubtree />}
+							</div>
+						);
+					})}
 				</>
 			)}
 		</div>
