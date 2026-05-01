@@ -16,10 +16,14 @@ type CgsIdInputProps = {
 };
 
 export const CgsIdInput: React.FC<CgsIdInputProps> = ({ label, value, onChange, disabled, allowHexToggle, allowDecimalToggle, isOnlyGameId }) => {
-  const [mode, setMode] = React.useState<'text' | 'hex' | 'decimal'>(isOnlyGameId ? 'decimal' : 'text');
-  React.useEffect(() => {
-    if (isOnlyGameId) setMode('decimal');
-  }, [isOnlyGameId]);
+  // The toggle is hidden when `isOnlyGameId`, so the user can't change
+  // the inner mode in that branch. Deriving `mode` from the prop makes
+  // the snap-to-decimal a render-time computation rather than a state-
+  // sync effect. The inner state still drives the toggle when it's
+  // visible.
+  const [innerMode, setInnerMode] = React.useState<'text' | 'hex' | 'decimal'>('text');
+  const mode = isOnlyGameId ? 'decimal' : innerMode;
+  const setMode = setInnerMode;
 
   const displayValue = mode === 'text'
     ? decodeCgsId(value)

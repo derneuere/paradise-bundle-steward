@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { FieldShell, type FieldRendererProps } from './common';
@@ -44,19 +44,18 @@ export function Matrix44Field({
 		: 'Matrix44Affine. Translation row is the most commonly edited.';
 
 	// ---------------- Hex bytes row ----------------
-	// The textbox is user-editable state, but it should also follow
-	// external changes (drags in the preview, edits in the 4×4 grid,
-	// X/Y/Z edits). We resync from `m` whenever the user is NOT actively
-	// typing — a dirty flag tracks that.
-	const [hexText, setHexText] = useState(() => floatsToHex(m.slice(0, 12)));
+	// The textbox follows external changes to `m` (drags in the preview,
+	// edits in the 4×4 grid, X/Y/Z edits) UNLESS the user is actively
+	// typing in it. The `dirty` flag tracks active typing; while it's
+	// false, `displayedHex` is derived from `m` directly — no effect
+	// needed. Once the user types, we mirror their text from local state
+	// until commit (Apply) or revert (blur) clears the dirty flag.
+	const canonicalHex = floatsToHex(m.slice(0, 12));
+	const [hexDraft, setHexDraft] = useState('');
+	const [dirty, setDirty] = useState(false);
 	const [hexError, setHexError] = useState<string | null>(null);
 	const [copied, setCopied] = useState(false);
-	const dirty = useRef(false);
-
-	const canonicalHex = floatsToHex(m.slice(0, 12));
-	useEffect(() => {
-		if (!dirty.current) setHexText(canonicalHex);
-	}, [canonicalHex]);
+	const hexText = dirty ? hexDraft : canonicalHex;
 
 	const applyHex = () => {
 		const parsed = parseHex(hexText);
@@ -69,8 +68,7 @@ export function Matrix44Field({
 		for (let i = 0; i < floats.length && i < 16; i++) next[i] = floats[i];
 		onChange(next);
 		setHexError(null);
-		dirty.current = false;
-		// setHexText will be refreshed by the effect when `m` re-flows in.
+		setDirty(false);
 	};
 
 	const copyHex = async () => {
@@ -128,8 +126,8 @@ export function Matrix44Field({
 							disabled={meta?.readOnly}
 							className="h-7 font-mono text-[10px] flex-1"
 							value={hexText}
-							onChange={(e) => { dirty.current = true; setHexText(e.target.value); }}
-							onBlur={() => { dirty.current = false; setHexText(canonicalHex); setHexError(null); }}
+							onChange={(e) => { setDirty(true); setHexDraft(e.target.value); }}
+							onBlur={() => { setDirty(false); setHexError(null); }}
 							onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyHex(); } }}
 						/>
 						<Button

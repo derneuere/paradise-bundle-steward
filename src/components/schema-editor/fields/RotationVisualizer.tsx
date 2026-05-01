@@ -8,9 +8,11 @@
 // m[0..11]'s rotation basis changes on drag. The camera is fixed — no
 // orbit controls — so the drag is unambiguously manipulating the object.
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { useMirrorRef } from '@/hooks/useMirrorRef';
+import { useApplyDisplayMatrix } from '@/hooks/useApplyDisplayMatrix';
 
 // ---------------------------------------------------------------------------
 // Helpers — matrix ↔ storage conversion
@@ -76,7 +78,7 @@ function projectToSphere(x: number, y: number, rect: DOMRect): THREE.Vector3 {
 // nothing.
 function CameraStash({ cameraRef }: { cameraRef: React.MutableRefObject<THREE.Camera | null> }) {
 	const { camera } = useThree();
-	useEffect(() => { cameraRef.current = camera; }, [camera, cameraRef]);
+	useMirrorRef(cameraRef, camera);
 	return null;
 }
 
@@ -87,17 +89,8 @@ function PreviewBox({ matrix }: { matrix: number[] }) {
 	const boxGeo = useMemo(() => new THREE.BoxGeometry(3, 2, 5), []);
 	const edgesGeo = useMemo(() => new THREE.EdgesGeometry(boxGeo), [boxGeo]);
 
-	useEffect(() => {
-		const mat = buildDisplayMatrix(matrix);
-		if (meshRef.current) {
-			meshRef.current.matrixAutoUpdate = false;
-			meshRef.current.matrix.copy(mat);
-		}
-		if (edgesRef.current) {
-			edgesRef.current.matrixAutoUpdate = false;
-			edgesRef.current.matrix.copy(mat);
-		}
-	}, [matrix]);
+	const displayMatrix = useMemo(() => buildDisplayMatrix(matrix), [matrix]);
+	useApplyDisplayMatrix(meshRef, edgesRef, displayMatrix);
 
 	return (
 		<>

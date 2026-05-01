@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useNormalizeMatchIndex } from '@/hooks/useNormalizeMatchIndex';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -400,14 +401,8 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
     return Math.floor(s / Math.max(1, bytesPerRow));
   }, [parsedSearchBytes, activeMatchIndex, searchMatchStarts, bytesPerRow]);
 
-  // Keep active match index valid when query or matches change
-  React.useEffect(() => {
-    if (!parsedSearchBytes || searchMatchStarts.length === 0) {
-      setActiveMatchIndex(-1);
-      return;
-    }
-    setActiveMatchIndex((prev) => (prev >= 0 && prev < searchMatchStarts.length ? prev : 0));
-  }, [parsedSearchBytes, searchMatchStarts.length]);
+  // Keep active match index valid when query or matches change.
+  useNormalizeMatchIndex(parsedSearchBytes, searchMatchStarts.length, setActiveMatchIndex);
 
   const goPrev = React.useCallback(() => {
     if (!parsedSearchBytes || searchMatchStarts.length === 0) return;

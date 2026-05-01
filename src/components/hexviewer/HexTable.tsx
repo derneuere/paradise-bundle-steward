@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import type { HexRow } from './types';
 import { formatHex } from './utils.ts';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useScrollToVirtualRow } from '@/hooks/useScrollToVirtualRow';
 
 export const BYTE_CELL_CLASS = 'px-1 py-0.5 rounded text-xs font-mono';
 
@@ -49,13 +50,15 @@ export const HexTable: React.FC<HexTableProps> = (props) => {
     overscan: OVERSCAN,
   });
 
-  // Programmatic scrolling to a given row index
-  useEffect(() => {
-    if (typeof scrollToRowIndex === 'number' && !Number.isNaN(scrollToRowIndex)) {
-      const idx = Math.max(0, Math.min(totalRows - 1, Math.floor(scrollToRowIndex)));
-      rowVirtualizer.scrollToIndex(idx, { align: 'center' });
-    }
-  }, [scrollToRowIndex, totalRows]);
+  // Programmatic scrolling to a given row index. Pre-clamp before
+  // handing off to the shared scroll hook — `useScrollToVirtualRow`
+  // treats negative as "skip", so an out-of-range / NaN scroll request
+  // is normalized to -1 here.
+  const clampedScrollIndex =
+    typeof scrollToRowIndex === 'number' && !Number.isNaN(scrollToRowIndex)
+      ? Math.max(0, Math.min(totalRows - 1, Math.floor(scrollToRowIndex)))
+      : -1;
+  useScrollToVirtualRow(rowVirtualizer, clampedScrollIndex, { align: 'center' });
 
   const items = rowVirtualizer.getVirtualItems();
 
