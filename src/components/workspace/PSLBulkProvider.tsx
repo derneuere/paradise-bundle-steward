@@ -22,11 +22,11 @@ import {
 	createContext,
 	useCallback,
 	useContext,
-	useEffect,
 	useMemo,
 	useState,
 	type ReactNode,
 } from 'react';
+import { useResetOnChange } from '@/hooks/useResetOnChange';
 import {
 	PolygonSoupListContext,
 	encodeSoupPoly,
@@ -115,9 +115,7 @@ export function PSLBulkProvider({
 		selection?.resourceKey === PSL_KEY && selection.index !== undefined
 			? `${selection.bundleId}:${selection.index}`
 			: null;
-	useEffect(() => {
-		setBulkPaths(new Set());
-	}, [activeKey]);
+	useResetOnChange(activeKey, () => setBulkPaths(new Set()));
 
 	const onClear = useCallback(() => setBulkPaths(new Set()), []);
 

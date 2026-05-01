@@ -21,11 +21,10 @@ import React, {
 	createContext,
 	useCallback,
 	useContext,
-	useEffect,
 	useMemo,
-	useRef,
 	useState,
 } from 'react';
+import { useLatestRef } from '@/hooks/useLatestRef';
 import { toast } from 'sonner';
 import {
 	getPlatformName,
@@ -69,6 +68,7 @@ import {
 	isVisibleIn,
 	removeBundleById,
 	replaceBundleById,
+	toggleSoloVisibility,
 	visibilityKey as makeVisibilityKey,
 	visibilityKeysForBundle,
 } from './WorkspaceContext.helpers';
@@ -162,10 +162,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 	// list without tearing their dep arrays. `loadBundle` and `saveAll` need
 	// the up-to-date list across `await` boundaries — closing over `bundles`
 	// alone would snapshot it at the time the callback was constructed.
-	const bundlesRef = useRef<EditableBundle[]>([]);
-	useEffect(() => {
-		bundlesRef.current = bundles;
-	}, [bundles]);
+	const bundlesRef = useLatestRef(bundles);
 
 	// Bundle helpers ---------------------------------------------------------
 
@@ -262,6 +259,13 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 		},
 		[],
 	);
+
+	// Read bundles via the ref so the solo gesture sees the freshest list
+	// without re-binding every time the bundles array reshapes — same trick
+	// loadBundle/saveAll use to dodge stale closures.
+	const soloVisibilityFn = useCallback((node: VisibilityNode) => {
+		setVisibility((prev) => toggleSoloVisibility(prev, bundlesRef.current, node));
+	}, []);
 
 	// Undo / redo ------------------------------------------------------------
 
@@ -527,6 +531,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 			select,
 			isVisible,
 			setVisibility: setVisibilityFn,
+			soloVisibility: soloVisibilityFn,
 			canUndo,
 			canRedo,
 			undo,
@@ -551,6 +556,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 			select,
 			isVisible,
 			setVisibilityFn,
+			soloVisibilityFn,
 			canUndo,
 			canRedo,
 			undo,

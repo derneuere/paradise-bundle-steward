@@ -11,7 +11,9 @@
 // The pure flat-list builder lives in `WorkspaceHierarchy.helpers.ts` so the
 // vitest node env can exercise row enumeration without dragging in React.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useSeedBundleExpansion } from '@/hooks/useSeedBundleExpansion';
+import { useScrollToVirtualRow } from '@/hooks/useScrollToVirtualRow';
 import {
 	ChevronDown,
 	ChevronRight,
@@ -107,28 +109,7 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 	const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 	const [seededBundles, setSeededBundles] = useState<Set<string>>(() => new Set());
 
-	useEffect(() => {
-		const newSeeds: string[] = [];
-		const newExpands: string[] = [];
-		for (const b of bundles) {
-			if (seededBundles.has(b.id)) continue;
-			newSeeds.push(b.id);
-			if (bundles.length === 1) newExpands.push(bundleKey(b.id));
-		}
-		if (newSeeds.length === 0) return;
-		setSeededBundles((prev) => {
-			const next = new Set(prev);
-			for (const id of newSeeds) next.add(id);
-			return next;
-		});
-		if (newExpands.length > 0) {
-			setExpanded((prev) => {
-				const next = new Set(prev);
-				for (const k of newExpands) next.add(k);
-				return next;
-			});
-		}
-	}, [bundles, seededBundles]);
+	useSeedBundleExpansion(bundles, seededBundles, setSeededBundles, setExpanded, bundleKey);
 
 	// `buildWorkspaceFlat` auto-expands ancestors of the current selection
 	// internally, so we just pass our persisted set.
@@ -258,14 +239,7 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 		return -1;
 	}, [flat, selection]);
 
-	useEffect(() => {
-		if (selectedFlatIndex >= 0) {
-			rowVirtualizer.scrollToIndex(selectedFlatIndex, {
-				align: 'auto',
-				behavior: 'auto',
-			});
-		}
-	}, [selectedFlatIndex, rowVirtualizer]);
+	useScrollToVirtualRow(rowVirtualizer, selectedFlatIndex);
 
 	// ---------------------- Render ----------------------
 
