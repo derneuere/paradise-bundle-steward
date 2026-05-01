@@ -101,20 +101,26 @@ const EXTENSIONS_BY_KEY: Record<string, ExtensionRegistry> = {
 // Inspector / viewport host — both consume the Selection
 // ---------------------------------------------------------------------------
 
-// Wraps the children with a SchemaEditorProvider when the selection is at
-// Instance / Schema level, so SchemaEditorPanel + ViewportPane share one
-// provider. Bundle / Resource-type-level selections render directly without
-// a provider — they don't drive the schema editor.
-function SelectedResourceShell({
+// Wraps `children` with a SchemaEditorProvider when the selection is at
+// Instance / Schema level. Bundle / Resource-type-level selections render
+// `children` directly — those panes don't read the SchemaEditor context.
+//
+// Issue #28: this wrapper deliberately lives INSIDE the panes that actually
+// consume `useSchemaEditor` (the right-pane InspectorPanel, the centre-pane
+// non-world ViewportPane), not as a single shared parent of both panes the
+// way an earlier `SelectedResourceShell` did. The earlier shape toggled
+// between `<>{children}</>` (no selection / Bundle / Resource-type-level)
+// and `<SchemaEditorProvider>{children}</SchemaEditorProvider>` (Instance /
+// Schema-level) at the same position in the tree, so any selection change
+// across that boundary unmounted and remounted the entire centre + right
+// subtree — taking the WorldViewport's `<Canvas>` with it and snapping the
+// camera back to `CAMERA_POSITION`. Keeping the provider out of the
+// WorldViewport's ancestor chain leaves its Canvas mounted across every
+// selection change in the world-family.
+function SelectedSchemaEditorProvider({
 	children,
 }: {
-	children: (args: {
-		schema: ReturnType<typeof getSchemaByKey>;
-		data: unknown;
-		path: NodePath;
-		setPath: (next: NodePath) => void;
-		onChange: (next: unknown) => void;
-	}) => React.ReactNode;
+	children: React.ReactNode;
 }) {
 	const { bundles, selection, select, setResourceAt } = useWorkspace();
 	const level = selectionLevel(selection);
@@ -159,21 +165,8 @@ function SelectedResourceShell({
 		[selection, select],
 	);
 
-	// Provider only mounts when there's a selectable instance + schema. Other
-	// selection levels (Bundle / Resource type) render the children fallback
-	// — those panes don't read the SchemaEditor context.
 	if (!isInstanceOrSchema || !schema || data === undefined || !selection?.resourceKey) {
-		return (
-			<>
-				{children({
-					schema: undefined,
-					data,
-					path: selection?.path ?? [],
-					setPath,
-					onChange,
-				})}
-			</>
-		);
+		return <>{children}</>;
 	}
 
 	return (
@@ -185,7 +178,7 @@ function SelectedResourceShell({
 			onSelectedPathChange={setPath}
 			extensions={EXTENSIONS_BY_KEY[selection.resourceKey]}
 		>
-			{children({ schema, data, path: selection.path, setPath, onChange })}
+			{children}
 		</SchemaEditorProvider>
 	);
 }
@@ -243,12 +236,16 @@ function CenterViewport() {
 		);
 	}
 	// ViewportPane reads the active resource from the SchemaEditorProvider
-	// — the SelectedResourceShell parent provides it.
+	// — wrap locally rather than through a shared parent above the centre
+	// pane so the WorldViewport composition above this branch isn't subject
+	// to mount/unmount cycles when selection changes (issue #28).
 	return (
 		<ViewportErrorBoundary
 			resetKey={`${selection.bundleId}/${selection.resourceKey}/${selection.index}`}
 		>
-			<ViewportPane />
+			<SelectedSchemaEditorProvider>
+				<ViewportPane />
+			</SelectedSchemaEditorProvider>
 		</ViewportErrorBoundary>
 	);
 }
@@ -350,7 +347,11 @@ function RightInspector() {
 			</div>
 		);
 	}
-	return wrapWithBulk(<InspectorPanel />);
+	return wrapWithBulk(
+		<SelectedSchemaEditorProvider>
+			<InspectorPanel />
+		</SelectedSchemaEditorProvider>,
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -719,35 +720,34 @@ const WorkspacePage = () => {
 
 				<ResizableHandle withHandle />
 
-				<SelectedResourceShell>
-					{() => (
-						<>
-							<ResizablePanel id="ws-scene" order={2} defaultSize={50} minSize={20}>
-								<div className="h-full flex flex-col">
-									<div className="px-3 py-2 border-b text-xs font-semibold tracking-wide text-muted-foreground">
-										Scene
-									</div>
-									<div className="flex-1 min-h-0">
-										<CenterViewport />
-									</div>
-								</div>
-							</ResizablePanel>
+				{/* The SchemaEditorProvider lives inside RightInspector and inside
+				    CenterViewport's non-world branch, not here as a shared parent.
+				    Keeping it out of the centre pane's ancestor chain is what stops
+				    the WorldViewport's Canvas from unmounting on selection changes
+				    (issue #28). */}
+				<ResizablePanel id="ws-scene" order={2} defaultSize={50} minSize={20}>
+					<div className="h-full flex flex-col">
+						<div className="px-3 py-2 border-b text-xs font-semibold tracking-wide text-muted-foreground">
+							Scene
+						</div>
+						<div className="flex-1 min-h-0">
+							<CenterViewport />
+						</div>
+					</div>
+				</ResizablePanel>
 
-							<ResizableHandle withHandle />
+				<ResizableHandle withHandle />
 
-							<ResizablePanel id="ws-inspector" order={3} defaultSize={30} minSize={18} className="bg-background">
-								<div className="h-full flex flex-col">
-									<div className="px-3 py-2 border-b text-xs font-semibold tracking-wide text-muted-foreground">
-										Inspector
-									</div>
-									<div className="flex-1 min-h-0">
-										<RightInspector />
-									</div>
-								</div>
-							</ResizablePanel>
-						</>
-					)}
-				</SelectedResourceShell>
+				<ResizablePanel id="ws-inspector" order={3} defaultSize={30} minSize={18} className="bg-background">
+					<div className="h-full flex flex-col">
+						<div className="px-3 py-2 border-b text-xs font-semibold tracking-wide text-muted-foreground">
+							Inspector
+						</div>
+						<div className="flex-1 min-h-0">
+							<RightInspector />
+						</div>
+					</div>
+				</ResizablePanel>
 			</ResizablePanelGroup>
 		</div>
 		</WorkspaceBulkWrapper>
