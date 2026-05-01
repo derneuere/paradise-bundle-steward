@@ -19,6 +19,9 @@ export type AutoFitCameraOptions = {
 	distanceFactor: number;
 	/** Multiplier applied to `radius` for the camera's `far` plane. */
 	farFactor: number;
+	/** When false, leave the camera's `far` plane untouched. Useful when
+	 *  the Canvas already sets a `far` value the viewport wants to keep. */
+	setFar: boolean;
 };
 
 export function useAutoFitCamera({
@@ -27,6 +30,7 @@ export function useAutoFitCamera({
 	radius,
 	distanceFactor,
 	farFactor,
+	setFar,
 }: AutoFitCameraOptions): void {
 	const fitted = useRef(false);
 	useEffect(() => {
@@ -35,9 +39,9 @@ export function useAutoFitCamera({
 		const d = radius * distanceFactor;
 		camera.position.set(center.x, center.y + d, center.z + d * 0.3);
 		camera.lookAt(center);
-		if ('far' in camera) {
+		if (setFar && 'far' in camera) {
 			(camera as THREE.PerspectiveCamera).far = radius * farFactor;
 			(camera as THREE.PerspectiveCamera).updateProjectionMatrix();
 		}
-	}, [camera, center, radius, distanceFactor, farFactor]);
+	}, [camera, center, radius, distanceFactor, farFactor, setFar]);
 }

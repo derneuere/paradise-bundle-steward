@@ -7,12 +7,16 @@
 // BufferGeometry (2 draw calls: fills + outlines) and use face-index
 // mapping for click/hover picking.
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Canvas, useThree, useFrame, ThreeEvent } from '@react-three/fiber';
+import { useMemo, useRef, useState, useCallback } from 'react';
+import { Canvas, useFrame, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
 import { Copy } from 'lucide-react';
+import { AutoFit } from '@/components/common/three/AutoFit';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
+import { useDismissOnOutsideInteraction } from '@/hooks/useDismissOnOutsideInteraction';
+import { useToggleHotkey } from '@/hooks/useToggleHotkey';
+import { useResetOnChange } from '@/hooks/useResetOnChange';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 import * as THREE from 'three';
@@ -74,23 +78,6 @@ function computeBounds(data: ParsedAISections): { center: THREE.Vector3; radius:
 	const sphere = new THREE.Sphere();
 	box.getBoundingSphere(sphere);
 	return { center: sphere.center, radius: Math.max(sphere.radius, 50) };
-}
-
-// ---------------------------------------------------------------------------
-// Camera auto-fit
-// ---------------------------------------------------------------------------
-
-function AutoFit({ center, radius }: { center: THREE.Vector3; radius: number }) {
-	const { camera } = useThree();
-	const fitted = useRef(false);
-	useEffect(() => {
-		if (fitted.current) return;
-		fitted.current = true;
-		const d = radius * 1.5;
-		camera.position.set(center.x, d, center.z + d * 0.3);
-		camera.lookAt(center);
-	}, [camera, center, radius]);
-	return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -618,31 +605,7 @@ function EdgeContextMenu({
 	onDuplicate: () => void;
 	onClose: () => void;
 }) {
-	useEffect(() => {
-		// Defer registration by a tick so the same mousedown that opened the
-		// menu doesn't immediately close it.
-		const handleClick = () => onClose();
-		const handleKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') onClose();
-		};
-		const handleContextMenuElsewhere = (e: MouseEvent) => {
-			// Block the browser context menu on a second right-click so the
-			// user gets their own menu replaced rather than two stacked menus.
-			e.preventDefault();
-			onClose();
-		};
-		const t = window.setTimeout(() => {
-			window.addEventListener('mousedown', handleClick);
-			window.addEventListener('keydown', handleKey);
-			window.addEventListener('contextmenu', handleContextMenuElsewhere);
-		}, 0);
-		return () => {
-			window.clearTimeout(t);
-			window.removeEventListener('mousedown', handleClick);
-			window.removeEventListener('keydown', handleKey);
-			window.removeEventListener('contextmenu', handleContextMenuElsewhere);
-		};
-	}, [onClose]);
+	useDismissOnOutsideInteraction(onClose);
 
 	return (
 		<div
@@ -703,21 +666,8 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 	// the per-frame drag callbacks don't recompute the multiply.
 	const snapRadius = useMemo(() => Math.max(radius * 0.02, 0.5), [radius]);
 
-	// `S` toggles snap mode. Skip when an editable element is focused so
-	// typing the letter into the inspector doesn't flip the toggle.
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key !== 's' && e.key !== 'S') return;
-			if (e.ctrlKey || e.metaKey || e.altKey) return;
-			const target = e.target as HTMLElement | null;
-			const tag = target?.tagName;
-			if (target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-			e.preventDefault();
-			setSnapEnabled((v) => !v);
-		};
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
-	}, []);
+	// `S` toggles snap mode.
+	useToggleHotkey('s', setSnapEnabled);
 
 	const selSection = selected ? data.sections[selected.sectionIndex] : null;
 	const hovSection = hovered ? data.sections[hovered.sectionIndex] : null;
@@ -863,12 +813,11 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 	// Reset transient edge / drag UI when the selected section changes —
 	// otherwise stale state from the previous selection (a hover, an open
 	// menu, an in-flight drag) could leak onto the new section.
-	const selectedSectionIndex = selected?.sectionIndex ?? null;
-	useEffect(() => {
+	useResetOnChange(selected?.sectionIndex ?? null, () => {
 		setHoveredEdge(null);
 		setEdgeMenu(null);
 		setDrag(null);
-	}, [selectedSectionIndex]);
+	});
 
 	const handleEdgeContextMenu = useCallback(
 		(edgeIdx: number, screenX: number, screenY: number) => {
@@ -944,7 +893,7 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 				onPointerMissed={() => onSelect(null)}
 			>
 				<color attach="background" args={['#1a1d23']} />
-				<AutoFit center={center} radius={radius} />
+				<AutoFit center={center} radius={radius} setFar={false} />
 				<ambientLight intensity={0.6} />
 				<hemisphereLight args={['#b1c8e8', '#4a3f2f', 0.3]} />
 				<directionalLight position={[10, 20, 5]} intensity={0.9} />

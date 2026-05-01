@@ -25,10 +25,19 @@ export type AutoFitProps = {
 	 *  10× radius keeps depth precision reasonable while still rendering
 	 *  the whole scene. */
 	farFactor?: number;
+	/** When false, leave the camera's `far` plane untouched. Useful when
+	 *  the Canvas already sets a `far` value the viewport wants to keep. */
+	setFar?: boolean;
 };
 
-export function AutoFit({ center, radius, distanceFactor = 1.5, farFactor = 10 }: AutoFitProps) {
+export function AutoFit({
+	center,
+	radius,
+	distanceFactor = 1.5,
+	farFactor = 10,
+	setFar = true,
+}: AutoFitProps) {
 	const { camera } = useThree();
-	useAutoFitCamera({ camera, center, radius, distanceFactor, farFactor });
+	useAutoFitCamera({ camera, center, radius, distanceFactor, farFactor, setFar });
 	return null;
 }
