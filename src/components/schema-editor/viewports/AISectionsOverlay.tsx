@@ -428,6 +428,17 @@ function EdgeHandles({
 // because that primitive binds to right-click on a DOM element; the trigger
 // here is a Three.js mesh `onContextMenu`, so we need a programmatic open.
 
+// `pointerEvents: 'auto'` is load-bearing: the WorldViewport HTML slot
+// wrapper (`useWorldViewportHtmlSlot`) sets `pointer-events: none` on its
+// container so empty overlay area doesn't eat canvas orbit / pick events.
+// CSS inheritance carries that through to position-fixed children too, so any
+// slot child that needs clicks must opt back in. Without this, the menu
+// renders but the chip's onClick never fires (issue #30). Exported for the
+// regression test that pins the pointer-events opt-in.
+export function edgeContextMenuRootStyle(x: number, y: number): React.CSSProperties {
+	return { position: 'fixed', left: x, top: y, zIndex: 1000, pointerEvents: 'auto' };
+}
+
 function EdgeContextMenu({
 	x, y, edgeIdx, onDuplicate, onClose,
 }: {
@@ -463,7 +474,7 @@ function EdgeContextMenu({
 
 	return (
 		<div
-			style={{ position: 'fixed', left: x, top: y, zIndex: 1000 }}
+			style={edgeContextMenuRootStyle(x, y)}
 			className="bg-popover text-popover-foreground border rounded-md shadow-md p-1 min-w-[16rem]"
 			onMouseDown={(e) => e.stopPropagation()}
 			onContextMenu={(e) => e.preventDefault()}

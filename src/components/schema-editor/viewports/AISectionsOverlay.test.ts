@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	aiSectionPathMarker,
 	aiSectionMarkerPath,
+	edgeContextMenuRootStyle,
 } from './AISectionsOverlay';
 import type { NodePath } from '@/lib/schema/walk';
 
@@ -68,5 +69,18 @@ describe('AISectionsOverlay', () => {
 		expect(aiSectionPathMarker(['sections'])).toBeNull();
 		expect(aiSectionPathMarker(['sections', 'notANumber'] as unknown as NodePath)).toBeNull();
 		expect(aiSectionMarkerPath(null)).toEqual([]);
+	});
+
+	// The menu rides the WorldViewport's HTML slot, whose wrapper sets
+	// `pointer-events: none` so empty overlay area doesn't eat canvas orbit /
+	// pick events. CSS inheritance carries that through to the menu's
+	// position-fixed root, so the root must opt back in or the chip's onClick
+	// never fires (issue #30 regression).
+	it('opts the edge context menu root back into pointer-events', () => {
+		const style = edgeContextMenuRootStyle(100, 200);
+		expect(style.pointerEvents).toBe('auto');
+		expect(style.position).toBe('fixed');
+		expect(style.left).toBe(100);
+		expect(style.top).toBe(200);
 	});
 });
