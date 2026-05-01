@@ -13,7 +13,8 @@
 // dropped on export. Every field is marked readOnly in the schema to
 // make that behavior visible.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useReseedVisibility } from '@/hooks/useReseedVisibility';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useFirstLoadedBundle, useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
@@ -107,18 +108,9 @@ const TexturePage = () => {
 	// the context still needs a stable visibility set so the eye icon isn't
 	// misleadingly grey. Default to "all visible"; the eye still toggles
 	// state and the picker row dims, giving the user a lightweight way to
-	// mark "don't look at this one again" on a cluttered bundle. Reseeded
-	// whenever the underlying resource set changes (e.g. load a new bundle).
-	const initBundleRef = useRef<number>(0);
+	// mark "don't look at this one again" on a cluttered bundle.
 	const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
-	useEffect(() => {
-		if (pickerCtxs.length === 0) return;
-		const bundleKey = pickerCtxs.map((c) => c.id).join('|').length;
-		if (initBundleRef.current !== bundleKey) {
-			initBundleRef.current = bundleKey;
-			setVisibleIds(new Set(pickerCtxs.map((c) => c.id)));
-		}
-	}, [pickerCtxs]);
+	useReseedVisibility(pickerCtxs, setVisibleIds);
 
 	// Sort → filter → (ensure selected row included)
 	const allEntries = useMemo<PickerEntry<ParsedTextureHeader>[]>(
@@ -141,14 +133,15 @@ const TexturePage = () => {
 	}, [sortedEntries, searchQuery, pickerConfig]);
 
 	// Seed selection on first non-empty list — prefer first parseable texture
-	// so the preview opens on something decoding-ready.
-	useEffect(() => {
-		if (selectedIndex !== -1) return;
-		if (sortedEntries.length === 0) return;
+	// so the preview opens on something decoding-ready. Set during render
+	// (React docs' "adjusting state on prop change" pattern): the
+	// `selectedIndex === -1` guard makes this run exactly once per page
+	// lifetime, so React schedules a single re-render with the seed index.
+	if (selectedIndex === -1 && sortedEntries.length > 0) {
 		const firstParsed = sortedEntries.find((e) => e.model != null);
 		const target = firstParsed ?? sortedEntries[0];
 		setSelectedIndex(target.ctx.index);
-	}, [sortedEntries, selectedIndex]);
+	}
 
 	const pickerRows = useMemo<PickerRow[]>(() => {
 		const rows = filteredEntries.map<PickerRow>((e) => ({

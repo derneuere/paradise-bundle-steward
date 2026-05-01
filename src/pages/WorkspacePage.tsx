@@ -37,7 +37,8 @@
 //   │  + Add Bundle         │                       │                  │
 //   └──────────────────────┴───────────────────────┴──────────────────┘
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
+import { useDropStaleSelection } from '@/hooks/useDropStaleSelection';
 import {
 	ResizableHandle,
 	ResizablePanel,
@@ -651,15 +652,7 @@ const WorkspacePage = () => {
 	);
 
 	// Reset selection if the bundle it pointed at is no longer loaded.
-	// Belt-and-braces: the provider's closeBundle / replace paths already
-	// clear the selection, but if a downstream caller ever drops a bundle
-	// without going through them, this keeps the inspector / viewport from
-	// reading off stale state.
-	useEffect(() => {
-		if (selection && !bundles.some((b) => b.id === selection.bundleId)) {
-			select(null);
-		}
-	}, [bundles, selection, select]);
+	useDropStaleSelection(bundles, selection, select);
 
 	if (bundles.length === 0) {
 		return (

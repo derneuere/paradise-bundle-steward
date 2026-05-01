@@ -27,7 +27,8 @@
 // selection as an amber tint so the user can see which polys they're
 // editing in context. Switching resources clears the bulk selection.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useReseedVisibility } from '@/hooks/useReseedVisibility';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -160,20 +161,11 @@ const PolygonSoupListPage = () => {
 	const [searchQuery, setSearchQuery] = useState('');
 	const [hideEmpty, setHideEmpty] = useState(false);
 
-	// Visibility state. Default everything visible when a bundle loads; a
-	// ref tracks which bundle's visibility set we have so swapping bundles
-	// re-initializes cleanly without resurrecting a prior bundle's hides.
-	const initBundleRef = useRef<number>(0);
+	// Visibility state. Default everything visible when a bundle loads;
+	// `useReseedVisibility` watches `pickerCtxs` and re-initializes cleanly
+	// across bundle swaps without resurrecting a prior bundle's hides.
 	const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
-	useEffect(() => {
-		if (pickerCtxs.length === 0) return;
-		// Reset when the PSL resource set changes (new bundle or reparse).
-		const bundleKey = pickerCtxs.map((c) => c.id).join('|').length;
-		if (initBundleRef.current !== bundleKey) {
-			initBundleRef.current = bundleKey;
-			setVisibleIds(new Set(pickerCtxs.map((c) => c.id)));
-		}
-	}, [pickerCtxs]);
+	useReseedVisibility(pickerCtxs, setVisibleIds);
 
 	// Selection lives here so the tree-embedded picker and the viewport
 	// click handler stay in sync. Seeded lazily on first non-empty models
@@ -215,16 +207,15 @@ const PolygonSoupListPage = () => {
 		});
 	}, [sortedEntries, searchQuery, hideEmpty, pickerConfig]);
 
-	// Seed selection on first non-empty entry list. Defaulting to the first
-	// sorted + populated row matches the old `firstPopulated` behavior
-	// without the extra useMemo dance.
-	useEffect(() => {
-		if (selectedIndex !== -1) return;
-		if (sortedEntries.length === 0) return;
+	// Seed selection on first non-empty entry list — prefer the first
+	// sorted + populated row. Set during render (React docs' "adjusting
+	// state on prop change" pattern): the `selectedIndex === -1` guard
+	// keeps it one-shot per page lifetime.
+	if (selectedIndex === -1 && sortedEntries.length > 0) {
 		const firstPopulated = sortedEntries.find((e) => e.model != null && e.model.soups.length > 0);
 		const target = firstPopulated ?? sortedEntries[0];
 		setSelectedIndex(target.ctx.index);
-	}, [sortedEntries, selectedIndex]);
+	}
 
 	// Always include the selected resource in the picker rows, even when a
 	// filter would hide it — otherwise the tree's subtree dangles with no
