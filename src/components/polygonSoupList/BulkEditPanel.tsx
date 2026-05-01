@@ -4,7 +4,8 @@
 // the legacy `PolygonSoupListPage` so the workspace's PSL flow can mount
 // it too — see `WorkspacePage`'s right inspector + `PSLBulkProvider`.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useResetOnChange } from '@/hooks/useResetOnChange';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -127,15 +128,15 @@ export function BulkEditPanel({
 	// When the selection becomes homogeneous for a field, seed the draft so
 	// the "Apply" button previews the value the user would leave in place.
 	// Mixed values don't overwrite the draft so the user can still type.
-	useEffect(() => {
+	useResetOnChange(summary.aiSectionIndex, () => {
 		if (summary.aiSectionIndex != null) setAiDraft(summary.aiSectionIndex);
-	}, [summary.aiSectionIndex]);
-	useEffect(() => {
+	});
+	useResetOnChange(summary.surfaceId, () => {
 		if (summary.surfaceId != null) setSurfaceDraft(String(summary.surfaceId));
-	}, [summary.surfaceId]);
-	useEffect(() => {
+	});
+	useResetOnChange(summary.trafficInfo, () => {
 		if (summary.trafficInfo != null) setTrafficDraft(String(summary.trafficInfo));
-	}, [summary.trafficInfo]);
+	});
 
 	const applyAiSection = () => {
 		if (aiDraft == null) return;
@@ -210,18 +211,21 @@ export function BulkEditPanel({
 					<div className="text-[11px] font-medium text-muted-foreground">Flags</div>
 					<div className="space-y-2">
 						<BulkFlagRow
+							key={`fatal:${summary.fatal ?? 'mixed'}`}
 							label="Fatal (wreck)"
 							value={summary.fatal}
 							onApply={(v) => applyBulk((raw) => setFlagFatal(raw, v))}
 							count={count}
 						/>
 						<BulkFlagRow
+							key={`driveable:${summary.driveable ?? 'mixed'}`}
 							label="Driveable"
 							value={summary.driveable}
 							onApply={(v) => applyBulk((raw) => setFlagDriveable(raw, v))}
 							count={count}
 						/>
 						<BulkFlagRow
+							key={`superfatal:${summary.superfatal ?? 'mixed'}`}
 							label="Superfatal"
 							value={summary.superfatal}
 							onApply={(v) => applyBulk((raw) => setFlagSuperfatal(raw, v))}
@@ -274,11 +278,10 @@ function BulkFlagRow({
 	onApply: (next: boolean) => void;
 	count: number;
 }) {
+	// Parent re-keys this row when `value` flips between non-null values,
+	// remounting and seeding `draft` afresh through the useState
+	// initializer below — so no effect is needed to follow `value`.
 	const [draft, setDraft] = useState<boolean>(value ?? false);
-
-	useEffect(() => {
-		if (value != null) setDraft(value);
-	}, [value]);
 
 	return (
 		<div className="flex items-center justify-between gap-2">
