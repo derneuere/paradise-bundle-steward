@@ -22,9 +22,12 @@
 // derived-state pattern below is ping-pong-proof because there's only one
 // direction of data flow.
 
-import { useCallback, useEffect, useMemo, useState, Suspense } from 'react';
+import { useCallback, useMemo, useState, Suspense } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
+import { useSceneEnvironment } from '@/hooks/useSceneEnvironment';
+import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
+import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
 import { useFirstLoadedBundle, useWorkspaceCompanion } from '@/context/WorkspaceContext';
@@ -169,44 +172,7 @@ function VehicleColorPicker({
 
 function SceneEnvironment() {
 	const { gl, scene } = useThree();
-	useEffect(() => {
-		const pmrem = new THREE.PMREMGenerator(gl);
-		pmrem.compileCubemapShader();
-		const envScene = new THREE.Scene();
-		const skyGeo = new THREE.SphereGeometry(50, 32, 16);
-		const skyMat = new THREE.ShaderMaterial({
-			side: THREE.BackSide,
-			uniforms: {},
-			vertexShader: `
-				varying vec3 vWorldPosition;
-				void main() {
-					vec4 worldPos = modelMatrix * vec4(position, 1.0);
-					vWorldPosition = worldPos.xyz;
-					gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-				}
-			`,
-			fragmentShader: `
-				varying vec3 vWorldPosition;
-				void main() {
-					float h = normalize(vWorldPosition).y;
-					vec3 sky = mix(vec3(0.8, 0.85, 0.9), vec3(0.5, 0.7, 1.0), max(h, 0.0));
-					vec3 ground = mix(vec3(0.4, 0.35, 0.3), vec3(0.1, 0.08, 0.06), max(-h, 0.0));
-					vec3 color = h > 0.0 ? sky : ground;
-					gl_FragColor = vec4(color, 1.0);
-				}
-			`,
-		});
-		envScene.add(new THREE.Mesh(skyGeo, skyMat));
-		const envMap = pmrem.fromScene(envScene, 0, 0.1, 100).texture;
-		scene.environment = envMap;
-		return () => {
-			envMap.dispose();
-			pmrem.dispose();
-			skyGeo.dispose();
-			skyMat.dispose();
-			scene.environment = null;
-		};
-	}, [gl, scene]);
+	useSceneEnvironment(gl, scene);
 	return null;
 }
 
@@ -589,17 +555,20 @@ function RenderableMeshes({
 		return map;
 	}, [renderables, wireframe, paintColor]);
 
-	useEffect(() => () => {
-		baseMaterial.dispose();
-		hoverMaterial.dispose();
-		selectedMaterial.dispose();
-		for (const mat of texturedMaterials.values()) {
-			mat.map?.dispose();
-			mat.normalMap?.dispose();
-			mat.roughnessMap?.dispose();
-			mat.dispose();
-		}
-	}, [baseMaterial, hoverMaterial, selectedMaterial, texturedMaterials]);
+	useDisposeOnDepsChange(
+		() => {
+			baseMaterial.dispose();
+			hoverMaterial.dispose();
+			selectedMaterial.dispose();
+			for (const mat of texturedMaterials.values()) {
+				mat.map?.dispose();
+				mat.normalMap?.dispose();
+				mat.roughnessMap?.dispose();
+				mat.dispose();
+			}
+		},
+		[baseMaterial, hoverMaterial, selectedMaterial, texturedMaterials],
+	);
 
 	// Translated-shader materials. Keyed by materialAssemblyId so shared
 	// materials produce one ShaderMaterial reused across every mesh that
@@ -679,12 +648,15 @@ function RenderableMeshes({
 		return out;
 	}, [translatedSetup, renderables]);
 
-	useEffect(() => () => {
-		for (const mat of translatedMaterialMap.values()) {
-			if (!mat) continue;
-			mat.dispose();
-		}
-	}, [translatedMaterialMap]);
+	useDisposeOnDepsChange(
+		() => {
+			for (const mat of translatedMaterialMap.values()) {
+				if (!mat) continue;
+				mat.dispose();
+			}
+		},
+		[translatedMaterialMap],
+	);
 
 	const matrices = useMemo(() => {
 		const out: (THREE.Matrix4 | null)[][] = [];
@@ -822,9 +794,7 @@ export function RenderableViewport() {
 	}, [loadedBundle, originalArrayBuffer, decoded]);
 
 	// Clear hover when the decoded set changes (different mode / LOD).
-	useEffect(() => {
-		setHovered(null);
-	}, [decoded?.decoded]);
+	useResetOnChange(decoded?.decoded, () => setHovered(null));
 
 	// Selection is a pure function of (schema path, decoded index map).
 	// Clicking in 3D writes the schema path; clicking in the tree writes
