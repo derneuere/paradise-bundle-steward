@@ -13,7 +13,7 @@
 //
 // DOM siblings (marquee, status badge) ride the WorldViewport HTML slot.
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
@@ -21,6 +21,9 @@ import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListCont
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useLineSegmentsGeometry } from '@/hooks/useLineSegmentsGeometry';
+import { useCachedColorAttribute } from '@/hooks/useCachedColorAttribute';
+import { useApplyPolygonSoupHighlight } from '@/hooks/useApplyPolygonSoupHighlight';
+import { useDisposeOnUnmount } from '@/hooks/useDisposeOnUnmount';
 import type { Edge } from '@/components/common/three/SelectionOutline';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayProps } from './WorldViewport.types';
@@ -498,35 +501,20 @@ export const PolygonSoupListOverlay = ({
 	);
 
 	const baseColorsRef = useRef<Float32Array | null>(null);
-	useEffect(() => {
-		const attr = batched.geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
-		if (!attr) return;
-		baseColorsRef.current = (attr.array as Float32Array).slice();
-	}, [batched.geometry]);
+	useCachedColorAttribute(batched.geometry, baseColorsRef);
 
-	useEffect(() => {
-		if (!baseColorsRef.current) return;
-		applyHighlight(
-			batched.geometry,
-			batched.triangleRangesByModel,
-			baseColorsRef.current,
-			batched.faceToLocation,
-			selectedModelIndex,
-			selectedPolysInCurrentModel,
-		);
-	}, [
+	useApplyPolygonSoupHighlight(
+		applyHighlight,
 		batched.geometry,
 		batched.triangleRangesByModel,
+		baseColorsRef,
 		batched.faceToLocation,
 		selectedModelIndex,
 		selectedPolysInCurrentModel,
-	]);
+	);
 
 	// Dispose GPU memory when the geometry changes or the overlay unmounts.
-	useEffect(() => {
-		const g = batched.geometry;
-		return () => { g.dispose(); };
-	}, [batched.geometry]);
+	useDisposeOnUnmount(batched.geometry);
 
 	const handleClick = (event: ThreeEvent<MouseEvent>) => {
 		// Resolve the receiver: page-level context (richer bulk-aware API)

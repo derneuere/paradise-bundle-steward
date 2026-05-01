@@ -20,10 +20,13 @@
 // pairs an inside-Canvas `<CameraBridge>` with the DOM rectangle so the
 // latter can read camera state.
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useMemo, useRef, useState, useCallback } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import { Html, Line } from '@react-three/drei';
 import { Copy, Magnet } from 'lucide-react';
+import { useDismissOnOutsideInteraction } from '@/hooks/useDismissOnOutsideInteraction';
+import { useToggleHotkey } from '@/hooks/useToggleHotkey';
+import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';
 import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
@@ -448,29 +451,7 @@ function EdgeContextMenu({
 	onDuplicate: () => void;
 	onClose: () => void;
 }) {
-	useEffect(() => {
-		// Defer registration by a tick so the same mousedown that opened the
-		// menu doesn't immediately close it.
-		const handleClick = () => onClose();
-		const handleKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') onClose();
-		};
-		const handleContextMenuElsewhere = (e: MouseEvent) => {
-			e.preventDefault();
-			onClose();
-		};
-		const t = window.setTimeout(() => {
-			window.addEventListener('mousedown', handleClick);
-			window.addEventListener('keydown', handleKey);
-			window.addEventListener('contextmenu', handleContextMenuElsewhere);
-		}, 0);
-		return () => {
-			window.clearTimeout(t);
-			window.removeEventListener('mousedown', handleClick);
-			window.removeEventListener('keydown', handleKey);
-			window.removeEventListener('contextmenu', handleContextMenuElsewhere);
-		};
-	}, [onClose]);
+	useDismissOnOutsideInteraction(onClose);
 
 	return (
 		<div
@@ -685,21 +666,8 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISections> = ({
 		return Math.max(sphere.radius * 0.02, 0.5);
 	}, [data]);
 
-	// `S` toggles snap mode. Skip when an editable element is focused so
-	// typing the letter into the inspector doesn't flip the toggle.
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key !== 's' && e.key !== 'S') return;
-			if (e.ctrlKey || e.metaKey || e.altKey) return;
-			const target = e.target as HTMLElement | null;
-			const tag = target?.tagName;
-			if (target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-			e.preventDefault();
-			setSnapEnabled((v) => !v);
-		};
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
-	}, []);
+	// `S` toggles snap mode.
+	useToggleHotkey('s', setSnapEnabled);
 
 	const scene = useMemo(() => buildBatchedSections(data.sections), [data.sections]);
 
@@ -818,11 +786,11 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISections> = ({
 	const handleCornerCancel = useCallback(() => setDrag(null), []);
 
 	// Reset transient edge / drag UI when the selected section changes.
-	useEffect(() => {
+	useResetOnChange(selectedSectionIndex, () => {
 		setHoveredEdge(null);
 		setEdgeMenu(null);
 		setDrag(null);
-	}, [selectedSectionIndex]);
+	});
 
 	const handleEdgeContextMenu = useCallback(
 		(edgeIdx: number, screenX: number, screenY: number) => {

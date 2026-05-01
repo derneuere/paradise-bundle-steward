@@ -15,10 +15,11 @@
 // and ZoneList both deliberately omit it (z-fights with their dense polys),
 // so it's a StreetData-specific decoration, not chrome default.
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useMemo, useRef, useState, useCallback } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import { Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
+import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
@@ -124,22 +125,23 @@ function RoadInstances({
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.roads.length;
 
-	useEffect(() => {
-		const mesh = meshRef.current;
-		if (!mesh) return;
-		for (let i = 0; i < count; i++) {
-			const r = data.roads[i];
-			_dummy.position.set(r.mReferencePosition.x, r.mReferencePosition.y, r.mReferencePosition.z);
-			_dummy.updateMatrix();
-			mesh.setMatrixAt(i, _dummy.matrix);
+	useUpdateInstancedMesh(
+		meshRef,
+		count,
+		(mesh) => {
+			for (let i = 0; i < count; i++) {
+				const r = data.roads[i];
+				_dummy.position.set(r.mReferencePosition.x, r.mReferencePosition.y, r.mReferencePosition.z);
+				_dummy.updateMatrix();
+				mesh.setMatrixAt(i, _dummy.matrix);
 
-			const isSel = selected?.kind === 'road' && selected.index === i;
-			const isHov = hovered?.kind === 'road' && hovered.index === i;
-			mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : ROAD_COLOR);
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [data.roads, count, selected, hovered]);
+				const isSel = selected?.kind === 'road' && selected.index === i;
+				const isHov = hovered?.kind === 'road' && hovered.index === i;
+				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : ROAD_COLOR);
+			}
+		},
+		[data.roads, count, selected, hovered],
+	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
@@ -184,31 +186,32 @@ function StreetInstances({
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.streets.length;
 
-	useEffect(() => {
-		const mesh = meshRef.current;
-		if (!mesh) return;
-		for (let i = 0; i < count; i++) {
-			const street = data.streets[i];
-			const road = data.roads[street.superSpanBase.miRoadIndex];
-			if (road) {
-				_dummy.position.set(
-					road.mReferencePosition.x + ROAD_RADIUS + STREET_SIZE * 0.8,
-					road.mReferencePosition.y + (i % 3) * STREET_SIZE * 1.2,
-					road.mReferencePosition.z,
-				);
-			} else {
-				_dummy.position.set(0, -9999, 0); // hide invalid
-			}
-			_dummy.updateMatrix();
-			mesh.setMatrixAt(i, _dummy.matrix);
+	useUpdateInstancedMesh(
+		meshRef,
+		count,
+		(mesh) => {
+			for (let i = 0; i < count; i++) {
+				const street = data.streets[i];
+				const road = data.roads[street.superSpanBase.miRoadIndex];
+				if (road) {
+					_dummy.position.set(
+						road.mReferencePosition.x + ROAD_RADIUS + STREET_SIZE * 0.8,
+						road.mReferencePosition.y + (i % 3) * STREET_SIZE * 1.2,
+						road.mReferencePosition.z,
+					);
+				} else {
+					_dummy.position.set(0, -9999, 0); // hide invalid
+				}
+				_dummy.updateMatrix();
+				mesh.setMatrixAt(i, _dummy.matrix);
 
-			const isSel = selected?.kind === 'street' && selected.index === i;
-			const isHov = hovered?.kind === 'street' && hovered.index === i;
-			mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : speedColor(street.mAiInfo.muMaxSpeedMPS));
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [data.streets, data.roads, count, selected, hovered]);
+				const isSel = selected?.kind === 'street' && selected.index === i;
+				const isHov = hovered?.kind === 'street' && hovered.index === i;
+				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : speedColor(street.mAiInfo.muMaxSpeedMPS));
+			}
+		},
+		[data.streets, data.roads, count, selected, hovered],
+	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
@@ -253,31 +256,32 @@ function JunctionInstances({
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.junctions.length;
 
-	useEffect(() => {
-		const mesh = meshRef.current;
-		if (!mesh) return;
-		for (let i = 0; i < count; i++) {
-			const junc = data.junctions[i];
-			const road = data.roads[junc.superSpanBase.miRoadIndex];
-			if (road) {
-				_dummy.position.set(
-					road.mReferencePosition.x - ROAD_RADIUS - JUNCTION_RADIUS * 0.8,
-					road.mReferencePosition.y,
-					road.mReferencePosition.z + (i % 3) * JUNCTION_RADIUS * 1.5,
-				);
-			} else {
-				_dummy.position.set(0, -9999, 0);
-			}
-			_dummy.updateMatrix();
-			mesh.setMatrixAt(i, _dummy.matrix);
+	useUpdateInstancedMesh(
+		meshRef,
+		count,
+		(mesh) => {
+			for (let i = 0; i < count; i++) {
+				const junc = data.junctions[i];
+				const road = data.roads[junc.superSpanBase.miRoadIndex];
+				if (road) {
+					_dummy.position.set(
+						road.mReferencePosition.x - ROAD_RADIUS - JUNCTION_RADIUS * 0.8,
+						road.mReferencePosition.y,
+						road.mReferencePosition.z + (i % 3) * JUNCTION_RADIUS * 1.5,
+					);
+				} else {
+					_dummy.position.set(0, -9999, 0);
+				}
+				_dummy.updateMatrix();
+				mesh.setMatrixAt(i, _dummy.matrix);
 
-			const isSel = selected?.kind === 'junction' && selected.index === i;
-			const isHov = hovered?.kind === 'junction' && hovered.index === i;
-			mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : JUNCTION_COLOR);
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [data.junctions, data.roads, count, selected, hovered]);
+				const isSel = selected?.kind === 'junction' && selected.index === i;
+				const isHov = hovered?.kind === 'junction' && hovered.index === i;
+				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : JUNCTION_COLOR);
+			}
+		},
+		[data.junctions, data.roads, count, selected, hovered],
+	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
