@@ -371,21 +371,20 @@ export function PSLBulkProvider({
 		onBulkRange,
 	]);
 
-	// PolygonSoupListContext only mounts when there's an active PSL — keeps
-	// the overlay's `usePolygonSoupListContext()` returning null on
-	// non-PSL workspaces so the marquee + 3D-pick callbacks gracefully
-	// fall back to the composition's `onPickInstancePoly` prop.
-	const overlay = pslCtxValue ? (
-		<PolygonSoupListContext.Provider value={pslCtxValue}>
-			{children}
-		</PolygonSoupListContext.Provider>
-	) : (
-		<>{children}</>
-	);
-
+	// PolygonSoupListContext.Provider is always mounted — `value` is `null`
+	// when no PSL instance is active, which `usePolygonSoupListContext()`
+	// already handles (the consumer hook returns `null` directly). Toggling
+	// between `<Provider>{children}</Provider>` and `<>{children}</>` based
+	// on whether a PSL is selected would unmount and remount every descendant
+	// of this provider — including the WorldViewport's `<Canvas>`, which
+	// snaps the camera back to its mount-time default (issue #28). Keeping
+	// the same wrapper element type across selection changes preserves the
+	// subtree.
 	return (
 		<WorkspacePSLBulkContext.Provider value={workspaceBulkValue}>
-			{overlay}
+			<PolygonSoupListContext.Provider value={pslCtxValue}>
+				{children}
+			</PolygonSoupListContext.Provider>
 		</WorkspacePSLBulkContext.Provider>
 	);
 }
