@@ -22,6 +22,12 @@ export type AutoFitCameraOptions = {
 	/** When false, leave the camera's `far` plane untouched. Useful when
 	 *  the Canvas already sets a `far` value the viewport wants to keep. */
 	setFar: boolean;
+	/** Offset factors of `d` (= radius × distanceFactor) added to `center`
+	 *  to derive the camera position. Default `(0, 1, 0.3)` produces the
+	 *  classic top-down-tilted-back framing; per-viewport overrides set
+	 *  e.g. `(0.7, 1, 0.7)` for an angled isometric or `(1, 0.6, 1)` for
+	 *  a lower-angle approach. */
+	offsetFactor: { x: number; y: number; z: number };
 };
 
 export function useAutoFitCamera({
@@ -31,17 +37,22 @@ export function useAutoFitCamera({
 	distanceFactor,
 	farFactor,
 	setFar,
+	offsetFactor,
 }: AutoFitCameraOptions): void {
 	const fitted = useRef(false);
 	useEffect(() => {
 		if (fitted.current) return;
 		fitted.current = true;
 		const d = radius * distanceFactor;
-		camera.position.set(center.x, center.y + d, center.z + d * 0.3);
+		camera.position.set(
+			center.x + d * offsetFactor.x,
+			center.y + d * offsetFactor.y,
+			center.z + d * offsetFactor.z,
+		);
 		camera.lookAt(center);
 		if (setFar && 'far' in camera) {
 			(camera as THREE.PerspectiveCamera).far = radius * farFactor;
 			(camera as THREE.PerspectiveCamera).updateProjectionMatrix();
 		}
-	}, [camera, center, radius, distanceFactor, farFactor, setFar]);
+	}, [camera, center, radius, distanceFactor, farFactor, setFar, offsetFactor]);
 }

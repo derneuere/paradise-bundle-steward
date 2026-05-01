@@ -28,7 +28,13 @@ export type AutoFitProps = {
 	/** When false, leave the camera's `far` plane untouched. Useful when
 	 *  the Canvas already sets a `far` value the viewport wants to keep. */
 	setFar?: boolean;
+	/** Offset factors of `d` (= radius × distanceFactor) added to `center`
+	 *  to derive the camera position. Default `(0, 1, 0.3)` produces the
+	 *  classic top-down-tilted-back framing. */
+	offsetFactor?: { x: number; y: number; z: number };
 };
+
+const DEFAULT_OFFSET = { x: 0, y: 1, z: 0.3 };
 
 export function AutoFit({
 	center,
@@ -36,8 +42,9 @@ export function AutoFit({
 	distanceFactor = 1.5,
 	farFactor = 10,
 	setFar = true,
+	offsetFactor = DEFAULT_OFFSET,
 }: AutoFitProps) {
 	const { camera } = useThree();
-	useAutoFitCamera({ camera, center, radius, distanceFactor, farFactor, setFar });
+	useAutoFitCamera({ camera, center, radius, distanceFactor, farFactor, setFar, offsetFactor });
 	return null;
 }

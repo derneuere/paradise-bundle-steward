@@ -5,11 +5,13 @@
 // call) with per-instance color. Picking uses instanceId. Wireframe edges are
 // only rendered for the selected/hovered box.
 
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
+import React, { useMemo, useRef, useState, useCallback } from 'react';
+import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
+import { AutoFit } from '@/components/common/three/AutoFit';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
+import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 import * as THREE from 'three';
@@ -116,19 +118,6 @@ function computeBounds(data: ParsedTriggerData): { center: THREE.Vector3; radius
 // Camera auto-fit
 // ---------------------------------------------------------------------------
 
-function AutoFit({ center, radius }: { center: THREE.Vector3; radius: number }) {
-	const { camera } = useThree();
-	const fitted = useRef(false);
-	useEffect(() => {
-		if (fitted.current) return;
-		fitted.current = true;
-		const d = radius * 1.8;
-		camera.position.set(center.x + d * 0.7, center.y + d, center.z + d * 0.7);
-		camera.lookAt(center);
-	}, [camera, center, radius]);
-	return null;
-}
-
 // ---------------------------------------------------------------------------
 // Batched region boxes — single InstancedMesh for ALL box regions
 // ---------------------------------------------------------------------------
@@ -155,24 +144,25 @@ function BatchedRegionBoxes({
 	const count = regions.length;
 
 	// Set instance transforms + colors
-	useEffect(() => {
-		const mesh = meshRef.current;
-		if (!mesh || count === 0) return;
-		for (let i = 0; i < count; i++) {
-			const r = regions[i];
-			_dummy.position.set(r.box.position.x, r.box.position.y, r.box.position.z);
-			_dummy.rotation.set(r.box.rotation.x, r.box.rotation.y, r.box.rotation.z);
-			_dummy.scale.set(r.box.dimensions.x || 1, r.box.dimensions.y || 1, r.box.dimensions.z || 1);
-			_dummy.updateMatrix();
-			mesh.setMatrixAt(i, _dummy.matrix);
+	useUpdateInstancedMesh(
+		meshRef,
+		count,
+		(mesh) => {
+			for (let i = 0; i < count; i++) {
+				const r = regions[i];
+				_dummy.position.set(r.box.position.x, r.box.position.y, r.box.position.z);
+				_dummy.rotation.set(r.box.rotation.x, r.box.rotation.y, r.box.rotation.z);
+				_dummy.scale.set(r.box.dimensions.x || 1, r.box.dimensions.y || 1, r.box.dimensions.z || 1);
+				_dummy.updateMatrix();
+				mesh.setMatrixAt(i, _dummy.matrix);
 
-			const isSel = selected?.kind === r.kind && selected.index === r.index;
-			const isHov = hovered?.kind === r.kind && hovered.index === r.index;
-			mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : r.color);
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [regions, count, selected, hovered]);
+				const isSel = selected?.kind === r.kind && selected.index === r.index;
+				const isHov = hovered?.kind === r.kind && hovered.index === r.index;
+				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : r.color);
+			}
+		},
+		[regions, count, selected, hovered],
+	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
@@ -317,20 +307,21 @@ function RoamingDots({
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.roamingLocations.length;
 
-	useEffect(() => {
-		const mesh = meshRef.current;
-		if (!mesh || count === 0) return;
-		for (let i = 0; i < count; i++) {
-			const rl = data.roamingLocations[i];
-			_roamDummy.position.set(rl.position.x, rl.position.y, rl.position.z);
-			_roamDummy.updateMatrix();
-			mesh.setMatrixAt(i, _roamDummy.matrix);
-			const isSel = selected?.kind === 'roaming' && selected.index === i;
-			mesh.setColorAt(i, isSel ? ROAM_SEL_COLOR : ROAM_COLOR);
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [data.roamingLocations, count, selected]);
+	useUpdateInstancedMesh(
+		meshRef,
+		count,
+		(mesh) => {
+			for (let i = 0; i < count; i++) {
+				const rl = data.roamingLocations[i];
+				_roamDummy.position.set(rl.position.x, rl.position.y, rl.position.z);
+				_roamDummy.updateMatrix();
+				mesh.setMatrixAt(i, _roamDummy.matrix);
+				const isSel = selected?.kind === 'roaming' && selected.index === i;
+				mesh.setColorAt(i, isSel ? ROAM_SEL_COLOR : ROAM_COLOR);
+			}
+		},
+		[data.roamingLocations, count, selected],
+	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
@@ -444,7 +435,13 @@ export const TriggerDataViewport: React.FC<Props> = ({ data, onChange, selected,
 				onPointerMissed={() => onSelect(null)}
 			>
 				<color attach="background" args={['#1a1d23']} />
-				<AutoFit center={center} radius={radius} />
+				<AutoFit
+					center={center}
+					radius={radius}
+					distanceFactor={1.8}
+					offsetFactor={{ x: 0.7, y: 1, z: 0.7 }}
+					setFar={false}
+				/>
 				<ambientLight intensity={0.5} />
 				<hemisphereLight args={['#b1c8e8', '#4a3f2f', 0.3]} />
 				<directionalLight position={[10, 20, 5]} intensity={0.9} />

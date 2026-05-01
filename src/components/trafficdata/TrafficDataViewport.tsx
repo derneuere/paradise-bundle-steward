@@ -8,7 +8,7 @@
 // triggers, and static vehicles use InstancedMesh with global
 // instance-to-hull mappings for picking.
 
-import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
+import { useMemo, useRef, useCallback, useState } from 'react';
 import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -18,8 +18,12 @@ import {
 	type TrafficDataSelection,
 } from './useTrafficSelection';
 import { buildRungToSectionMap, speedToRGB } from './constants';
+import { AutoFit } from '@/components/common/three/AutoFit';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
+import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
+import { useApplyMatrixToObject } from '@/hooks/useApplyMatrixToObject';
+import { useFlyCameraToTarget } from '@/hooks/useFlyCameraToTarget';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 
@@ -56,19 +60,6 @@ export function computeAllBounds(hulls: TrafficHull[]): { center: THREE.Vector3;
 // Camera auto-fit
 // ---------------------------------------------------------------------------
 
-function AutoFit({ center, radius }: { center: THREE.Vector3; radius: number }) {
-	const { camera } = useThree();
-	const fitted = useRef(false);
-	useEffect(() => {
-		if (fitted.current) return;
-		fitted.current = true;
-		const d = radius * 1.5;
-		camera.position.set(center.x, d, center.z + d * 0.3);
-		camera.lookAt(center);
-	}, [camera, center, radius]);
-	return null;
-}
-
 // When the selection changes to a static vehicle, fly the camera over so the
 // highlighted box is actually on-screen. Without this, clicking a vehicle in
 // the list leaves the viewport wherever it was last aimed and you never see
@@ -76,25 +67,17 @@ function AutoFit({ center, radius }: { center: THREE.Vector3; radius: number }) 
 // sub-types (sections, junctions, etc.) doesn't move the camera.
 export function FocusOnVehicle({ hulls, selected }: { hulls: TrafficHull[]; selected: TrafficDataSelection }) {
 	const { camera, controls } = useThree() as { camera: THREE.Camera; controls: { target: THREE.Vector3; update: () => void } | null };
-	useEffect(() => {
-		if (selected?.sub?.type !== 'staticVehicle') return;
+	// Translation at mT[12..14] (RwMatrix layout). 60 units away is ~10
+	// car lengths — close enough to see the selection scaling and the
+	// label.
+	const target = useMemo<THREE.Vector3 | null>(() => {
+		if (selected?.sub?.type !== 'staticVehicle') return null;
 		const hull = hulls[selected.hullIndex];
 		const sv = hull?.staticTrafficVehicles[selected.sub.index];
-		if (!sv) return;
-		// Translation at mT[12..14] (RwMatrix layout).
-		const target = new THREE.Vector3(sv.mTransform[12], sv.mTransform[13], sv.mTransform[14]);
-		// Pull camera back along its existing view direction so we keep the
-		// user's current angle rather than jump-cutting. 60 units is ~10 car
-		// lengths — close enough to see the selection scaling and the label.
-		const dir = new THREE.Vector3().subVectors(camera.position, controls?.target ?? target).normalize();
-		camera.position.copy(target).addScaledVector(dir, 60);
-		if (controls) {
-			controls.target.copy(target);
-			controls.update();
-		} else {
-			camera.lookAt(target);
-		}
-	}, [hulls, selected, camera, controls]);
+		if (!sv) return null;
+		return new THREE.Vector3(sv.mTransform[12], sv.mTransform[13], sv.mTransform[14]);
+	}, [hulls, selected]);
+	useFlyCameraToTarget(camera, controls, target, 60);
 	return null;
 }
 
@@ -583,44 +566,46 @@ export function AllStaticVehicleInstances({
 		return m;
 	}, [hulls]);
 
-	// useEffect (not useMemo) so the ref is guaranteed attached. useMemo runs
-	// during render, before commit, so meshRef.current is null on the initial
-	// render and the early-return skips writing matrices/colors entirely —
-	// leaving every vehicle parked at origin with the default white.
-	useEffect(() => {
-		if (!meshRef.current || totalCount === 0) return;
-		const mesh = meshRef.current;
-		const mat = new THREE.Matrix4();
-		for (let i = 0; i < mapping.length; i++) {
-			const { hullIndex, localIndex } = mapping[i];
-			const sv = hulls[hullIndex].staticTrafficVehicles[localIndex];
-			// mTransform is an RwMatrix: four rows of (Vec3 + 4-byte pad),
-			// translation at [12..14]. That layout is column-major from
-			// THREE's perspective, so fromArray maps it directly — elements
-			// [12..14] become THREE's translation column. We then patch the
-			// bottom row to [0,0,0,1] because the pad slots ([3],[7],[11],
-			// [15]) are zero in the source, which would give a degenerate
-			// w on the homogeneous multiply.
-			mat.fromArray(sv.mTransform);
-			const e = mat.elements;
-			e[3] = 0; e[7] = 0; e[11] = 0; e[15] = 1;
+	// Effect (not memo) — useMemo runs during render before commit, so
+	// `meshRef.current` is null on the initial render and the writes
+	// would skip entirely, leaving every vehicle parked at origin with
+	// default white. `useUpdateInstancedMesh` handles the post-commit
+	// timing via useEffect.
+	useUpdateInstancedMesh(
+		meshRef,
+		totalCount,
+		(mesh) => {
+			const mat = new THREE.Matrix4();
+			for (let i = 0; i < mapping.length; i++) {
+				const { hullIndex, localIndex } = mapping[i];
+				const sv = hulls[hullIndex].staticTrafficVehicles[localIndex];
+				// mTransform is an RwMatrix: four rows of (Vec3 + 4-byte pad),
+				// translation at [12..14]. That layout is column-major from
+				// THREE's perspective, so fromArray maps it directly —
+				// elements [12..14] become THREE's translation column. We
+				// then patch the bottom row to [0,0,0,1] because the pad
+				// slots ([3],[7],[11],[15]) are zero in the source, which
+				// would give a degenerate w on the homogeneous multiply.
+				mat.fromArray(sv.mTransform);
+				const e = mat.elements;
+				e[3] = 0; e[7] = 0; e[11] = 0; e[15] = 1;
 
-			const isSel =
-				selected?.hullIndex === hullIndex &&
-				selected.sub?.type === 'staticVehicle' &&
-				selected.sub.index === localIndex;
-			mesh.setMatrixAt(i, mat);
+				const isSel =
+					selected?.hullIndex === hullIndex &&
+					selected.sub?.type === 'staticVehicle' &&
+					selected.sub.index === localIndex;
+				mesh.setMatrixAt(i, mat);
 
-			const color = isSel
-				? vehicleSelectedColor
-				: hullIndex === activeHullIndex
-					? vehicleActiveColor
-					: vehicleInactiveColor;
-			mesh.setColorAt(i, color);
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [hulls, mapping, totalCount, activeHullIndex, selected]);
+				const color = isSel
+					? vehicleSelectedColor
+					: hullIndex === activeHullIndex
+						? vehicleActiveColor
+						: vehicleInactiveColor;
+				mesh.setColorAt(i, color);
+			}
+		},
+		[hulls, mapping, totalCount, activeHullIndex, selected],
+	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
@@ -657,12 +642,7 @@ export function SelectedVehicleOutline({ hulls, selected }: { hulls: TrafficHull
 		return mat;
 	}, [hulls, selected]);
 
-	useEffect(() => {
-		if (!lineRef.current || !matrix) return;
-		lineRef.current.matrix.copy(matrix);
-		lineRef.current.matrixAutoUpdate = false;
-		lineRef.current.updateMatrixWorld(true);
-	}, [matrix]);
+	useApplyMatrixToObject(lineRef, matrix);
 
 	if (!matrix) return null;
 	return (
@@ -1179,7 +1159,7 @@ export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, se
 				onPointerMissed={() => { /* deselect only on clicks outside the canvas */ }}
 			>
 				<color attach="background" args={['#1a1d23']} />
-				<AutoFit center={center} radius={radius} />
+				<AutoFit center={center} radius={radius} setFar={false} />
 				<FocusOnVehicle hulls={hulls} selected={selected} />
 				<ambientLight intensity={0.5} />
 				<hemisphereLight args={['#b1c8e8', '#4a3f2f', 0.4]} />
