@@ -7,6 +7,7 @@
 // state to these and dispatches toasts.
 
 import type { HistoryStack } from '@/lib/history';
+import { isVisibilityRelevantKey } from '@/components/workspace/WorkspaceHierarchy.helpers';
 import type {
 	BundleId,
 	EditableBundle,
@@ -73,6 +74,137 @@ export function visibilityKeysForBundle(
 		}
 	}
 	return out;
+}
+
+// ---------------------------------------------------------------------------
+// Solo gesture (issue #26) — alt+click on a visibility eye hides every peer
+// at the same level inside the same Bundle, and force-shows the soloed
+// node's ancestors so it's guaranteed to render. A second alt-press while
+// the node is the only visible peer restores full visibility within scope.
+// ---------------------------------------------------------------------------
+
+/**
+ * Peers at the same scope as `node` that solo would hide. Visibility-relevant
+ * resource types only — non-relevant keys never get an eye icon, so hiding
+ * them here would be a meaningless write to the visibility map.
+ */
+function peerNodesFor(
+	bundles: readonly EditableBundle[],
+	node: VisibilityNode,
+): VisibilityNode[] {
+	if ('index' in node) {
+		// Instance solo hides (a) every other resource type in this Bundle and
+		// (b) every other instance inside the soloed node's resource type — see
+		// issue #26 acceptance criterion 1.
+		const bundle = bundles.find((b) => b.id === node.bundleId);
+		if (!bundle) return [];
+		const peers: VisibilityNode[] = [];
+		for (const [key, list] of bundle.parsedResourcesAll) {
+			if (!isVisibilityRelevantKey(key)) continue;
+			if (list.length === 0) continue;
+			if (key === node.resourceKey) {
+				for (let i = 0; i < list.length; i++) {
+					if (i === node.index) continue;
+					peers.push({ bundleId: node.bundleId, resourceKey: key, index: i });
+				}
+			} else {
+				peers.push({ bundleId: node.bundleId, resourceKey: key });
+			}
+		}
+		return peers;
+	}
+	if ('resourceKey' in node) {
+		const bundle = bundles.find((b) => b.id === node.bundleId);
+		if (!bundle) return [];
+		const peers: VisibilityNode[] = [];
+		for (const [key, list] of bundle.parsedResourcesAll) {
+			if (key === node.resourceKey) continue;
+			if (!isVisibilityRelevantKey(key)) continue;
+			if (list.length === 0) continue;
+			peers.push({ bundleId: node.bundleId, resourceKey: key });
+		}
+		return peers;
+	}
+	return bundles.filter((b) => b.id !== node.bundleId).map((b) => ({ bundleId: b.id }));
+}
+
+/**
+ * True if `node` is the only visible peer at its scope. The detection mirrors
+ * what `applySolo` would have produced — visible self, every peer hidden via
+ * the cascade. Used by the gesture handler to decide whether the second alt-
+ * click should restore full visibility or treat the press as a fresh solo.
+ */
+export function isSoloed(
+	visibility: ReadonlyMap<VisibilityKey, boolean>,
+	bundles: readonly EditableBundle[],
+	node: VisibilityNode,
+): boolean {
+	if (!isVisibleIn(visibility, node)) return false;
+	const peers = peerNodesFor(bundles, node);
+	for (const peer of peers) {
+		if (isVisibleIn(visibility, peer)) return false;
+	}
+	// No peers and node visible counts as soloed — alt-clicking again at that
+	// point clears any stale within-scope `false` entries the user accumulated
+	// before, which matches the legacy PSL "alt to flip back to all visible."
+	return true;
+}
+
+function applySolo(
+	visibility: ReadonlyMap<VisibilityKey, boolean>,
+	bundles: readonly EditableBundle[],
+	node: VisibilityNode,
+): Map<VisibilityKey, boolean> {
+	const next = new Map(visibility);
+	// Force the soloed node's path visible. Cascade is one-way — an explicit
+	// `false` on an ancestor would shadow the soloed node, so we drop those
+	// outright. The own-key delete also clears any stale `false` left from a
+	// prior plain-click hide.
+	next.delete(visibilityKey(node));
+	for (const k of ancestorKeys(node)) next.delete(k);
+	for (const peer of peerNodesFor(bundles, node)) {
+		next.set(visibilityKey(peer), false);
+	}
+	return next;
+}
+
+function restoreFromSolo(
+	visibility: ReadonlyMap<VisibilityKey, boolean>,
+	bundles: readonly EditableBundle[],
+	node: VisibilityNode,
+): Map<VisibilityKey, boolean> {
+	const next = new Map(visibility);
+	if ('resourceKey' in node || 'index' in node) {
+		// Resource-type or Instance un-solo: restore full visibility within the
+		// Bundle (issue #26 says scope is the Bundle, never crosses Bundles).
+		const prefix = `${node.bundleId}::`;
+		for (const k of [...next.keys()]) {
+			if (k === node.bundleId || k.startsWith(prefix)) next.delete(k);
+		}
+		return next;
+	}
+	// Bundle un-solo: drop every Bundle-id key so all loaded bundles default
+	// back to visible. Within-bundle entries stay — restoring "all bundles"
+	// shouldn't wipe per-instance hides the user set inside any one bundle.
+	for (const b of bundles) next.delete(b.id);
+	return next;
+}
+
+/**
+ * Toggle the solo state of `node`. If the node is already the only visible
+ * peer at its scope, restores full visibility within scope; otherwise applies
+ * solo. Single state update so React batches the visibility map change as one
+ * commit (no flash of intermediate visibility).
+ */
+export function toggleSoloVisibility(
+	visibility: ReadonlyMap<VisibilityKey, boolean>,
+	bundles: readonly EditableBundle[],
+	node: VisibilityNode,
+): Map<VisibilityKey, boolean> {
+	if (isSoloed(visibility, bundles, node)) {
+		return restoreFromSolo(visibility, bundles, node);
+	}
+	return applySolo(visibility, bundles, node);
 }
 
 // ---------------------------------------------------------------------------

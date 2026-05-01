@@ -315,6 +315,16 @@ export type WorkspaceContextValue = {
 	 */
 	setVisibility: (node: VisibilityNode, visible: boolean) => void;
 
+	/**
+	 * Solo `node`: hide every peer at the same scope inside the same Bundle
+	 * (Bundle never crosses Bundles), force-show the soloed node's ancestors
+	 * so it's guaranteed to render, and clear any stale `false` on the node
+	 * itself. A second call on the already-soloed node restores full
+	 * visibility within scope. Drives the alt+click gesture on the unified
+	 * Workspace tree (issue #26).
+	 */
+	soloVisibility: (node: VisibilityNode) => void;
+
 	// -------------------------------------------------------------------------
 	// Undo/redo — single global Workspace stack (ADR-0006)
 	// -------------------------------------------------------------------------

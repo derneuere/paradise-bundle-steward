@@ -62,21 +62,28 @@ function VisibilityToggle({
 	node: VisibilityNode;
 	label: string;
 }) {
-	const { isVisible, setVisibility } = useWorkspace();
+	const { isVisible, setVisibility, soloVisibility } = useWorkspace();
 	const visible = isVisible(node);
+	// Alt+click solos this node within its Bundle — second alt-press on the
+	// already-soloed eye restores full visibility (see issue #26). Plain click
+	// stays as the per-node visibility toggle.
 	const onClick = useCallback(
 		(e: React.MouseEvent) => {
 			e.stopPropagation();
+			if (e.altKey) {
+				soloVisibility(node);
+				return;
+			}
 			setVisibility(node, !visible);
 		},
-		[node, visible, setVisibility],
+		[node, visible, setVisibility, soloVisibility],
 	);
 	return (
 		<button
 			type="button"
 			onClick={onClick}
 			className="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-			title={visible ? `Hide ${label}` : `Show ${label}`}
+			title={`${visible ? `Hide ${label}` : `Show ${label}`} — alt+click to solo`}
 			aria-label={visible ? `Hide ${label}` : `Show ${label}`}
 			aria-pressed={visible}
 		>
