@@ -27,9 +27,10 @@
 // viewport runs its own per-item containsPoint test against the frustum
 // — keeps this component free of any data-shape assumptions.
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import * as THREE from 'three';
 import { buildMarqueeFrustum } from '@/lib/three/marqueeFrustum';
+import { useMarqueeActivation } from '@/hooks/useMarqueeActivation';
 import type { CameraBridgeData } from './CameraBridge';
 
 export type MarqueeMode = 'add' | 'remove';
@@ -70,7 +71,6 @@ export function MarqueeSelector({
 	hintActive: hintActiveProp,
 }: MarqueeSelectorProps) {
 	const overlayRef = useRef<HTMLDivElement>(null);
-	const [active, setActive] = useState(false);
 	const [drag, setDrag] = useState<{
 		startX: number;
 		startY: number;
@@ -79,7 +79,11 @@ export function MarqueeSelector({
 		pointerId: number;
 	} | null>(null);
 
-	const keyLower = activationKey.toLowerCase();
+	// Aborting the in-flight drag on deactivate (key toggle off OR Escape)
+	// prevents a leaked pointer capture or stale rectangle next time the
+	// user enters marquee mode.
+	const active = useMarqueeActivation(activationKey, () => setDrag(null));
+
 	const keyUpper = activationKey.toUpperCase();
 	const hintIdle = hintIdleProp === undefined
 		? `press ${keyUpper} for box select`
@@ -87,39 +91,6 @@ export function MarqueeSelector({
 	const hintActive = hintActiveProp === undefined
 		? `box select on — drag to add (alt = remove) · ${keyUpper} / Esc to exit`
 		: hintActiveProp;
-
-	// Toggle on the activation key, exit on Escape. Listening on window
-	// (not the overlay) so the keystroke works regardless of where focus
-	// is in the page. Ignore key events that originate inside an editable
-	// element so typing the key into an input field doesn't toggle mode.
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			const target = e.target as HTMLElement | null;
-			const tag = target?.tagName;
-			const isEditable =
-				target?.isContentEditable ||
-				tag === 'INPUT' ||
-				tag === 'TEXTAREA' ||
-				tag === 'SELECT';
-			if (isEditable) return;
-			const lower = e.key.toLowerCase();
-			if (lower === keyLower) {
-				e.preventDefault();
-				setActive((a) => !a);
-			} else if (e.key === 'Escape') {
-				setActive(false);
-				setDrag(null);
-			}
-		};
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
-	}, [keyLower]);
-
-	// If the user toggles off mid-drag, abort cleanly so we don't leak
-	// pointer capture or render a stale rectangle next time.
-	useEffect(() => {
-		if (!active) setDrag(null);
-	}, [active]);
 
 	const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
 		if (!active || e.button !== 0) return;

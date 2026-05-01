@@ -18,9 +18,13 @@
 // AISection wiring lives in the viewport; this component just produces
 // `{ x, z }` deltas.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import * as THREE from 'three';
 import { ThreeEvent, useFrame, useThree } from '@react-three/fiber';
+import {
+	useTranslateGizmoDrag,
+	unprojectToGroundPlane,
+} from '@/hooks/useTranslateGizmoDrag';
 
 // =============================================================================
 // Types
@@ -106,72 +110,21 @@ export const TranslateGizmo: React.FC<TranslateGizmoProps> = ({
 		group.scale.setScalar(targetWorldSize / DESIGN_SIZE);
 	});
 
-	// Window-level listeners only mount while a drag is in flight. R3F's
-	// per-mesh pointer events stop firing once the cursor leaves the arrow,
-	// which would freeze the preview as soon as the user drags far enough
-	// to fall off the hit cylinder. Listening on the window sidesteps that
-	// while still letting us cleanly tear down on release.
-	useEffect(() => {
-		if (!active) return;
-
-		// `controls` is `THREE.EventDispatcher | null` in r3f's typing, but
-		// when Drei's <OrbitControls makeDefault /> is mounted (as it is in
-		// every viewport in this repo) it's the live OrbitControls instance.
-		const oc = controls as unknown as { enabled: boolean } | null;
-		const prevEnabled = oc?.enabled ?? true;
-		if (oc) oc.enabled = false;
-
-		const handleMove = (e: PointerEvent) => {
-			const drag = dragStart.current;
-			if (!drag) return;
-			const world = unprojectToGroundPlane(
-				e.clientX,
-				e.clientY,
-				camera,
-				gl.domElement,
-				planeY,
-			);
-			if (!world) return;
-			onTranslate(constrainToAxis(drag.axis, drag.world, world));
-		};
-
-		const handleUp = (e: PointerEvent) => {
-			const drag = dragStart.current;
-			if (!drag) return;
-			const world = unprojectToGroundPlane(
-				e.clientX,
-				e.clientY,
-				camera,
-				gl.domElement,
-				planeY,
-			);
-			const offset = world
-				? constrainToAxis(drag.axis, drag.world, world)
-				: { x: 0, z: 0 };
-			dragStart.current = null;
-			setActive(null);
-			onCommit(offset);
-		};
-
-		const handleKey = (e: KeyboardEvent) => {
-			if (e.key !== 'Escape') return;
-			dragStart.current = null;
-			setActive(null);
-			// Tell the consumer to roll back any preview state.
-			onTranslate({ x: 0, z: 0 });
-			onCancel?.();
-		};
-
-		window.addEventListener('pointermove', handleMove);
-		window.addEventListener('pointerup', handleUp);
-		window.addEventListener('keydown', handleKey);
-		return () => {
-			window.removeEventListener('pointermove', handleMove);
-			window.removeEventListener('pointerup', handleUp);
-			window.removeEventListener('keydown', handleKey);
-			if (oc) oc.enabled = prevEnabled;
-		};
-	}, [active, camera, gl, controls, planeY, onTranslate, onCommit, onCancel]);
+	// `controls` is `THREE.EventDispatcher | null` in r3f's typing, but
+	// when Drei's <OrbitControls makeDefault /> is mounted (as it is in
+	// every viewport in this repo) it's the live OrbitControls instance.
+	useTranslateGizmoDrag({
+		active,
+		camera,
+		canvas: gl.domElement,
+		controls: controls as unknown as { enabled: boolean } | null,
+		planeY,
+		dragStart,
+		onTranslate,
+		onCommit,
+		onCancel,
+		setActive,
+	});
 
 	const beginDrag = (axis: Axis) => (e: ThreeEvent<PointerEvent>) => {
 		e.stopPropagation();
@@ -188,11 +141,6 @@ export const TranslateGizmo: React.FC<TranslateGizmoProps> = ({
 		setActive(axis);
 		document.body.style.cursor = axis === 'free' ? 'move' : 'grabbing';
 	};
-
-	// Restore the cursor whenever the active drag releases.
-	useEffect(() => {
-		if (!active) document.body.style.cursor = 'auto';
-	}, [active]);
 
 	const xColor = active === 'x' || hover === 'x' ? COLOR.xHot : COLOR.x;
 	const zColor = active === 'z' || hover === 'z' ? COLOR.zHot : COLOR.z;
@@ -313,38 +261,3 @@ const Arrow: React.FC<ArrowProps> = ({
 	);
 };
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-function unprojectToGroundPlane(
-	clientX: number,
-	clientY: number,
-	camera: THREE.Camera,
-	canvas: HTMLCanvasElement,
-	planeY: number,
-): THREE.Vector3 | null {
-	const rect = canvas.getBoundingClientRect();
-	const ndc = new THREE.Vector2(
-		((clientX - rect.left) / rect.width) * 2 - 1,
-		-((clientY - rect.top) / rect.height) * 2 + 1,
-	);
-	const raycaster = new THREE.Raycaster();
-	raycaster.setFromCamera(ndc, camera);
-	const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
-	const hit = new THREE.Vector3();
-	const ok = raycaster.ray.intersectPlane(plane, hit);
-	return ok ? hit : null;
-}
-
-function constrainToAxis(
-	axis: Axis,
-	start: THREE.Vector3,
-	current: THREE.Vector3,
-): GizmoOffset {
-	const dx = current.x - start.x;
-	const dz = current.z - start.z;
-	if (axis === 'x') return { x: dx, z: 0 };
-	if (axis === 'z') return { x: 0, z: dz };
-	return { x: dx, z: dz };
-}

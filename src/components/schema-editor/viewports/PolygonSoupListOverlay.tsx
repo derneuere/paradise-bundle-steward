@@ -20,7 +20,8 @@ import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygon
 import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
-import { useLineSegmentsGeometry, type Edge } from '@/components/common/three/SelectionOutline';
+import { useLineSegmentsGeometry } from '@/hooks/useLineSegmentsGeometry';
+import type { Edge } from '@/components/common/three/SelectionOutline';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayProps } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
