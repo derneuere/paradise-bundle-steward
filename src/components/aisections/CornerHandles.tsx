@@ -18,9 +18,11 @@
 // would forward those onto a Three.js intrinsic where R3F's applyProps
 // crashes on the dashed prop names. See note in TranslateGizmo.tsx.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import * as THREE from 'three';
 import { ThreeEvent, useFrame, useThree } from '@react-three/fiber';
+import { useCornerDrag } from '@/hooks/useCornerDrag';
+import { unprojectToGroundPlane } from '@/lib/three/groundPlane';
 import type { AISection } from '@/lib/core/aiSections';
 
 // =============================================================================
@@ -109,61 +111,17 @@ export const CornerHandles: React.FC<Props> = ({
 		}
 	});
 
-	useEffect(() => {
-		if (active === null) return;
-
-		const oc = controls as unknown as { enabled: boolean } | null;
-		const prevEnabled = oc?.enabled ?? true;
-		if (oc) oc.enabled = false;
-
-		const handleMove = (e: PointerEvent) => {
-			const drag = dragRef.current;
-			if (!drag) return;
-			const world = unprojectToGroundPlane(e.clientX, e.clientY, camera, gl.domElement, 0);
-			if (!world) return;
-			onDrag(drag.cornerIdx, {
-				x: world.x - drag.startWorld.x,
-				z: world.z - drag.startWorld.z,
-			});
-		};
-
-		const handleUp = (e: PointerEvent) => {
-			const drag = dragRef.current;
-			if (!drag) return;
-			const world = unprojectToGroundPlane(e.clientX, e.clientY, camera, gl.domElement, 0);
-			const offset = world
-				? { x: world.x - drag.startWorld.x, z: world.z - drag.startWorld.z }
-				: { x: 0, z: 0 };
-			dragRef.current = null;
-			setActive(null);
-			onCommit(drag.cornerIdx, offset);
-		};
-
-		const handleKey = (e: KeyboardEvent) => {
-			if (e.key !== 'Escape') return;
-			const drag = dragRef.current;
-			if (!drag) return;
-			dragRef.current = null;
-			setActive(null);
-			// Rewind the consumer's preview state.
-			onDrag(drag.cornerIdx, { x: 0, z: 0 });
-			onCancel?.();
-		};
-
-		window.addEventListener('pointermove', handleMove);
-		window.addEventListener('pointerup', handleUp);
-		window.addEventListener('keydown', handleKey);
-		return () => {
-			window.removeEventListener('pointermove', handleMove);
-			window.removeEventListener('pointerup', handleUp);
-			window.removeEventListener('keydown', handleKey);
-			if (oc) oc.enabled = prevEnabled;
-		};
-	}, [active, camera, gl, controls, onDrag, onCommit, onCancel]);
-
-	useEffect(() => {
-		if (active === null) document.body.style.cursor = 'auto';
-	}, [active]);
+	useCornerDrag({
+		active,
+		camera,
+		canvas: gl.domElement,
+		controls: controls as unknown as { enabled: boolean } | null,
+		dragRef,
+		onDrag,
+		onCommit,
+		onCancel,
+		setActive,
+	});
 
 	const beginDrag = (cornerIdx: number) => (e: ThreeEvent<PointerEvent>) => {
 		e.stopPropagation();
@@ -216,26 +174,3 @@ export const CornerHandles: React.FC<Props> = ({
 	);
 };
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-function unprojectToGroundPlane(
-	clientX: number,
-	clientY: number,
-	camera: THREE.Camera,
-	canvas: HTMLCanvasElement,
-	planeY: number,
-): THREE.Vector3 | null {
-	const rect = canvas.getBoundingClientRect();
-	const ndc = new THREE.Vector2(
-		((clientX - rect.left) / rect.width) * 2 - 1,
-		-((clientY - rect.top) / rect.height) * 2 + 1,
-	);
-	const raycaster = new THREE.Raycaster();
-	raycaster.setFromCamera(ndc, camera);
-	const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
-	const hit = new THREE.Vector3();
-	const ok = raycaster.ray.intersectPlane(plane, hit);
-	return ok ? hit : null;
-}

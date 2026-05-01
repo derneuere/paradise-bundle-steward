@@ -21,10 +21,8 @@
 import React, { useRef, useState } from 'react';
 import * as THREE from 'three';
 import { ThreeEvent, useFrame, useThree } from '@react-three/fiber';
-import {
-	useTranslateGizmoDrag,
-	unprojectToGroundPlane,
-} from '@/hooks/useTranslateGizmoDrag';
+import { useTranslateGizmoDrag } from '@/hooks/useTranslateGizmoDrag';
+import { unprojectToGroundPlane } from '@/lib/three/groundPlane';
 
 // =============================================================================
 // Types
