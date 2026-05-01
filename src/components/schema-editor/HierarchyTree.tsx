@@ -32,7 +32,9 @@
 //      previously-selected and newly-selected rows actually re-render;
 //      every other visible row bails out on shallow-equal props.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useScrollToVirtualRow } from '@/hooks/useScrollToVirtualRow';
+import { useEnsureMapEntry } from '@/hooks/useEnsureMapEntry';
 import { ChevronDown, ChevronRight, Eye, EyeOff, Search } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/utils';
@@ -293,14 +295,7 @@ export function HierarchyTree() {
 
 	// Make sure the map has a Set for the current scope so future toggles
 	// have something to clone from; seeded lazily via the memo above.
-	useEffect(() => {
-		setExpandedByScope((prev) => {
-			if (prev.has(expansionScope)) return prev;
-			const next = new Map(prev);
-			next.set(expansionScope, expanded);
-			return next;
-		});
-	}, [expansionScope, expanded]);
+	useEnsureMapEntry(setExpandedByScope, expansionScope, expanded);
 
 	const toggle = useCallback(
 		(path: NodePath) => {
@@ -366,14 +361,10 @@ export function HierarchyTree() {
 		getItemKey: (index) => flat[index]?.pathKey ?? index,
 	});
 
-	// Scroll the selection into view whenever the selected row moves. We
-	// don't force-scroll on every selection — `scrollToIndex` with
-	// align: 'auto' is a no-op when the target is already visible.
-	useEffect(() => {
-		if (selectedIndex >= 0) {
-			rowVirtualizer.scrollToIndex(selectedIndex, { align: 'auto', behavior: 'auto' });
-		}
-	}, [selectedIndex, rowVirtualizer]);
+	// Scroll the selection into view whenever the selected row moves.
+	// `scrollToIndex` with align: 'auto' is a no-op when the target is
+	// already visible, so this doesn't fight user scroll.
+	useScrollToVirtualRow(rowVirtualizer, selectedIndex);
 
 	if (!rootRecord) {
 		return <div className="p-3 text-xs text-destructive">Root type &quot;{resource.rootType}&quot; not in registry.</div>;

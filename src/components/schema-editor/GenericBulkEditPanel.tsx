@@ -138,14 +138,13 @@ type RowProps = {
 };
 
 function NumericRow({ entry, paths, data, onApply }: RowProps) {
+	// `draft` resets when the parent re-keys this row on fold change —
+	// see BulkRecordSection. The useState initializer below seeds the
+	// initial draft from the fold; subsequent fold changes remount this
+	// component, which re-runs the initializer with the new value.
 	const fold = foldField<number>(data, paths, entry.key);
 	const initial = fold.kind === 'all' ? String(fold.value) : '';
 	const [draft, setDraft] = useState(initial);
-	// Re-seed draft when the fold flips from mixed back to homogeneous so
-	// the input shows the new common value rather than stale text.
-	React.useEffect(() => {
-		if (fold.kind === 'all') setDraft(String(fold.value));
-	}, [fold.kind, fold.kind === 'all' ? fold.value : null]);
 
 	const isFloat = entry.field.kind === 'f32';
 	const apply = () => {
@@ -183,11 +182,9 @@ function NumericRow({ entry, paths, data, onApply }: RowProps) {
 }
 
 function BoolRow({ entry, paths, data, onApply }: RowProps) {
+	// Parent re-keys on fold change; this initializer re-runs on remount.
 	const fold = foldField<boolean>(data, paths, entry.key);
 	const [draft, setDraft] = useState<'true' | 'false'>(fold.kind === 'all' && fold.value ? 'true' : 'false');
-	React.useEffect(() => {
-		if (fold.kind === 'all') setDraft(fold.value ? 'true' : 'false');
-	}, [fold.kind, fold.kind === 'all' ? fold.value : null]);
 
 	const label = entry.meta?.label ?? entry.key;
 	return (
@@ -212,14 +209,12 @@ function BoolRow({ entry, paths, data, onApply }: RowProps) {
 }
 
 function EnumRow({ entry, paths, data, onApply }: RowProps) {
+	// Parent re-keys on fold change; this initializer re-runs on remount.
 	const fold = foldField<number>(data, paths, entry.key);
 	const enumField = entry.field as FieldSchema & { kind: 'enum'; values: { value: number; label: string }[] };
 	const [draft, setDraft] = useState<string>(
 		fold.kind === 'all' ? String(fold.value) : '',
 	);
-	React.useEffect(() => {
-		if (fold.kind === 'all') setDraft(String(fold.value));
-	}, [fold.kind, fold.kind === 'all' ? fold.value : null]);
 
 	const label = entry.meta?.label ?? entry.key;
 	return (
@@ -289,15 +284,25 @@ function BulkRecordSection({ recordSchema, paths, data, onApply }: SectionProps)
 			<div className="text-[10px] uppercase tracking-wide text-muted-foreground">
 				{recordSchema.name} · {paths.length} item{paths.length === 1 ? '' : 's'}
 			</div>
-			{fields.map((entry) => (
-				<BulkFieldRow
-					key={entry.key}
-					entry={entry}
-					paths={paths}
-					data={data}
-					onApply={(value) => onApply(paths, entry.key, value)}
-				/>
-			))}
+			{fields.map((entry) => {
+				// Re-key the row on fold change so React remounts the input
+				// with a fresh draft value when the bulk's homogeneous value
+				// flips. Replaces the previous `useEffect` reseed pattern in
+				// each Row type — the key prop is the React-recommended fix
+				// for "reset state on prop change" (see React docs: You Might
+				// Not Need an Effect).
+				const fold = foldField(data, paths, entry.key);
+				const foldKey = fold.kind === 'all' ? `all:${String(fold.value)}` : 'mixed';
+				return (
+					<BulkFieldRow
+						key={`${entry.key}:${foldKey}`}
+						entry={entry}
+						paths={paths}
+						data={data}
+						onApply={(value) => onApply(paths, entry.key, value)}
+					/>
+				);
+			})}
 		</div>
 	);
 }

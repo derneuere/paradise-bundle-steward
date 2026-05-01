@@ -1,6 +1,7 @@
 // Schema-driven inspector — renders the form for the currently selected path.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useResetOnChange } from '@/hooks/useResetOnChange';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -141,9 +142,7 @@ function RecordForm({ record, path, value }: RecordFormProps) {
 
 	const [activeTab, setActiveTab] = useState<string>(defaultTab);
 
-	useEffect(() => {
-		setActiveTab(defaultTab);
-	}, [defaultTab]);
+	useResetOnChange(defaultTab, () => setActiveTab(defaultTab));
 
 	const renderFields = (fieldNames: string[]) => (
 		<div className="space-y-3">
