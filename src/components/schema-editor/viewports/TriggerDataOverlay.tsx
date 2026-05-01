@@ -22,7 +22,8 @@
 //
 // DOM siblings: marquee bulk-select rides the WorldViewport HTML slot.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
 import { ThreeEvent } from '@react-three/fiber';
 import { Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
@@ -186,24 +187,25 @@ function BatchedRegionBoxes({
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = regions.length;
 
-	useEffect(() => {
-		const mesh = meshRef.current;
-		if (!mesh || count === 0) return;
-		for (let i = 0; i < count; i++) {
-			const r = regions[i];
-			_dummy.position.set(r.box.position.x, r.box.position.y, r.box.position.z);
-			_dummy.rotation.set(r.box.rotation.x, r.box.rotation.y, r.box.rotation.z);
-			_dummy.scale.set(r.box.dimensions.x || 1, r.box.dimensions.y || 1, r.box.dimensions.z || 1);
-			_dummy.updateMatrix();
-			mesh.setMatrixAt(i, _dummy.matrix);
+	useUpdateInstancedMesh(
+		meshRef,
+		count,
+		(mesh) => {
+			for (let i = 0; i < count; i++) {
+				const r = regions[i];
+				_dummy.position.set(r.box.position.x, r.box.position.y, r.box.position.z);
+				_dummy.rotation.set(r.box.rotation.x, r.box.rotation.y, r.box.rotation.z);
+				_dummy.scale.set(r.box.dimensions.x || 1, r.box.dimensions.y || 1, r.box.dimensions.z || 1);
+				_dummy.updateMatrix();
+				mesh.setMatrixAt(i, _dummy.matrix);
 
-			const isSel = marker?.kind === r.kind && marker.index === r.index;
-			const isHov = hovered?.kind === r.kind && hovered.index === r.index;
-			mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : r.color);
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [regions, count, marker, hovered]);
+				const isSel = marker?.kind === r.kind && marker.index === r.index;
+				const isHov = hovered?.kind === r.kind && hovered.index === r.index;
+				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : r.color);
+			}
+		},
+		[regions, count, marker, hovered],
+	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
@@ -322,20 +324,21 @@ function RoamingDots({
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.roamingLocations.length;
 
-	useEffect(() => {
-		const mesh = meshRef.current;
-		if (!mesh || count === 0) return;
-		for (let i = 0; i < count; i++) {
-			const rl = data.roamingLocations[i];
-			_roamDummy.position.set(rl.position.x, rl.position.y, rl.position.z);
-			_roamDummy.updateMatrix();
-			mesh.setMatrixAt(i, _roamDummy.matrix);
-			const isSel = marker?.kind === 'roaming' && marker.index === i;
-			mesh.setColorAt(i, isSel ? ROAM_SEL_COLOR : ROAM_COLOR);
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [data.roamingLocations, count, marker]);
+	useUpdateInstancedMesh(
+		meshRef,
+		count,
+		(mesh) => {
+			for (let i = 0; i < count; i++) {
+				const rl = data.roamingLocations[i];
+				_roamDummy.position.set(rl.position.x, rl.position.y, rl.position.z);
+				_roamDummy.updateMatrix();
+				mesh.setMatrixAt(i, _roamDummy.matrix);
+				const isSel = marker?.kind === 'roaming' && marker.index === i;
+				mesh.setColorAt(i, isSel ? ROAM_SEL_COLOR : ROAM_COLOR);
+			}
+		},
+		[data.roamingLocations, count, marker],
+	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();

@@ -23,7 +23,8 @@
 // "Fast" viewport state (wireframe, paint color, selection highlight)
 // stays local to the viewport.
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { useLoadShaderNameMap } from '@/hooks/useLoadShaderNameMap';
 import * as THREE from 'three';
 import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import {
@@ -52,7 +53,6 @@ import { extractResourceSize, isCompressed, decompressData } from '@/lib/core/re
 import { u64ToBigInt } from '@/lib/core/u64';
 import {
 	resolveMaterialTextures,
-	parseShaderNameMap,
 	type ResolvedMaterial,
 	type TextureSourceBundle,
 	type ShaderNameMap,
@@ -397,18 +397,9 @@ export function RenderableDecodedProvider({ children }: { children: React.ReactN
 	const [textureBundleNames, setTextureBundleNames] = useState<string[]>([]);
 	const [shaderNameMap, setShaderNameMap] = useState<ShaderNameMap | null>(null);
 
-	// Auto-load SHADERS.BNDL from the example directory if available. Same
-	// side-effect the old RenderablePage ran at mount; moved up to the
-	// provider so every consumer sees the shader name map.
-	useEffect(() => {
-		fetch('/example/SHADERS.BNDL')
-			.then(r => { if (!r.ok) throw new Error('not found'); return r.arrayBuffer(); })
-			.then(ab => {
-				const map = parseShaderNameMap(ab);
-				setShaderNameMap(map);
-			})
-			.catch(() => { /* SHADERS.BNDL not available, shader names will be null */ });
-	}, []);
+	// Auto-load SHADERS.BNDL from the example directory at mount; every
+	// consumer sees the resulting shader name map.
+	useLoadShaderNameMap(setShaderNameMap);
 
 	const loadTexturePack = useCallback(async () => {
 		const input = document.createElement('input');

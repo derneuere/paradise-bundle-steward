@@ -29,13 +29,17 @@
 // content needs to read camera state (e.g. marquee picking).
 
 import {
-	createContext, useContext, useEffect, useMemo, useState,
+	createContext, useMemo, useState,
 	type ReactNode,
 } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { ViewportErrorBoundary } from '@/components/common/ViewportErrorBoundary';
 import type { WorldViewportComponent } from './WorldViewport.types';
+
+// Re-exported so `useWorldViewportHtmlSlot` (lives in src/hooks/) keeps
+// its existing import surface for the rest of the codebase.
+export { useWorldViewportHtmlSlot } from '@/hooks/useWorldViewportHtmlSlot';
 
 const CAMERA_POSITION: [number, number, number] = [0, 15000, 3000];
 const CAMERA_TARGET: [number, number, number] = [0, 0, 0];
@@ -52,49 +56,12 @@ const BACKGROUND = '#0a0e14';
 type RegisterHtmlOverlay = (id: string, node: ReactNode) => void;
 type UnregisterHtmlOverlay = (id: string) => void;
 
-type HtmlSlotApi = {
+export type HtmlSlotApi = {
 	register: RegisterHtmlOverlay;
 	unregister: UnregisterHtmlOverlay;
 };
 
-const HtmlSlotContext = createContext<HtmlSlotApi | null>(null);
-
-/**
- * Register DOM JSX to render as a sibling of the Canvas (i.e. inside the
- * chrome's wrapping element, outside the WebGL surface). Use this for UI
- * that doesn't belong inside R3F's reconciler — context menus, marquee
- * rectangles, screen-space toggle buttons.
- *
- * Pass `node` reactively from your render: this hook re-registers on every
- * render where `node` changes, so closures stay live with overlay state.
- * Pass `null` (or `false`) to skip / unregister — overlays that aren't the
- * currently-active resource use this to avoid stacking their tools on top
- * of the active overlay's (issue #24 inspector dispatch).
- *
- * The chrome positions the slot as `absolute inset-0` with
- * `pointer-events: none` so individual children opt into pointer events
- * locally (matches the marquee selector / snap-toggle conventions).
- */
-export function useWorldViewportHtmlSlot(node: ReactNode): void {
-	const api = useContext(HtmlSlotContext);
-	// Stable id per hook-call site — generated lazily so React's strict-mode
-	// double-invoke doesn't churn the registry.
-	const id = useMemo(
-		() => `html-overlay-${Math.random().toString(36).slice(2, 10)}`,
-		[],
-	);
-	useEffect(() => {
-		if (!api) return;
-		// `null` / `false` means "do not register". The cleanup still
-		// unregisters in case a previous render had a non-null node.
-		if (node == null || node === false) {
-			api.unregister(id);
-			return;
-		}
-		api.register(id, node);
-		return () => api.unregister(id);
-	}, [api, id, node]);
-}
+export const HtmlSlotContext = createContext<HtmlSlotApi | null>(null);
 
 export const WorldViewport: WorldViewportComponent = ({ children }) => {
 	// Order-stable map from id → JSX so overlays can register and unregister

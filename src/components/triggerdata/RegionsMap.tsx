@@ -1,6 +1,7 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { MapContainer, Polygon, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { useFitMapBounds } from '@/hooks/useFitMapBounds';
 import type { ParsedTriggerData, Landmark, GenericRegion, BoxRegion } from '@/lib/core/triggerData';
 import { GenericRegionType, StuntCameraType } from '@/lib/core/triggerData';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -119,17 +120,7 @@ const ALL_GENERIC_TYPES = [
 
 const FitBounds: React.FC<{ polys: PolyData[] }> = ({ polys }) => {
   const map = useMap();
-  
-  useEffect(() => {
-    if (polys.length === 0) return;
-    
-    const allPoints: L.LatLngExpression[] = polys.flatMap(p => p.world);
-    const bounds = L.latLngBounds(allPoints);
-    
-    // Fit bounds to show all regions with padding
-    map.fitBounds(bounds, { padding: [100, 100] });
-  }, [map, polys]);
-  
+  useFitMapBounds(map, polys);
   return null;
 };
 

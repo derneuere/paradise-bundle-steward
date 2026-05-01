@@ -12,10 +12,11 @@
 // matches Bundle-Manager's PVS editor screenshot). Authoring tools that
 // paint type values onto zones will get a colour split for free.
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
+import { useMemo, useRef, useState, useCallback } from 'react';
+import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
+import { AutoFit } from '@/components/common/three/AutoFit';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
@@ -74,23 +75,6 @@ function computeBounds(data: ParsedZoneList): { center: THREE.Vector3; radius: n
 	const sphere = new THREE.Sphere();
 	box.getBoundingSphere(sphere);
 	return { center: sphere.center, radius: Math.max(sphere.radius, 50) };
-}
-
-// ---------------------------------------------------------------------------
-// Auto-fit camera (one-shot on mount)
-// ---------------------------------------------------------------------------
-
-function AutoFit({ center, radius }: { center: THREE.Vector3; radius: number }) {
-	const { camera } = useThree();
-	const fitted = useRef(false);
-	useEffect(() => {
-		if (fitted.current) return;
-		fitted.current = true;
-		const d = radius * 1.5;
-		camera.position.set(center.x, d, center.z + d * 0.3);
-		camera.lookAt(center);
-	}, [camera, center, radius]);
-	return null;
 }
 
 // ---------------------------------------------------------------------------
