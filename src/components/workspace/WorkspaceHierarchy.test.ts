@@ -39,7 +39,13 @@ const EMPTY_PARSED: ParsedBundle = {
 function makeBundle(
 	id: string,
 	resources: Record<string, (unknown | null)[]>,
-	opts: { isModified?: boolean } = {},
+	opts: {
+		isModified?: boolean;
+		// Per-handler-key list of UIResource stubs in bundle order. Optional —
+		// only tests that exercise picker.labelOf-driven labelling need to
+		// supply real names + typeIds.
+		uiResources?: Partial<Record<string, { id: string; name: string; typeId: number }[]>>;
+	} = {},
 ): EditableBundle {
 	const parsedResourcesAll = new Map<string, (unknown | null)[]>();
 	const parsedResources = new Map<string, unknown>();
@@ -48,11 +54,30 @@ function makeBundle(
 		const first = list[0];
 		if (first != null) parsedResources.set(k, first);
 	}
+	const uiResources = opts.uiResources
+		? Object.values(opts.uiResources)
+				.flat()
+				.filter((r): r is { id: string; name: string; typeId: number } => r != null)
+				.map((r) => ({
+					id: r.id,
+					name: r.name,
+					type: '',
+					typeName: '',
+					category: '',
+					platform: '',
+					uncompressedSize: 0,
+					compressedSize: 0,
+					memoryType: '',
+					imports: [],
+					flags: [],
+					raw: { resourceTypeId: r.typeId },
+				}))
+		: [];
 	return {
 		id,
 		originalArrayBuffer: new ArrayBuffer(0),
 		parsed: EMPTY_PARSED,
-		resources: [],
+		resources: uiResources,
 		debugResources: [],
 		parsedResources,
 		parsedResourcesAll,
@@ -610,6 +635,74 @@ describe('Selection round-trips per row kind', () => {
 		);
 		expect(target).toBeDefined();
 		expect(target?.isSelected).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Multi-instance Instance row labels — issue #29
+// ---------------------------------------------------------------------------
+
+describe('buildWorkspaceFlat — multi-instance Instance row labels (issue #29)', () => {
+	it('routes Instance row labels through handler.picker.labelOf when available', () => {
+		// PolygonSoupList's `picker.labelOf` returns the resource's debug name
+		// as `primary` (e.g. `trk_unit_007_col`). The Workspace tree must show
+		// that name instead of the legacy `Polygon Soup List #N` fallback so
+		// rows are identifiable across the legacy `/polygonSoupList` page and
+		// the unified Workspace.
+		const PSL_TYPE_ID = 0x43;
+		const bundles = [
+			makeBundle(
+				'WORLDCOL.BIN',
+				{ polygonSoupList: [{ soups: [] }, { soups: [] }] },
+				{
+					uiResources: {
+						polygonSoupList: [
+							{ id: '0xAAA', name: 'trk_unit_007_col', typeId: PSL_TYPE_ID },
+							{ id: '0xBBB', name: 'trk_unit_042_col', typeId: PSL_TYPE_ID },
+						],
+					},
+				},
+			),
+		];
+		const flat = buildWorkspaceFlat({
+			bundles,
+			expanded: new Set([
+				bundleKey('WORLDCOL.BIN'),
+				resourceTypeKey('WORLDCOL.BIN', 'polygonSoupList'),
+			]),
+			selection: null,
+		});
+		expect(findInstance(flat, 'WORLDCOL.BIN', 'polygonSoupList', 0)?.label).toBe(
+			'trk_unit_007_col',
+		);
+		expect(findInstance(flat, 'WORLDCOL.BIN', 'polygonSoupList', 1)?.label).toBe(
+			'trk_unit_042_col',
+		);
+	});
+
+	it('falls back to "<HandlerName> #N" when no UIResource is present (handler still has a picker)', () => {
+		// Same handler (has picker.labelOf) but no UIResource → picker derives
+		// its `name` from the synthetic `Resource_<i>` fallback. The row label
+		// should still come from the picker (so handlers with picker labellers
+		// stay consistent), not the legacy "<HandlerName> #N" string.
+		const bundles = [
+			makeBundle('WORLDCOL.BIN', { polygonSoupList: [{ soups: [] }, { soups: [] }] }),
+		];
+		const flat = buildWorkspaceFlat({
+			bundles,
+			expanded: new Set([
+				bundleKey('WORLDCOL.BIN'),
+				resourceTypeKey('WORLDCOL.BIN', 'polygonSoupList'),
+			]),
+			selection: null,
+		});
+		// picker.labelOf returns ctx.name as primary → `Resource_0`, `Resource_1`.
+		expect(findInstance(flat, 'WORLDCOL.BIN', 'polygonSoupList', 0)?.label).toBe(
+			'Resource_0',
+		);
+		expect(findInstance(flat, 'WORLDCOL.BIN', 'polygonSoupList', 1)?.label).toBe(
+			'Resource_1',
+		);
 	});
 });
 

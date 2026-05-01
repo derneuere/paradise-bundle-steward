@@ -31,6 +31,10 @@ import type {
 } from '@/context/WorkspaceContext.types';
 import { selectionLevel } from '@/context/WorkspaceContext.types';
 import { getHandlerByKey } from '@/lib/core/registry';
+import type {
+	PickerResourceCtx,
+	ResourceHandler,
+} from '@/lib/core/registry/handler';
 import { getSchemaByKey } from '@/lib/schema/resources';
 import type {
 	FieldSchema,
@@ -126,6 +130,57 @@ export type FlatNode =
 	| ResourceTypeFlatNode
 	| InstanceFlatNode
 	| SchemaFlatNode;
+
+// ---------------------------------------------------------------------------
+// Per-instance label derivation
+// ---------------------------------------------------------------------------
+
+// Multi-instance handlers (PolygonSoupList, etc.) ship a `picker.labelOf` that
+// produces the same TRK_*-aware label the legacy `/<resource>` page shows
+// (e.g. `trk_unit_007_col` instead of `Polygon Soup List #4`). Routing the
+// Workspace tree's Instance rows through the same labeller keeps the user
+// looking at one canonical name per resource regardless of which surface they
+// opened it from (issue #29).
+//
+// `bundle.resources` is the UIResource[] view built at parse time; the parser
+// walks it in order and appends to each handler's parsed list, so the Nth
+// matching UIResource lines up with the Nth parsed model — same correlation
+// the legacy PolygonSoupListPage relies on (see comment at
+// PolygonSoupListPage.tsx:131-134).
+function buildInstancePickerCtxs(
+	bundle: EditableBundle,
+	handler: ResourceHandler | undefined,
+	count: number,
+): PickerResourceCtx[] {
+	const ctxs: PickerResourceCtx[] = new Array(count);
+	const matching = handler
+		? bundle.resources.filter((r) => r.raw?.resourceTypeId === handler.typeId)
+		: [];
+	for (let i = 0; i < count; i++) {
+		const ui = matching[i];
+		ctxs[i] = {
+			id: ui?.id ?? `__inst:${bundle.id}:${handler?.key ?? '?'}:${i}__`,
+			name: ui?.name ?? `Resource_${i}`,
+			index: i,
+		};
+	}
+	return ctxs;
+}
+
+function deriveInstanceLabel(
+	handler: ResourceHandler | undefined,
+	model: unknown,
+	ctx: PickerResourceCtx,
+	fallback: string,
+): string {
+	if (!handler?.picker) return fallback;
+	try {
+		const label = handler.picker.labelOf(model, ctx);
+		return label.primary || fallback;
+	} catch {
+		return fallback;
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Path / expansion key helpers
@@ -530,6 +585,7 @@ export function buildWorkspaceFlat({
 			if (!expandedRow) continue;
 
 			if (isMulti) {
+				const pickerCtxs = buildInstancePickerCtxs(bundle, handler, entry.count);
 				for (let i = 0; i < entry.count; i++) {
 					const iKey = instanceKey(bundle.id, entry.key, i);
 					const instanceSelected =
@@ -540,6 +596,12 @@ export function buildWorkspaceFlat({
 					const schema = getSchemaByKey(entry.key);
 					const data = entry.instances[i];
 					const expandThisInstance = instanceSelected;
+					const instanceLabel = deriveInstanceLabel(
+						handler,
+						data,
+						pickerCtxs[i],
+						`${label} #${i}`,
+					);
 					out.push({
 						kind: 'instance',
 						pathKey: iKey,
@@ -547,7 +609,7 @@ export function buildWorkspaceFlat({
 						bundleId: bundle.id,
 						resourceKey: entry.key,
 						index: i,
-						label: `${label} #${i}`,
+						label: instanceLabel,
 						expanded: expandThisInstance,
 						isSelected: instanceSelected,
 						showVisibility: visibilityRelevant,
