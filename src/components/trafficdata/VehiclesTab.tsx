@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type {
-	ParsedTrafficData,
+	ParsedTrafficDataRetail,
 	TrafficVehicleTypeData,
 	TrafficVehicleTypeUpdateData,
 	TrafficVehicleAsset,
@@ -14,8 +14,8 @@ import type {
 import { VEHICLE_FLAG_NAMES } from './constants';
 
 type Props = {
-	data: ParsedTrafficData;
-	onChange: (next: ParsedTrafficData) => void;
+	data: ParsedTrafficDataRetail;
+	onChange: (next: ParsedTrafficDataRetail) => void;
 };
 
 function NumCell({ value, onChange, float, step, width = 'w-20' }: {

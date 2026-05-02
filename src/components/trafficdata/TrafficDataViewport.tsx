@@ -12,7 +12,7 @@ import { useMemo, useRef, useCallback, useState } from 'react';
 import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import type { ParsedTrafficData, TrafficHull, TrafficPvs } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail, TrafficHull, TrafficPvs } from '@/lib/core/trafficData';
 import {
 	isPvsCellSelection,
 	type TrafficDataSelection,
@@ -28,7 +28,7 @@ import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelection
 import type { NodePath } from '@/lib/schema/walk';
 
 type Props = {
-	data: ParsedTrafficData;
+	data: ParsedTrafficDataRetail;
 	activeHullIndex: number;
 	selected: TrafficDataSelection;
 	onSelect: (sel: TrafficDataSelection) => void;
@@ -662,7 +662,7 @@ export function SelectedVehicleOutline({ hulls, selected }: { hulls: TrafficHull
 const lightGeo = new THREE.SphereGeometry(2, 12, 8);
 const lightMat = new THREE.MeshStandardMaterial({ color: 0x44ff44, roughness: 0.3, metalness: 0.3, emissive: 0x114411, emissiveIntensity: 0.5 });
 
-export function TrafficLightInstances({ data }: { data: ParsedTrafficData }) {
+export function TrafficLightInstances({ data }: { data: ParsedTrafficDataRetail }) {
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const tl = data.trafficLights;
 	const count = tl.posAndYRotations.length;

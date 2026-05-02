@@ -3,13 +3,13 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Trash2 } from 'lucide-react';
-import type { ParsedTrafficData, TrafficHull, Vec4 } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail, TrafficHull, Vec4 } from '@/lib/core/trafficData';
 import { updateHull, buildRungToSectionMap } from './constants';
 
 type Props = {
-	data: ParsedTrafficData;
+	data: ParsedTrafficDataRetail;
 	hullIndex: number;
-	onChange: (next: ParsedTrafficData) => void;
+	onChange: (next: ParsedTrafficDataRetail) => void;
 	scrollToIndexRef: React.MutableRefObject<((index: number) => void) | null>;
 };
 

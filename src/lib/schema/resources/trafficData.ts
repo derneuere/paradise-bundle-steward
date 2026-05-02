@@ -1,4 +1,4 @@
-// Hand-written schema for ParsedTrafficData.
+// Hand-written schema for the retail (v44 / v45) ParsedTrafficData shape.
 //
 // Mirrors the types in `src/lib/core/trafficData.ts`. Keep these in lockstep
 // with the parser/writer — any field added to the parser needs a matching
@@ -8,6 +8,14 @@
 // time (`muSizeInBytes`) are marked readOnly + hidden. Phase A's round-trip
 // test exercises parse → walk → write with no edits, so these don't need to
 // be reconciled here; that's Phase B's job.
+//
+// V44 and V45 are structurally identical — both share this schema. The
+// editor registry registers two separate EditorProfiles (one per `kind`)
+// pointing at the same `trafficDataResourceSchema` so the variant suffix
+// ("v44 Paradise PS3 era") shows up on the tree row. The v22 prototype
+// payload uses a different schema in `./trafficDataV22.ts` because its
+// parsed shape is structurally distinct (no retail tables; hull contents
+// captured raw).
 
 import type {
 	FieldSchema,
@@ -749,8 +757,14 @@ const TRAFFIC_DATA_GROUPS: PropertyGroup[] = [
 
 const TrafficData: RecordSchema = {
 	name: 'TrafficData',
-	description: 'Root record for the Traffic Data resource (0x10002).',
+	description: 'Root record for the Traffic Data resource (0x10002), retail (v44/v45) variant.',
 	fields: {
+		// Discriminator on the runtime model — 'v44' or 'v45' on this schema;
+		// the v22 prototype payload uses a separate schema. Hidden + read-only
+		// because it's a structural tag, not a user-editable field. Declared
+		// so the schema-coverage walker doesn't flag it as undeclared
+		// (mirrors the AISections V12 / V4 approach — see ADR-0008).
+		kind: { kind: 'string' },
 		muDataVersion: u8(),
 		muSizeInBytes: u32(),
 		pvs: record('TrafficPvs'),
@@ -770,7 +784,8 @@ const TrafficData: RecordSchema = {
 		paintColours: { kind: 'list', item: vec4(), addable: true, removable: true, customRenderer: 'PaintColoursTab' },
 	},
 	fieldMetadata: {
-		muDataVersion: { description: 'Always 45 in retail.' },
+		kind: { hidden: true, readOnly: true },
+		muDataVersion: { description: 'On-the-wire data version — 44 (Paradise PS3 era) or 45 (retail PC).' },
 		muSizeInBytes: { readOnly: true, hidden: true, description: 'Patched by the writer.' },
 		killZoneIds: { description: 'Parallel array to killZones.' },
 		vehicleTypesUpdate: { description: 'Parallel array to vehicleTypes.' },

@@ -1,11 +1,11 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { ParsedTrafficData, Vec4 } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail, Vec4 } from '@/lib/core/trafficData';
 
 type Props = {
-	data: ParsedTrafficData;
-	onChange: (next: ParsedTrafficData) => void;
+	data: ParsedTrafficDataRetail;
+	onChange: (next: ParsedTrafficDataRetail) => void;
 };
 
 function vec4ToCSS(c: Vec4): string {

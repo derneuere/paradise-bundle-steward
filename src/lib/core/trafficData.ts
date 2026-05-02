@@ -19,6 +19,14 @@
 //     no spec for hull internals or the tail regions yet. See the
 //     `parseTrafficDataV22Internal` block lower in this file.
 // 64-bit pointer layout (Paradise Remastered) is not supported yet.
+//
+// `ParsedTrafficData` is a discriminated union over `kind`: 'v45' (retail
+// PC), 'v44' (retail PS3 era), and 'v22' (Burnout 5 prototype, read-only).
+// V44 and V45 share the same retail field shape — only `kind` differs — so
+// most consumers narrow once to `ParsedTrafficDataRetail` and treat both
+// uniformly. V22 carries a structurally distinct header (no retail tables;
+// hull contents + tail regions captured raw) and is rejected by the writer.
+// See ADR-0008 for the discriminated-union rationale.
 
 import { BinReader, BinWriter } from './binTools';
 
@@ -260,11 +268,11 @@ export type TrafficLightCollection = {
 // than re-interpreted, because confidently labelling those fields would
 // need either a v22 spec or several more fixtures to triangulate.
 //
-// `ParsedTrafficData.v22Raw` is populated only when `muDataVersion < 44`.
-// All retail-shaped fields (`hulls`, `flowTypes`, `killZones`, etc.) are
-// returned as empty arrays in that case so existing UI / glTF consumers
-// don't crash when a v22 bundle wanders through them — they just see an
-// empty bundle and can branch on `v22Raw` if they care to surface it.
+// V22 payloads parse into the `kind: 'v22'` branch of the discriminated
+// union — a structurally distinct shape from retail. Consumers that only
+// know the retail layout (`hulls`, `flowTypes`, …) must narrow on
+// `model.kind` first; the editor registry's `pickProfile` call is the
+// canonical place to do that.
 
 export type TrafficPvsV22 = {
   // Same Vec4 grid origin convention as retail (x and z populated, y/w 0).
@@ -282,37 +290,12 @@ export type TrafficPvsV22 = {
   hullPvsSets: PvsHullSet[];
 };
 
-export type ParsedTrafficDataV22Raw = {
-  // Header fields preserved verbatim (offsets refer to the start of the
-  // resource payload). The 4 trailing pointers don't have stable semantic
-  // labels yet — we just preserve the raw values + their referenced bytes.
-  ptrPvs: number;             // header @0x08
-  ptrHulls: number;           // header @0x0C
-  ptrTailA: number;           // header @0x10  (likely flow types — 1792 B)
-  muNumFlowTypes: number;     // header @0x14
-  muNumVehicleTypes: number;  // header @0x16
-  ptrTailB: number;           // header @0x18  (~432 B)
-  ptrTailC: number;           // header @0x1C  (~544 B)
-  ptrTailD: number;           // header @0x20  (~324 B, runs to EOF)
-  // Pvs: same conceptual structure as v44/v45 minus the forward CellSize
-  // Vec4 (verified by walking the hullPvsSets that follow it).
-  pvs: TrafficPvsV22;
-  // Hull pointer table read off `ptrHulls`. Each hull is exactly 0x30 bytes
-  // long (the table is a uniform stride; we verified that adjacent pointers
-  // are spaced 0x30 apart). The hull contents themselves are NOT
-  // interpreted — we capture each hull's raw 0x30 bytes for inspection.
-  hullPointers: number[];
-  hullsRaw: Uint8Array[];
-  // Bytes referenced by the four trailing header pointers, sized by the
-  // distance to the next-higher pointer (or end-of-file for the last one).
-  // The "tail" labels are positional and have no semantic claim attached.
-  tailABytes: Uint8Array;
-  tailBBytes: Uint8Array;
-  tailCBytes: Uint8Array;
-  tailDBytes: Uint8Array;
-};
-
-export type ParsedTrafficData = {
+// Retail (v44 / v45) shape — every shipping bundle. The two on-disk versions
+// differ only in `BrnTraffic::JunctionLogicBox` byte layout (handled by the
+// reader/writer dispatch on `muDataVersion`); the parsed model shape is
+// identical, so V44 and V45 share this base type and discriminate purely on
+// `kind`.
+type ParsedTrafficDataRetailFields = {
   muDataVersion: number;
   muSizeInBytes: number;
   pvs: TrafficPvs;
@@ -327,13 +310,66 @@ export type ParsedTrafficData = {
   vehicleTraits: TrafficVehicleTraits[];
   trafficLights: TrafficLightCollection;
   paintColours: Vec4[];
-  // Populated only when the bundle is a v22 prototype (Burnout 5 dev
-  // builds). The retail-shaped fields above are returned empty in that
-  // case; this carries the structural information we *can* read out of
-  // v22. The writer rejects models with `v22Raw` set — there's no spec
-  // for re-emitting v22 yet.
-  v22Raw?: ParsedTrafficDataV22Raw;
 };
+
+export type ParsedTrafficDataV45 = ParsedTrafficDataRetailFields & {
+  kind: 'v45';
+};
+
+export type ParsedTrafficDataV44 = ParsedTrafficDataRetailFields & {
+  kind: 'v44';
+};
+
+// V44 and V45 are structurally identical — most consumers (UI tabs, glTF
+// pipeline, schema editor extensions) only need to know "this is the retail
+// shape" and can ignore which exact retail version produced the bundle. The
+// writer re-dispatches on `muDataVersion` for the byte-level junction-layout
+// split.
+export type ParsedTrafficDataRetail = ParsedTrafficDataV45 | ParsedTrafficDataV44;
+
+// Burnout 5 prototype (v22). Structurally distinct from retail: only the
+// header / Pvs / hull pointer table decode cleanly, hull contents are raw
+// bytes, four trailing pointer regions are preserved verbatim. No writer.
+export type ParsedTrafficDataV22 = {
+  kind: 'v22';
+  muDataVersion: number; // always 22
+  muSizeInBytes: number;
+  // Pvs uses the v22 structural variant (no forward `mCellSize` Vec4).
+  pvs: TrafficPvsV22;
+  // Header pointer fields preserved verbatim (offsets refer to the start of
+  // the resource payload). The 4 trailing pointers don't have stable
+  // semantic labels yet — we keep raw values + referenced bytes only.
+  ptrPvs: number;             // header @0x08
+  ptrHulls: number;           // header @0x0C
+  ptrTailA: number;           // header @0x10  (likely flow types — 1792 B)
+  muNumFlowTypes: number;     // header @0x14
+  muNumVehicleTypes: number;  // header @0x16
+  ptrTailB: number;           // header @0x18  (~432 B)
+  ptrTailC: number;           // header @0x1C  (~544 B)
+  ptrTailD: number;           // header @0x20  (~324 B, runs to EOF)
+  // Hull pointer table read off `ptrHulls`. Each hull is exactly 0x30 bytes
+  // long (uniform stride; adjacent pointers are 0x30 apart). Hull contents
+  // themselves are NOT interpreted — we capture each hull's raw 0x30 bytes
+  // for inspection.
+  hullPointers: number[];
+  hullsRaw: Uint8Array[];
+  // Bytes referenced by the four trailing header pointers, sized by the
+  // distance to the next-higher pointer (or end-of-file for the last one).
+  // The "tail" labels are positional and have no semantic claim attached.
+  tailABytes: Uint8Array;
+  tailBBytes: Uint8Array;
+  tailCBytes: Uint8Array;
+  tailDBytes: Uint8Array;
+};
+
+// Discriminated union: every consumer must narrow on `kind` before reading
+// version-specific fields. The editor registry (src/lib/editor/) does this
+// once at the profile-pick site so per-profile schemas/extensions/overlays
+// are written against a single concrete variant.
+export type ParsedTrafficData =
+  | ParsedTrafficDataV45
+  | ParsedTrafficDataV44
+  | ParsedTrafficDataV22;
 
 // =============================================================================
 // Constants
@@ -664,21 +700,21 @@ const V22_PVS_HEADER_SIZE = 0x30;
 // Read-only structural parser for the v22 prototype TrafficData payload.
 // Exported alongside the main `parseTrafficDataData` dispatcher so callers
 // who already know they have a v22 payload can skip the version probe and
-// get the v22 fields directly via `result.v22Raw!`.
+// pin the result type to `ParsedTrafficDataV22` directly.
 export function parseTrafficDataV22(
   data: Uint8Array,
   littleEndian = false,
-): ParsedTrafficData {
+): ParsedTrafficDataV22 {
   return parseTrafficDataV22Internal(data, littleEndian);
 }
 
-// Internal implementation. Returns a `ParsedTrafficData` whose retail-shaped
-// collections are empty and whose `v22Raw` field carries everything we
-// managed to extract.
+// Internal implementation. Returns a `ParsedTrafficDataV22` carrying the
+// header + Pvs + hull pointer table that decoded cleanly, plus raw bytes
+// for the hull contents and four trailing regions we don't yet interpret.
 function parseTrafficDataV22Internal(
   data: Uint8Array,
   littleEndian: boolean,
-): ParsedTrafficData {
+): ParsedTrafficDataV22 {
   const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
   const r = new BinReader(buf, littleEndian);
 
@@ -747,63 +783,32 @@ function parseTrafficDataV22Internal(
   };
 
   return {
+    kind: 'v22',
     muDataVersion,
     muSizeInBytes,
     pvs: {
       mGridMin,
-      mCellSize: { x: 0, y: 0, z: 0, w: 0 }, // not stored in v22
       mRecipCellSize,
       muNumCells_X,
       muNumCells_Z,
       muNumCells,
+      ptrHullPvs,
       hullPvsSets,
     },
-    hulls: [],
-    flowTypes: [],
-    killZoneIds: [],
-    killZones: [],
-    killZoneRegions: [],
-    vehicleTypes: [],
-    vehicleTypesUpdate: [],
-    vehicleAssets: [],
-    vehicleTraits: [],
-    trafficLights: {
-      posAndYRotations: [],
-      instanceIDs: [],
-      instanceTypes: [],
-      trafficLightTypes: [],
-      coronaTypes: [],
-      coronaPositions: [],
-      mauInstanceHashOffsets: new Array(129).fill(0),
-      instanceHashTable: [],
-      instanceHashToIndexLookup: [],
-    },
-    paintColours: [],
-    v22Raw: {
-      ptrPvs,
-      ptrHulls,
-      ptrTailA,
-      muNumFlowTypes,
-      muNumVehicleTypes,
-      ptrTailB,
-      ptrTailC,
-      ptrTailD,
-      pvs: {
-        mGridMin,
-        mRecipCellSize,
-        muNumCells_X,
-        muNumCells_Z,
-        muNumCells,
-        ptrHullPvs,
-        hullPvsSets,
-      },
-      hullPointers,
-      hullsRaw,
-      tailABytes: sliceTail(ptrTailA),
-      tailBBytes: sliceTail(ptrTailB),
-      tailCBytes: sliceTail(ptrTailC),
-      tailDBytes: sliceTail(ptrTailD),
-    },
+    ptrPvs,
+    ptrHulls,
+    ptrTailA,
+    muNumFlowTypes,
+    muNumVehicleTypes,
+    ptrTailB,
+    ptrTailC,
+    ptrTailD,
+    hullPointers,
+    hullsRaw,
+    tailABytes: sliceTail(ptrTailA),
+    tailBBytes: sliceTail(ptrTailB),
+    tailCBytes: sliceTail(ptrTailC),
+    tailDBytes: sliceTail(ptrTailD),
   };
 }
 
@@ -1055,7 +1060,11 @@ export function parseTrafficDataData(data: Uint8Array, littleEndian = true): Par
     for (let i = 0; i < muNumPaintColours; i++) paintColours.push(readVec4(r));
   }
 
+  // Discriminate v44 vs v45 by `muDataVersion`. Field shape is identical;
+  // only `kind` differs so the editor registry can pick the right profile.
+  const kind = muDataVersion >= 45 ? 'v45' as const : 'v44' as const;
   return {
+    kind,
     muDataVersion,
     muSizeInBytes,
     pvs,
@@ -1335,11 +1344,10 @@ function writeFlowTypeBlock(w: BinWriter, ft: TrafficFlowType, ftOff: number) {
 // =============================================================================
 
 export function writeTrafficDataData(model: ParsedTrafficData, littleEndian = true): Uint8Array {
-  if (model.v22Raw) {
+  if (model.kind === 'v22') {
     throw new Error(
       `TrafficData.write: cannot write v22 prototype payload — the parser is read-only ` +
-        `for that version (no on-disk spec for hull contents or tail regions). ` +
-        `Drop the \`v22Raw\` field if you intended to write a retail bundle instead.`,
+        `for that version (no on-disk spec for hull contents or tail regions).`,
     );
   }
   if (!SUPPORTED_TRAFFIC_VERSIONS.has(model.muDataVersion)) {

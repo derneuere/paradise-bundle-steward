@@ -25,7 +25,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import type { ParsedTrafficData } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 import {
 	AllJunctionInstances,
 	AllLaneConnections,
@@ -133,15 +133,15 @@ export function trafficActiveTabFromSelection(sel: TrafficDataSelection): string
 // ---------------------------------------------------------------------------
 
 type Props = {
-	data: ParsedTrafficData;
+	data: ParsedTrafficDataRetail;
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
-	onChange?: (next: ParsedTrafficData) => void;
+	onChange?: (next: ParsedTrafficDataRetail) => void;
 	/** True when this overlay owns the active selection — gates tool registration. */
 	isActive?: boolean;
 };
 
-export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficData> = ({
+export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> = ({
 	data, selectedPath, onSelect, isActive = true,
 }: Props) => {
 	const hulls = data.hulls;

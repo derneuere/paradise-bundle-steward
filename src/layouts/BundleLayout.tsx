@@ -14,7 +14,7 @@ import { ExportWarningModal, ExportPlatformModal } from '@/components/capabiliti
 import { getCapabilityByTypeId, type FeatureCapability } from '@/lib/capabilities';
 import { registry, getExportablePlatforms } from '@/lib/core/registry';
 import type { ParsedStreetData } from '@/lib/core/streetData';
-import type { ParsedTrafficData } from '@/lib/core/trafficData';
+import type { ParsedTrafficData, ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 import type { ParsedAISections, ParsedAISectionsV12 } from '@/lib/core/aiSections';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import {
@@ -130,7 +130,10 @@ export const BundleLayout = () => {
         payload.streetData = getResource<ParsedStreetData>(activeBundleId, 'streetData') ?? undefined;
       }
       if (parsedResources.has('trafficData')) {
-        payload.trafficData = getResource<ParsedTrafficData>(activeBundleId, 'trafficData') ?? undefined;
+        // glTF export only knows the retail (v44/v45) shape; v22 prototype
+        // payloads have no glTF visualization yet.
+        const td = getResource<ParsedTrafficData>(activeBundleId, 'trafficData');
+        if (td && td.kind !== 'v22') payload.trafficData = td as ParsedTrafficDataRetail;
       }
       if (parsedResources.has('aiSections')) {
         // glTF export only knows the V12 retail shape; V4/V6 prototype

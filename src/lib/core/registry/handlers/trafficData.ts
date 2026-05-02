@@ -5,10 +5,11 @@ import {
 	parseTrafficDataData,
 	writeTrafficDataData,
 	type ParsedTrafficData,
+	type ParsedTrafficDataRetail,
 	type TrafficHull,
 	type TrafficFlowType,
 } from '../../trafficData';
-import { HANDLER_PLATFORM, type ResourceHandler } from '../handler';
+import { HANDLER_PLATFORM, type ResourceHandler, type StressScenario } from '../handler';
 
 export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 	typeId: 0x10002,
@@ -33,12 +34,11 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 		return writeTrafficDataData(model, ctx.littleEndian);
 	},
 	describe(model) {
-		if (model.v22Raw) {
-			const v = model.v22Raw;
-			return `v${model.muDataVersion} (read-only structural), hulls ${v.hullPointers.length}, ` +
-				`pvs cells ${v.pvs.muNumCells} (${v.pvs.muNumCells_X}×${v.pvs.muNumCells_Z}), ` +
-				`flowTypes ${v.muNumFlowTypes}, vehicleTypes ${v.muNumVehicleTypes}, ` +
-				`tail bytes A=${v.tailABytes.byteLength} B=${v.tailBBytes.byteLength} C=${v.tailCBytes.byteLength} D=${v.tailDBytes.byteLength}`;
+		if (model.kind === 'v22') {
+			return `v${model.muDataVersion} (read-only structural), hulls ${model.hullPointers.length}, ` +
+				`pvs cells ${model.pvs.muNumCells} (${model.pvs.muNumCells_X}×${model.pvs.muNumCells_Z}), ` +
+				`flowTypes ${model.muNumFlowTypes}, vehicleTypes ${model.muNumVehicleTypes}, ` +
+				`tail bytes A=${model.tailABytes.byteLength} B=${model.tailBBytes.byteLength} C=${model.tailCBytes.byteLength} D=${model.tailDBytes.byteLength}`;
 		}
 		const tlc = model.trafficLights;
 		return `v${model.muDataVersion}, hulls ${model.hulls.length}, flowTypes ${model.flowTypes.length}, killZones ${model.killZones.length}, vehicleTypes ${model.vehicleTypes.length}, lights ${tlc.posAndYRotations.length}, paintColours ${model.paintColours.length}`;
@@ -71,7 +71,11 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 		],
 	},
 
-	stressScenarios: [
+	// All scenarios target the retail (v44/v45) shape — they touch hulls,
+	// flowTypes, etc. The wrapper at the bottom no-ops on v22 prototype data;
+	// v22 has no writer anyway and its only fixture (`B5Traffic.bndl`)
+	// advertises only `parseOk: true`, so the stress runner skips it.
+	stressScenarios: ([
 		// ── baseline ──
 		{
 			name: 'baseline',
@@ -572,5 +576,12 @@ export const trafficDataHandler: ResourceHandler<ParsedTrafficData> = {
 					? [`rung not zeroed`] : [];
 			},
 		},
-	],
+	] as StressScenario<ParsedTrafficDataRetail>[]).map((s): StressScenario<ParsedTrafficData> => ({
+		name: s.name,
+		description: s.description,
+		mutate: (m) => (m.kind === 'v22' ? m : s.mutate(m)),
+		verify: s.verify
+			? (a, b) => (a.kind === 'v22' || b.kind === 'v22' ? [] : s.verify!(a, b))
+			: undefined,
+	})),
 };

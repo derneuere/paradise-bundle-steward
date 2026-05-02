@@ -4,12 +4,12 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChevronDown, ChevronRight, Trash2, Plus } from 'lucide-react';
-import type { ParsedTrafficData, TrafficFlowType } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail, TrafficFlowType } from '@/lib/core/trafficData';
 import { VEHICLE_CLASS_LABELS, countFlowTypeReferences } from './constants';
 
 type Props = {
-	data: ParsedTrafficData;
-	onChange: (next: ParsedTrafficData) => void;
+	data: ParsedTrafficDataRetail;
+	onChange: (next: ParsedTrafficDataRetail) => void;
 };
 
 // One (vehicleTypeId, cumulativeProb) pair — the editing primitive.
@@ -35,7 +35,7 @@ function entriesToFlow(entries: Entry[]): TrafficFlowType {
 	};
 }
 
-function vehicleTypeLabel(data: ParsedTrafficData, index: number): string {
+function vehicleTypeLabel(data: ParsedTrafficDataRetail, index: number): string {
 	const vt = data.vehicleTypes[index];
 	if (!vt) return `#${index} (missing)`;
 	const cls = VEHICLE_CLASS_LABELS[vt.muVehicleClass] ?? `class ${vt.muVehicleClass}`;
@@ -47,7 +47,7 @@ function vehicleTypeLabel(data: ParsedTrafficData, index: number): string {
 // ---------------------------------------------------------------------------
 
 const EntryRow: React.FC<{
-	data: ParsedTrafficData;
+	data: ParsedTrafficDataRetail;
 	entry: Entry;
 	prevProb: number;
 	onChange: (next: Entry) => void;
@@ -97,7 +97,7 @@ const EntryRow: React.FC<{
 // ---------------------------------------------------------------------------
 
 const FlowTypeCard: React.FC<{
-	data: ParsedTrafficData;
+	data: ParsedTrafficDataRetail;
 	flow: TrafficFlowType;
 	index: number;
 	onChange: (next: TrafficFlowType) => void;

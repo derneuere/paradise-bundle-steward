@@ -10,7 +10,7 @@
 
 import { Document, NodeIO } from '@gltf-transform/core';
 import type { ParsedStreetData } from '../streetData';
-import type { ParsedTrafficData } from '../trafficData';
+import type { ParsedTrafficDataRetail } from '../trafficData';
 import type { ParsedAISectionsV12 } from '../aiSections';
 import type { ParsedTriggerData } from '../triggerData';
 import {
@@ -39,7 +39,7 @@ const GENERATOR = 'steward-worldlogic-gltf/1';
 
 export type WorldLogicPayload = {
 	streetData?: ParsedStreetData;
-	trafficData?: ParsedTrafficData;
+	trafficData?: ParsedTrafficDataRetail;
 	aiSections?: ParsedAISectionsV12;
 	triggerData?: ParsedTriggerData;
 };

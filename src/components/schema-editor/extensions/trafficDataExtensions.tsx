@@ -21,7 +21,7 @@
 
 import React, { useRef } from 'react';
 import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
-import type { ParsedTrafficData } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 import type { TrafficDataSelection } from '@/components/trafficdata/useTrafficSelection';
 import { useSchemaEditor } from '../context';
 import type { NodePath } from '@/lib/schema/walk';
@@ -82,20 +82,20 @@ function useTabSelectionBridge() {
 }
 
 // ---------------------------------------------------------------------------
-// Root-level adapters — tab owns full ParsedTrafficData
+// Root-level adapters — tab owns full ParsedTrafficDataRetail
 // ---------------------------------------------------------------------------
 
 export const FlowTypesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
 	<FlowTypesTab
-		data={data as ParsedTrafficData}
-		onChange={setData as (next: ParsedTrafficData) => void}
+		data={data as ParsedTrafficDataRetail}
+		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
 export const PaintColoursExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
 	<PaintColoursTab
-		data={data as ParsedTrafficData}
-		onChange={setData as (next: ParsedTrafficData) => void}
+		data={data as ParsedTrafficDataRetail}
+		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
@@ -105,8 +105,8 @@ export const OverviewExtension: React.FC<SchemaExtensionProps> = ({ data, setDat
 	const { selectPath } = useSchemaEditor();
 	return (
 		<OverviewTab
-			data={data as ParsedTrafficData}
-			onChange={setData as (next: ParsedTrafficData) => void}
+			data={data as ParsedTrafficDataRetail}
+			onChange={setData as (next: ParsedTrafficDataRetail) => void}
 			onHullClick={(i) => selectPath(['hulls', i])}
 		/>
 	);
@@ -114,22 +114,22 @@ export const OverviewExtension: React.FC<SchemaExtensionProps> = ({ data, setDat
 
 export const KillZonesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
 	<KillZonesTab
-		data={data as ParsedTrafficData}
-		onChange={setData as (next: ParsedTrafficData) => void}
+		data={data as ParsedTrafficDataRetail}
+		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
 export const VehiclesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
 	<VehiclesTab
-		data={data as ParsedTrafficData}
-		onChange={setData as (next: ParsedTrafficData) => void}
+		data={data as ParsedTrafficDataRetail}
+		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
 export const TrafficLightsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
 	<TrafficLightsTab
-		data={data as ParsedTrafficData}
-		onChange={setData as (next: ParsedTrafficData) => void}
+		data={data as ParsedTrafficDataRetail}
+		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
@@ -150,9 +150,9 @@ export const SectionsExtension: React.FC<SchemaExtensionProps> = ({ path, data, 
 	const { selected, onSelect, scrollToIndexRef } = useTabSelectionBridge();
 	return (
 		<SectionsTab
-			data={data as ParsedTrafficData}
+			data={data as ParsedTrafficDataRetail}
 			hullIndex={hullIndex}
-			onChange={setData as (next: ParsedTrafficData) => void}
+			onChange={setData as (next: ParsedTrafficDataRetail) => void}
 			selected={selected}
 			onSelect={onSelect}
 			scrollToIndexRef={scrollToIndexRef}
@@ -165,9 +165,9 @@ export const LaneRungsExtension: React.FC<SchemaExtensionProps> = ({ path, data,
 	const { scrollToIndexRef } = useTabSelectionBridge();
 	return (
 		<LaneRungsTab
-			data={data as ParsedTrafficData}
+			data={data as ParsedTrafficDataRetail}
 			hullIndex={hullIndex}
-			onChange={setData as (next: ParsedTrafficData) => void}
+			onChange={setData as (next: ParsedTrafficDataRetail) => void}
 			scrollToIndexRef={scrollToIndexRef}
 		/>
 	);

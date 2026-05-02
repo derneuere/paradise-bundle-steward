@@ -21,7 +21,11 @@ import { polygonSoupListProfile } from './profiles/polygonSoupList';
 import { renderableProfile } from './profiles/renderable';
 import { streetDataProfile } from './profiles/streetData';
 import { textureProfile } from './profiles/texture';
-import { trafficDataProfile } from './profiles/trafficData';
+import {
+	trafficDataV22Profile,
+	trafficDataV44Profile,
+	trafficDataV45Profile,
+} from './profiles/trafficData';
 import { triggerDataProfile } from './profiles/triggerData';
 import { vehicleListProfile } from './profiles/vehicleList';
 import { zoneListProfile } from './profiles/zoneList';
@@ -55,9 +59,17 @@ const ENTRIES: RegistryEntry[] = [
 		profiles: [aiSectionsV12Profile, aiSectionsV4Profile],
 	},
 	{
-		typeId: 0x10003,
+		// 0x10002 — matches the core registry handler (`trafficDataHandler`).
+		// The previous 0x10003 was a typo from the initial profile scaffold
+		// that masked tree-row suffix lookups; resolved while wiring the
+		// V22/V44/V45 split per issue #45.
+		typeId: 0x10002,
 		key: 'trafficData',
-		profiles: [trafficDataProfile],
+		// Order matters: the FIRST profile is treated as the type's "primary"
+		// variant by `profileSuffixFor` (V45 retail stays bare; V44 gets the
+		// `(v44 Paradise PS3 era)` suffix on the tree row, V22 gets the
+		// `(v22 prototype)` suffix).
+		profiles: [trafficDataV45Profile, trafficDataV44Profile, trafficDataV22Profile],
 	},
 	{
 		typeId: 0x10006,

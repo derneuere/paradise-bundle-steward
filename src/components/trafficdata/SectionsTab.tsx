@@ -2,14 +2,14 @@ import React, { useMemo, useState, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import type { ParsedTrafficData, TrafficSection } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail, TrafficSection } from '@/lib/core/trafficData';
 import type { TrafficDataSelection } from './useTrafficSelection';
 import { updateHullField } from './constants';
 
 type Props = {
-	data: ParsedTrafficData;
+	data: ParsedTrafficDataRetail;
 	hullIndex: number;
-	onChange: (next: ParsedTrafficData) => void;
+	onChange: (next: ParsedTrafficDataRetail) => void;
 	selected: TrafficDataSelection;
 	onSelect: (sel: TrafficDataSelection) => void;
 	scrollToIndexRef: React.MutableRefObject<((index: number) => void) | null>;

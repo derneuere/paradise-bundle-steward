@@ -16,7 +16,7 @@ import { parseBundle } from '../bundle';
 import { RESOURCE_TYPE_IDS } from '../types';
 import { extractResourceSize, isCompressed, decompressData } from '../resourceManager';
 import { parseStreetDataData, type ParsedStreetData } from '../streetData';
-import { parseTrafficDataData, type ParsedTrafficData } from '../trafficData';
+import { parseTrafficDataData, type ParsedTrafficDataRetail } from '../trafficData';
 import { parseAISectionsData, type ParsedAISectionsV12 } from '../aiSections';
 import { parseTriggerDataData, type ParsedTriggerData } from '../triggerData';
 import {
@@ -63,14 +63,16 @@ function loadStreet(): ParsedStreetData {
 		),
 	);
 }
-function loadTraffic(): ParsedTrafficData {
-	return parseTrafficDataData(
+function loadTraffic(): ParsedTrafficDataRetail {
+	const parsed = parseTrafficDataData(
 		extractTypedResource(
 			path.resolve(__dirname, '../../../../example/B5TRAFFIC.BNDL'),
 			RESOURCE_TYPE_IDS.TRAFFIC_DATA,
 		),
 		true,
 	);
+	if (parsed.kind === 'v22') throw new Error(`Expected retail fixture, got ${parsed.kind}`);
+	return parsed;
 }
 function loadAI(): ParsedAISectionsV12 {
 	const parsed = parseAISectionsData(

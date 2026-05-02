@@ -20,7 +20,7 @@ import { extractResourceSize, isCompressed, decompressData } from '../../core/re
 import {
 	parseTrafficDataData,
 	writeTrafficDataData,
-	type ParsedTrafficData,
+	type ParsedTrafficDataRetail,
 } from '../../core/trafficData';
 
 import { trafficDataResourceSchema } from './trafficData';
@@ -69,7 +69,14 @@ function loadTrafficDataRaw(): Uint8Array {
 }
 
 const rawTraffic = loadTrafficDataRaw();
-const parsedTraffic = parseTrafficDataData(rawTraffic, true);
+const parsedTrafficRaw = parseTrafficDataData(rawTraffic, true);
+// Fixture is the v45 retail bundle; the rest of this test file is written
+// against the retail field shape, so narrow once at the top and let the
+// later assertions read `.hulls` / `.flowTypes` without re-narrowing.
+if (parsedTrafficRaw.kind === 'v22') {
+	throw new Error('Fixture B5TRAFFIC.BNDL parsed as v22; expected retail v44/v45.');
+}
+const parsedTraffic: ParsedTrafficDataRetail = parsedTrafficRaw;
 
 // ---------------------------------------------------------------------------
 // 1. Schema coverage — every parsed field has a schema entry
@@ -294,7 +301,7 @@ describe('trafficData byte round-trip', () => {
 	// keeping count fields in sync; here we verify the walker does NOT break
 	// the writer invariants).
 	it('updateAtPath on a primitive produces a writable model', () => {
-		const next = setAtPath(parsedTraffic, ['paintColours', 0], { x: 0, y: 0, z: 0, w: 0 } as ParsedTrafficData['paintColours'][number]);
+		const next = setAtPath(parsedTraffic, ['paintColours', 0], { x: 0, y: 0, z: 0, w: 0 } as ParsedTrafficDataRetail['paintColours'][number]);
 		expect(() => writeTrafficDataData(next, true)).not.toThrow();
 	});
 });
@@ -321,7 +328,7 @@ describe('count-field reconciliation', () => {
 			sectionFlows: hulls[hullIdx].sectionFlows.slice(0, -1),
 			// muNumSections deliberately NOT updated
 		};
-		const modified: ParsedTrafficData = { ...parsedTraffic, hulls };
+		const modified: ParsedTrafficDataRetail = { ...parsedTraffic, hulls };
 
 		// The stale count is still present on the model …
 		expect(modified.hulls[hullIdx].muNumSections).toBe(originalCount);
@@ -332,6 +339,7 @@ describe('count-field reconciliation', () => {
 		// the stale count, because the writer derives from length.
 		const bytes = writeTrafficDataData(modified, true);
 		const roundTripped = parseTrafficDataData(bytes, true);
+		if (roundTripped.kind === 'v22') throw new Error('round-trip parsed as v22');
 
 		expect(roundTripped.hulls[hullIdx].sections.length).toBe(originalCount - 1);
 		expect(roundTripped.hulls[hullIdx].muNumSections).toBe(originalCount - 1);
@@ -349,13 +357,14 @@ describe('count-field reconciliation', () => {
 			cumulativeProbs: flows[flowIdx].cumulativeProbs.slice(0, -1),
 			// muNumVehicleTypes deliberately NOT updated
 		};
-		const modified: ParsedTrafficData = { ...parsedTraffic, flowTypes: flows };
+		const modified: ParsedTrafficDataRetail = { ...parsedTraffic, flowTypes: flows };
 
 		expect(modified.flowTypes[flowIdx].muNumVehicleTypes).toBe(originalCount);
 		expect(modified.flowTypes[flowIdx].vehicleTypeIds.length).toBe(originalCount - 1);
 
 		const bytes = writeTrafficDataData(modified, true);
 		const roundTripped = parseTrafficDataData(bytes, true);
+		if (roundTripped.kind === 'v22') throw new Error('round-trip parsed as v22');
 
 		expect(roundTripped.flowTypes[flowIdx].vehicleTypeIds.length).toBe(originalCount - 1);
 		expect(roundTripped.flowTypes[flowIdx].muNumVehicleTypes).toBe(originalCount - 1);
@@ -373,12 +382,13 @@ describe('count-field reconciliation', () => {
 			cumulativeRungLengths: hulls[hullIdx].cumulativeRungLengths.slice(0, -1),
 			// muNumRungs deliberately NOT updated
 		};
-		const modified: ParsedTrafficData = { ...parsedTraffic, hulls };
+		const modified: ParsedTrafficDataRetail = { ...parsedTraffic, hulls };
 
 		expect(modified.hulls[hullIdx].muNumRungs).toBe(originalCount);
 
 		const bytes = writeTrafficDataData(modified, true);
 		const roundTripped = parseTrafficDataData(bytes, true);
+		if (roundTripped.kind === 'v22') throw new Error('round-trip parsed as v22');
 
 		expect(roundTripped.hulls[hullIdx].rungs.length).toBe(originalCount - 1);
 		expect(roundTripped.hulls[hullIdx].muNumRungs).toBe(originalCount - 1);
@@ -620,6 +630,72 @@ describe('schema labels', () => {
 		if (field.kind !== 'list') throw new Error('expected list');
 		const label = field.itemLabel?.(parsedTraffic.hulls[hi].sectionFlows[0], 0, ctx);
 		expect(label).toMatch(/→ FlowType/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 8. V22 prototype variant — discriminated-union smoke test (issue #45)
+// ---------------------------------------------------------------------------
+//
+// The Burnout 5 prototype X360 fixture parses into the `kind: 'v22'` branch
+// of the discriminated union. The retail schema can't render it (the field
+// shape is structurally different), so the editor registry registers a
+// separate `trafficDataV22ResourceSchema` for that branch. The writer
+// refuses v22 — there's no spec for hull internals or the tail regions.
+
+import { trafficDataV22ResourceSchema } from './trafficDataV22';
+
+const V22_FIXTURE = path.resolve(__dirname, '../../../../example/older builds/B5Traffic.bndl');
+
+function loadV22Raw(): Uint8Array {
+	const raw = fs.readFileSync(V22_FIXTURE);
+	const bytes = new Uint8Array(raw.byteLength);
+	bytes.set(raw);
+	const bundle = parseBundle(bytes.buffer);
+	const resource = bundle.resources.find((r) => r.resourceTypeId === RESOURCE_TYPE_IDS.TRAFFIC_DATA);
+	if (!resource) throw new Error('Fixture missing TrafficData resource');
+	for (let bi = 0; bi < 3; bi++) {
+		const size = extractResourceSize(resource.sizeAndAlignmentOnDisk[bi]);
+		if (size <= 0) continue;
+		const base = bundle.header.resourceDataOffsets[bi] >>> 0;
+		const rel = resource.diskOffsets[bi] >>> 0;
+		const start = (base + rel) >>> 0;
+		let slice = new Uint8Array(bytes.buffer.slice(start, start + size));
+		if (isCompressed(slice)) slice = decompressData(slice) as Uint8Array;
+		return slice;
+	}
+	throw new Error('V22 fixture has no non-empty TrafficData payload');
+}
+
+describe('trafficData v22 prototype variant', () => {
+	const rawV22 = loadV22Raw();
+	// X360 build → big-endian.
+	const parsedV22 = parseTrafficDataData(rawV22, false);
+
+	it('parses into the kind: "v22" branch', () => {
+		expect(parsedV22.kind).toBe('v22');
+	});
+
+	it('reports muDataVersion === 22', () => {
+		expect(parsedV22.muDataVersion).toBe(22);
+	});
+
+	it('exposes structural fields directly (no v22Raw nesting)', () => {
+		if (parsedV22.kind !== 'v22') throw new Error('expected v22');
+		expect(parsedV22.hullPointers.length).toBeGreaterThan(0);
+		expect(parsedV22.hullPointers.length).toBe(parsedV22.hullsRaw.length);
+		expect(parsedV22.tailABytes.byteLength).toBeGreaterThan(0);
+		// pvs has the v22-shaped fields (no forward mCellSize Vec4).
+		expect(parsedV22.pvs.muNumCells).toBeGreaterThan(0);
+	});
+
+	it('writer rejects v22 with a clear error', () => {
+		expect(() => writeTrafficDataData(parsedV22, false)).toThrow(/cannot write v22 prototype payload/);
+	});
+
+	it('v22 schema root references the correct record type', () => {
+		expect(trafficDataV22ResourceSchema.rootType).toBe('ParsedTrafficDataV22');
+		expect(trafficDataV22ResourceSchema.registry.ParsedTrafficDataV22).toBeDefined();
 	});
 });
 

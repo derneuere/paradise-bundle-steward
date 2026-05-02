@@ -19,7 +19,7 @@ import {
 } from '../streetData';
 import {
 	parseTrafficDataData,
-	type ParsedTrafficData,
+	type ParsedTrafficDataRetail,
 } from '../trafficData';
 import {
 	parseAISectionsData,
@@ -78,14 +78,16 @@ function loadStreet(): ParsedStreetData {
 		),
 	);
 }
-function loadTraffic(): ParsedTrafficData {
-	return parseTrafficDataData(
+function loadTraffic(): ParsedTrafficDataRetail {
+	const parsed = parseTrafficDataData(
 		extractTypedResource(
 			path.resolve(__dirname, '../../../../example/B5TRAFFIC.BNDL'),
 			RESOURCE_TYPE_IDS.TRAFFIC_DATA,
 		),
 		true,
 	);
+	if (parsed.kind === 'v22') throw new Error(`Expected retail fixture, got ${parsed.kind}`);
+	return parsed;
 }
 function loadAI(): ParsedAISectionsV12 {
 	const parsed = parseAISectionsData(

@@ -24,7 +24,7 @@
 
 import { Document, NodeIO, type Scene, type Mesh, type Buffer } from '@gltf-transform/core';
 import {
-	type ParsedTrafficData,
+	type ParsedTrafficDataRetail,
 	type TrafficHull,
 	type TrafficJunctionLogicBox,
 	type TrafficLaneRung,
@@ -171,7 +171,7 @@ function buildSectionRibbonMesh(
 function addVisualizationNodes(
 	doc: Document,
 	root: ReturnType<Document['createNode']>,
-	model: ParsedTrafficData,
+	model: ParsedTrafficDataRetail,
 ): void {
 	// One shared buffer for every section ribbon across every hull — keeps
 	// the glTF compact rather than spraying one buffer per mesh.
@@ -253,7 +253,7 @@ function addVisualizationNodes(
 export function addTrafficDataSubtree(
 	doc: Document,
 	scene: Scene,
-	model: ParsedTrafficData,
+	model: ParsedTrafficDataRetail,
 ): void {
 	const encoded = encodeModelDeep(model);
 	extendSceneExtras(scene, SCENE_EXTRAS_TRAFFIC_DATA, encoded);
@@ -268,11 +268,11 @@ export function addTrafficDataSubtree(
  * scene.extras.paradiseBundle.trafficData; the visualization nodes are
  * ignored. Phase 5 adds a reconciler that incorporates node edits.
  */
-export function readTrafficDataFromDocument(doc: Document): ParsedTrafficData {
+export function readTrafficDataFromDocument(doc: Document): ParsedTrafficDataRetail {
 	const scene = doc.getRoot().listScenes()[0];
 	if (!scene) throw new Error('glTF has no scene');
 	const encoded = readSceneExtrasSection(scene, SCENE_EXTRAS_TRAFFIC_DATA);
-	const model = decodeModelDeep(encoded) as ParsedTrafficData;
+	const model = decodeModelDeep(encoded) as ParsedTrafficDataRetail;
 	return reconcileTrafficDataFromNodes(model, scene);
 }
 
@@ -293,9 +293,9 @@ export function readTrafficDataFromDocument(doc: Document): ParsedTrafficData {
  * extend this to edit rung endpoints but that's a separate contract.
  */
 function reconcileTrafficDataFromNodes(
-	model: ParsedTrafficData,
+	model: ParsedTrafficDataRetail,
 	scene: import('@gltf-transform/core').Scene,
-): ParsedTrafficData {
+): ParsedTrafficDataRetail {
 	const root = findSceneRoot(scene, GROUP_TRAFFIC_DATA);
 	if (!root) return model;
 
@@ -401,7 +401,7 @@ function reconcileTrafficDataFromNodes(
 // Single-resource convenience wrappers
 // ---------------------------------------------------------------------------
 
-export function buildTrafficDataDocument(model: ParsedTrafficData): Document {
+export function buildTrafficDataDocument(model: ParsedTrafficDataRetail): Document {
 	const doc = new Document();
 	doc.getRoot().getAsset().generator = GENERATOR;
 	const scene = doc.createScene('Scene');
@@ -410,7 +410,7 @@ export function buildTrafficDataDocument(model: ParsedTrafficData): Document {
 }
 
 export async function exportTrafficDataToGltf(
-	model: ParsedTrafficData,
+	model: ParsedTrafficDataRetail,
 ): Promise<Uint8Array> {
 	const doc = buildTrafficDataDocument(model);
 	const io = new NodeIO();
@@ -418,14 +418,14 @@ export async function exportTrafficDataToGltf(
 }
 
 export async function exportTrafficDataToGltfJson(
-	model: ParsedTrafficData,
+	model: ParsedTrafficDataRetail,
 ): Promise<Uint8Array> {
 	return writeDocumentAsGltfJson(buildTrafficDataDocument(model));
 }
 
 export async function importTrafficDataFromGltf(
 	bytes: Uint8Array,
-): Promise<ParsedTrafficData> {
+): Promise<ParsedTrafficDataRetail> {
 	const io = new NodeIO();
 	const magic = new TextDecoder().decode(bytes.subarray(0, 4));
 	if (magic === 'glTF') {

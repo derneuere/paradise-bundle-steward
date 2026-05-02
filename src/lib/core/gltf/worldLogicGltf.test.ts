@@ -52,7 +52,9 @@ function loadCombined() {
 	const streetRaw = extractByType(STREET_FIXTURE, RESOURCE_TYPE_IDS.STREET_DATA);
 	const trafficRaw = extractByType(TRAFFIC_FIXTURE, RESOURCE_TYPE_IDS.TRAFFIC_DATA);
 	const streetData = parseStreetDataData(streetRaw);
-	const trafficData = parseTrafficDataData(trafficRaw, true);
+	const trafficParsed = parseTrafficDataData(trafficRaw, true);
+	if (trafficParsed.kind === 'v22') throw new Error('Fixture parsed as v22; expected retail.');
+	const trafficData = trafficParsed;
 	return { streetData, trafficData };
 }
 

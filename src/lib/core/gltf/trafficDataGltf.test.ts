@@ -15,7 +15,7 @@ import { extractResourceSize, isCompressed, decompressData } from '../resourceMa
 import {
 	parseTrafficDataData,
 	writeTrafficDataData,
-	type ParsedTrafficData,
+	type ParsedTrafficDataRetail,
 } from '../trafficData';
 import {
 	buildTrafficDataDocument,
@@ -39,7 +39,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 function loadFixtureModel(): {
-	model: ParsedTrafficData;
+	model: ParsedTrafficDataRetail;
 	raw: Uint8Array;
 	baselineWrite: Uint8Array;
 } {
@@ -63,7 +63,9 @@ function loadFixtureModel(): {
 		break;
 	}
 	if (!extracted) throw new Error('TrafficData resource had no populated block');
-	const model = parseTrafficDataData(extracted, true);
+	const parsed = parseTrafficDataData(extracted, true);
+	if (parsed.kind === 'v22') throw new Error('Fixture parsed as v22; expected retail.');
+	const model: ParsedTrafficDataRetail = parsed;
 	const baselineWrite = writeTrafficDataData(model, true);
 	return { model, raw: extracted, baselineWrite };
 }
@@ -187,7 +189,7 @@ describe('trafficData glTF round-trip', () => {
 			sections: hulls[hullIdx].sections.slice(0, -1),
 			sectionFlows: hulls[hullIdx].sectionFlows.slice(0, -1),
 		};
-		const edited: ParsedTrafficData = { ...model, hulls };
+		const edited: ParsedTrafficDataRetail = { ...model, hulls };
 
 		const baselineEdited = writeTrafficDataData(edited, true);
 		const gltfBytes = await exportTrafficDataToGltf(edited);

@@ -13,12 +13,17 @@ import { SchemaBulkSelectionContext } from '@/components/schema-editor/bulkSelec
 import { useGenericBulkSelection } from '@/components/schema-editor/useGenericBulkSelection';
 import { trafficDataExtensions } from '@/components/schema-editor/extensions/trafficDataExtensions';
 import { trafficDataResourceSchema } from '@/lib/schema/resources/trafficData';
-import type { ParsedTrafficData } from '@/lib/core/trafficData';
+import type { ParsedTrafficData, ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 
 const TrafficDataPage = () => {
 	const { getResource, setResource } = useWorkspace();
 	const bundleId = useFirstLoadedBundleId();
-	const data = bundleId ? getResource<ParsedTrafficData>(bundleId, 'trafficData') : null;
+	const raw = bundleId ? getResource<ParsedTrafficData>(bundleId, 'trafficData') : null;
+	// This legacy single-resource page renders the retail schema only. v22
+	// prototype payloads are surfaced via the Workspace tree (its EditorProfile
+	// picks the read-only v22 schema there); routing them to the retail
+	// schema here would crash on the missing `hulls` / `flowTypes` fields.
+	const data: ParsedTrafficDataRetail | null = raw && raw.kind !== 'v22' ? raw : null;
 	const bulk = useGenericBulkSelection();
 	const bulkValue = useMemo(
 		() => ({
@@ -51,7 +56,7 @@ const TrafficDataPage = () => {
 				<SchemaEditorProvider
 					resource={trafficDataResourceSchema}
 					data={data}
-					onChange={(next) => bundleId && setResource(bundleId, 'trafficData', next as ParsedTrafficData)}
+					onChange={(next) => bundleId && setResource(bundleId, 'trafficData', next as ParsedTrafficDataRetail)}
 					extensions={trafficDataExtensions}
 				>
 					<SchemaEditor />

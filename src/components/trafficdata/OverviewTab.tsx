@@ -2,12 +2,12 @@ import React, { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { ParsedTrafficData } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 import { hullColor } from './constants';
 
 type Props = {
-	data: ParsedTrafficData;
-	onChange: (next: ParsedTrafficData) => void;
+	data: ParsedTrafficDataRetail;
+	onChange: (next: ParsedTrafficDataRetail) => void;
 	onHullClick: (index: number) => void;
 };
 

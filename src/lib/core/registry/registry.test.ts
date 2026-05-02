@@ -171,9 +171,10 @@ for (const handler of registry) {
 				// handler is writable AND this specific fixture advertises a
 				// successful round-trip (byteRoundTrip or stableWriter). Some
 				// fixtures parse fine but aren't writable — e.g., the B5
-				// TrafficData prototype carries a `v22Raw` payload the writer
-				// has no spec for, so it sets `parseOk: true` only and we
-				// must skip stress on it.
+				// TrafficData prototype parses into the `kind: 'v22'` variant
+				// of the discriminated union and the writer has no spec for
+				// it, so it sets `parseOk: true` only and we must skip stress
+				// on it.
 				const fixtureIsWritable =
 					!!(fixture.expect?.byteRoundTrip || fixture.expect?.stableWriter);
 				if (

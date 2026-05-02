@@ -3,11 +3,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { ParsedTrafficData, TrafficKillZone, TrafficKillZoneRegion } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail, TrafficKillZone, TrafficKillZoneRegion } from '@/lib/core/trafficData';
 
 type Props = {
-	data: ParsedTrafficData;
-	onChange: (next: ParsedTrafficData) => void;
+	data: ParsedTrafficDataRetail;
+	onChange: (next: ParsedTrafficDataRetail) => void;
 };
 
 function NumberCell({ value, onChange, width = 'w-20' }: { value: number; onChange: (v: number) => void; width?: string }) {

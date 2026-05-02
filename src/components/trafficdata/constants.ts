@@ -1,25 +1,25 @@
-import type { ParsedTrafficData, TrafficHull } from '@/lib/core/trafficData';
+import type { ParsedTrafficDataRetail, TrafficHull } from '@/lib/core/trafficData';
 
 // ---------------------------------------------------------------------------
 // Hull-level immutable updater
 // ---------------------------------------------------------------------------
 
 export function updateHullField<K extends keyof TrafficHull>(
-	data: ParsedTrafficData,
+	data: ParsedTrafficDataRetail,
 	hullIndex: number,
 	key: K,
 	updater: (current: TrafficHull[K]) => TrafficHull[K],
-): ParsedTrafficData {
+): ParsedTrafficDataRetail {
 	const hulls = data.hulls.slice();
 	hulls[hullIndex] = { ...hulls[hullIndex], [key]: updater(hulls[hullIndex][key]) };
 	return { ...data, hulls };
 }
 
 export function updateHull(
-	data: ParsedTrafficData,
+	data: ParsedTrafficDataRetail,
 	hullIndex: number,
 	patch: Partial<TrafficHull>,
-): ParsedTrafficData {
+): ParsedTrafficDataRetail {
 	const hulls = data.hulls.slice();
 	hulls[hullIndex] = { ...hulls[hullIndex], ...patch };
 	return { ...data, hulls };
@@ -97,7 +97,7 @@ export type FlowTypeReferences = {
 	trailers: number;
 };
 
-export function countFlowTypeReferences(data: ParsedTrafficData, flowTypeIndex: number): FlowTypeReferences {
+export function countFlowTypeReferences(data: ParsedTrafficDataRetail, flowTypeIndex: number): FlowTypeReferences {
 	let sectionFlows = 0;
 	let staticVehicles = 0;
 	for (const hull of data.hulls) {

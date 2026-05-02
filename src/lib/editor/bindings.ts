@@ -47,10 +47,21 @@ const BINDINGS: Record<string, Record<string, ProfileRenderBinding<unknown>>> = 
 		},
 	},
 	trafficData: {
-		default: {
+		// V45 retail: the full editor surface — 3D overlay + every Phase-1/2
+		// tab as a schema-editor extension.
+		v45: {
 			overlay: TrafficDataOverlay as ProfileRenderBinding['overlay'],
 			extensions: trafficDataExtensions,
 		},
+		// V44 retail (Paradise PS3 era): same shape as V45, same overlay /
+		// extensions — only the tree-row suffix differs.
+		v44: {
+			overlay: TrafficDataOverlay as ProfileRenderBinding['overlay'],
+			extensions: trafficDataExtensions,
+		},
+		// V22 prototype: read-only inspector — no overlay (no fixture has
+		// hull internals decoded yet) and no extensions (the retail tabs all
+		// assume retail-shape arrays).
 	},
 	streetData: {
 		default: {
