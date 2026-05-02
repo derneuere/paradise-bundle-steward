@@ -1094,3 +1094,126 @@ describe('duplicate ↔ delete round-trip', () => {
 		expect(restored.sections[0].portals).toEqual([]);
 	});
 });
+
+// =============================================================================
+// translateLegacyCornerWithShared (V4/V6 corner-drag with shared-point cascade)
+// =============================================================================
+
+import { translateLegacyCornerWithShared } from './aiSectionsOps';
+import type {
+	LegacyAISection,
+	LegacyAISectionsData,
+} from './aiSections';
+
+describe('translateLegacyCornerWithShared', () => {
+	// Two adjacent V4 quads sharing the right edge of section 0 / left edge
+	// of section 1. Mirror of the V12 makePair fixture.
+	function makeLegacySection(
+		cornersX: number[],
+		cornersZ: number[],
+		portals: LegacyAISection['portals'] = [],
+	): LegacyAISection {
+		return { cornersX, cornersZ, portals, noGoLines: [], dangerRating: 1, flags: 0 };
+	}
+
+	function makeLegacyPair(): LegacyAISectionsData {
+		const s0 = makeLegacySection(
+			[0, 10, 10, 0],
+			[0,  0, 10, 10],
+			[{
+				midPosition: { x: 10, y: 0, z: 5, w: 0 },
+				boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+				linkSection: 1,
+			}],
+		);
+		const s1 = makeLegacySection(
+			[10, 20, 20, 10],
+			[ 0,  0, 10, 10],
+			[{
+				midPosition: { x: 10, y: 0, z: 5, w: 0 },
+				boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+				linkSection: 0,
+			}],
+		);
+		return { version: 4, sections: [s0, s1] };
+	}
+
+	it('moves the targeted corner', () => {
+		const model = makeLegacyPair();
+		// Corner 1 of section 0 is at (cornersX=10, cornersZ=0). Drag by (+3, -1).
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		expect(next.sections[0].cornersX[1]).toBe(13);
+		expect(next.sections[0].cornersZ[1]).toBe(-1);
+		// Other corners on section 0 unchanged.
+		expect(next.sections[0].cornersX[0]).toBe(0);
+		expect(next.sections[0].cornersZ[0]).toBe(0);
+	});
+
+	it('cascades to the shared corner on a neighbouring section', () => {
+		const model = makeLegacyPair();
+		// Section 1 corner 0 is also at (10, 0) — must move together.
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		expect(next.sections[1].cornersX[0]).toBe(13);
+		expect(next.sections[1].cornersZ[0]).toBe(-1);
+		// Section 1's far-edge corners stay put.
+		expect(next.sections[1].cornersX[1]).toBe(20);
+		expect(next.sections[1].cornersZ[1]).toBe(0);
+	});
+
+	it('shifts boundary-line endpoints that match the old corner', () => {
+		const model = makeLegacyPair();
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		// Section 0's portal BL start (10,0) matched → shift to (13,-1).
+		expect(next.sections[0].portals[0].boundaryLines[0].verts).toEqual({
+			x: 13, y: -1, z: 10, w: 10,
+		});
+		// Section 1's portal BL end (10,0) matched → shift to (13,-1).
+		expect(next.sections[1].portals[0].boundaryLines[0].verts).toEqual({
+			x: 10, y: 10, z: 13, w: -1,
+		});
+	});
+
+	it('is a no-op for a zero offset (returns the same model reference)', () => {
+		const model = makeLegacyPair();
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 0, z: 0 });
+		expect(next).toBe(model);
+	});
+
+	it('preserves object identity for sections that share no point with the dragged corner', () => {
+		const base = makeLegacyPair();
+		const farAway = makeLegacySection([100, 110, 110, 100], [100, 100, 110, 110]);
+		const expanded: LegacyAISectionsData = {
+			...base,
+			sections: [...base.sections, farAway],
+		};
+		const next = translateLegacyCornerWithShared(expanded, 0, 1, { x: 3, z: -1 });
+		expect(next.sections[2]).toBe(farAway);
+	});
+
+	it('throws RangeError for out-of-range srcIdx', () => {
+		const model = makeLegacyPair();
+		expect(() => translateLegacyCornerWithShared(model, -1, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateLegacyCornerWithShared(model, 7, 0, { x: 1, z: 0 })).toThrow(RangeError);
+	});
+
+	it('throws RangeError for out-of-range cornerIdx', () => {
+		const model = makeLegacyPair();
+		expect(() => translateLegacyCornerWithShared(model, 0, -1, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateLegacyCornerWithShared(model, 0, 4, { x: 1, z: 0 })).toThrow(RangeError);
+	});
+
+	it('shifts a noGoLine endpoint that matches the old corner', () => {
+		const base = makeLegacyPair();
+		const withNoGo: LegacyAISectionsData = {
+			...base,
+			sections: base.sections.map((s, i) =>
+				i === 0
+					? { ...s, noGoLines: [{ verts: { x: 5, y: 5, z: 10, w: 0 } }] }
+					: s,
+			),
+		};
+		const next = translateLegacyCornerWithShared(withNoGo, 0, 1, { x: 3, z: -1 });
+		// noGo end (10, 0) matched corner 1 → shift end to (13, -1).
+		expect(next.sections[0].noGoLines[0].verts).toEqual({ x: 5, y: 5, z: 13, w: -1 });
+	});
+});

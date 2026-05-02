@@ -14,6 +14,8 @@
 import type {
 	AISection,
 	BoundaryLine,
+	LegacyAISectionsData,
+	LegacyBoundaryLine,
 	ParsedAISectionsV12,
 	Portal,
 	Vector2,
@@ -607,6 +609,132 @@ function shiftBoundaryEndpointsAt(
 	const endMatches =
 		Math.abs(bl.verts.z - point.x) < POSITION_EPS &&
 		Math.abs(bl.verts.w - point.y) < POSITION_EPS;
+	if (!startMatches && !endMatches) return bl;
+	return {
+		verts: {
+			x: startMatches ? bl.verts.x + dx : bl.verts.x,
+			y: startMatches ? bl.verts.y + dz : bl.verts.y,
+			z: endMatches ? bl.verts.z + dx : bl.verts.z,
+			w: endMatches ? bl.verts.w + dz : bl.verts.w,
+		},
+	};
+}
+
+// =============================================================================
+// Smart corner-drag for legacy (V4/V6) sections
+// =============================================================================
+
+/**
+ * Move a single polygon corner by an XZ offset in a V4/V6 legacy model,
+ * cascading the move to every other value that coincides with the OLD corner
+ * position — the same "smart cascade" semantics as `translateCornerWithShared`
+ * but over the V4/V6 parallel-array corner storage (`cornersX[4]` + `cornersZ[4]`):
+ *
+ *   - All corners on any section whose `(cornersX[i], cornersZ[i])` world
+ *     point lies within `POSITION_EPS` of the original corner shift together.
+ *   - Boundary-line endpoints in portal BLs and noGo lines whose XZ position
+ *     matches the old corner are shifted by the same delta.
+ *
+ * Sections that share no point with the dragged corner are returned
+ * `===`-equal to their input so React renderers can skip them cheaply.
+ *
+ * @throws RangeError if `srcIdx` or `cornerIdx` is out of range.
+ */
+export function translateLegacyCornerWithShared(
+	model: LegacyAISectionsData,
+	srcIdx: number,
+	cornerIdx: number,
+	offset: { x: number; z: number },
+): LegacyAISectionsData {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	const src = model.sections[srcIdx];
+	const n = Math.min(src.cornersX.length, src.cornersZ.length);
+	if (cornerIdx < 0 || cornerIdx >= n) {
+		throw new RangeError(`cornerIdx ${cornerIdx} out of range [0, ${n})`);
+	}
+	if (offset.x === 0 && offset.z === 0) return model;
+
+	const oldX = src.cornersX[cornerIdx];
+	const oldZ = src.cornersZ[cornerIdx];
+	const dx = offset.x;
+	const dz = offset.z;
+
+	const sections = model.sections.map((sec) => {
+		const m = Math.min(sec.cornersX.length, sec.cornersZ.length);
+
+		// Find which corner indices match the old world position.
+		const matched: boolean[] = new Array(m).fill(false);
+		let cornersChanged = false;
+		for (let i = 0; i < m; i++) {
+			if (
+				Math.abs(sec.cornersX[i] - oldX) < POSITION_EPS &&
+				Math.abs(sec.cornersZ[i] - oldZ) < POSITION_EPS
+			) {
+				matched[i] = true;
+				cornersChanged = true;
+			}
+		}
+
+		const newCornersX = cornersChanged
+			? sec.cornersX.map((cx, i) => (matched[i] ? cx + dx : cx))
+			: sec.cornersX;
+		const newCornersZ = cornersChanged
+			? sec.cornersZ.map((cz, i) => (matched[i] ? cz + dz : cz))
+			: sec.cornersZ;
+
+		let portalsChanged = false;
+		const newPortals = sec.portals.map((p) => {
+			let blsChanged = false;
+			const newBLs = p.boundaryLines.map((bl) => {
+				const next = shiftLegacyBoundaryEndpointsAt(bl, oldX, oldZ, dx, dz);
+				if (next !== bl) blsChanged = true;
+				return next;
+			});
+			if (!blsChanged) return p;
+			portalsChanged = true;
+			return { ...p, boundaryLines: newBLs };
+		});
+
+		let noGoChanged = false;
+		const newNoGo = sec.noGoLines.map((bl) => {
+			const next = shiftLegacyBoundaryEndpointsAt(bl, oldX, oldZ, dx, dz);
+			if (next !== bl) noGoChanged = true;
+			return next;
+		});
+
+		if (!cornersChanged && !portalsChanged && !noGoChanged) return sec;
+		return {
+			...sec,
+			cornersX: newCornersX,
+			cornersZ: newCornersZ,
+			portals: portalsChanged ? newPortals : sec.portals,
+			noGoLines: noGoChanged ? newNoGo : sec.noGoLines,
+		};
+	});
+
+	return { ...model, sections };
+}
+
+/**
+ * Return a new LegacyBoundaryLine with any endpoint matching `(px, pz)`
+ * shifted by `(dx, dz)`. Returns the original (`===`-equal) when neither
+ * endpoint matched, so callers can detect "no change" cheaply.
+ */
+function shiftLegacyBoundaryEndpointsAt(
+	bl: LegacyBoundaryLine,
+	px: number,
+	pz: number,
+	dx: number,
+	dz: number,
+): LegacyBoundaryLine {
+	const startMatches =
+		Math.abs(bl.verts.x - px) < POSITION_EPS &&
+		Math.abs(bl.verts.y - pz) < POSITION_EPS;
+	const endMatches =
+		Math.abs(bl.verts.z - px) < POSITION_EPS &&
+		Math.abs(bl.verts.w - pz) < POSITION_EPS;
 	if (!startMatches && !endMatches) return bl;
 	return {
 		verts: {

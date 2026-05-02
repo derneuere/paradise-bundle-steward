@@ -1,4 +1,4 @@
-// AISectionsLegacyOverlay — read-only WorldViewport overlay for the V4 (and
+// AISectionsLegacyOverlay — WorldViewport overlay for the V4 (and
 // later V6) prototype AI Sections data. Reads the legacy model directly —
 // no adapter to the V12 shape — so the prototype's parallel cornersX[4] +
 // cornersZ[4] storage, dangerRating enum, and Vector4 midPosition fields
@@ -24,9 +24,11 @@
 //   - ['legacy', 'sections', i, 'portals', p, 'boundaryLines', l]     → boundary line
 //   - ['legacy', 'sections', i, 'noGoLines', l]                       → no-go line
 //
-// **No edit ops** — no onChange, no gizmo, no corner handles, no edge
-// handles, no snap toggle, no marquee. Edit ops land incrementally in
-// future "Legacy edit op:" issues.
+// Corner drag edit op: selecting a section shows corner handles. Dragging
+// one commits via `onChange` (if provided) using `translateLegacyCornerWithShared`,
+// which cascades the move to all coincident corners and BL endpoints in the
+// model (same "smart cascade" semantics as the V12 overlay). Snap is out of
+// scope for this slice.
 //
 // 3D primitives (BatchedSections, SelectionOverlay, SectionLabel) live in
 // `@/components/aisections/shared` so the V12 overlay consumes the same
@@ -39,8 +41,10 @@ import type {
 	ParsedAISectionsV6,
 	LegacyAISection,
 	LegacyAISectionsData,
+	Vector2,
 } from '@/lib/core/aiSections';
 import { LegacyDangerRating } from '@/lib/core/aiSections';
+import { translateLegacyCornerWithShared } from '@/lib/core/aiSectionsOps';
 import {
 	BatchedSections,
 	buildBatchedSections,
@@ -53,6 +57,7 @@ import {
 	type Corner,
 	type SectionAccessor,
 } from '@/components/aisections/shared';
+import { CornerHandles, type CornerDragOffset } from '@/components/aisections/CornerHandles';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 
@@ -156,6 +161,20 @@ function legacyCorners(section: LegacyAISection): Corner[] {
 	const out: Corner[] = new Array(n);
 	for (let i = 0; i < n; i++) {
 		out[i] = { x: section.cornersX[i], z: section.cornersZ[i] };
+	}
+	return out;
+}
+
+/**
+ * Convert a legacy section's parallel cornersX/cornersZ arrays into a
+ * `Vector2[]` suitable for `CornerHandles` (which uses `{x, y}` where `y`
+ * is the world Z coordinate, matching `AISection.corners`).
+ */
+function legacyCornersAsV2(section: LegacyAISection): Vector2[] {
+	const n = legacyCornerCount(section);
+	const out: Vector2[] = new Array(n);
+	for (let i = 0; i < n; i++) {
+		out[i] = { x: section.cornersX[i], y: section.cornersZ[i] };
 	}
 	return out;
 }
@@ -285,12 +304,15 @@ type Props = {
 	data: ParsedAISectionsV4 | ParsedAISectionsV6;
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
+	onChange?: (next: ParsedAISectionsV4 | ParsedAISectionsV6) => void;
+	isActive?: boolean;
 };
 
 export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 | ParsedAISectionsV6> = ({
-	data, selectedPath, onSelect,
+	data, selectedPath, onSelect, onChange,
 }: Props) => {
 	const [hoverSectionIndex, setHoverSectionIndex] = useState<number | null>(null);
+	const [drag, setDrag] = useState<{ cornerIdx: number; offset: CornerDragOffset } | null>(null);
 
 	const legacy = data.legacy;
 	const sections = legacy.sections;
@@ -303,14 +325,52 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	const selSection = selectedSectionIndex != null ? sections[selectedSectionIndex] ?? null : null;
 	const hovSection = hoverSectionIndex != null ? sections[hoverSectionIndex] ?? null : null;
 
+	// Derive a preview legacy model while a corner drag is in flight so the
+	// selection overlay and CornerHandles reflect the live offset.
+	const previewLegacy: LegacyAISectionsData | null = useMemo(() => {
+		if (selectedSectionIndex == null || !drag) return null;
+		if (drag.offset.x === 0 && drag.offset.z === 0) return null;
+		try {
+			return translateLegacyCornerWithShared(legacy, selectedSectionIndex, drag.cornerIdx, drag.offset);
+		} catch {
+			return null;
+		}
+	}, [legacy, selectedSectionIndex, drag]);
+
+	// The displayed selection section — uses preview during drag, live otherwise.
+	const previewSelSection: LegacyAISection | null = useMemo(() => {
+		if (!selSection) return null;
+		if (!previewLegacy || selectedSectionIndex == null) return selSection;
+		return previewLegacy.sections[selectedSectionIndex] ?? selSection;
+	}, [selSection, previewLegacy, selectedSectionIndex]);
+
 	const selCorners = useMemo(
-		() => (selSection ? legacyCorners(selSection) : null),
-		[selSection],
+		() => (previewSelSection ? legacyCorners(previewSelSection) : null),
+		[previewSelSection],
 	);
 	const hovCorners = useMemo(
 		() => (hovSection ? legacyCorners(hovSection) : null),
 		[hovSection],
 	);
+
+	// Corners in Vector2 format (x,y where y=worldZ) for CornerHandles.
+	const previewCornerHandleSection = useMemo(
+		() => (previewSelSection ? { corners: legacyCornersAsV2(previewSelSection) } : null),
+		[previewSelSection],
+	);
+
+	// Affected neighbours: sections that changed identity in the preview model.
+	const affectedNeighbours = useMemo(() => {
+		if (!previewLegacy || selectedSectionIndex == null) return [];
+		const out: { idx: number; corners: Corner[] }[] = [];
+		for (let i = 0; i < previewLegacy.sections.length; i++) {
+			if (i === selectedSectionIndex) continue;
+			if (previewLegacy.sections[i] !== sections[i]) {
+				out.push({ idx: i, corners: legacyCorners(previewLegacy.sections[i]) });
+			}
+		}
+		return out;
+	}, [previewLegacy, selectedSectionIndex, sections]);
 
 	const handlePickSection = useCallback((sectionIndex: number) => {
 		onSelect(legacyAISectionMarkerPath({ kind: 'section', sectionIndex }));
@@ -331,6 +391,25 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 		onSelect(legacyAISectionMarkerPath({ kind: 'noGoLine', sectionIndex: selectedSectionIndex, lineIndex }));
 	}, [onSelect, selectedSectionIndex]);
 
+	// Corner-drag handlers — update preview during drag, commit on release.
+	const handleCornerDrag = useCallback((cornerIdx: number, offset: CornerDragOffset) => {
+		setDrag({ cornerIdx, offset });
+	}, []);
+
+	const handleCornerCommit = useCallback((cornerIdx: number, offset: CornerDragOffset) => {
+		setDrag(null);
+		if (selectedSectionIndex == null || !onChange) return;
+		if (offset.x === 0 && offset.z === 0) return;
+		try {
+			const nextLegacy = translateLegacyCornerWithShared(legacy, selectedSectionIndex, cornerIdx, offset);
+			onChange({ ...data, legacy: nextLegacy });
+		} catch {
+			// out-of-range: ignore
+		}
+	}, [data, legacy, selectedSectionIndex, onChange]);
+
+	const handleCornerCancel = useCallback(() => setDrag(null), []);
+
 	return (
 		<>
 			<BatchedSections
@@ -343,6 +422,10 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 			{hovCorners && hoverSectionIndex !== selectedSectionIndex && (
 				<SelectionOverlay corners={hovCorners} color="#66aaff" />
 			)}
+
+			{affectedNeighbours.map(({ idx, corners }) => (
+				<SelectionOverlay key={`neighbour-${idx}`} corners={corners} color="#ffaa33" />
+			))}
 
 			{selCorners && selSection && selectedSectionIndex != null && (
 				<SectionLabel corners={selCorners} color="#ffaa33">
@@ -363,6 +446,16 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 					onPickPortal={handlePickPortal}
 					onPickBoundaryLine={handlePickBoundaryLine}
 					onPickNoGoLine={handlePickNoGoLine}
+				/>
+			)}
+
+			{previewCornerHandleSection && (
+				<CornerHandles
+					section={previewCornerHandleSection}
+					pixelSize={12}
+					onDrag={handleCornerDrag}
+					onCommit={handleCornerCommit}
+					onCancel={handleCornerCancel}
 				/>
 			)}
 		</>

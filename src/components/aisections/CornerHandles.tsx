@@ -23,7 +23,7 @@ import * as THREE from 'three';
 import { ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import { useCornerDrag } from '@/hooks/useCornerDrag';
 import { unprojectToGroundPlane } from '@/lib/three/groundPlane';
-import type { AISection } from '@/lib/core/aiSections';
+import type { Vector2 } from '@/lib/core/aiSections';
 
 // =============================================================================
 // Types
@@ -31,10 +31,15 @@ import type { AISection } from '@/lib/core/aiSections';
 
 export type CornerDragOffset = { x: number; z: number };
 
+/** Minimal section shape required by CornerHandles — just the corners array.
+ *  `AISection` satisfies this interface; for V4/V6 pass `{ corners: Vector2[] }`
+ *  built from `cornersX`/`cornersZ`. */
+type CornerSection = { corners: Vector2[] };
+
 type Props = {
 	/** The section whose corners we render handles for. Pass the previewed
 	 *  section during a drag so each handle tracks the live offset. */
-	section: AISection;
+	section: CornerSection;
 	/**
 	 * Approximate on-screen radius (in CSS pixels) of each corner sphere.
 	 * The component rescales itself per-frame against camera distance so
