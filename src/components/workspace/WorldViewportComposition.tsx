@@ -48,17 +48,8 @@
 import { useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { WorldViewport } from '@/components/schema-editor/viewports/WorldViewport';
-import { AISectionsOverlay } from '@/components/schema-editor/viewports/AISectionsOverlay';
-import { StreetDataOverlay } from '@/components/schema-editor/viewports/StreetDataOverlay';
-import { TrafficDataOverlay } from '@/components/schema-editor/viewports/TrafficDataOverlay';
-import { TriggerDataOverlay } from '@/components/schema-editor/viewports/TriggerDataOverlay';
-import { ZoneListOverlay } from '@/components/schema-editor/viewports/ZoneListOverlay';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
-import type { ParsedAISections } from '@/lib/core/aiSections';
-import type { ParsedStreetData } from '@/lib/core/streetData';
-import type { ParsedTrafficData } from '@/lib/core/trafficData';
-import type { ParsedTriggerData } from '@/lib/core/triggerData';
-import type { ParsedZoneList } from '@/lib/core/zoneList';
+import { pickProfileByKey } from '@/lib/editor/registry';
 import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorkspaceContextValue } from '@/context/WorkspaceContext.types';
@@ -102,91 +93,51 @@ type OverlayBindings = {
 
 function renderOverlay({ descriptor, selectedPath, onSelect, onChange, isActive, activeSoupIndex, onPickInstancePoly }: OverlayBindings) {
 	const key = `${descriptor.bundleId}::${descriptor.resourceKey}::${descriptor.index}`;
-	switch (descriptor.resourceKey) {
-		case 'aiSections':
-			return (
-				<AISectionsOverlay
-					key={key}
-					data={descriptor.model as ParsedAISections}
-					selectedPath={selectedPath}
-					onSelect={onSelect}
-					onChange={onChange as (next: ParsedAISections) => void}
-					isActive={isActive}
-				/>
-			);
-		case 'streetData':
-			return (
-				<StreetDataOverlay
-					key={key}
-					data={descriptor.model as ParsedStreetData}
-					selectedPath={selectedPath}
-					onSelect={onSelect}
-					onChange={onChange as (next: ParsedStreetData) => void}
-				/>
-			);
-		case 'trafficData':
-			return (
-				<TrafficDataOverlay
-					key={key}
-					data={descriptor.model as ParsedTrafficData}
-					selectedPath={selectedPath}
-					onSelect={onSelect}
-					onChange={onChange as (next: ParsedTrafficData) => void}
-					isActive={isActive}
-				/>
-			);
-		case 'triggerData':
-			return (
-				<TriggerDataOverlay
-					key={key}
-					data={descriptor.model as ParsedTriggerData}
-					selectedPath={selectedPath}
-					onSelect={onSelect}
-					onChange={onChange as (next: ParsedTriggerData) => void}
-					isActive={isActive}
-				/>
-			);
-		case 'zoneList':
-			return (
-				<ZoneListOverlay
-					key={key}
-					data={descriptor.model as ParsedZoneList}
-					selectedPath={selectedPath}
-					onSelect={onSelect}
-				/>
-			);
-		case 'polygonSoupList':
-			// PolygonSoupList renders the *union* of every PSL instance in its
-			// Bundle as one batched mesh. The composition supplies that union
-			// via `bundleSoups` (ADR-0004 multi-Bundle resolution) so the
-			// overlay never has to read the workspace itself — that's the bit
-			// that used to leak across Bundles by always reaching for
-			// `bundles[0]`. Only ONE PSL overlay is mounted per Bundle (see
-			// `dedupePolygonSoupOverlays`); rendering the same N-instance
-			// union from N descriptors used to peg the renderer.
-			return (
-				<PolygonSoupListOverlay
-					key={key}
-					data={descriptor.model as ParsedPolygonSoupList}
-					bundleSoups={descriptor.bundleSiblings as (ParsedPolygonSoupList | null)[]}
-					activeSoupIndex={activeSoupIndex}
-					onPickInstancePoly={onPickInstancePoly}
-					selectedPath={selectedPath}
-					onSelect={onSelect}
-					onChange={onChange as (next: ParsedPolygonSoupList) => void}
-					isActive={isActive}
-				/>
-			);
-		default: {
-			// Exhaustiveness check — adding a new family key without a render
-			// branch above is a compile-time error (the assignment to
-			// `_exhaustive: never` fails) so the composition can never silently
-			// drop a registered overlay type.
-			const _exhaustive: never = descriptor.resourceKey;
-			void _exhaustive;
-			return null;
-		}
+
+	// PolygonSoupList renders the *union* of every PSL instance in its
+	// Bundle as one batched mesh. The composition supplies that union
+	// via `bundleSoups` (ADR-0004 multi-Bundle resolution) so the overlay
+	// never has to read the workspace itself — that's the bit that used
+	// to leak across Bundles by always reaching for `bundles[0]`. Only
+	// ONE PSL overlay is mounted per Bundle (see
+	// `dedupePolygonSoupOverlays`); rendering the same N-instance union
+	// from N descriptors used to peg the renderer. PSL uses extra props
+	// (bundleSoups / activeSoupIndex / onPickInstancePoly) that don't fit
+	// the generic WorldOverlayProps shape, so it stays special-cased.
+	if (descriptor.resourceKey === 'polygonSoupList') {
+		return (
+			<PolygonSoupListOverlay
+				key={key}
+				data={descriptor.model as ParsedPolygonSoupList}
+				bundleSoups={descriptor.bundleSiblings as (ParsedPolygonSoupList | null)[]}
+				activeSoupIndex={activeSoupIndex}
+				onPickInstancePoly={onPickInstancePoly}
+				selectedPath={selectedPath}
+				onSelect={onSelect}
+				onChange={onChange as (next: ParsedPolygonSoupList) => void}
+				isActive={isActive}
+			/>
+		);
 	}
+
+	// All other world-family overlays (aiSections / streetData /
+	// trafficData / triggerData / zoneList) come straight off the editor
+	// profile registered for the resource key — no per-key switch here
+	// means new versioned profiles (e.g. AISections V4/V6) automatically
+	// participate once their profile lands in the registry (ADR-0008).
+	const profile = pickProfileByKey(descriptor.resourceKey, descriptor.model);
+	const Overlay = profile?.overlay;
+	if (!Overlay) return null;
+	return (
+		<Overlay
+			key={key}
+			data={descriptor.model}
+			selectedPath={selectedPath}
+			onSelect={onSelect}
+			onChange={onChange}
+			isActive={isActive}
+		/>
+	);
 }
 
 // ---------------------------------------------------------------------------

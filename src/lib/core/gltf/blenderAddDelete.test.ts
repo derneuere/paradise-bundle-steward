@@ -17,7 +17,7 @@ import { RESOURCE_TYPE_IDS } from '../types';
 import { extractResourceSize, isCompressed, decompressData } from '../resourceManager';
 import { parseStreetDataData, type ParsedStreetData } from '../streetData';
 import { parseTrafficDataData, type ParsedTrafficData } from '../trafficData';
-import { parseAISectionsData, type ParsedAISections } from '../aiSections';
+import { parseAISectionsData, type ParsedAISectionsV12 } from '../aiSections';
 import { parseTriggerDataData, type ParsedTriggerData } from '../triggerData';
 import {
 	buildStreetDataDocument,
@@ -72,14 +72,16 @@ function loadTraffic(): ParsedTrafficData {
 		true,
 	);
 }
-function loadAI(): ParsedAISections {
-	return parseAISectionsData(
+function loadAI(): ParsedAISectionsV12 {
+	const parsed = parseAISectionsData(
 		extractTypedResource(
 			path.resolve(__dirname, '../../../../example/AI.DAT'),
 			RESOURCE_TYPE_IDS.AI_SECTIONS,
 		),
 		true,
 	);
+	if (parsed.kind !== 'v12') throw new Error(`Expected v12 fixture, got ${parsed.kind}`);
+	return parsed;
 }
 function loadTrigger(): ParsedTriggerData {
 	return parseTriggerDataData(

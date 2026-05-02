@@ -314,8 +314,14 @@ const AI_SECTIONS_GROUPS = [
 
 const ParsedAISections: RecordSchema = {
 	name: 'ParsedAISections',
-	description: 'Root record for the AI Sections resource (0x10001). Contains the section polygons, per-speed limits, and the reset-pair table.',
+	description: 'Root record for the AI Sections resource (0x10001) — V12 retail variant. Contains the section polygons, per-speed limits, and the reset-pair table.',
 	fields: {
+		// Discriminator on the runtime model — always 'v12' on this schema.
+		// Hidden + read-only because it's a structural tag the parser writes
+		// and the writer ignores; users have no business editing it. Listed
+		// in `fields` only so the schema-coverage walker doesn't flag it as
+		// an undeclared field on the parsed model (ADR-0008).
+		kind: { kind: 'string' },
 		version: u32(),
 		sectionMinSpeeds: fixedList(f32(), 5),
 		sectionMaxSpeeds: fixedList(f32(), 5),
@@ -323,6 +329,7 @@ const ParsedAISections: RecordSchema = {
 		sectionResetPairs: recordList('SectionResetPair', resetPairLabel, 'AISectionsResetPairs'),
 	},
 	fieldMetadata: {
+		kind: { hidden: true, readOnly: true },
 		version: { description: 'Always 12 in retail.' },
 		sectionMinSpeeds: {
 			label: 'Min speeds (m/s)',

@@ -4,6 +4,7 @@ import {
 	parseAISectionsData,
 	writeAISectionsData,
 	type ParsedAISections,
+	type ParsedAISectionsV12,
 	type AISection,
 	type Portal,
 	type BoundaryLine,
@@ -11,7 +12,7 @@ import {
 	AISectionFlag,
 	EResetSpeedType,
 } from '../../aiSections';
-import { HANDLER_PLATFORM, type ResourceHandler } from '../handler';
+import { HANDLER_PLATFORM, type ResourceHandler, type StressScenario } from '../handler';
 
 export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 	typeId: 0x10001,
@@ -22,7 +23,10 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 	caps: {
 		read: true,
 		write: true,
-		writePlatforms: [HANDLER_PLATFORM.PC, HANDLER_PLATFORM.PS3],
+		// X360 (BE) is supported for the Burnout 5 prototype legacy V4/V6
+		// payload — the only X360 fixture we have. The retail v12 writer
+		// is endian-clean too, so promoting this is safe.
+		writePlatforms: [HANDLER_PLATFORM.PC, HANDLER_PLATFORM.XBOX360, HANDLER_PLATFORM.PS3],
 	},
 
 	parseRaw(raw, ctx) {
@@ -32,6 +36,12 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 		return writeAISectionsData(model, ctx.littleEndian);
 	},
 	describe(model) {
+		if (model.kind === 'v4' || model.kind === 'v6') {
+			const sec = model.legacy.sections;
+			let portalCount = 0, noGoCount = 0;
+			for (const s of sec) { portalCount += s.portals.length; noGoCount += s.noGoLines.length; }
+			return `legacy v${model.version}, sections ${sec.length}, portals ${portalCount}, noGoLines ${noGoCount}`;
+		}
 		const shortcutCount = model.sections.filter(s => s.flags & AISectionFlag.SHORTCUT).length;
 		const junctionCount = model.sections.filter(s => s.flags & AISectionFlag.JUNCTION).length;
 		return `v${model.version}, sections ${model.sections.length}, resetPairs ${model.sectionResetPairs.length}, shortcuts ${shortcutCount}, junctions ${junctionCount}`;
@@ -45,9 +55,20 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 			bundle: 'example/ps3/AI.DAT',
 			expect: { parseOk: true, byteRoundTrip: true, stableWriter: true },
 		},
+		// Burnout 5 prototype dev build (X360, BE) — version 4 legacy layout
+		// with inline corners and no reset-pair table. Routed through
+		// aiSectionsLegacy.ts and parsed into the `kind: 'v4'` variant.
+		{
+			bundle: 'example/older builds/AI.dat',
+			expect: { parseOk: true, byteRoundTrip: true, stableWriter: true },
+		},
 	],
 
-	stressScenarios: [
+	// All scenarios target the retail (v12) shape — they read `sections[0].id`,
+	// mutate `sectionResetPairs`, etc. The wrapper at the bottom no-ops the
+	// scenario when the model is V4/V6 prototype data; legacy mutation
+	// coverage is the next slice (see issue #32 follow-ups).
+	stressScenarios: ([
 		{
 			name: 'baseline',
 			description: 'no mutation — exercises the writer on the read model unchanged',
@@ -226,5 +247,12 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 				return problems;
 			},
 		},
-	],
+	] as StressScenario<ParsedAISectionsV12>[]).map((s): StressScenario<ParsedAISections> => ({
+		name: s.name,
+		description: s.description,
+		mutate: (m) => (m.kind === 'v12' ? s.mutate(m) : m),
+		verify: s.verify
+			? (a, b) => (a.kind !== 'v12' || b.kind !== 'v12' ? [] : s.verify!(a, b))
+			: undefined,
+	})),
 };

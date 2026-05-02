@@ -23,7 +23,7 @@ import {
 } from '../trafficData';
 import {
 	parseAISectionsData,
-	type ParsedAISections,
+	type ParsedAISectionsV12,
 } from '../aiSections';
 import {
 	parseTriggerDataData,
@@ -87,14 +87,16 @@ function loadTraffic(): ParsedTrafficData {
 		true,
 	);
 }
-function loadAI(): ParsedAISections {
-	return parseAISectionsData(
+function loadAI(): ParsedAISectionsV12 {
+	const parsed = parseAISectionsData(
 		extractTypedResource(
 			path.resolve(__dirname, '../../../../example/AI.DAT'),
 			RESOURCE_TYPE_IDS.AI_SECTIONS,
 		),
 		true,
 	);
+	if (parsed.kind !== 'v12') throw new Error(`Expected v12 fixture, got ${parsed.kind}`);
+	return parsed;
 }
 function loadTrigger(): ParsedTriggerData {
 	return parseTriggerDataData(

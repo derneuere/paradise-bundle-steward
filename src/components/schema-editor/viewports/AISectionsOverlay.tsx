@@ -28,7 +28,7 @@ import { useDismissOnOutsideInteraction } from '@/hooks/useDismissOnOutsideInter
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';
-import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
+import type { ParsedAISectionsV12, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
 	duplicateSectionThroughEdge,
@@ -492,7 +492,7 @@ function SelectedSectionDetail({
 	onEdgeContextMenu,
 }: {
 	section: AISection;
-	data: ParsedAISections;
+	data: ParsedAISectionsV12;
 	sectionIndex: number;
 	marker: AISectionMarker;
 	onPickPortal: (portalIndex: number) => void;
@@ -627,15 +627,15 @@ type ActiveDrag =
 	| { kind: 'corner'; cornerIdx: number; offset: CornerDragOffset };
 
 type Props = {
-	data: ParsedAISections;
+	data: ParsedAISectionsV12;
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
-	onChange?: (next: ParsedAISections) => void;
+	onChange?: (next: ParsedAISectionsV12) => void;
 	/** True when this overlay owns the active selection — gates tool registration. */
 	isActive?: boolean;
 };
 
-export const AISectionsOverlay: WorldOverlayComponent<ParsedAISections> = ({
+export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	data, selectedPath, onSelect, onChange, isActive = true,
 }: Props) => {
 	const [hoverSectionIndex, setHoverSectionIndex] = useState<number | null>(null);
@@ -678,7 +678,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISections> = ({
 	// derive a preview model. Used for the selection overlay on the source
 	// AND for highlighted neighbours that the smart-cascade affects, so the
 	// user sees the move in real time.
-	const previewModel: ParsedAISections | null = useMemo(() => {
+	const previewModel: ParsedAISectionsV12 | null = useMemo(() => {
 		if (selectedSectionIndex == null || !selSection || !drag) return null;
 		if (drag.offset.x === 0 && drag.offset.z === 0) return null;
 		try {

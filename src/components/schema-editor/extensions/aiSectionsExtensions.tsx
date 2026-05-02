@@ -11,7 +11,7 @@
 import React, { useRef, useState } from 'react';
 import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
 import { useSchemaEditor } from '../context';
-import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
+import type { ParsedAISectionsV12, AISection } from '@/lib/core/aiSections';
 import { AISectionsOverview } from '@/components/aisections/AISectionsOverview';
 import { ResetPairsTable } from '@/components/aisections/ResetPairsTable';
 import { SectionsList } from '@/components/aisections/SectionsList';
@@ -24,8 +24,8 @@ import { EdgesList } from '@/components/aisections/EdgesList';
 
 export const AISectionsOverviewExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
 	<AISectionsOverview
-		data={data as ParsedAISections}
-		onChange={setData as (next: ParsedAISections) => void}
+		data={data as ParsedAISectionsV12}
+		onChange={setData as (next: ParsedAISectionsV12) => void}
 	/>
 );
 
@@ -42,8 +42,8 @@ export const AISectionsListExtension: React.FC<SchemaExtensionProps> = ({ data, 
 	const scrollToIndexRef = useRef<((index: number) => void) | null>(null);
 	const [addOpen, setAddOpen] = useState(false);
 
-	const parsed = data as ParsedAISections;
-	const onChange = setData as (next: ParsedAISections) => void;
+	const parsed = data as ParsedAISectionsV12;
+	const onChange = setData as (next: ParsedAISectionsV12) => void;
 
 	const handleAdd = (section: AISection) => {
 		const newIndex = parsed.sections.length;
@@ -74,8 +74,8 @@ export const AISectionsListExtension: React.FC<SchemaExtensionProps> = ({ data, 
 
 export const AISectionsResetPairsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
 	<ResetPairsTable
-		data={data as ParsedAISections}
-		onChange={setData as (next: ParsedAISections) => void}
+		data={data as ParsedAISectionsV12}
+		onChange={setData as (next: ParsedAISectionsV12) => void}
 	/>
 );
 
@@ -102,7 +102,7 @@ export const AISectionEdgesExtension: React.FC<SchemaExtensionProps> = ({ path, 
 	}
 	const srcIdx = path[1];
 	const section = value as AISection | undefined;
-	const model = data as ParsedAISections;
+	const model = data as ParsedAISectionsV12;
 	if (!section) {
 		return <div className="text-xs text-muted-foreground">No section selected.</div>;
 	}

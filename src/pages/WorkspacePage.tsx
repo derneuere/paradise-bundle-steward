@@ -71,32 +71,15 @@ import {
 	SCHEMA_TREE_SHORTCUTS,
 	type ShortcutGroup,
 } from '@/components/schema-editor/ShortcutsHelp';
-import { getSchemaByKey } from '@/lib/schema/resources';
 import { getHandlerByKey } from '@/lib/core/registry';
-import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
-import { challengeListExtensions } from '@/components/schema-editor/extensions/challengeListExtensions';
-import { polygonSoupListExtensions } from '@/components/schema-editor/extensions/collisionTagExtension';
-import { renderableExtensions } from '@/components/schema-editor/extensions/renderableExtensions';
-import { streetDataExtensions } from '@/components/schema-editor/extensions/streetDataExtensions';
-import { trafficDataExtensions } from '@/components/schema-editor/extensions/trafficDataExtensions';
-import { triggerDataExtensions } from '@/components/schema-editor/extensions/triggerDataExtensions';
-import { vehicleListExtensions } from '@/components/schema-editor/extensions/vehicleListExtensions';
-import type { ExtensionRegistry } from '@/components/schema-editor/context';
+import { pickProfileByKey } from '@/lib/editor/registry';
 import type { NodePath } from '@/lib/schema/walk';
 
-// Extension registry per resource key. Mirrors what each per-resource page
-// passes to its `SchemaEditorProvider`, so the workspace inspector renders
-// the same tabs / custom panels users see on the legacy routes.
-const EXTENSIONS_BY_KEY: Record<string, ExtensionRegistry> = {
-	aiSections: aiSectionsExtensions,
-	challengeList: challengeListExtensions,
-	polygonSoupList: polygonSoupListExtensions,
-	renderable: renderableExtensions,
-	streetData: streetDataExtensions,
-	trafficData: trafficDataExtensions,
-	triggerData: triggerDataExtensions,
-	vehicleList: vehicleListExtensions,
-};
+// Per-resource schema and extension lookup is now a single call into the
+// editor registry (ADR-0008). The previous per-key `EXTENSIONS_BY_KEY` map +
+// `getSchemaByKey` calls have been folded into `pickProfileByKey(key, model)`,
+// which inspects the model's discriminator (e.g. AISections's `kind: 'v12'`)
+// to pick the right schema/extensions/overlay for variant resources.
 
 // ---------------------------------------------------------------------------
 // Inspector / viewport host — both consume the Selection
@@ -131,9 +114,6 @@ function SelectedSchemaEditorProvider({
 		[bundles, selection],
 	);
 	const isInstanceOrSchema = level === 'instance' || level === 'schema';
-	const schema = isInstanceOrSchema && selection?.resourceKey
-		? getSchemaByKey(selection.resourceKey)
-		: undefined;
 	const data = useMemo(() => {
 		if (!selection || !selectedBundle) return undefined;
 		if (selection.resourceKey === undefined || selection.index === undefined) {
@@ -142,6 +122,13 @@ function SelectedSchemaEditorProvider({
 		const list = selectedBundle.parsedResourcesAll.get(selection.resourceKey);
 		return list?.[selection.index] ?? undefined;
 	}, [selection, selectedBundle]);
+	// Profile picks the right schema + extension registry for the model's
+	// variant — single-profile resources resolve unambiguously, AISections
+	// (and future versioned types) narrow on `kind`.
+	const profile = isInstanceOrSchema && selection?.resourceKey
+		? pickProfileByKey(selection.resourceKey, data)
+		: undefined;
+	const schema = profile?.schema;
 
 	const onChange = useCallback(
 		(next: unknown) => {
@@ -177,7 +164,7 @@ function SelectedSchemaEditorProvider({
 			onChange={onChange}
 			selectedPath={selection.path}
 			onSelectedPathChange={setPath}
-			extensions={EXTENSIONS_BY_KEY[selection.resourceKey]}
+			extensions={profile?.extensions}
 		>
 			{children}
 		</SchemaEditorProvider>
@@ -187,6 +174,24 @@ function SelectedSchemaEditorProvider({
 function CenterViewport() {
 	const { bundles, selection } = useWorkspace();
 	const level = selectionLevel(selection);
+
+	// Resolve the active resource model so the editor registry can pick the
+	// right profile. Bundle / resource-type-level selections leave `data`
+	// undefined; pickProfileByKey resolves to the lone profile in that case
+	// (single-profile resources) or to undefined (versioned resources where
+	// the variant can't be inferred without a model).
+	const selectedBundle = useMemo(
+		() => (selection ? bundles.find((b) => b.id === selection.bundleId) : undefined),
+		[bundles, selection],
+	);
+	const data = useMemo(() => {
+		if (!selection || !selectedBundle) return undefined;
+		if (selection.resourceKey === undefined || selection.index === undefined) {
+			return undefined;
+		}
+		const list = selectedBundle.parsedResourcesAll.get(selection.resourceKey);
+		return list?.[selection.index] ?? undefined;
+	}, [selection, selectedBundle]);
 
 	// World-viewport-family resources (AI sections, street/traffic/trigger
 	// data, zone list, polygon soups) compose into a single shared
@@ -226,8 +231,8 @@ function CenterViewport() {
 			</div>
 		);
 	}
-	const schema = getSchemaByKey(selection.resourceKey);
-	if (!schema) {
+	const profile = pickProfileByKey(selection.resourceKey, data);
+	if (!profile) {
 		return (
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
 				No viewport available for {selection.resourceKey} yet.
@@ -337,11 +342,14 @@ function RightInspector() {
 		);
 	}
 
-	// Instance / Schema → the schema editor inspector takes over.
-	const schema = selection.resourceKey
-		? getSchemaByKey(selection.resourceKey)
+	// Instance / Schema → the schema editor inspector takes over. Use the
+	// editor registry to confirm a profile exists for this resource type;
+	// the actual schema/extensions are resolved on the model inside
+	// SelectedSchemaEditorProvider.
+	const profile = selection.resourceKey
+		? pickProfileByKey(selection.resourceKey, null)
 		: undefined;
-	if (!schema) {
+	if (!profile && selection.resourceKey) {
 		return wrapWithBulk(
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
 				No inspector for {selection.resourceKey}.

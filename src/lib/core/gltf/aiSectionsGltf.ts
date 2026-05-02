@@ -11,7 +11,7 @@
 // positions) but are ignored on import until Phase 5 adds reconciliation.
 
 import { Document, NodeIO, type Scene, type Mesh, type Buffer } from '@gltf-transform/core';
-import type { ParsedAISections, Vector2 } from '../aiSections';
+import type { ParsedAISectionsV12, Vector2 } from '../aiSections';
 import { paradiseToGltf, gltfToParadise } from './coords';
 import {
 	extendSceneExtras,
@@ -113,7 +113,7 @@ function buildSectionPolygonMesh(
 function addVisualizationNodes(
 	doc: Document,
 	root: ReturnType<Document['createNode']>,
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 ): void {
 	const sectionsGroup = doc.createNode('Sections');
 	root.addChild(sectionsGroup);
@@ -162,7 +162,7 @@ function addVisualizationNodes(
 export function addAISectionsSubtree(
 	doc: Document,
 	scene: Scene,
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 ): void {
 	const encoded = encodeModelDeep(model);
 	extendSceneExtras(scene, SCENE_EXTRAS_AI_SECTIONS, encoded);
@@ -172,11 +172,11 @@ export function addAISectionsSubtree(
 	addVisualizationNodes(doc, root, model);
 }
 
-export function readAISectionsFromDocument(doc: Document): ParsedAISections {
+export function readAISectionsFromDocument(doc: Document): ParsedAISectionsV12 {
 	const scene = doc.getRoot().listScenes()[0];
 	if (!scene) throw new Error('glTF has no scene');
 	const encoded = readSceneExtrasSection(scene, SCENE_EXTRAS_AI_SECTIONS);
-	const model = decodeModelDeep(encoded) as ParsedAISections;
+	const model = decodeModelDeep(encoded) as ParsedAISectionsV12;
 	return reconcileAISectionsFromNodes(model, scene);
 }
 
@@ -189,9 +189,9 @@ export function readAISectionsFromDocument(doc: Document): ParsedAISections {
  * a rectangle-editing extension on top).
  */
 function reconcileAISectionsFromNodes(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 	scene: import('@gltf-transform/core').Scene,
-): ParsedAISections {
+): ParsedAISectionsV12 {
 	const root = findSceneRoot(scene, GROUP_AI_SECTIONS);
 	if (!root) return model;
 	const sectionsGroup = root.listChildren().find((n) => n.getName() === 'Sections');
@@ -228,7 +228,7 @@ function reconcileAISectionsFromNodes(
 // Single-resource convenience wrappers
 // ---------------------------------------------------------------------------
 
-export function buildAISectionsDocument(model: ParsedAISections): Document {
+export function buildAISectionsDocument(model: ParsedAISectionsV12): Document {
 	const doc = new Document();
 	doc.getRoot().getAsset().generator = GENERATOR;
 	const scene = doc.createScene('Scene');
@@ -237,7 +237,7 @@ export function buildAISectionsDocument(model: ParsedAISections): Document {
 }
 
 export async function exportAISectionsToGltf(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 ): Promise<Uint8Array> {
 	const doc = buildAISectionsDocument(model);
 	const io = new NodeIO();
@@ -245,14 +245,14 @@ export async function exportAISectionsToGltf(
 }
 
 export async function exportAISectionsToGltfJson(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 ): Promise<Uint8Array> {
 	return writeDocumentAsGltfJson(buildAISectionsDocument(model));
 }
 
 export async function importAISectionsFromGltf(
 	bytes: Uint8Array,
-): Promise<ParsedAISections> {
+): Promise<ParsedAISectionsV12> {
 	const io = new NodeIO();
 	const magic = new TextDecoder().decode(bytes.subarray(0, 4));
 	if (magic === 'glTF') {

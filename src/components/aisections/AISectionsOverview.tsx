@@ -10,13 +10,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { ParsedAISections } from '@/lib/core/aiSections';
+import type { ParsedAISectionsV12 } from '@/lib/core/aiSections';
 import { SECTION_SPEED_COUNT } from '@/lib/core/aiSections';
 import { SPEED_LABELS, FLAG_NAMES } from './constants';
 
 type Props = {
-	data: ParsedAISections;
-	onChange: (next: ParsedAISections) => void;
+	data: ParsedAISectionsV12;
+	onChange: (next: ParsedAISectionsV12) => void;
 };
 
 function NumberCell(props: { value: number; onChange: (v: number) => void }) {

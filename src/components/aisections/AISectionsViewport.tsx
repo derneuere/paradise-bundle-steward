@@ -20,7 +20,7 @@ import { useResetOnChange } from '@/hooks/useResetOnChange';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 import * as THREE from 'three';
-import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
+import type { ParsedAISectionsV12, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
 	duplicateSectionThroughEdge,
@@ -43,8 +43,8 @@ export type AISectionSelection = {
 } | null;
 
 type Props = {
-	data: ParsedAISections;
-	onChange: (next: ParsedAISections) => void;
+	data: ParsedAISectionsV12;
+	onChange: (next: ParsedAISectionsV12) => void;
 	selected: AISectionSelection;
 	onSelect: (sel: AISectionSelection) => void;
 };
@@ -67,7 +67,7 @@ const FALLBACK_RGB: [number, number, number] = [0.4, 0.4, 0.4];
 // Scene bounds
 // ---------------------------------------------------------------------------
 
-function computeBounds(data: ParsedAISections): { center: THREE.Vector3; radius: number } {
+function computeBounds(data: ParsedAISectionsV12): { center: THREE.Vector3; radius: number } {
 	if (data.sections.length === 0) return { center: new THREE.Vector3(), radius: 100 };
 	const box = new THREE.Box3();
 	for (const sec of data.sections) {
@@ -203,7 +203,7 @@ const outlineMaterial = new THREE.LineBasicMaterial({ color: 0x888888 });
 function BatchedSections({
 	data, selected, hovered, onSelect, onHover,
 }: {
-	data: ParsedAISections;
+	data: ParsedAISectionsV12;
 	selected: AISectionSelection;
 	hovered: AISectionSelection;
 	onSelect: (sel: AISectionSelection) => void;
@@ -339,7 +339,7 @@ function SelectedSectionDetail({
 	/** The section to render. During a translate-drag this is the previewed
 	 *  (offset-applied) copy, otherwise it's `data.sections[sectionIndex]`. */
 	section: AISection;
-	data: ParsedAISections;
+	data: ParsedAISectionsV12;
 	sectionIndex: number;
 	selected: AISectionSelection;
 	onSelect: (sel: AISectionSelection) => void;
@@ -679,7 +679,7 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 	// BatchedSections — that would rebuild ~8000 sections of geometry every
 	// frame. The per-section overlays are cheap and only touch the affected
 	// sections.
-	const previewModel: ParsedAISections | null = useMemo(() => {
+	const previewModel: ParsedAISectionsV12 | null = useMemo(() => {
 		if (!selected || !selSection || !drag) return null;
 		if (drag.offset.x === 0 && drag.offset.z === 0) return null;
 		try {

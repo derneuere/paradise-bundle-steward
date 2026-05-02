@@ -1,6 +1,6 @@
 // AISections higher-level operations.
 //
-// Pure functions that mutate a `ParsedAISections` model immutably — i.e.,
+// Pure functions that mutate a `ParsedAISectionsV12` model immutably — i.e.,
 // the input is never modified, the result is a new model with structural
 // sharing where unaffected. UI code calls these and then commits the
 // returned model with `setData(next)`.
@@ -14,7 +14,7 @@
 import type {
 	AISection,
 	BoundaryLine,
-	ParsedAISections,
+	ParsedAISectionsV12,
 	Portal,
 	Vector2,
 } from './aiSections';
@@ -62,10 +62,10 @@ const centroid = (corners: Vector2[]): Vector2 => {
  *         degenerate (zero-length).
  */
 export function duplicateSectionThroughEdge(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 	srcIdx: number,
 	edgeIdx: number,
-): ParsedAISections {
+): ParsedAISectionsV12 {
 	if (srcIdx < 0 || srcIdx >= model.sections.length) {
 		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
 	}
@@ -162,7 +162,7 @@ export function duplicateSectionThroughEdge(
 // existing section ID. AISection IDs are u32 GameDB hashes in retail data;
 // "max + 1" is just a placeholder the user can edit afterwards in the
 // inspector.
-function nextFreeId(model: ParsedAISections): number {
+function nextFreeId(model: ParsedAISectionsV12): number {
 	let max = 0;
 	for (const s of model.sections) {
 		if (s.id > max) max = s.id;
@@ -213,10 +213,10 @@ const v2Approx = (a: Vector2, b: Vector2) =>
  * cleanly on graphs with cycles. Two-hop drift is the user's call to fix.
  */
 export function translateSectionWithLinks(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 	srcIdx: number,
 	offset: { x: number; z: number },
-): ParsedAISections {
+): ParsedAISectionsV12 {
 	if (srcIdx < 0 || srcIdx >= model.sections.length) {
 		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
 	}
@@ -366,7 +366,7 @@ function nearestPointOnSegment(
  * them is meaningless.
  */
 function findNearestSnapTarget(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 	srcIdx: number,
 	probe: Vector2,
 	snapRadius: number,
@@ -423,7 +423,7 @@ function findNearestSnapTarget(
  *     deform with us).
  */
 export function snapSectionOffset(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 	srcIdx: number,
 	proposedOffset: { x: number; z: number },
 	snapRadius: number,
@@ -474,7 +474,7 @@ export function snapSectionOffset(
  * `snapRadius`. Returns the original offset when nothing's in range.
  */
 export function snapCornerOffset(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 	srcIdx: number,
 	cornerIdx: number,
 	proposedOffset: { x: number; z: number },
@@ -530,11 +530,11 @@ export function snapCornerOffset(
  * @throws RangeError if `srcIdx` or `cornerIdx` is out of range.
  */
 export function translateCornerWithShared(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 	srcIdx: number,
 	cornerIdx: number,
 	offset: { x: number; z: number },
-): ParsedAISections {
+): ParsedAISectionsV12 {
 	if (srcIdx < 0 || srcIdx >= model.sections.length) {
 		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
 	}
@@ -643,9 +643,9 @@ function shiftBoundaryEndpointsAt(
  * @throws RangeError if `idx` is out of range.
  */
 export function deleteSection(
-	model: ParsedAISections,
+	model: ParsedAISectionsV12,
 	idx: number,
-): ParsedAISections {
+): ParsedAISectionsV12 {
 	if (idx < 0 || idx >= model.sections.length) {
 		throw new RangeError(`idx ${idx} out of range [0, ${model.sections.length})`);
 	}

@@ -15,7 +15,7 @@ import { getCapabilityByTypeId, type FeatureCapability } from '@/lib/capabilitie
 import { registry, getExportablePlatforms } from '@/lib/core/registry';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 import type { ParsedTrafficData } from '@/lib/core/trafficData';
-import type { ParsedAISections } from '@/lib/core/aiSections';
+import type { ParsedAISections, ParsedAISectionsV12 } from '@/lib/core/aiSections';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
 import {
   exportWorldLogicToGltf,
@@ -133,7 +133,10 @@ export const BundleLayout = () => {
         payload.trafficData = getResource<ParsedTrafficData>(activeBundleId, 'trafficData') ?? undefined;
       }
       if (parsedResources.has('aiSections')) {
-        payload.aiSections = getResource<ParsedAISections>(activeBundleId, 'aiSections') ?? undefined;
+        // glTF export only knows the V12 retail shape; V4/V6 prototype
+        // payloads are skipped (they have no glTF visualization yet).
+        const ai = getResource<ParsedAISections>(activeBundleId, 'aiSections');
+        if (ai && ai.kind === 'v12') payload.aiSections = ai as ParsedAISectionsV12;
       }
       if (parsedResources.has('triggerData')) {
         payload.triggerData = getResource<ParsedTriggerData>(activeBundleId, 'triggerData') ?? undefined;

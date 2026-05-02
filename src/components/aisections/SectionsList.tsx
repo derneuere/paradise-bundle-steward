@@ -3,14 +3,14 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import type { ParsedAISections, AISection } from '@/lib/core/aiSections';
+import type { ParsedAISectionsV12, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import { deleteSection } from '@/lib/core/aiSectionsOps';
 import { SPEED_LABELS, FLAG_NAMES } from './constants';
 
 type Props = {
-	data: ParsedAISections;
-	onChange: (next: ParsedAISections) => void;
+	data: ParsedAISectionsV12;
+	onChange: (next: ParsedAISectionsV12) => void;
 	onAddClick: () => void;
 	onDetailClick: (index: number) => void;
 	scrollToIndexRef: React.MutableRefObject<((index: number) => void) | null>;

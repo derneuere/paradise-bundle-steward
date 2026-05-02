@@ -8,13 +8,13 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { ParsedAISections, SectionResetPair } from '@/lib/core/aiSections';
+import type { ParsedAISectionsV12, SectionResetPair } from '@/lib/core/aiSections';
 import { EResetSpeedType } from '@/lib/core/aiSections';
 import { RESET_SPEED_LABELS } from './constants';
 
 type Props = {
-	data: ParsedAISections;
-	onChange: (next: ParsedAISections) => void;
+	data: ParsedAISectionsV12;
+	onChange: (next: ParsedAISectionsV12) => void;
 };
 
 function NumberCell(props: { value: number; onChange: (v: number) => void; width?: string }) {

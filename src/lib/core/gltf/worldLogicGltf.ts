@@ -11,7 +11,7 @@
 import { Document, NodeIO } from '@gltf-transform/core';
 import type { ParsedStreetData } from '../streetData';
 import type { ParsedTrafficData } from '../trafficData';
-import type { ParsedAISections } from '../aiSections';
+import type { ParsedAISectionsV12 } from '../aiSections';
 import type { ParsedTriggerData } from '../triggerData';
 import {
 	hasSceneExtrasSection,
@@ -40,7 +40,7 @@ const GENERATOR = 'steward-worldlogic-gltf/1';
 export type WorldLogicPayload = {
 	streetData?: ParsedStreetData;
 	trafficData?: ParsedTrafficData;
-	aiSections?: ParsedAISections;
+	aiSections?: ParsedAISectionsV12;
 	triggerData?: ParsedTriggerData;
 };
 

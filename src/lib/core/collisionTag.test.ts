@@ -233,6 +233,7 @@ describe('collisionTag transformation holds for every polygon in WORLDCOL.BIN', 
 			extractResourceRaw(aiBuf.buffer, aiBundle, aiRes!),
 			aiCtx.littleEndian,
 		);
+		if (aiModel.kind !== 'v12') throw new Error(`Expected v12 AI fixture, got ${aiModel.kind}`);
 		const sectionCount = aiModel.sections.length;
 
 		const raw = fs.readFileSync(FIXTURE);

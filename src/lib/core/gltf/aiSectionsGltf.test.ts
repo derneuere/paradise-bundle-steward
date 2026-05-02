@@ -17,7 +17,7 @@ import {
 	writeAISectionsData,
 	SectionSpeed,
 	AISectionFlag,
-	type ParsedAISections,
+	type ParsedAISectionsV12,
 } from '../aiSections';
 import {
 	buildAISectionsDocument,
@@ -54,7 +54,9 @@ function loadFixtureModel() {
 		break;
 	}
 	if (!extracted) throw new Error('AISections resource had no populated block');
-	const model = parseAISectionsData(extracted, true);
+	const parsed = parseAISectionsData(extracted, true);
+	if (parsed.kind !== 'v12') throw new Error(`Expected v12 fixture, got ${parsed.kind}`);
+	const model: ParsedAISectionsV12 = parsed;
 	const baselineWrite = writeAISectionsData(model, true);
 	return { model, raw: extracted, baselineWrite };
 }
@@ -127,7 +129,7 @@ describe('aiSections glTF round-trip', () => {
 		const { model } = loadFixtureModel();
 		const sections = model.sections.slice();
 		sections[0] = { ...sections[0], speed: SectionSpeed.E_SECTION_SPEED_VERY_FAST };
-		const edited: ParsedAISections = { ...model, sections };
+		const edited: ParsedAISectionsV12 = { ...model, sections };
 
 		const baselineEdited = writeAISectionsData(edited, true);
 		const gltfBytes = await exportAISectionsToGltf(edited);
@@ -143,7 +145,7 @@ describe('aiSections glTF round-trip', () => {
 		const before = sections[0].flags;
 		const after = (before ^ AISectionFlag.SHORTCUT) & 0xFF;
 		sections[0] = { ...sections[0], flags: after };
-		const edited: ParsedAISections = { ...model, sections };
+		const edited: ParsedAISectionsV12 = { ...model, sections };
 
 		const gltfBytes = await exportAISectionsToGltf(edited);
 		const modelAfter = await importAISectionsFromGltf(gltfBytes);

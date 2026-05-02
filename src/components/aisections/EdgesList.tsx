@@ -33,7 +33,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import type { AISection, ParsedAISections, Vector2 } from '@/lib/core/aiSections';
+import type { AISection, ParsedAISectionsV12, Vector2 } from '@/lib/core/aiSections';
 import { deleteSection, duplicateSectionThroughEdge } from '@/lib/core/aiSectionsOps';
 import { useSchemaEditor } from '@/components/schema-editor/context';
 
@@ -43,7 +43,7 @@ const fmtPoint = (p: Vector2) => `(${fmt(p.x)}, ${fmt(p.y)})`;
 type Props = {
 	section: AISection;
 	srcIdx: number;
-	model: ParsedAISections;
+	model: ParsedAISectionsV12;
 };
 
 export const EdgesList: React.FC<Props> = ({ section, srcIdx, model }) => {

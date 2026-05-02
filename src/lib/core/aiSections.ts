@@ -10,8 +10,20 @@
 // Both little-endian (PC) and big-endian (PS3 / X360) bundles round-trip
 // byte-exact. 64-bit pointer layout (Paradise Remastered) is not yet
 // supported — that's a separate header shape (0x48 bytes, 0x28-byte sections).
+//
+// Legacy formats: Burnout 5 prototype builds carry a different layout
+// (no per-speed limits, no reset-pair table, sections store corners inline).
+// `ParsedAISections` is a discriminated union over `kind` — V12 retail and
+// V4/V6 prototype layouts are distinct variants, parsed and written by
+// dispatching on `kind`. See ADR-0008 for the rationale.
 
 import { BinReader, BinWriter } from './binTools';
+import {
+	parseLegacyAISectionsData,
+	writeLegacyAISectionsData,
+	detectLegacyVersion,
+	type LegacyAISectionsData,
+} from './aiSectionsLegacy';
 
 // =============================================================================
 // Constants
@@ -109,7 +121,13 @@ export type SectionResetPair = {
 	resetSectionIndex: number; // u16
 };
 
-export type ParsedAISections = {
+// Retail Burnout Paradise (v12) — full editor surface lives on this variant.
+// `version` mirrors the on-the-wire muVersion so callers can read it without
+// branching, but `kind` is the structural discriminator: the writer dispatches
+// on it, and `version` is a plain number (not a literal type) so test code can
+// bump it for dirty-tracking checks without fighting the type system.
+export type ParsedAISectionsV12 = {
+	kind: 'v12';
 	version: number;
 	sectionMinSpeeds: number[];  // float32[5]
 	sectionMaxSpeeds: number[];  // float32[5]
@@ -117,11 +135,63 @@ export type ParsedAISections = {
 	sectionResetPairs: SectionResetPair[];
 };
 
+// Burnout 5 prototype builds (2006-11-13 X360 dev, 2007-02-22 build). Parsed
+// and writeable for round-trip preservation; no editor profile yet, so the
+// schema editor sees these as opaque (real V4/V6 schema/overlay is the
+// follow-up slice — see issue #32).
+export type ParsedAISectionsV6 = {
+	kind: 'v6';
+	version: number;
+	legacy: LegacyAISectionsData;
+};
+
+export type ParsedAISectionsV4 = {
+	kind: 'v4';
+	version: number;
+	legacy: LegacyAISectionsData;
+};
+
+// Discriminated union: every consumer must narrow on `kind` before reading
+// version-specific fields. The editor registry (src/lib/editor/) does this
+// once at the profile-pick site so per-resource viewers/extensions can be
+// written against a single concrete variant (e.g. ParsedAISectionsV12).
+export type ParsedAISections =
+	| ParsedAISectionsV12
+	| ParsedAISectionsV6
+	| ParsedAISectionsV4;
+
+// Re-export legacy types for callers that need to introspect the V4/V6 shape.
+export type {
+	LegacyAISectionsData,
+	LegacyAISection,
+	LegacyPortal,
+	LegacyBoundaryLine,
+} from './aiSectionsLegacy';
+export {
+	LegacyDangerRating,
+	LegacyAISectionFlagV4,
+	LegacyAISectionFlagV6,
+	LegacyEDistrict,
+	LEGACY_AI_SECTION_VERSIONS,
+} from './aiSectionsLegacy';
+
 // =============================================================================
 // Parsing
 // =============================================================================
 
 export function parseAISectionsData(raw: Uint8Array, littleEndian: boolean = true): ParsedAISections {
+	// Burnout 5 prototype builds (versions 4 and 6) carry a different layout
+	// — see aiSectionsLegacy.ts. Detection peeks the muVersion field at
+	// offset 0x8, which would never coincidentally match 4 or 6 in retail
+	// (v12) bundles since that offset holds a float there.
+	const legacyVersion = detectLegacyVersion(raw, littleEndian);
+	if (legacyVersion !== null) {
+		const legacy = parseLegacyAISectionsData(raw, littleEndian);
+		return legacy.version === 6
+			? { kind: 'v6', version: 6, legacy }
+			: { kind: 'v4', version: 4, legacy };
+	}
+
 	const r = new BinReader(
 		raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength),
 		littleEndian,
@@ -248,7 +318,21 @@ export function parseAISectionsData(raw: Uint8Array, littleEndian: boolean = tru
 		});
 	}
 
-	return { version, sectionMinSpeeds, sectionMaxSpeeds, sections, sectionResetPairs };
+	if (version !== 12) {
+		throw new Error(
+			`parseAISectionsData: unexpected v12-shaped payload reports muVersion=${version}; ` +
+			`legacy V4/V6 should have been routed by detectLegacyVersion. Refusing to misclassify.`,
+		);
+	}
+
+	return {
+		kind: 'v12',
+		version: 12,
+		sectionMinSpeeds,
+		sectionMaxSpeeds,
+		sections,
+		sectionResetPairs,
+	};
 }
 
 // =============================================================================
@@ -256,6 +340,11 @@ export function parseAISectionsData(raw: Uint8Array, littleEndian: boolean = tru
 // =============================================================================
 
 export function writeAISectionsData(model: ParsedAISections, littleEndian: boolean = true): Uint8Array {
+	// Legacy V4/V6 prototype payloads round-trip through the dedicated writer.
+	if (model.kind === 'v4' || model.kind === 'v6') {
+		return writeLegacyAISectionsData(model.legacy, littleEndian);
+	}
+
 	const numSections   = model.sections.length;
 	const numResetPairs = model.sectionResetPairs.length;
 

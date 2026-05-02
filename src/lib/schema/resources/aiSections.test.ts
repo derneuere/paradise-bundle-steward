@@ -25,7 +25,7 @@ import {
 	SectionSpeed,
 	EResetSpeedType,
 	AISectionFlag,
-	type ParsedAISections,
+	type ParsedAISectionsV12,
 } from '../../core/aiSections';
 
 import { aiSectionsResourceSchema } from './aiSections';
@@ -53,7 +53,7 @@ function sha1(bytes: Uint8Array): string {
 	return createHash('sha1').update(bytes).digest('hex');
 }
 
-function loadAISectionsRaw(): { raw: Uint8Array; parsed: ParsedAISections } {
+function loadAISectionsRaw(): { raw: Uint8Array; parsed: ParsedAISectionsV12 } {
 	const fileBytes = fs.readFileSync(FIXTURE);
 	const buffer = new Uint8Array(fileBytes.byteLength);
 	buffer.set(fileBytes);
@@ -63,6 +63,7 @@ function loadAISectionsRaw(): { raw: Uint8Array; parsed: ParsedAISections } {
 	if (!resource) throw new Error('example/AI.DAT missing AISections resource');
 	const raw = extractResourceRaw(buffer.buffer, bundle, resource);
 	const parsed = parseAISectionsData(raw, ctx.littleEndian);
+	if (parsed.kind !== 'v12') throw new Error(`Expected v12 fixture, got ${parsed.kind}`);
 	return { raw, parsed };
 }
 
@@ -419,6 +420,7 @@ describe('aiSections flag-field edits', () => {
 		const modified = updateAtPath(parsedAI, ['sections', 0, 'flags'], () => toggled);
 		const bytes = writeAISectionsData(modified, true);
 		const reparsed = parseAISectionsData(bytes, true);
+		if (reparsed.kind !== 'v12') throw new Error(`Expected v12 round-trip, got ${reparsed.kind}`);
 		expect(reparsed.sections[0].flags).toBe(toggled);
 	});
 });

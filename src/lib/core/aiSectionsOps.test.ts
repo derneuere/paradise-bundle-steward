@@ -1,7 +1,7 @@
 // Unit tests for duplicateSectionThroughEdge.
 //
 // Pure-model tests — no fixtures, no React, no IO. We hand-build a tiny
-// `ParsedAISections` and check the geometry / portal wiring of the result.
+// `ParsedAISectionsV12` and check the geometry / portal wiring of the result.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -17,7 +17,7 @@ import {
 	EResetSpeedType,
 	SectionSpeed,
 	type AISection,
-	type ParsedAISections,
+	type ParsedAISectionsV12,
 	type Portal,
 	type SectionResetPair,
 	type Vector2,
@@ -55,8 +55,9 @@ function makeSection(opts: {
 	};
 }
 
-function makeModel(sections: AISection[]): ParsedAISections {
+function makeModel(sections: AISection[]): ParsedAISectionsV12 {
 	return {
+		kind: 'v12',
 		version: AI_SECTIONS_VERSION,
 		sectionMinSpeeds: [0, 0, 0, 0, 0],
 		sectionMaxSpeeds: [0, 0, 0, 0, 0],
@@ -333,7 +334,7 @@ describe('deleteSection', () => {
 	});
 
 	it('reindexes section reset pairs > idx', () => {
-		const model: ParsedAISections = {
+		const model: ParsedAISectionsV12 = {
 			...makeModel([makeSection({ id: 1 }), makeSection({ id: 2 }), makeSection({ id: 3 })]),
 			sectionResetPairs: [resetPair(0, 2), resetPair(2, 0)],
 		};
@@ -347,7 +348,7 @@ describe('deleteSection', () => {
 	});
 
 	it('drops reset pairs that reference the deleted section', () => {
-		const model: ParsedAISections = {
+		const model: ParsedAISectionsV12 = {
 			...makeModel([makeSection({ id: 1 }), makeSection({ id: 2 }), makeSection({ id: 3 })]),
 			sectionResetPairs: [
 				resetPair(1, 2),  // start references idx → drop
@@ -379,7 +380,8 @@ describe('deleteSection', () => {
 	});
 
 	it('preserves header fields (version, speed limits)', () => {
-		const model: ParsedAISections = {
+		const model: ParsedAISectionsV12 = {
+			kind: 'v12',
 			version: 12,
 			sectionMinSpeeds: [1, 2, 3, 4, 5],
 			sectionMaxSpeeds: [6, 7, 8, 9, 10],
@@ -405,7 +407,7 @@ describe('translateSectionWithLinks', () => {
 	//   Section 0: a unit-ish quad whose right edge is (10, 0) → (10, 10).
 	//   Section 1: a quad to the right of section 0, sharing that edge.
 	//   Both portals at world position (10, 0, 5) — the edge midpoint.
-	function makePair(): ParsedAISections {
+	function makePair(): ParsedAISectionsV12 {
 		const portal0to1: Portal = {
 			position: { x: 10, y: 0, z: 5 },
 			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
@@ -580,7 +582,7 @@ describe('translateSectionWithLinks', () => {
 		const model = makePair();
 		// Add an extra section that has no link to section 0.
 		const detached: AISection = makeSection({ id: 0xDD });
-		const expanded: ParsedAISections = {
+		const expanded: ParsedAISectionsV12 = {
 			...model,
 			sections: [...model.sections, detached],
 		};
@@ -596,7 +598,7 @@ describe('translateSectionWithLinks', () => {
 describe('translateCornerWithShared', () => {
 	// Reuse the makePair-style fixture from translateSectionWithLinks: two
 	// quads sharing the right edge of section 0 / left edge of section 1.
-	function makePair(): ParsedAISections {
+	function makePair(): ParsedAISectionsV12 {
 		const portal0to1: Portal = {
 			position: { x: 10, y: 0, z: 5 },
 			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
@@ -675,7 +677,7 @@ describe('translateCornerWithShared', () => {
 
 	it('shifts a noGoLine endpoint that matches the old corner', () => {
 		const base = makePair();
-		const withNoGo: ParsedAISections = {
+		const withNoGo: ParsedAISectionsV12 = {
 			...base,
 			sections: base.sections.map((s, i) =>
 				i === 0
@@ -700,7 +702,7 @@ describe('translateCornerWithShared', () => {
 				{ x: 100, y: 110 },
 			],
 		});
-		const expanded: ParsedAISections = {
+		const expanded: ParsedAISectionsV12 = {
 			...base,
 			sections: [...base.sections, farAway],
 		};
@@ -766,7 +768,7 @@ describe('translateCornerWithShared', () => {
 // =============================================================================
 
 describe('snapSectionOffset', () => {
-	function makeTwoApart(): ParsedAISections {
+	function makeTwoApart(): ParsedAISectionsV12 {
 		// Section 0: unit-ish quad on the left.
 		// Section 1: a triangle whose tip (14, 0) is the rightmost point, so
 		// the two edges meeting at that tip both retreat in -X. A probe at
@@ -895,7 +897,7 @@ describe('snapSectionOffset', () => {
 });
 
 describe('snapCornerOffset', () => {
-	function makeTwoApart(): ParsedAISections {
+	function makeTwoApart(): ParsedAISectionsV12 {
 		const s0 = makeSection({
 			id: 0xA,
 			corners: [

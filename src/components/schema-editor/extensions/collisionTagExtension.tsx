@@ -14,7 +14,7 @@ import React, { useMemo, useState } from 'react';
 import { Check, ChevronsUpDown, Copy } from 'lucide-react';
 import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
 import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
-import type { ParsedAISections } from '@/lib/core/aiSections';
+import type { ParsedAISections, ParsedAISectionsV12 } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
 	decodeCollisionTag,
@@ -87,7 +87,8 @@ export function AISectionPicker({
 	const { getResource } = useWorkspace();
 	const bundleId = useFirstLoadedBundleId();
 	const aiSections = bundleId ? getResource<ParsedAISections>(bundleId, 'aiSections') : null;
-	const sections = aiSections?.sections;
+	const v12 = aiSections?.kind === 'v12' ? (aiSections as ParsedAISectionsV12) : null;
+	const sections = v12?.sections;
 	const hasSections = !!sections && sections.length > 0;
 
 	const [open, setOpen] = useState(false);

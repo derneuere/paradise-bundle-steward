@@ -35,7 +35,7 @@ import type {
 	HistoryCommit,
 	WorkspaceSelection,
 } from './WorkspaceContext.types';
-import type { ParsedAISections } from '@/lib/core/aiSections';
+import type { ParsedAISectionsV12 } from '@/lib/core/aiSections';
 
 // AI.DAT is a small PC bundle that contains a single AISections resource —
 // well-suited for testing the Bundle-keyed read/write/selection flow without
@@ -111,7 +111,7 @@ describe('getResource(bundleId, key)', () => {
 		const state: WorkspaceState = {
 			bundles: [makeEditableBundle(loadFixture(), 'AI.DAT')],
 		};
-		const ai = getResource<ParsedAISections>(state, 'AI.DAT', 'aiSections');
+		const ai = getResource<ParsedAISectionsV12>(state, 'AI.DAT', 'aiSections');
 		expect(ai).not.toBeNull();
 		expect(ai!.sections.length).toBeGreaterThan(0);
 	});
@@ -142,15 +142,15 @@ describe('setResource(bundleId, key, value)', () => {
 		const initial: WorkspaceState = {
 			bundles: [makeEditableBundle(loadFixture(), 'AI.DAT')],
 		};
-		const original = getResource<ParsedAISections>(initial, 'AI.DAT', 'aiSections')!;
+		const original = getResource<ParsedAISectionsV12>(initial, 'AI.DAT', 'aiSections')!;
 
 		// Build a tiny edit — bumping the version field is the cheapest legal
 		// mutation, and it survives the immutable-update path because we're
 		// writing a brand-new object in.
-		const next: ParsedAISections = { ...original, version: original.version + 1 };
+		const next: ParsedAISectionsV12 = { ...original, version: original.version + 1 };
 		const after = setResource(initial, 'AI.DAT', 'aiSections', next);
 
-		const updated = getResource<ParsedAISections>(after, 'AI.DAT', 'aiSections')!;
+		const updated = getResource<ParsedAISectionsV12>(after, 'AI.DAT', 'aiSections')!;
 		expect(updated.version).toBe(original.version + 1);
 
 		const updatedBundle = after.bundles[0];
@@ -172,13 +172,13 @@ describe('setResource(bundleId, key, value)', () => {
 				makeEditableBundle(loadFixture(), 'B.DAT'),
 			],
 		};
-		const oa = getResource<ParsedAISections>(initial, 'A.DAT', 'aiSections')!;
-		const next: ParsedAISections = { ...oa, version: oa.version + 1 };
+		const oa = getResource<ParsedAISectionsV12>(initial, 'A.DAT', 'aiSections')!;
+		const next: ParsedAISectionsV12 = { ...oa, version: oa.version + 1 };
 		const after = setResource(initial, 'A.DAT', 'aiSections', next);
 
 		expect(after.bundles[0].isModified).toBe(true);
 		expect(after.bundles[1].isModified).toBe(false);
-		expect(getResource<ParsedAISections>(after, 'B.DAT', 'aiSections')!.version).toBe(
+		expect(getResource<ParsedAISectionsV12>(after, 'B.DAT', 'aiSections')!.version).toBe(
 			oa.version,
 		);
 	});
@@ -187,7 +187,7 @@ describe('setResource(bundleId, key, value)', () => {
 		const initial: WorkspaceState = {
 			bundles: [makeEditableBundle(loadFixture(), 'AI.DAT')],
 		};
-		const original = getResource<ParsedAISections>(initial, 'AI.DAT', 'aiSections')!;
+		const original = getResource<ParsedAISectionsV12>(initial, 'AI.DAT', 'aiSections')!;
 		const edited = setResource(initial, 'AI.DAT', 'aiSections', {
 			...original,
 			version: original.version + 1,
@@ -196,7 +196,7 @@ describe('setResource(bundleId, key, value)', () => {
 		const saved: WorkspaceState = {
 			bundles: edited.bundles.map(clearBundleDirty),
 		};
-		const after = getResource<ParsedAISections>(saved, 'AI.DAT', 'aiSections')!;
+		const after = getResource<ParsedAISectionsV12>(saved, 'AI.DAT', 'aiSections')!;
 
 		// Edit survives the save; dirty bookkeeping clears.
 		expect(after.version).toBe(original.version + 1);
@@ -384,7 +384,7 @@ function redoOnce(state: WSWithHistory): WSWithHistory {
 
 function readVersion(state: WSWithHistory, bundleId: string): number {
 	const b = state.bundles.find((x) => x.id === bundleId)!;
-	return (b.parsedResources.get('aiSections') as ParsedAISections).version;
+	return (b.parsedResources.get('aiSections') as ParsedAISectionsV12).version;
 }
 
 function freshTwoBundleState(): WSWithHistory {
@@ -406,9 +406,9 @@ describe('global undo/redo stack (ADR-0006)', () => {
 		const v0a = readVersion(s, 'A.DAT');
 		const v0b = readVersion(s, 'B.DAT');
 
-		const aOriginal = s.bundles[0].parsedResources.get('aiSections') as ParsedAISections;
+		const aOriginal = s.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12;
 		s = commitWrite(s, 'A.DAT', 'aiSections', 0, { ...aOriginal, version: v0a + 1 });
-		const bOriginal = s.bundles[1].parsedResources.get('aiSections') as ParsedAISections;
+		const bOriginal = s.bundles[1].parsedResources.get('aiSections') as ParsedAISectionsV12;
 		s = commitWrite(s, 'B.DAT', 'aiSections', 0, { ...bOriginal, version: v0b + 1 });
 
 		expect(readVersion(s, 'A.DAT')).toBe(v0a + 1);
@@ -431,7 +431,7 @@ describe('global undo/redo stack (ADR-0006)', () => {
 	it('redo round-trip: undo, redo, undo, redo lands on the same model', () => {
 		let s = freshTwoBundleState();
 		const v0 = readVersion(s, 'A.DAT');
-		const original = s.bundles[0].parsedResources.get('aiSections') as ParsedAISections;
+		const original = s.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12;
 		s = commitWrite(s, 'A.DAT', 'aiSections', 0, { ...original, version: v0 + 1 });
 		s = commitWrite(s, 'A.DAT', 'aiSections', 0, { ...original, version: v0 + 2 });
 
@@ -454,7 +454,7 @@ describe('global undo/redo stack (ADR-0006)', () => {
 		// branch becomes unreachable (the timeline forks).
 		let s = freshTwoBundleState();
 		const v0 = readVersion(s, 'A.DAT');
-		const original = s.bundles[0].parsedResources.get('aiSections') as ParsedAISections;
+		const original = s.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12;
 		s = commitWrite(s, 'A.DAT', 'aiSections', 0, { ...original, version: v0 + 1 });
 		s = commitWrite(s, 'A.DAT', 'aiSections', 0, { ...original, version: v0 + 2 });
 		s = undoOnce(s);
@@ -473,8 +473,8 @@ describe('global undo/redo stack (ADR-0006)', () => {
 		let s = freshTwoBundleState();
 		const va0 = readVersion(s, 'A.DAT');
 		const vb0 = readVersion(s, 'B.DAT');
-		const aOrig = s.bundles[0].parsedResources.get('aiSections') as ParsedAISections;
-		const bOrig = s.bundles[1].parsedResources.get('aiSections') as ParsedAISections;
+		const aOrig = s.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12;
+		const bOrig = s.bundles[1].parsedResources.get('aiSections') as ParsedAISectionsV12;
 
 		s = commitWrite(s, 'A.DAT', 'aiSections', 0, { ...aOrig, version: va0 + 1 });
 		s = commitWrite(s, 'B.DAT', 'aiSections', 0, { ...bOrig, version: vb0 + 1 });
@@ -534,8 +534,8 @@ describe('multi-Bundle load flow', () => {
 
 		// User edits the loaded Bundle so we can prove the replace really
 		// swapped the bytes (the new Bundle should NOT carry over the edit).
-		const original = v1.parsedResources.get('aiSections') as ParsedAISections;
-		const edited = setResource<ParsedAISections>(state, 'A.DAT', 'aiSections', {
+		const original = v1.parsedResources.get('aiSections') as ParsedAISectionsV12;
+		const edited = setResource<ParsedAISectionsV12>(state, 'A.DAT', 'aiSections', {
 			...original,
 			version: original.version + 7,
 		});
@@ -555,15 +555,15 @@ describe('multi-Bundle load flow', () => {
 		// Edit from v1 is gone — replace is destructive on purpose.
 		expect(afterReplace[0].isModified).toBe(false);
 		expect(
-			(afterReplace[0].parsedResources.get('aiSections') as ParsedAISections).version,
+			(afterReplace[0].parsedResources.get('aiSections') as ParsedAISectionsV12).version,
 		).toBe(original.version);
 	});
 
 	it('same-name re-load: Cancel path leaves the Workspace untouched', () => {
 		const v1 = makeEditableBundle(loadFixture(), 'A.DAT');
 		const state: WorkspaceState = { bundles: [v1] };
-		const original = v1.parsedResources.get('aiSections') as ParsedAISections;
-		const edited = setResource<ParsedAISections>(state, 'A.DAT', 'aiSections', {
+		const original = v1.parsedResources.get('aiSections') as ParsedAISectionsV12;
+		const edited = setResource<ParsedAISectionsV12>(state, 'A.DAT', 'aiSections', {
 			...original,
 			version: original.version + 1,
 		});
@@ -577,7 +577,7 @@ describe('multi-Bundle load flow', () => {
 		expect(edited.bundles[0]).toBe(edited.bundles[0]);
 		expect(edited.bundles[0].isModified).toBe(true);
 		expect(
-			(edited.bundles[0].parsedResources.get('aiSections') as ParsedAISections).version,
+			(edited.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12).version,
 		).toBe(original.version + 1);
 		// Sanity: candidate was parsed but not adopted.
 		expect(v2).not.toBe(edited.bundles[0]);
@@ -608,8 +608,8 @@ describe('multi-Bundle close flow', () => {
 				makeEditableBundle(loadFixture(), 'B.DAT'),
 			],
 		};
-		const a = initial.bundles[0].parsedResources.get('aiSections') as ParsedAISections;
-		const dirty = setResource<ParsedAISections>(initial, 'A.DAT', 'aiSections', {
+		const a = initial.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12;
+		const dirty = setResource<ParsedAISectionsV12>(initial, 'A.DAT', 'aiSections', {
 			...a,
 			version: a.version + 1,
 		});
@@ -657,15 +657,15 @@ describe('per-Bundle save bookkeeping', () => {
 				makeEditableBundle(loadFixture(), 'B.DAT'),
 			],
 		};
-		const a = initial.bundles[0].parsedResources.get('aiSections') as ParsedAISections;
-		const b = initial.bundles[1].parsedResources.get('aiSections') as ParsedAISections;
+		const a = initial.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12;
+		const b = initial.bundles[1].parsedResources.get('aiSections') as ParsedAISectionsV12;
 
 		// Both Bundles edited.
-		let s = setResource<ParsedAISections>(initial, 'A.DAT', 'aiSections', {
+		let s = setResource<ParsedAISectionsV12>(initial, 'A.DAT', 'aiSections', {
 			...a,
 			version: a.version + 1,
 		});
-		s = setResource<ParsedAISections>(s, 'B.DAT', 'aiSections', {
+		s = setResource<ParsedAISectionsV12>(s, 'B.DAT', 'aiSections', {
 			...b,
 			version: b.version + 1,
 		});
@@ -685,7 +685,7 @@ describe('per-Bundle save bookkeeping', () => {
 		expect(saved.bundles[1].dirtyMulti.has('aiSections:0')).toBe(true);
 		// Edits survive the save bookkeeping reset.
 		expect(
-			(saved.bundles[0].parsedResources.get('aiSections') as ParsedAISections).version,
+			(saved.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12).version,
 		).toBe(a.version + 1);
 	});
 
@@ -700,14 +700,14 @@ describe('per-Bundle save bookkeeping', () => {
 				makeEditableBundle(loadFixture(), 'C.DAT'),
 			],
 		};
-		const a = initial.bundles[0].parsedResources.get('aiSections') as ParsedAISections;
-		const c = initial.bundles[2].parsedResources.get('aiSections') as ParsedAISections;
+		const a = initial.bundles[0].parsedResources.get('aiSections') as ParsedAISectionsV12;
+		const c = initial.bundles[2].parsedResources.get('aiSections') as ParsedAISectionsV12;
 		// Edit A and C; leave B clean.
-		let s = setResource<ParsedAISections>(initial, 'A.DAT', 'aiSections', {
+		let s = setResource<ParsedAISectionsV12>(initial, 'A.DAT', 'aiSections', {
 			...a,
 			version: a.version + 1,
 		});
-		s = setResource<ParsedAISections>(s, 'C.DAT', 'aiSections', {
+		s = setResource<ParsedAISectionsV12>(s, 'C.DAT', 'aiSections', {
 			...c,
 			version: c.version + 1,
 		});

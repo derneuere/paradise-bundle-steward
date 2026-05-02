@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { parseBundle, writeBundleFresh } from './bundle';
 import { PLATFORMS, RESOURCE_TYPE_IDS } from './types';
 import { extractResourceSize, isCompressed, decompressData } from './resourceManager';
-import { parseAISectionsData, writeAISectionsData, type ParsedAISections } from './aiSections';
+import { parseAISectionsData, writeAISectionsData, type ParsedAISectionsV12 } from './aiSections';
 
 const PC_FIXTURE  = path.resolve(__dirname, '../../../example/AI.DAT');
 const PS3_FIXTURE = path.resolve(__dirname, '../../../example/ps3/AI.DAT');
@@ -46,7 +46,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 	return true;
 }
 
-function expectModelsEqual(a: ParsedAISections, b: ParsedAISections) {
+function expectModelsEqual(a: ParsedAISectionsV12, b: ParsedAISectionsV12) {
 	expect(a.version).toBe(b.version);
 	expect(a.sectionMinSpeeds).toEqual(b.sectionMinSpeeds);
 	expect(a.sectionMaxSpeeds).toEqual(b.sectionMaxSpeeds);
@@ -70,7 +70,7 @@ function loadFullBundle(fixturePath: string): { buffer: ArrayBuffer } {
 	return { buffer: bytes.buffer };
 }
 
-function readAISectionsFromBundle(buffer: ArrayBuffer): ParsedAISections {
+function readAISectionsFromBundle(buffer: ArrayBuffer): ParsedAISectionsV12 {
 	const bundle = parseBundle(buffer);
 	const ctxLittleEndian = bundle.header.platform !== PLATFORMS.PS3;
 	const resource = bundle.resources.find((r) => r.resourceTypeId === RESOURCE_TYPE_IDS.AI_SECTIONS)!;
@@ -80,7 +80,9 @@ function readAISectionsFromBundle(buffer: ArrayBuffer): ParsedAISections {
 	const start = (base + rel) >>> 0;
 	let slice: Uint8Array = new Uint8Array(buffer.slice(start, start + size));
 	if (isCompressed(slice)) slice = decompressData(slice);
-	return parseAISectionsData(slice, ctxLittleEndian);
+	const parsed = parseAISectionsData(slice, ctxLittleEndian);
+	if (parsed.kind !== 'v12') throw new Error(`Expected v12 AI Sections, got ${parsed.kind}`);
+	return parsed;
 }
 
 describe('AI Sections cross-platform bundle export', () => {
@@ -126,10 +128,12 @@ describe('AI Sections cross-platform self-consistency', () => {
 	it('PC payload → write as PS3 (BE) → reparse → write as PC === source', () => {
 		const sourcePC = loadResourceBytes(PC_FIXTURE);
 		const modelFromPC = parseAISectionsData(sourcePC, /* littleEndian */ true);
+		if (modelFromPC.kind !== 'v12') throw new Error(`Expected v12 fixture, got ${modelFromPC.kind}`);
 
 		// Convert to PS3 (BE) layout.
 		const asBE = writeAISectionsData(modelFromPC, /* littleEndian */ false);
 		const modelFromBE = parseAISectionsData(asBE, /* littleEndian */ false);
+		if (modelFromBE.kind !== 'v12') throw new Error(`Expected v12 round-trip, got ${modelFromBE.kind}`);
 		expectModelsEqual(modelFromBE, modelFromPC);
 
 		// Convert back to PC (LE). Must equal the original byte-for-byte.
@@ -148,9 +152,11 @@ describe('AI Sections cross-platform self-consistency', () => {
 	it('PS3 payload → write as PC (LE) → reparse → write as PS3 === source', () => {
 		const sourcePS3 = loadResourceBytes(PS3_FIXTURE);
 		const modelFromPS3 = parseAISectionsData(sourcePS3, /* littleEndian */ false);
+		if (modelFromPS3.kind !== 'v12') throw new Error(`Expected v12 fixture, got ${modelFromPS3.kind}`);
 
 		const asLE = writeAISectionsData(modelFromPS3, /* littleEndian */ true);
 		const modelFromLE = parseAISectionsData(asLE, /* littleEndian */ true);
+		if (modelFromLE.kind !== 'v12') throw new Error(`Expected v12 round-trip, got ${modelFromLE.kind}`);
 		expectModelsEqual(modelFromLE, modelFromPS3);
 
 		const backToBE = writeAISectionsData(modelFromLE, /* littleEndian */ false);
