@@ -1,4 +1,4 @@
-// AISectionsOverlay — WorldViewport overlay for the AISections resource.
+// AISectionsOverlay — WorldViewport overlay for the V12 AISections resource.
 //
 // Renders ~8780 sections as one batched fill+outline mesh (2 draw calls)
 // with face-index → section picking. The currently-selected section gets a
@@ -19,12 +19,15 @@
 // see `useWorldViewportHtmlSlot()` in `./WorldViewport.tsx`. The marquee
 // pairs an inside-Canvas `<CameraBridge>` with the DOM rectangle so the
 // latter can read camera state.
+//
+// 3D primitives (BatchedSections, SelectionOverlay, SectionLabel,
+// EdgeHandles, EdgeContextMenu) live in `@/components/aisections/shared`
+// so the V4/V6 read-only overlay consumes the same code path — bug fixes
+// land in both at once. See issue #35.
 
 import { useMemo, useRef, useState, useCallback } from 'react';
-import { ThreeEvent } from '@react-three/fiber';
 import { Html, Line } from '@react-three/drei';
 import { Copy, Magnet } from 'lucide-react';
-import { useDismissOnOutsideInteraction } from '@/hooks/useDismissOnOutsideInteraction';
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';
@@ -41,6 +44,20 @@ import { TranslateGizmo, type GizmoOffset } from '@/components/common/three/Tran
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { CornerHandles, type CornerDragOffset } from '@/components/aisections/CornerHandles';
+import {
+	BatchedSections,
+	buildBatchedSections,
+	EdgeContextMenu,
+	EdgeHandles,
+	SectionLabel,
+	SelectionOverlay,
+	edgeContextMenuRootStyle as sharedEdgeContextMenuRootStyle,
+	portalGeo,
+	portalMat,
+	portalSelMat,
+	type Corner,
+	type SectionAccessor,
+} from '@/components/aisections/shared';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
@@ -102,378 +119,40 @@ export function aiSectionMarkerPath(m: AISectionMarker): NodePath {
 	}
 }
 
+/**
+ * Re-export for the regression test pinned in `AISectionsOverlay.test.ts`.
+ * The implementation lives in `@/components/aisections/shared/EdgeContextMenu`.
+ */
+export const edgeContextMenuRootStyle = sharedEdgeContextMenuRootStyle;
+
 // ---------------------------------------------------------------------------
-// Colors / shared materials
+// V12 → shared adapters
 // ---------------------------------------------------------------------------
 
-const SPEED_COLORS_RGB: Record<number, [number, number, number]> = {
+const SPEED_COLORS_RGB: Record<number, readonly [number, number, number]> = {
 	[SectionSpeed.E_SECTION_SPEED_VERY_SLOW]: [0.2, 0.4, 0.8],
 	[SectionSpeed.E_SECTION_SPEED_SLOW]: [0.27, 0.67, 0.53],
 	[SectionSpeed.E_SECTION_SPEED_NORMAL]: [0.53, 0.73, 0.27],
 	[SectionSpeed.E_SECTION_SPEED_FAST]: [0.8, 0.53, 0.2],
 	[SectionSpeed.E_SECTION_SPEED_VERY_FAST]: [0.8, 0.2, 0.2],
 };
-const FALLBACK_RGB: [number, number, number] = [0.4, 0.4, 0.4];
+const FALLBACK_RGB: readonly [number, number, number] = [0.4, 0.4, 0.4];
 
-const fillMaterial = new THREE.MeshBasicMaterial({
-	vertexColors: true,
-	transparent: true,
-	opacity: 0.25,
-	side: THREE.DoubleSide,
-	depthWrite: false,
-	polygonOffset: true,
-	polygonOffsetFactor: 1,
-	polygonOffsetUnits: 1,
-});
-const outlineMaterial = new THREE.LineBasicMaterial({ color: 0x888888 });
-
-const portalGeo = new THREE.SphereGeometry(3, 12, 8);
-const portalMat = new THREE.MeshStandardMaterial({ color: 0x33cccc, roughness: 0.4, metalness: 0.2 });
-const portalSelMat = new THREE.MeshStandardMaterial({
-	color: 0xffaa33, roughness: 0.4, metalness: 0.2, emissive: 0x664400, emissiveIntensity: 0.5,
-});
-
-// ---------------------------------------------------------------------------
-// Batched section geometry
-// ---------------------------------------------------------------------------
-
-export type BatchedAISections = {
-	fillGeo: THREE.BufferGeometry;
-	outlineGeo: THREE.BufferGeometry;
-	/** triangle index → section index */
-	faceToSection: Int32Array;
+// V12 stores corners as `Vector2` where `y` is the world Z axis (the ground
+// plane is XZ). The shared primitives speak `Corner = { x, z }`, so this
+// adapter pins the y→z projection in one place.
+const v12Accessor: SectionAccessor<AISection> = {
+	cornerCount: (s) => s.corners.length,
+	cornerX: (s, i) => s.corners[i].x,
+	cornerZ: (s, i) => s.corners[i].y,
+	color: (s) => SPEED_COLORS_RGB[s.speed] ?? FALLBACK_RGB,
 };
 
-export function buildBatchedSections(sections: AISection[]): BatchedAISections {
-	let totalFillVerts = 0;
-	let totalFillIndices = 0;
-	let totalOutlineVerts = 0;
-	for (const sec of sections) {
-		const n = sec.corners.length;
-		if (n < 3) continue;
-		totalFillVerts += n;
-		totalFillIndices += (n - 2) * 3;
-		totalOutlineVerts += n * 2;
-	}
-
-	const positions = new Float32Array(totalFillVerts * 3);
-	const colors = new Float32Array(totalFillVerts * 3);
-	const indices = new Uint32Array(totalFillIndices);
-	const faceToSection = new Int32Array(totalFillIndices / 3);
-	const outPositions = new Float32Array(totalOutlineVerts * 3);
-
-	let vOff = 0, iOff = 0, fOff = 0, oOff = 0;
-	for (let si = 0; si < sections.length; si++) {
-		const sec = sections[si];
-		const n = sec.corners.length;
-		if (n < 3) continue;
-
-		const rgb = SPEED_COLORS_RGB[sec.speed] ?? FALLBACK_RGB;
-		const baseVert = vOff / 3;
-
-		for (let ci = 0; ci < n; ci++) {
-			positions[vOff] = sec.corners[ci].x;
-			positions[vOff + 1] = 0.1;
-			positions[vOff + 2] = sec.corners[ci].y;
-			colors[vOff] = rgb[0];
-			colors[vOff + 1] = rgb[1];
-			colors[vOff + 2] = rgb[2];
-			vOff += 3;
-		}
-
-		const numTris = n - 2;
-		for (let t = 0; t < numTris; t++) {
-			indices[iOff] = baseVert;
-			indices[iOff + 1] = baseVert + t + 1;
-			indices[iOff + 2] = baseVert + t + 2;
-			iOff += 3;
-			faceToSection[fOff++] = si;
-		}
-
-		for (let ci = 0; ci < n; ci++) {
-			const next = (ci + 1) % n;
-			outPositions[oOff++] = sec.corners[ci].x;
-			outPositions[oOff++] = 0.5;
-			outPositions[oOff++] = sec.corners[ci].y;
-			outPositions[oOff++] = sec.corners[next].x;
-			outPositions[oOff++] = 0.5;
-			outPositions[oOff++] = sec.corners[next].y;
-		}
-	}
-
-	const fillGeo = new THREE.BufferGeometry();
-	fillGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-	fillGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-	fillGeo.setIndex(new THREE.BufferAttribute(indices, 1));
-	fillGeo.computeBoundingSphere();
-
-	const outlineGeo = new THREE.BufferGeometry();
-	outlineGeo.setAttribute('position', new THREE.BufferAttribute(outPositions.subarray(0, oOff), 3));
-	outlineGeo.computeBoundingSphere();
-
-	return { fillGeo, outlineGeo, faceToSection };
+function v12Corners(section: AISection): Corner[] {
+	return section.corners.map((c) => ({ x: c.x, z: c.y }));
 }
 
-// ---------------------------------------------------------------------------
-// Batched scene — one draw call for fills, one for outlines
-// ---------------------------------------------------------------------------
-
-function BatchedSections({
-	scene, onPickSection, onHoverSection,
-}: {
-	scene: BatchedAISections;
-	onPickSection: (sectionIndex: number) => void;
-	onHoverSection: (sectionIndex: number | null) => void;
-}) {
-	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-		e.stopPropagation();
-		if (e.faceIndex == null) return;
-		const si = scene.faceToSection[e.faceIndex];
-		if (si != null && si >= 0) onPickSection(si);
-	}, [scene.faceToSection, onPickSection]);
-
-	const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
-		e.stopPropagation();
-		if (e.faceIndex == null) { onHoverSection(null); return; }
-		const si = scene.faceToSection[e.faceIndex];
-		if (si != null && si >= 0) {
-			onHoverSection(si);
-			document.body.style.cursor = 'pointer';
-		}
-	}, [scene.faceToSection, onHoverSection]);
-
-	const handlePointerOut = useCallback(() => {
-		onHoverSection(null);
-		document.body.style.cursor = 'auto';
-	}, [onHoverSection]);
-
-	return (
-		<>
-			<mesh
-				geometry={scene.fillGeo}
-				material={fillMaterial}
-				onClick={handleClick}
-				onPointerMove={handlePointerMove}
-				onPointerOut={handlePointerOut}
-			/>
-			<lineSegments geometry={scene.outlineGeo} material={outlineMaterial} />
-		</>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Selection / hover highlight (one section, drawn brighter)
-// ---------------------------------------------------------------------------
-
-function SelectionOverlay({ section, color }: { section: AISection; color: string }) {
-	const geometry = useMemo(() => {
-		if (section.corners.length < 3) return null;
-		const shape = new THREE.Shape();
-		shape.moveTo(section.corners[0].x, section.corners[0].y);
-		for (let i = 1; i < section.corners.length; i++) {
-			shape.lineTo(section.corners[i].x, section.corners[i].y);
-		}
-		shape.closePath();
-		const geo = new THREE.ShapeGeometry(shape);
-		// ShapeGeometry sits on XY; rotate +π/2 around X to land on the XZ
-		// plane at world (x, 0, y) — matches the outline `<Line>` below.
-		geo.rotateX(Math.PI / 2);
-		return geo;
-	}, [section.corners]);
-
-	if (!geometry) return null;
-
-	return (
-		<>
-			<mesh geometry={geometry} position={[0, 0.3, 0]}>
-				<meshBasicMaterial color={color} transparent opacity={0.5} side={THREE.DoubleSide} depthWrite={false} />
-			</mesh>
-			{section.corners.length >= 3 && (
-				<Line
-					points={[
-						...section.corners.map((c): [number, number, number] => [c.x, 0.4, c.y]),
-						[section.corners[0].x, 0.4, section.corners[0].y],
-					]}
-					color={color}
-					lineWidth={2.5}
-				/>
-			)}
-		</>
-	);
-}
-
-function SectionLabel({ section, index, color }: { section: AISection; index: number; color: string }) {
-	if (section.corners.length < 4) return null;
-	return (
-		<Html
-			position={[
-				(section.corners[0].x + section.corners[2].x) / 2,
-				2,
-				(section.corners[0].y + section.corners[2].y) / 2,
-			]}
-			center
-			distanceFactor={200}
-			style={{ pointerEvents: 'none' }}
-		>
-			<div style={{
-				background: 'rgba(0,0,0,0.8)', color, padding: '2px 6px',
-				borderRadius: 4, fontSize: 10, whiteSpace: 'nowrap', fontFamily: 'monospace',
-			}}>
-				Sec {index} | 0x{(section.id >>> 0).toString(16).toUpperCase()} | {['VSLOW', 'SLOW', 'NORM', 'FAST', 'VFAST'][section.speed] ?? section.speed}
-			</div>
-		</Html>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Edge handles — visible outline + invisible hit boxes for hover + right-click
-// ---------------------------------------------------------------------------
-
-function EdgeHandles({
-	section, hoveredEdge, onHoverEdge, onContextMenu,
-}: {
-	section: AISection;
-	hoveredEdge: number | null;
-	onHoverEdge: (edgeIdx: number | null) => void;
-	onContextMenu: (edgeIdx: number, screenX: number, screenY: number) => void;
-}) {
-	const corners = section.corners;
-	const N = corners.length;
-	if (N < 2) return null;
-
-	return (
-		<>
-			{corners.map((_, i) => {
-				const A = corners[i];
-				const B = corners[(i + 1) % N];
-				const midX = (A.x + B.x) / 2;
-				const midZ = (A.y + B.y) / 2;
-				const dx = B.x - A.x;
-				const dz = B.y - A.y;
-				const length = Math.hypot(dx, dz);
-				if (length === 0) return null;
-				const angle = -Math.atan2(dz, dx);
-
-				const isHovered = hoveredEdge === i;
-				const lineColor = isHovered ? '#33ff66' : '#ffaa33';
-				const lineWidth = isHovered ? 4 : 2;
-				const hitWidth = Math.max(length * 0.05, 2);
-
-				return (
-					<group key={`edge-${i}`}>
-						<Line
-							points={[
-								[A.x, 0.6, A.y],
-								[B.x, 0.6, B.y],
-							]}
-							color={lineColor}
-							lineWidth={lineWidth}
-						/>
-						<mesh
-							position={[midX, 0.6, midZ]}
-							rotation={[0, angle, 0]}
-							onPointerOver={(e) => {
-								e.stopPropagation();
-								onHoverEdge(i);
-								document.body.style.cursor = 'context-menu';
-							}}
-							onPointerOut={(e) => {
-								e.stopPropagation();
-								onHoverEdge(null);
-								document.body.style.cursor = 'auto';
-							}}
-							onContextMenu={(e) => {
-								e.stopPropagation();
-								// Suppress the browser's default context menu so
-								// only ours opens.
-								e.nativeEvent.preventDefault();
-								onContextMenu(i, e.nativeEvent.clientX, e.nativeEvent.clientY);
-							}}
-						>
-							<boxGeometry args={[length, 1, hitWidth]} />
-							<meshBasicMaterial transparent opacity={0} />
-						</mesh>
-						{isHovered && (
-							<Html
-								position={[midX, 1.5, midZ]}
-								center
-								distanceFactor={150}
-								style={{ pointerEvents: 'none' }}
-							>
-								<div
-									style={{
-										background: 'rgba(0,0,0,0.9)',
-										color: '#33ff66',
-										padding: '2px 6px',
-										borderRadius: 4,
-										fontSize: 10,
-										whiteSpace: 'nowrap',
-										fontFamily: 'monospace',
-									}}
-								>
-									Edge {i} · right-click for actions
-								</div>
-							</Html>
-						)}
-					</group>
-				);
-			})}
-		</>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Edge context menu — DOM, positioned at click coords
-// ---------------------------------------------------------------------------
-//
-// Rendered into the WorldViewport chrome's HTML slot via createPortal so it
-// floats above the WebGL surface. We don't reuse shadcn's <ContextMenu>
-// because that primitive binds to right-click on a DOM element; the trigger
-// here is a Three.js mesh `onContextMenu`, so we need a programmatic open.
-
-// `pointerEvents: 'auto'` is load-bearing: the WorldViewport HTML slot
-// wrapper (`useWorldViewportHtmlSlot`) sets `pointer-events: none` on its
-// container so empty overlay area doesn't eat canvas orbit / pick events.
-// CSS inheritance carries that through to position-fixed children too, so any
-// slot child that needs clicks must opt back in. Without this, the menu
-// renders but the chip's onClick never fires (issue #30). Exported for the
-// regression test that pins the pointer-events opt-in.
-export function edgeContextMenuRootStyle(x: number, y: number): React.CSSProperties {
-	return { position: 'fixed', left: x, top: y, zIndex: 1000, pointerEvents: 'auto' };
-}
-
-function EdgeContextMenu({
-	x, y, edgeIdx, onDuplicate, onClose,
-}: {
-	x: number;
-	y: number;
-	edgeIdx: number;
-	onDuplicate: () => void;
-	onClose: () => void;
-}) {
-	useDismissOnOutsideInteraction(onClose);
-
-	return (
-		<div
-			style={edgeContextMenuRootStyle(x, y)}
-			className="bg-popover text-popover-foreground border rounded-md shadow-md p-1 min-w-[16rem]"
-			onMouseDown={(e) => e.stopPropagation()}
-			onContextMenu={(e) => e.preventDefault()}
-		>
-			<div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-				Edge {edgeIdx}
-			</div>
-			<button
-				type="button"
-				className="w-full text-left flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
-				onClick={onDuplicate}
-			>
-				<Copy className="h-3.5 w-3.5" />
-				Duplicate section through this edge
-			</button>
-		</div>
-	);
-}
+const SPEED_LABEL = ['VSLOW', 'SLOW', 'NORM', 'FAST', 'VFAST'];
 
 // ---------------------------------------------------------------------------
 // Detail layer for the selected section
@@ -482,7 +161,6 @@ function EdgeContextMenu({
 function SelectedSectionDetail({
 	section: sec,
 	data,
-	sectionIndex,
 	marker,
 	onPickPortal,
 	onPickBoundaryLine,
@@ -493,7 +171,6 @@ function SelectedSectionDetail({
 }: {
 	section: AISection;
 	data: ParsedAISectionsV12;
-	sectionIndex: number;
 	marker: AISectionMarker;
 	onPickPortal: (portalIndex: number) => void;
 	onPickBoundaryLine: (portalIndex: number, lineIndex: number) => void;
@@ -504,10 +181,12 @@ function SelectedSectionDetail({
 }) {
 	if (!sec) return null;
 
+	const corners = useMemo(() => v12Corners(sec), [sec]);
+
 	return (
 		<>
 			<EdgeHandles
-				section={sec}
+				corners={corners}
 				hoveredEdge={hoveredEdge}
 				onHoverEdge={onHoverEdge}
 				onContextMenu={onEdgeContextMenu}
@@ -608,7 +287,6 @@ function SelectedSectionDetail({
 					<Line key={`link-${pi}`} points={[from, to]} color="#33cccc" lineWidth={1} dashed dashSize={4} gapSize={3} />
 				);
 			})}
-			{/* Anchor for the dashed-line ref so React doesn't warn about unused 'data' */}
 		</>
 	);
 }
@@ -669,7 +347,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// `S` toggles snap mode.
 	useToggleHotkey('s', setSnapEnabled);
 
-	const scene = useMemo(() => buildBatchedSections(data.sections), [data.sections]);
+	const scene = useMemo(() => buildBatchedSections(data.sections, v12Accessor), [data.sections]);
 
 	const selSection = selectedSectionIndex != null ? data.sections[selectedSectionIndex] ?? null : null;
 	const hovSection = hoverSectionIndex != null ? data.sections[hoverSectionIndex] ?? null : null;
@@ -697,13 +375,22 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		return previewModel.sections[selectedSectionIndex] ?? selSection;
 	}, [selSection, previewModel, selectedSectionIndex]);
 
+	const previewCorners = useMemo(
+		() => (previewSection ? v12Corners(previewSection) : null),
+		[previewSection],
+	);
+	const hovCorners = useMemo(
+		() => (hovSection ? v12Corners(hovSection) : null),
+		[hovSection],
+	);
+
 	const affectedNeighbours = useMemo(() => {
 		if (!previewModel || selectedSectionIndex == null) return [];
-		const out: { idx: number; section: AISection }[] = [];
+		const out: { idx: number; corners: Corner[] }[] = [];
 		for (let i = 0; i < previewModel.sections.length; i++) {
 			if (i === selectedSectionIndex) continue;
 			if (previewModel.sections[i] !== data.sections[i]) {
-				out.push({ idx: i, section: previewModel.sections[i] });
+				out.push({ idx: i, corners: v12Corners(previewModel.sections[i]) });
 			}
 		}
 		return out;
@@ -851,26 +538,29 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				onHoverSection={setHoverSectionIndex}
 			/>
 
-			{previewSection && <SelectionOverlay section={previewSection} color="#ffaa33" />}
-			{hovSection && hoverSectionIndex !== selectedSectionIndex && (
-				<SelectionOverlay section={hovSection} color="#66aaff" />
+			{previewCorners && <SelectionOverlay corners={previewCorners} color="#ffaa33" />}
+			{hovCorners && hoverSectionIndex !== selectedSectionIndex && (
+				<SelectionOverlay corners={hovCorners} color="#66aaff" />
 			)}
 
-			{drag && affectedNeighbours.map(({ idx, section }) => (
-				<SelectionOverlay key={`cascade-${idx}`} section={section} color="#ddaa66" />
+			{drag && affectedNeighbours.map(({ idx, corners }) => (
+				<SelectionOverlay key={`cascade-${idx}`} corners={corners} color="#ddaa66" />
 			))}
 
-			{previewSection && selectedSectionIndex != null && (
-				<SectionLabel section={previewSection} index={selectedSectionIndex} color="#ffaa33" />
+			{previewCorners && previewSection && selectedSectionIndex != null && (
+				<SectionLabel corners={previewCorners} color="#ffaa33">
+					Sec {selectedSectionIndex} | 0x{(previewSection.id >>> 0).toString(16).toUpperCase()} | {SPEED_LABEL[previewSection.speed] ?? previewSection.speed}
+				</SectionLabel>
 			)}
-			{hovSection && hoverSectionIndex != null && hoverSectionIndex !== selectedSectionIndex && (
-				<SectionLabel section={hovSection} index={hoverSectionIndex} color="#aaaaaa" />
+			{hovCorners && hovSection && hoverSectionIndex != null && hoverSectionIndex !== selectedSectionIndex && (
+				<SectionLabel corners={hovCorners} color="#aaaaaa">
+					Sec {hoverSectionIndex} | 0x{(hovSection.id >>> 0).toString(16).toUpperCase()} | {SPEED_LABEL[hovSection.speed] ?? hovSection.speed}
+				</SectionLabel>
 			)}
 
 			{selectedSectionIndex != null && previewSection && (
 				<SelectedSectionDetail
 					section={previewSection}
-					sectionIndex={selectedSectionIndex}
 					data={data}
 					marker={marker}
 					onPickPortal={handlePickPortal}
@@ -995,9 +685,17 @@ function HtmlSiblings({
 						x={edgeMenu.x}
 						y={edgeMenu.y}
 						edgeIdx={edgeMenu.edgeIdx}
-						onDuplicate={onDuplicateThroughEdge}
 						onClose={onCloseEdgeMenu}
-					/>
+					>
+						<button
+							type="button"
+							className="w-full text-left flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+							onClick={onDuplicateThroughEdge}
+						>
+							<Copy className="h-3.5 w-3.5" />
+							Duplicate section through this edge
+						</button>
+					</EdgeContextMenu>
 				)}
 			</>
 		),
