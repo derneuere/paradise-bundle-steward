@@ -11,6 +11,9 @@ import { FieldRenderer } from './fields/FieldRenderer';
 import { useSchemaEditor } from './context';
 import { formatPath, getAtPath, type NodePath } from '@/lib/schema/walk';
 import { GenericBulkEditPanel } from './GenericBulkEditPanel';
+import { ConversionProvenanceBanner } from './ConversionProvenanceBanner';
+import { useWorkspace } from '@/context/WorkspaceContext';
+import { selectionLevel } from '@/context/WorkspaceContext.types';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -28,6 +31,8 @@ export function InspectorPanel() {
 
 	const selectedValue = useMemo(() => getAtPath(data, selectedPath), [data, selectedPath]);
 
+	const provenanceBanner = <ProvenanceBanner />;
+
 	if (!record) {
 		// Selection is a leaf field (e.g., user clicked into a ref). Render
 		// the single field by itself.
@@ -36,6 +41,7 @@ export function InspectorPanel() {
 			const meta = selectedLocation.parentRecord.fieldMetadata?.[selectedLocation.parentFieldName];
 			return (
 				<div className="h-full flex flex-col min-h-0">
+					{provenanceBanner}
 					<GenericBulkEditPanel />
 					<div className="flex-1 min-h-0 overflow-auto p-4">
 						<Breadcrumb path={selectedPath} selectPath={selectPath} />
@@ -55,6 +61,7 @@ export function InspectorPanel() {
 		}
 		return (
 			<div className="h-full flex flex-col min-h-0">
+				{provenanceBanner}
 				<GenericBulkEditPanel />
 				<div className="flex-1 min-h-0 p-4 text-xs text-muted-foreground">Nothing selected.</div>
 			</div>
@@ -63,11 +70,52 @@ export function InspectorPanel() {
 
 	return (
 		<div className="h-full flex flex-col min-h-0">
+			{provenanceBanner}
 			<GenericBulkEditPanel />
 			<div className="flex-1 min-h-0">
 				<RecordForm record={record} path={selectedPath} value={selectedValue as Record<string, unknown>} />
 			</div>
 		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Conversion provenance banner — wired to the workspace selection because
+// provenance lives on (bundleId, resourceKey, index), not on the schema-
+// editor's NodePath. Renders only at instance / schema selection levels;
+// the bundle and resource-type levels never reach this component, but we
+// guard defensively so a misuse doesn't crash.
+// ---------------------------------------------------------------------------
+
+function ProvenanceBanner() {
+	const { selection, getConversionProvenance, dismissConversionProvenance } =
+		useWorkspace();
+	const level = selectionLevel(selection);
+	if (
+		!selection ||
+		(level !== 'instance' && level !== 'schema') ||
+		selection.resourceKey === undefined ||
+		selection.index === undefined
+	) {
+		return null;
+	}
+	const provenance = getConversionProvenance(
+		selection.bundleId,
+		selection.resourceKey,
+		selection.index,
+	);
+	if (!provenance) return null;
+	return (
+		<ConversionProvenanceBanner
+			provenance={provenance}
+			onDismiss={() =>
+				dismissConversionProvenance(
+					selection.bundleId,
+					selection.resourceKey!,
+					selection.index!,
+				)
+			}
+		/>
 	);
 }
 

@@ -46,6 +46,7 @@ import type { ParsedBundle } from '@/lib/core/types';
 import type { DebugResource } from '@/lib/core/bundle/debugData';
 import type { UIResource } from '@/lib/core/bundle';
 import type { NodePath } from '@/lib/schema/walk';
+import type { ConversionProvenance } from './WorkspaceContext.provenance';
 
 // ---------------------------------------------------------------------------
 // Identifiers
@@ -337,6 +338,50 @@ export type WorkspaceContextValue = {
 
 	/** Step forward one HistoryCommit. No-op when `canRedo === false`. */
 	redo: () => void;
+
+	// -------------------------------------------------------------------------
+	// Conversion provenance — banner data for the post-export inspector
+	// (issue #38). The export pipeline writes one entry per migrated
+	// resource via `recordConversionProvenance`; the inspector reads it
+	// via `getConversionProvenance` to decide whether to render the
+	// "Converted from V4 — defaulted: ... Interpreted: ..." banner.
+	// Dismissal is per-resource and lives alongside the provenance.
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Read the active conversion provenance for one resource. Returns null
+	 * when no migration has touched it OR when the user has already
+	 * dismissed the banner — both should hide the banner.
+	 */
+	getConversionProvenance: (
+		bundleId: BundleId,
+		resourceKey: string,
+		index: number,
+	) => ConversionProvenance | null;
+
+	/**
+	 * Record one migration's outcome on a resource. Called by the export
+	 * pipeline after a successful export — once per migrated (resource,
+	 * index). Overwrites any prior entry on that resource and clears the
+	 * dismissed flag so a fresh export always re-surfaces the banner.
+	 */
+	recordConversionProvenance: (
+		bundleId: BundleId,
+		resourceKey: string,
+		index: number,
+		provenance: ConversionProvenance,
+	) => void;
+
+	/**
+	 * Dismiss the provenance banner for one resource. The provenance entry
+	 * stays in the map (so subsequent code can still see "this resource
+	 * was converted at time T") but the banner stops rendering for it.
+	 */
+	dismissConversionProvenance: (
+		bundleId: BundleId,
+		resourceKey: string,
+		index: number,
+	) => void;
 };
 
 // ---------------------------------------------------------------------------

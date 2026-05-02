@@ -72,6 +72,15 @@ import {
 	visibilityKey as makeVisibilityKey,
 	visibilityKeysForBundle,
 } from './WorkspaceContext.helpers';
+import {
+	dismissProvenance,
+	dropProvenanceForBundle,
+	getActiveProvenance,
+	recordProvenance,
+	type ConversionProvenance,
+	type ProvenanceEntry,
+	type ProvenanceKey,
+} from './WorkspaceContext.provenance';
 import { ReplaceBundleDialog } from '@/components/workspace/ReplaceBundleDialog';
 import { CloseBundleDialog } from '@/components/workspace/CloseBundleDialog';
 
@@ -151,6 +160,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 	}));
 	const [isLoading, setIsLoading] = useState(false);
 	const [secondaryBundles, setSecondaryBundles] = useState<SecondaryBundle[]>([]);
+	// Conversion provenance store — one entry per (bundle, resource, index)
+	// triple that the most recent "Export to game version..." migrated.
+	// Drives the inspector banner from issue #38; cleared on close /
+	// replace to keep stale entries from resurfacing if the user reloads
+	// the same filename later.
+	const [provenance, setProvenance] = useState<Map<ProvenanceKey, ProvenanceEntry>>(
+		() => new Map(),
+	);
 	// Pending UI prompts. The deferred resolver lets `loadBundle` /
 	// `closeBundle` return a Promise that completes when the user clicks
 	// through the dialog — mirrors how a `confirm()` shaped API would work
@@ -330,6 +347,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 			return next;
 		});
 		setHistory((prev) => dropHistoryForBundle(prev, bundleId));
+		setProvenance((prev) => dropProvenanceForBundle(prev, bundleId));
 	}, []);
 
 	const loadBundle = useCallback(
@@ -512,6 +530,35 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 		setSecondaryBundles((prev) => prev.filter((b) => b.name !== name));
 	}, []);
 
+	// Conversion provenance ---------------------------------------------------
+
+	const getConversionProvenance = useCallback(
+		(bundleId: BundleId, resourceKey: string, index: number) =>
+			getActiveProvenance(provenance, bundleId, resourceKey, index),
+		[provenance],
+	);
+
+	const recordConversionProvenance = useCallback(
+		(
+			bundleId: BundleId,
+			resourceKey: string,
+			index: number,
+			next: ConversionProvenance,
+		) => {
+			setProvenance((prev) =>
+				recordProvenance(prev, bundleId, resourceKey, index, next),
+			);
+		},
+		[],
+	);
+
+	const dismissConversionProvenance = useCallback(
+		(bundleId: BundleId, resourceKey: string, index: number) => {
+			setProvenance((prev) => dismissProvenance(prev, bundleId, resourceKey, index));
+		},
+		[],
+	);
+
 	// Memoise the public value to keep consumers stable when only secondary
 	// state moves. Internal extras are tagged with `__` — they're an
 	// implementation detail of the companion-state hooks below.
@@ -536,6 +583,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 			canRedo,
 			undo,
 			redo,
+			getConversionProvenance,
+			recordConversionProvenance,
+			dismissConversionProvenance,
 			__isLoading: isLoading,
 			__secondaryBundles: secondaryBundles,
 			__loadSecondaryBundle: loadSecondaryBundle,
@@ -561,6 +611,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 			canRedo,
 			undo,
 			redo,
+			getConversionProvenance,
+			recordConversionProvenance,
+			dismissConversionProvenance,
 			isLoading,
 			secondaryBundles,
 			loadSecondaryBundle,
