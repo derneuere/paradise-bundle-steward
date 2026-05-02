@@ -304,8 +304,12 @@ type Props = {
 	data: ParsedAISectionsV4 | ParsedAISectionsV6;
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
+	/**
+	 * Called on pointer-up after a corner drag. Receives the full updated
+	 * model with the dragged (and cascade-shared) corners moved by the drag
+	 * offset. One call per committed drag — one undo entry.
+	 */
 	onChange?: (next: ParsedAISectionsV4 | ParsedAISectionsV6) => void;
-	isActive?: boolean;
 };
 
 export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 | ParsedAISectionsV6> = ({

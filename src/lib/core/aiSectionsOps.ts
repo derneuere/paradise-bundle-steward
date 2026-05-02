@@ -593,6 +593,34 @@ export function translateCornerWithShared(
 }
 
 /**
+ * Shared core: return a new boundary-line verts object with any endpoint that
+ * matches `(px, pz)` shifted by `(dx, dz)`, or the same input reference when
+ * neither endpoint matched. Works for both the V12 `BoundaryLine` and the V4/V6
+ * `LegacyBoundaryLine` since both use the same `{ verts: { x, y, z, w } }` shape.
+ */
+function shiftBoundaryVertsAt(
+	verts: { x: number; y: number; z: number; w: number },
+	px: number,
+	pz: number,
+	dx: number,
+	dz: number,
+): { x: number; y: number; z: number; w: number } | null {
+	const startMatches =
+		Math.abs(verts.x - px) < POSITION_EPS &&
+		Math.abs(verts.y - pz) < POSITION_EPS;
+	const endMatches =
+		Math.abs(verts.z - px) < POSITION_EPS &&
+		Math.abs(verts.w - pz) < POSITION_EPS;
+	if (!startMatches && !endMatches) return null;
+	return {
+		x: startMatches ? verts.x + dx : verts.x,
+		y: startMatches ? verts.y + dz : verts.y,
+		z: endMatches ? verts.z + dx : verts.z,
+		w: endMatches ? verts.w + dz : verts.w,
+	};
+}
+
+/**
  * Return a new BoundaryLine with any endpoint that matches `point` shifted
  * by `(dx, dz)`. Returns the original input (`===`-equal) when no endpoint
  * matched, so callers can detect "no change" cheaply.
@@ -603,21 +631,9 @@ function shiftBoundaryEndpointsAt(
 	dx: number,
 	dz: number,
 ): BoundaryLine {
-	const startMatches =
-		Math.abs(bl.verts.x - point.x) < POSITION_EPS &&
-		Math.abs(bl.verts.y - point.y) < POSITION_EPS;
-	const endMatches =
-		Math.abs(bl.verts.z - point.x) < POSITION_EPS &&
-		Math.abs(bl.verts.w - point.y) < POSITION_EPS;
-	if (!startMatches && !endMatches) return bl;
-	return {
-		verts: {
-			x: startMatches ? bl.verts.x + dx : bl.verts.x,
-			y: startMatches ? bl.verts.y + dz : bl.verts.y,
-			z: endMatches ? bl.verts.z + dx : bl.verts.z,
-			w: endMatches ? bl.verts.w + dz : bl.verts.w,
-		},
-	};
+	const next = shiftBoundaryVertsAt(bl.verts, point.x, point.y, dx, dz);
+	if (!next) return bl;
+	return { verts: next };
 }
 
 // =============================================================================
@@ -729,21 +745,9 @@ function shiftLegacyBoundaryEndpointsAt(
 	dx: number,
 	dz: number,
 ): LegacyBoundaryLine {
-	const startMatches =
-		Math.abs(bl.verts.x - px) < POSITION_EPS &&
-		Math.abs(bl.verts.y - pz) < POSITION_EPS;
-	const endMatches =
-		Math.abs(bl.verts.z - px) < POSITION_EPS &&
-		Math.abs(bl.verts.w - pz) < POSITION_EPS;
-	if (!startMatches && !endMatches) return bl;
-	return {
-		verts: {
-			x: startMatches ? bl.verts.x + dx : bl.verts.x,
-			y: startMatches ? bl.verts.y + dz : bl.verts.y,
-			z: endMatches ? bl.verts.z + dx : bl.verts.z,
-			w: endMatches ? bl.verts.w + dz : bl.verts.w,
-		},
-	};
+	const next = shiftBoundaryVertsAt(bl.verts, px, pz, dx, dz);
+	if (!next) return bl;
+	return { verts: next };
 }
 
 // =============================================================================
