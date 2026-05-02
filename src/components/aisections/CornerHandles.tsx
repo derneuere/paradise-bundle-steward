@@ -6,6 +6,12 @@
 // `translateCornerWithShared` op on that offset so coincident corners and
 // boundary-line endpoints elsewhere in the model follow along.
 //
+// Corner storage differs across V12 (`Vector2[]` with y → world Z) and
+// V4/V6 (parallel `cornersX[]` + `cornersZ[]`) — both project onto the
+// shared `Corner = { x, z }` shape, which is what this component takes.
+// The caller does the V12-or-legacy projection once in render so this
+// component stays format-agnostic and can be wired into either overlay.
+//
 // Drag mechanics mirror TranslateGizmo: the active drag installs window-
 // level pointermove / pointerup / keydown listeners (so the cursor can
 // roam off the sphere mid-drag without the preview freezing) and disables
@@ -23,7 +29,7 @@ import * as THREE from 'three';
 import { ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import { useCornerDrag } from '@/hooks/useCornerDrag';
 import { unprojectToGroundPlane } from '@/lib/three/groundPlane';
-import type { AISection } from '@/lib/core/aiSections';
+import type { Corner } from '@/components/aisections/shared';
 
 // =============================================================================
 // Types
@@ -32,9 +38,9 @@ import type { AISection } from '@/lib/core/aiSections';
 export type CornerDragOffset = { x: number; z: number };
 
 type Props = {
-	/** The section whose corners we render handles for. Pass the previewed
-	 *  section during a drag so each handle tracks the live offset. */
-	section: AISection;
+	/** Polygon corners to render handles for. Pass the previewed corners
+	 *  during a drag so each handle tracks the live offset. */
+	corners: readonly Corner[];
 	/**
 	 * Approximate on-screen radius (in CSS pixels) of each corner sphere.
 	 * The component rescales itself per-frame against camera distance so
@@ -63,7 +69,7 @@ const scratchVec = new THREE.Vector3();
 // =============================================================================
 
 export const CornerHandles: React.FC<Props> = ({
-	section,
+	corners,
 	pixelSize = 8,
 	onDrag,
 	onCommit,
@@ -94,20 +100,20 @@ export const CornerHandles: React.FC<Props> = ({
 		// per-corner per-frame. R3F's frame loop can churn through GC if we
 		// allocate carelessly.
 		const probe = scratchVec;
-		for (let i = 0; i < section.corners.length; i++) {
+		for (let i = 0; i < corners.length; i++) {
 			const mesh = meshRefs.current[i];
 			if (!mesh) continue;
-			const c2d = section.corners[i];
-			probe.set(c2d.x, 0.8, c2d.y);
+			const c2d = corners[i];
+			probe.set(c2d.x, 0.8, c2d.z);
 			const distance = cam.position.distanceTo(probe);
 			const worldPerPixel = (2 * distance * tanHalfFov) / viewport.height;
 			const targetWorldRadius = pixelSize * worldPerPixel;
 			mesh.scale.setScalar(targetWorldRadius / DESIGN_RADIUS);
 		}
-		// Trim the ref array if a section's corner count shrank between frames
+		// Trim the ref array if the corner count shrank between frames
 		// (happens when the user picks a different section).
-		if (meshRefs.current.length > section.corners.length) {
-			meshRefs.current.length = section.corners.length;
+		if (meshRefs.current.length > corners.length) {
+			meshRefs.current.length = corners.length;
 		}
 	});
 
@@ -152,7 +158,7 @@ export const CornerHandles: React.FC<Props> = ({
 
 	return (
 		<>
-			{section.corners.map((c, i) => {
+			{corners.map((c, i) => {
 				const isHover = hover === i;
 				const isActive = active === i;
 				const color = isActive ? '#ffffff' : isHover ? '#ffd470' : '#ff8833';
@@ -160,7 +166,7 @@ export const CornerHandles: React.FC<Props> = ({
 					<mesh
 						key={`corner-${i}`}
 						ref={(el) => { meshRefs.current[i] = el; }}
-						position={[c.x, 0.8, c.y]}
+						position={[c.x, 0.8, c.z]}
 						onPointerDown={beginDrag(i)}
 						onPointerOver={overHandler(i)}
 						onPointerOut={outHandler(i)}

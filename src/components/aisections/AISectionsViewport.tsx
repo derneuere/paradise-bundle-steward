@@ -969,7 +969,7 @@ export const AISectionsViewport: React.FC<Props> = ({ data, onChange, selected, 
 				    handle follows the cursor during its own drag. */}
 				{previewSection && drag?.kind !== 'section' && (
 					<CornerHandles
-						section={previewSection}
+						corners={previewSection.corners.map((c) => ({ x: c.x, z: c.y }))}
 						pixelSize={cornerHandlePixelSize}
 						onDrag={handleCornerDrag}
 						onCommit={handleCornerCommit}

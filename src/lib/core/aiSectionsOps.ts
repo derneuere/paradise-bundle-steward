@@ -666,6 +666,146 @@ export function snapCornerOffset(
 // =============================================================================
 
 /**
+ * Storage-shape adapter for the corner-drag op. V12 sections store corners
+ * as `Vector2[]` (with the `y` field being world-Z); V4/V6 sections store
+ * them as parallel `cornersX[]` + `cornersZ[]` f32 arrays. The smart-drag
+ * algorithm is identical in both — find every corner / boundary-line
+ * endpoint coincident with the dragged point, shift them by the same
+ * offset — so we factor the storage difference out into this adapter and
+ * keep one op implementation.
+ *
+ * `getCorners` projects to the canonical `Vector2`-on-XZ shape (`{x, y=z}`,
+ * matching V12's native storage), and `setCorners` writes back through
+ * whichever native layout the section uses. Boundary lines on V12 and V4/V6
+ * already share the `BoundaryLine` Vector4 shape, so no boundary-line
+ * adapter is needed — the `BoundaryLine` type alias here covers both
+ * (`LegacyBoundaryLine` is structurally identical to `BoundaryLine`).
+ */
+type SectionLikeShape<S, P, BL extends { verts: { x: number; y: number; z: number; w: number } }> = {
+	getCorners: (s: S) => Vector2[];
+	setCorners: (s: S, corners: Vector2[]) => S;
+	getPortals: (s: S) => P[];
+	setPortals: (s: S, portals: P[]) => S;
+	getNoGoLines: (s: S) => BL[];
+	setNoGoLines: (s: S, lines: BL[]) => S;
+	getPortalBoundaryLines: (p: P) => BL[];
+	setPortalBoundaryLines: (p: P, lines: BL[]) => P;
+};
+
+const v12Shape: SectionLikeShape<AISection, Portal, BoundaryLine> = {
+	getCorners: (s) => s.corners,
+	// V12's native corner storage IS Vector2[] with y → world-Z, so
+	// "set" just installs the array verbatim.
+	setCorners: (s, corners) => ({ ...s, corners }),
+	getPortals: (s) => s.portals,
+	setPortals: (s, portals) => ({ ...s, portals }),
+	getNoGoLines: (s) => s.noGoLines,
+	setNoGoLines: (s, noGoLines) => ({ ...s, noGoLines }),
+	getPortalBoundaryLines: (p) => p.boundaryLines,
+	setPortalBoundaryLines: (p, boundaryLines) => ({ ...p, boundaryLines }),
+};
+
+const legacyShape: SectionLikeShape<LegacyAISection, LegacyPortal, LegacyBoundaryLine> = {
+	getCorners: legacyCornersAsVec2,
+	// Write back into the parallel cornersX/cornersZ arrays. Allocation is
+	// fresh — the caller may have created a new corner array, and we want
+	// the on-disk layout to match exactly what the op produced. Length is
+	// preserved so a section with 4 corners stays 4-cornered (the V4 wire
+	// format mandates exactly 4 — duplicateLegacy already enforces this).
+	setCorners: (s, corners) => {
+		const cornersX = corners.map((c) => c.x);
+		const cornersZ = corners.map((c) => c.y);
+		return { ...s, cornersX, cornersZ };
+	},
+	getPortals: (s) => s.portals,
+	setPortals: (s, portals) => ({ ...s, portals }),
+	getNoGoLines: (s) => s.noGoLines,
+	setNoGoLines: (s, noGoLines) => ({ ...s, noGoLines }),
+	getPortalBoundaryLines: (p) => p.boundaryLines,
+	setPortalBoundaryLines: (p, boundaryLines) => ({ ...p, boundaryLines }),
+};
+
+/**
+ * Generic smart corner-drag — the meat of `translateCornerWithShared`
+ * (V12) and `translateLegacyCornerWithShared` (V4/V6). Walks every section
+ * via the supplied `shape`, looking for corners and boundary-line endpoints
+ * that coincide with the OLD dragged-corner position, and shifts them by
+ * `(dx, dz)`. Sections, portals, and lines that don't touch the dragged
+ * point are returned `===`-identical so React renderers can cheaply skip.
+ */
+function translateCornerWithSharedGeneric<
+	S,
+	P,
+	BL extends { verts: { x: number; y: number; z: number; w: number } },
+>(
+	sections: S[],
+	srcIdx: number,
+	cornerIdx: number,
+	offset: { x: number; z: number },
+	shape: SectionLikeShape<S, P, BL>,
+): { sections: S[]; changed: boolean } {
+	if (srcIdx < 0 || srcIdx >= sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${sections.length})`);
+	}
+	const src = sections[srcIdx];
+	const srcCorners = shape.getCorners(src);
+	if (cornerIdx < 0 || cornerIdx >= srcCorners.length) {
+		throw new RangeError(`cornerIdx ${cornerIdx} out of range [0, ${srcCorners.length})`);
+	}
+	if (offset.x === 0 && offset.z === 0) return { sections, changed: false };
+
+	const oldCorner = srcCorners[cornerIdx];
+	const dx = offset.x;
+	const dz = offset.z;
+
+	let anyChanged = false;
+	const next = sections.map((sec) => {
+		const corners = shape.getCorners(sec);
+		let cornersChanged = false;
+		const newCorners = corners.map((c) => {
+			if (v2Approx(c, oldCorner)) {
+				cornersChanged = true;
+				return { x: c.x + dx, y: c.y + dz };
+			}
+			return c;
+		});
+
+		const portals = shape.getPortals(sec);
+		let portalsChanged = false;
+		const newPortals = portals.map((p) => {
+			const bls = shape.getPortalBoundaryLines(p);
+			let blsChanged = false;
+			const newBLs = bls.map((bl) => {
+				const shifted = shiftBoundaryEndpointsAt(bl, oldCorner, dx, dz);
+				if (shifted !== bl) blsChanged = true;
+				return shifted;
+			});
+			if (!blsChanged) return p;
+			portalsChanged = true;
+			return shape.setPortalBoundaryLines(p, newBLs);
+		});
+
+		const noGo = shape.getNoGoLines(sec);
+		let noGoChanged = false;
+		const newNoGo = noGo.map((bl) => {
+			const shifted = shiftBoundaryEndpointsAt(bl, oldCorner, dx, dz);
+			if (shifted !== bl) noGoChanged = true;
+			return shifted;
+		});
+
+		if (!cornersChanged && !portalsChanged && !noGoChanged) return sec;
+		anyChanged = true;
+		let updated = sec;
+		if (cornersChanged) updated = shape.setCorners(updated, newCorners);
+		if (portalsChanged) updated = shape.setPortals(updated, newPortals);
+		if (noGoChanged) updated = shape.setNoGoLines(updated, newNoGo);
+		return updated;
+	});
+
+	return { sections: anyChanged ? next : sections, changed: anyChanged };
+}
+
+/**
  * Move a single polygon corner by an XZ offset, dragging along every other
  * value in the model that coincides with the OLD corner position:
  *
@@ -692,72 +832,55 @@ export function translateCornerWithShared(
 	cornerIdx: number,
 	offset: { x: number; z: number },
 ): ParsedAISectionsV12 {
-	if (srcIdx < 0 || srcIdx >= model.sections.length) {
-		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
-	}
-	const src = model.sections[srcIdx];
-	if (cornerIdx < 0 || cornerIdx >= src.corners.length) {
-		throw new RangeError(`cornerIdx ${cornerIdx} out of range [0, ${src.corners.length})`);
-	}
-	if (offset.x === 0 && offset.z === 0) return model;
+	const result = translateCornerWithSharedGeneric(model.sections, srcIdx, cornerIdx, offset, v12Shape);
+	if (!result.changed) return model;
+	return { ...model, sections: result.sections };
+}
 
-	const oldCorner = src.corners[cornerIdx];
-	const dx = offset.x;
-	const dz = offset.z;
-
-	const sections = model.sections.map((sec) => {
-		let cornersChanged = false;
-		const newCorners = sec.corners.map((c) => {
-			if (v2Approx(c, oldCorner)) {
-				cornersChanged = true;
-				return { x: c.x + dx, y: c.y + dz };
-			}
-			return c;
-		});
-
-		let portalsChanged = false;
-		const newPortals = sec.portals.map((p) => {
-			let blsChanged = false;
-			const newBLs = p.boundaryLines.map((bl) => {
-				const next = shiftBoundaryEndpointsAt(bl, oldCorner, dx, dz);
-				if (next !== bl) blsChanged = true;
-				return next;
-			});
-			if (!blsChanged) return p;
-			portalsChanged = true;
-			return { ...p, boundaryLines: newBLs };
-		});
-
-		let noGoChanged = false;
-		const newNoGo = sec.noGoLines.map((bl) => {
-			const next = shiftBoundaryEndpointsAt(bl, oldCorner, dx, dz);
-			if (next !== bl) noGoChanged = true;
-			return next;
-		});
-
-		if (!cornersChanged && !portalsChanged && !noGoChanged) return sec;
-		return {
-			...sec,
-			corners: cornersChanged ? newCorners : sec.corners,
-			portals: portalsChanged ? newPortals : sec.portals,
-			noGoLines: noGoChanged ? newNoGo : sec.noGoLines,
-		};
-	});
-
-	return { ...model, sections };
+/**
+ * V4/V6 sibling of {@link translateCornerWithShared}. Same smart-cascade
+ * behaviour — corners shared between sections (matched by exact-equal
+ * coordinates within an epsilon) move together, boundary-line endpoints
+ * coincident with the dragged corner shift along — but operates on the
+ * legacy `cornersX[]` / `cornersZ[]` storage instead of V12's `Vector2[]`.
+ *
+ * Identity choices match `duplicateLegacySectionThroughEdge`:
+ *   - V4 sections have no `id` field; corner identity is positional within
+ *     the parallel arrays.
+ *   - V6-only fields (`spanIndex`, `district`) are preserved — the smart
+ *     drag never touches non-spatial fields.
+ *   - Portal `midPosition` (the Vector4 with structural padding W) is NOT
+ *     moved by a corner drag, mirroring the V12 op's "leave the anchor
+ *     alone" rule.
+ *
+ * @throws RangeError if `srcIdx` or `cornerIdx` is out of range.
+ */
+export function translateLegacyCornerWithShared(
+	model: LegacyAISectionsData,
+	srcIdx: number,
+	cornerIdx: number,
+	offset: { x: number; z: number },
+): LegacyAISectionsData {
+	const result = translateCornerWithSharedGeneric(model.sections, srcIdx, cornerIdx, offset, legacyShape);
+	if (!result.changed) return model;
+	return { ...model, sections: result.sections };
 }
 
 /**
  * Return a new BoundaryLine with any endpoint that matches `point` shifted
  * by `(dx, dz)`. Returns the original input (`===`-equal) when no endpoint
  * matched, so callers can detect "no change" cheaply.
+ *
+ * Generic over the boundary-line shape — V12 `BoundaryLine` and V4/V6
+ * `LegacyBoundaryLine` are structurally identical (both wrap a Vector4
+ * packing the two endpoints) so the same helper drives both ops.
  */
-function shiftBoundaryEndpointsAt(
-	bl: BoundaryLine,
+function shiftBoundaryEndpointsAt<BL extends { verts: { x: number; y: number; z: number; w: number } }>(
+	bl: BL,
 	point: Vector2,
 	dx: number,
 	dz: number,
-): BoundaryLine {
+): BL {
 	const startMatches =
 		Math.abs(bl.verts.x - point.x) < POSITION_EPS &&
 		Math.abs(bl.verts.y - point.y) < POSITION_EPS;
@@ -766,6 +889,7 @@ function shiftBoundaryEndpointsAt(
 		Math.abs(bl.verts.w - point.y) < POSITION_EPS;
 	if (!startMatches && !endMatches) return bl;
 	return {
+		...bl,
 		verts: {
 			x: startMatches ? bl.verts.x + dx : bl.verts.x,
 			y: startMatches ? bl.verts.y + dz : bl.verts.y,
