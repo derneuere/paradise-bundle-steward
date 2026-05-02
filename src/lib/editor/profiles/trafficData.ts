@@ -24,6 +24,7 @@ import type {
 import { trafficDataResourceSchema } from '@/lib/schema/resources/trafficData';
 import { trafficDataV22ResourceSchema } from '@/lib/schema/resources/trafficDataV22';
 import { freezeSchema } from '@/lib/schema/freeze';
+import { migrateV22toV45 } from '@/lib/conversion/migrations/trafficDataV22toV45';
 
 export const trafficDataV45Profile = defineProfile<ParsedTrafficDataV45>({
 	kind: 'v45',
@@ -54,7 +55,17 @@ export const trafficDataV22Profile = defineProfile<ParsedTrafficDataV22>({
 	// metadata, not a separate axis).
 	schema: freezeSchema(trafficDataV22ResourceSchema),
 	matches: (model) => (model as ParsedTrafficData).kind === 'v22',
-	// No conversions yet — V22 → V45 migration is filed as a follow-up
-	// (HITL: hull internals + tail regions need the same triangulation pass
-	// as the AI Sections V4 → V12 lossy mappings).
+	conversions: {
+		// Reachable via `pickProfile(0x10002, v22Model).conversions.v45.migrate`.
+		// Tier 1 (PVS, flowTypes, vehicleAssets, vehicleTypes, vehicleTypesUpdate)
+		// migrates losslessly; hull sections + rungs + cumulativeRungLengths
+		// also migrate verbatim. Hull sub-arrays without a triangulated
+		// record layout (neighbours, sectionSpans, staticTrafficVehicles,
+		// sectionFlows) are emitted empty and surfaced via `lossy`. See
+		// docs/trafficData-v22-migration.md.
+		v45: {
+			label: 'Convert to v45 (Paradise PC Retail)',
+			migrate: migrateV22toV45,
+		},
+	},
 });

@@ -347,10 +347,14 @@ export type ParsedTrafficDataV22 = {
   ptrTailB: number;           // header @0x18  (~432 B)
   ptrTailC: number;           // header @0x1C  (~544 B)
   ptrTailD: number;           // header @0x20  (~324 B, runs to EOF)
-  // Hull pointer table read off `ptrHulls`. Each hull is exactly 0x30 bytes
-  // long (uniform stride; adjacent pointers are 0x30 apart). Hull contents
-  // themselves are NOT interpreted — we capture each hull's raw 0x30 bytes
-  // for inspection.
+  // Hull pointer table read off `ptrHulls`. Each hull starts with a 0x30-
+  // byte header (counts + 8 sub-array pointers + 8 B pad); populated hulls
+  // append variable-length sub-array data (sections / rungs / etc.) after
+  // the header. `hullsRaw[i]` carries the FULL hull body bytes
+  // (header + sub-arrays), sliced from ptr[i] up to ptr[i+1] (or the first
+  // tail region for the last hull). The v22 → v45 migration decodes
+  // sections + rungs + cumulativeRungLengths from these buffers; field
+  // semantics for the remaining sub-arrays haven't been triangulated.
   hullPointers: number[];
   hullsRaw: Uint8Array[];
   // Bytes referenced by the four trailing header pointers, sized by the
@@ -685,10 +689,11 @@ const PARSEABLE_TRAFFIC_VERSIONS = new Set<number>([22, 44, 45]);
 // kill-zone / vehicle / TLC / paint tables) is in effect.
 const RETAIL_MIN_VERSION = 44;
 
-// v22 hull stride observed empirically in the Burnout 5 prototype X360
-// fixture — every adjacent pair of hull pointers in the table is exactly
-// 0x30 bytes apart. We don't claim to know which fields live inside.
-const V22_HULL_STRIDE = 0x30;
+// v22 hull header size — counts (8 B) + 8 sub-array pointers (32 B) +
+// trailing pad (8 B) = 0x30. Empty hulls are exactly this size; populated
+// hulls have variable-length sub-array data appended (sections, rungs,
+// etc. — see docs/trafficData-v22-migration.md).
+const V22_HULL_HEADER_SIZE = 0x30;
 // v22 inline header is exactly the bytes from offset 0 up to ptrPvs (0x30
 // in the only fixture we have); the trailing 12 bytes (0x24..0x2F) are
 // zero in the sample and treated as reserved/padding.
@@ -756,14 +761,28 @@ function parseTrafficDataV22Internal(
   }
 
   // --- Hull pointer table + per-hull raw bytes ---
+  // Each hull starts with a 0x30-byte header (counts + 8 sub-array pointers
+  // + 8 bytes pad) followed by variable-length sub-array data — empty hulls
+  // are header-only, populated hulls span up to ~120 KB. We capture the
+  // FULL body bytes (not just the header) so the v22 → v45 migration can
+  // decode sections / rungs / etc. inline. Body size = next pointer's
+  // offset minus this pointer's; the last hull's body runs up to the first
+  // tail region (tailA, the lowest tail pointer).
   const hullPointers: number[] = [];
   if (muNumHulls > 0) {
     r.position = ptrHulls;
     for (let i = 0; i < muNumHulls; i++) hullPointers.push(r.readU32());
   }
-  const hullsRaw: Uint8Array[] = hullPointers.map((p) => {
-    if (p + V22_HULL_STRIDE > data.byteLength) return new Uint8Array(0);
-    return data.slice(p, p + V22_HULL_STRIDE);
+  const hullEndsAt = (i: number): number => {
+    if (i + 1 < hullPointers.length) return hullPointers[i + 1];
+    // Last hull: body runs until the lowest non-zero tail pointer (or EOF).
+    const tails = [ptrTailA, ptrTailB, ptrTailC, ptrTailD].filter((p) => p > 0);
+    return tails.length > 0 ? Math.min(...tails) : data.byteLength;
+  };
+  const hullsRaw: Uint8Array[] = hullPointers.map((p, i) => {
+    const end = hullEndsAt(i);
+    if (p >= data.byteLength || end <= p) return new Uint8Array(0);
+    return data.slice(p, Math.min(end, data.byteLength));
   });
 
   // --- Tail regions ---
