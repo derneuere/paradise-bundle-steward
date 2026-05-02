@@ -33,8 +33,11 @@
 //   - Section translate via the centred `TranslateGizmo` — drags the source
 //     section's corners + portals + no-go lines and cascades into linked
 //     neighbour sections (`translateLegacySectionWithLinks`; issue #42).
+//   - Snap-to-edges: `S` toggles snap mode (matches V12). When on, both the
+//     gizmo and corner-handle drags snap to nearby foreign corners / edges
+//     within a scene-scaled radius (`snapLegacySectionOffset`,
+//     `snapLegacyCornerOffset`; issue #43).
 //
-// Both drag paths are no-snap on this slice — snap-to-edges lands as #43.
 // Marquee select is still a future slice.
 //
 // 3D primitives (BatchedSections, SelectionOverlay, SectionLabel,
@@ -44,8 +47,10 @@
 
 import { useMemo, useState, useCallback } from 'react';
 import { Html, Line } from '@react-three/drei';
-import { Copy } from 'lucide-react';
+import { Copy, Magnet } from 'lucide-react';
+import * as THREE from 'three';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
+import { useToggleHotkey } from '@/hooks/useToggleHotkey';
 import type {
 	ParsedAISectionsV4,
 	ParsedAISectionsV6,
@@ -55,6 +60,8 @@ import type {
 import { LegacyDangerRating } from '@/lib/core/aiSections';
 import {
 	duplicateLegacySectionThroughEdge,
+	snapLegacyCornerOffset,
+	snapLegacySectionOffset,
 	translateLegacyCornerWithShared,
 	translateLegacySectionWithLinks,
 } from '@/lib/core/aiSectionsOps';
@@ -347,12 +354,37 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 		{ x: number; y: number; sectionIndex: number; edgeIdx: number } | null
 	>(null);
 	const [drag, setDrag] = useState<ActiveDrag | null>(null);
+	const [snapEnabled, setSnapEnabled] = useState(false);
 
 	const legacy = data.legacy;
 	const sections = legacy.sections;
 
 	const marker = useMemo(() => legacyAISectionPathMarker(selectedPath), [selectedPath]);
 	const selectedSectionIndex = marker ? marker.sectionIndex : null;
+
+	// Snap radius scales with the scene — for a typical legacy AI prototype
+	// (~200 units across) this lands at ~4 units, matching V12. Walks the
+	// parallel cornersX[]/cornersZ[] arrays directly; no Vector2 projection
+	// needed for the bounding-sphere computation. Min of 0.5 keeps the snap
+	// usable even on tiny synthetic test fixtures.
+	const snapRadius = useMemo(() => {
+		if (sections.length === 0) return 0.5;
+		const box = new THREE.Box3();
+		const v = new THREE.Vector3();
+		for (const sec of sections) {
+			const n = Math.min(sec.cornersX.length, sec.cornersZ.length);
+			for (let i = 0; i < n; i++) {
+				v.set(sec.cornersX[i], 0, sec.cornersZ[i]);
+				box.expandByPoint(v);
+			}
+		}
+		const sphere = new THREE.Sphere();
+		box.getBoundingSphere(sphere);
+		return Math.max(sphere.radius * 0.02, 0.5);
+	}, [sections]);
+
+	// `S` toggles snap mode (matches V12 overlay).
+	useToggleHotkey('s', setSnapEnabled);
 
 	const scene = useMemo(() => buildBatchedSections(sections, legacyAccessor), [sections]);
 
@@ -458,37 +490,54 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	// Drag callbacks — gizmo translates the whole section, corner handles
 	// deform a single corner. Both go through the smart-cascade ops on commit
 	// and emit the new root via onChange. Without onChange the previews still
-	// render but the commit is a no-op (read-only mode). Snap is deliberately
-	// absent on this slice — see issue #43.
+	// render but the commit is a no-op (read-only mode).
+	//
+	// Snap is applied on BOTH the live drag (so the preview overlay snaps
+	// in real time) and on commit (so the persisted offset matches what the
+	// user saw). Mirrors V12's `handleGizmoTranslate` / `handleCornerDrag`.
 	const handleGizmoTranslate = useCallback((offset: GizmoOffset) => {
-		setDrag({ kind: 'section', offset });
-	}, []);
+		const finalOffset =
+			snapEnabled && selectedSectionIndex != null
+				? snapLegacySectionOffset(legacy, selectedSectionIndex, offset, snapRadius)
+				: offset;
+		setDrag({ kind: 'section', offset: finalOffset });
+	}, [snapEnabled, selectedSectionIndex, legacy, snapRadius]);
 
 	const handleGizmoCommit = useCallback((offset: GizmoOffset) => {
 		setDrag(null);
 		if (selectedSectionIndex == null || !onChange) return;
-		if (offset.x === 0 && offset.z === 0) return;
-		const nextLegacy = translateLegacySectionWithLinks(legacy, selectedSectionIndex, offset);
+		const finalOffset = snapEnabled
+			? snapLegacySectionOffset(legacy, selectedSectionIndex, offset, snapRadius)
+			: offset;
+		if (finalOffset.x === 0 && finalOffset.z === 0) return;
+		const nextLegacy = translateLegacySectionWithLinks(legacy, selectedSectionIndex, finalOffset);
 		// Re-wrap into the discriminated-union root — same shape the page
 		// handed us. Mirrors the duplicate-through-edge flow above.
 		const nextRoot = { ...data, legacy: nextLegacy } as ParsedAISectionsV4 | ParsedAISectionsV6;
 		onChange(nextRoot);
-	}, [data, legacy, selectedSectionIndex, onChange]);
+	}, [data, legacy, selectedSectionIndex, onChange, snapEnabled, snapRadius]);
 
 	const handleGizmoCancel = useCallback(() => setDrag(null), []);
 
 	const handleCornerDrag = useCallback((cornerIdx: number, offset: CornerDragOffset) => {
-		setDrag({ kind: 'corner', cornerIdx, offset });
-	}, []);
+		const finalOffset =
+			snapEnabled && selectedSectionIndex != null
+				? snapLegacyCornerOffset(legacy, selectedSectionIndex, cornerIdx, offset, snapRadius)
+				: offset;
+		setDrag({ kind: 'corner', cornerIdx, offset: finalOffset });
+	}, [snapEnabled, selectedSectionIndex, legacy, snapRadius]);
 
 	const handleCornerCommit = useCallback((cornerIdx: number, offset: CornerDragOffset) => {
 		setDrag(null);
 		if (selectedSectionIndex == null || !onChange) return;
-		if (offset.x === 0 && offset.z === 0) return;
-		const nextLegacy = translateLegacyCornerWithShared(legacy, selectedSectionIndex, cornerIdx, offset);
+		const finalOffset = snapEnabled
+			? snapLegacyCornerOffset(legacy, selectedSectionIndex, cornerIdx, offset, snapRadius)
+			: offset;
+		if (finalOffset.x === 0 && finalOffset.z === 0) return;
+		const nextLegacy = translateLegacyCornerWithShared(legacy, selectedSectionIndex, cornerIdx, finalOffset);
 		const nextRoot = { ...data, legacy: nextLegacy } as ParsedAISectionsV4 | ParsedAISectionsV6;
 		onChange(nextRoot);
-	}, [data, legacy, selectedSectionIndex, onChange]);
+	}, [data, legacy, selectedSectionIndex, onChange, snapEnabled, snapRadius]);
 
 	const handleCornerCancel = useCallback(() => setDrag(null), []);
 
@@ -592,6 +641,8 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 
 			<HtmlSiblings
 				isActive={isActive}
+				snapEnabled={snapEnabled}
+				toggleSnap={() => setSnapEnabled((v) => !v)}
 				edgeMenu={edgeMenu}
 				canDuplicate={!!onChange}
 				onDuplicateThroughEdge={handleDuplicateThroughEdge}
@@ -601,19 +652,23 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	);
 };
 
-// HtmlSiblings — DOM-overlay JSX for the edge context menu, registered into
-// the WorldViewport chrome's HTML slot so it floats above the WebGL surface.
-// Kept as a separate component (mirroring the V12 overlay) so the slot
-// re-registration deps can be tracked precisely without dragging in the
-// rest of the overlay's state.
+// HtmlSiblings — DOM-overlay JSX (snap toggle + edge context menu),
+// registered into the WorldViewport chrome's HTML slot so it floats above
+// the WebGL surface. Kept as a separate component (mirroring the V12
+// overlay) so the slot re-registration deps can be tracked precisely
+// without dragging in the rest of the overlay's state.
 function HtmlSiblings({
 	isActive,
+	snapEnabled,
+	toggleSnap,
 	edgeMenu,
 	canDuplicate,
 	onDuplicateThroughEdge,
 	onCloseEdgeMenu,
 }: {
 	isActive: boolean;
+	snapEnabled: boolean;
+	toggleSnap: () => void;
 	edgeMenu: { x: number; y: number; sectionIndex: number; edgeIdx: number } | null;
 	canDuplicate: boolean;
 	onDuplicateThroughEdge: () => void;
@@ -622,6 +677,38 @@ function HtmlSiblings({
 	const node = useMemo(
 		() => (
 			<>
+				<button
+					type="button"
+					onClick={toggleSnap}
+					title={snapEnabled
+						? 'Snap to edges: ON (S to toggle)'
+						: 'Snap to edges: OFF (S to toggle)'}
+					aria-pressed={snapEnabled}
+					style={{
+						position: 'absolute',
+						top: 8,
+						left: 8,
+						display: 'flex',
+						alignItems: 'center',
+						gap: 6,
+						padding: '4px 8px',
+						borderRadius: 6,
+						fontSize: 11,
+						fontFamily: 'monospace',
+						border: '1px solid rgba(255,255,255,0.15)',
+						background: snapEnabled ? 'rgba(80, 170, 110, 0.85)' : 'rgba(20, 22, 28, 0.85)',
+						color: snapEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
+						cursor: 'pointer',
+						userSelect: 'none',
+						boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+						pointerEvents: 'auto',
+					}}
+				>
+					<Magnet size={14} />
+					<span>Snap{snapEnabled ? ' · on' : ' · off'}</span>
+					<span style={{ opacity: 0.5, fontSize: 10 }}>S</span>
+				</button>
+
 				{edgeMenu && (
 					<EdgeContextMenu
 						x={edgeMenu.x}
@@ -643,7 +730,7 @@ function HtmlSiblings({
 				)}
 			</>
 		),
-		[edgeMenu, canDuplicate, onDuplicateThroughEdge, onCloseEdgeMenu],
+		[snapEnabled, toggleSnap, edgeMenu, canDuplicate, onDuplicateThroughEdge, onCloseEdgeMenu],
 	);
 	useWorldViewportHtmlSlot(isActive ? node : null);
 	return null;

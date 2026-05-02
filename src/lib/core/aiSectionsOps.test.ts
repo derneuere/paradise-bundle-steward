@@ -9,6 +9,8 @@ import {
 	duplicateLegacySectionThroughEdge,
 	duplicateSectionThroughEdge,
 	snapCornerOffset,
+	snapLegacyCornerOffset,
+	snapLegacySectionOffset,
 	snapSectionOffset,
 	translateCornerWithShared,
 	translateLegacyCornerWithShared,
@@ -1330,6 +1332,7 @@ describe('duplicateLegacySectionThroughEdge', () => {
 	});
 });
 
+// =============================================================================
 // translateLegacyCornerWithShared (V4 / V6 corner-drag with shared-point cascade)
 // =============================================================================
 
@@ -1722,5 +1725,232 @@ describe('translateLegacySectionWithLinks', () => {
 		const srcPortal = after_translate.sections[0].portals.at(-1)!;
 		const dupPortal = after_translate.sections[1].portals[0];
 		expect(srcPortal.midPosition).toEqual(dupPortal.midPosition);
+	});
+});
+
+// =============================================================================
+// snapLegacyCornerOffset / snapLegacySectionOffset (V4 / V6 prototype layouts)
+// =============================================================================
+//
+// V4/V6 sections store corners in parallel `cornersX[]` / `cornersZ[]` f32
+// arrays, where V12 uses `Vector2[]`. The snap math is the same as V12 — these
+// tests check the legacy adapter walks the parallel arrays correctly and
+// returns identical offsets to the V12 path on geometrically-equivalent
+// inputs.
+
+describe('snapLegacyCornerOffset', () => {
+	it('snaps onto a foreign corner within radius', () => {
+		// Two squares — the dragged corner of section 0 (corner 1, world 10,0)
+		// is being moved by (+0.3, 0); section 1's corner 0 sits at (11, 0).
+		// With snapRadius 1.0, post-offset position 10.3 is within 0.7 of 11
+		// → snaps to 11. Net offset becomes (1, 0).
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(), // 0,0 / 10,0 / 10,10 / 0,10
+			makeLegacyV4Section({
+				cornersX: [11, 21, 21, 11],
+				cornersZ: [0, 0, 10, 10],
+			}),
+		]);
+		const snapped = snapLegacyCornerOffset(model, 0, 1, { x: 0.3, z: 0 }, 1.0);
+		expect(snapped.x).toBeCloseTo(1, 6);
+		expect(snapped.z).toBeCloseTo(0, 6);
+	});
+
+	it('snaps onto a foreign edge (closest point on segment, not endpoint)', () => {
+		// Section 1 is an edge running x ∈ [-5, 15] at z = -1 — its bottom
+		// edge (corners 0→1). Dragging section 0's corner 0 (world 0,0) by
+		// (0, -0.5) lands probe at (0, -0.5); the closest point on that edge
+		// is (0, -1). With snapRadius 1.0 it snaps. Net offset: (0, -1).
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({
+				cornersX: [-5, 15, 15, -5],
+				cornersZ: [-1, -1, -11, -11],
+			}),
+		]);
+		const snapped = snapLegacyCornerOffset(model, 0, 0, { x: 0, z: -0.5 }, 1.0);
+		expect(snapped.x).toBeCloseTo(0, 6);
+		expect(snapped.z).toBeCloseTo(-1, 6);
+	});
+
+	it('returns the proposed offset when nothing is in range', () => {
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({
+				cornersX: [100, 110, 110, 100],
+				cornersZ: [100, 100, 110, 110],
+			}),
+		]);
+		const proposed = { x: 0.3, z: 0.4 };
+		const snapped = snapLegacyCornerOffset(model, 0, 1, proposed, 1.0);
+		expect(snapped).toEqual(proposed);
+	});
+
+	it('ignores its own corners (no self-snap)', () => {
+		// Single section — no other section to snap to. Even though section 0
+		// has another corner at (10, 10), dragging corner 1 toward it should
+		// not snap. (Snapping a polygon corner onto another corner of the
+		// same polygon would degenerate the shape.)
+		const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+		const proposed = { x: 0.1, z: 9.95 };
+		const snapped = snapLegacyCornerOffset(model, 0, 1, proposed, 1.0);
+		expect(snapped).toEqual(proposed);
+	});
+
+	it('excludes neighbour corners coincident with the dragged corner (cascade partner filter)', () => {
+		// Two sections sharing a corner at (10, 0). Dragging section 0's
+		// corner 1 (the shared world position) toward another foreign target
+		// at (11, 0): the cascade-partner filter should exclude section 1's
+		// corner 0 (== old world position of the dragged corner). The snap
+		// target is section 1's corner 1 (21, 0), which is too far away
+		// (post-offset 10.3 is 10.7 from 21), so we get no snap and keep
+		// proposed offset.
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({
+				cornersX: [10, 21, 21, 10],
+				cornersZ: [0, 0, 10, 10],
+			}),
+		]);
+		const proposed = { x: 0.3, z: 0 };
+		const snapped = snapLegacyCornerOffset(model, 0, 1, proposed, 1.0);
+		expect(snapped).toEqual(proposed);
+	});
+
+	it('returns proposed offset on out-of-range srcIdx', () => {
+		const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+		const proposed = { x: 0.5, z: 0.5 };
+		expect(snapLegacyCornerOffset(model, 99, 0, proposed, 1.0)).toEqual(proposed);
+	});
+
+	it('returns proposed offset on out-of-range cornerIdx', () => {
+		const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+		const proposed = { x: 0.5, z: 0.5 };
+		expect(snapLegacyCornerOffset(model, 0, 99, proposed, 1.0)).toEqual(proposed);
+	});
+
+	it('returns proposed offset on snapRadius <= 0', () => {
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({ cornersX: [11, 21, 21, 11], cornersZ: [0, 0, 10, 10] }),
+		]);
+		const proposed = { x: 0.3, z: 0 };
+		expect(snapLegacyCornerOffset(model, 0, 1, proposed, 0)).toEqual(proposed);
+		expect(snapLegacyCornerOffset(model, 0, 1, proposed, -1)).toEqual(proposed);
+	});
+
+	it('works for V6 sections (same code path as V4)', () => {
+		const model = makeLegacyModel(6, [
+			makeLegacyV6Section(),
+			makeLegacyV6Section({ cornersX: [11, 21, 21, 11], cornersZ: [0, 0, 10, 10] }),
+		]);
+		const snapped = snapLegacyCornerOffset(model, 0, 1, { x: 0.3, z: 0 }, 1.0);
+		expect(snapped.x).toBeCloseTo(1, 6);
+		expect(snapped.z).toBeCloseTo(0, 6);
+	});
+});
+
+describe('snapLegacySectionOffset', () => {
+	it('snaps the whole section so a source corner lands on a foreign corner', () => {
+		// Source square at 0..10. Foreign square at 11..21 in X. Translate
+		// proposed (+0.7, 0) → source corner 1 lands at (10.7, 0). Foreign
+		// corner 0 sits at (11, 0). With snapRadius 1.0 → snap delta +0.3.
+		// Net offset (+1, 0). Foreign corner 3 at (11, 10) is also at
+		// distance 0.3 + 10 → not closer.
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({ cornersX: [11, 21, 21, 11], cornersZ: [0, 0, 10, 10] }),
+		]);
+		const snapped = snapLegacySectionOffset(model, 0, { x: 0.7, z: 0 }, 1.0);
+		expect(snapped.x).toBeCloseTo(1, 6);
+		expect(snapped.z).toBeCloseTo(0, 6);
+	});
+
+	it('picks the closest source-corner / foreign-target pair', () => {
+		// Two foreign squares in range. The closer one (foreign corner at
+		// (11, 0), distance 0.3 from source corner 1 post-translate) should
+		// win over the farther one (foreign corner at (10.6, 0), distance 0.6
+		// from source corner 0 post-translate). Tests that the algorithm
+		// genuinely searches across all source corners + all foreign
+		// candidates and picks the global minimum, not just the first hit.
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			// Square anchored at (11, 0) — corner 0 at (11, 0) is the
+			// nearest target for source corner 1 (post-translate world 10.3,0).
+			makeLegacyV4Section({ cornersX: [11, 21, 21, 11], cornersZ: [0, 0, 10, 10] }),
+			// Square far below at z=-50 with corner 0 at (10.6, -50) — too far
+			// to ever snap. Confirms we don't accidentally snap to it.
+			makeLegacyV4Section({ cornersX: [10.6, 20, 20, 10.6], cornersZ: [-50, -50, -40, -40] }),
+		]);
+		const snapped = snapLegacySectionOffset(model, 0, { x: 0.3, z: 0 }, 1.0);
+		// Source corner 1 (10, 0) → post-translate (10.3, 0); snaps to (11, 0).
+		// Net offset: (+1, 0).
+		expect(snapped.x).toBeCloseTo(1, 6);
+		expect(snapped.z).toBeCloseTo(0, 6);
+	});
+
+	it('returns the proposed offset when nothing is in range', () => {
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({ cornersX: [100, 110, 110, 100], cornersZ: [100, 100, 110, 110] }),
+		]);
+		const proposed = { x: 0.3, z: 0 };
+		const snapped = snapLegacySectionOffset(model, 0, proposed, 1.0);
+		expect(snapped).toEqual(proposed);
+	});
+
+	it('returns proposed offset on out-of-range srcIdx', () => {
+		const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+		const proposed = { x: 0.5, z: 0.5 };
+		expect(snapLegacySectionOffset(model, 99, proposed, 1.0)).toEqual(proposed);
+	});
+
+	it('returns proposed offset on snapRadius <= 0', () => {
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({ cornersX: [11, 21, 21, 11], cornersZ: [0, 0, 10, 10] }),
+		]);
+		const proposed = { x: 0.7, z: 0 };
+		expect(snapLegacySectionOffset(model, 0, proposed, 0)).toEqual(proposed);
+		expect(snapLegacySectionOffset(model, 0, proposed, -1)).toEqual(proposed);
+	});
+
+	it('snaps onto a foreign edge between two corners', () => {
+		// Foreign section: long horizontal edge from (-5, 11) to (15, 11) —
+		// the bottom edge (corners 0→1). Translate (+0, +10.7) on the source
+		// square: source corner 3 (0,10) → (0, 20.7) → not near. Source
+		// corner 2 (10,10) → (10, 20.7) → not near.
+		// Wait — that doesn't work. Let me re-orient: foreign edge at z=11
+		// running from x=-5 to x=15. Translating source up by +0.7 in Z lands
+		// corner 3 (0,10) at (0,10.7) — which is 0.3 from the closest point
+		// on the foreign edge (0, 11). With snapRadius 1.0 → snaps to 11.
+		// Net offset (0, +1).
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({ cornersX: [-5, 15, 15, -5], cornersZ: [11, 11, 21, 21] }),
+		]);
+		const snapped = snapLegacySectionOffset(model, 0, { x: 0, z: 0.7 }, 1.0);
+		expect(snapped.x).toBeCloseTo(0, 6);
+		expect(snapped.z).toBeCloseTo(1, 6);
+	});
+
+	it('works for V6 sections (same code path as V4)', () => {
+		const model = makeLegacyModel(6, [
+			makeLegacyV6Section(),
+			makeLegacyV6Section({ cornersX: [11, 21, 21, 11], cornersZ: [0, 0, 10, 10] }),
+		]);
+		const snapped = snapLegacySectionOffset(model, 0, { x: 0.7, z: 0 }, 1.0);
+		expect(snapped.x).toBeCloseTo(1, 6);
+		expect(snapped.z).toBeCloseTo(0, 6);
+	});
+
+	it('does not modify the input model', () => {
+		const model = makeLegacyModel(4, [
+			makeLegacyV4Section(),
+			makeLegacyV4Section({ cornersX: [11, 21, 21, 11], cornersZ: [0, 0, 10, 10] }),
+		]);
+		const before = JSON.stringify(model);
+		snapLegacySectionOffset(model, 0, { x: 0.7, z: 0 }, 1.0);
+		expect(JSON.stringify(model)).toEqual(before);
 	});
 });
