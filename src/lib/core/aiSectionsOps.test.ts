@@ -11,6 +11,7 @@ import {
 	snapCornerOffset,
 	snapSectionOffset,
 	translateCornerWithShared,
+	translateLegacyCornerWithShared,
 	translateSectionWithLinks,
 } from './aiSectionsOps';
 import {
@@ -1325,5 +1326,181 @@ describe('duplicateLegacySectionThroughEdge', () => {
 			expect(next.sections[0].portals.at(-1)!.linkSection).toBe(1);
 			expect(next.sections[1].portals[0].linkSection).toBe(0);
 		});
+	});
+});
+
+// =============================================================================
+// translateLegacyCornerWithShared (V4 / V6 corner-drag with shared-point cascade)
+// =============================================================================
+
+describe('translateLegacyCornerWithShared', () => {
+	// Two adjacent V4 quads sharing the right edge of section 0 / left edge
+	// of section 1. Mirrors the V12 makePair fixture but with cornersX/Z and
+	// LegacyPortal midPosition/boundaryLines, so the smart-cascade behaviour
+	// is exercised on the real legacy storage layout.
+	function makeLegacyPair(version: 4 | 6 = 4): LegacyAISectionsData {
+		const portal0to1: LegacyPortal = {
+			midPosition: { x: 10, y: 0, z: 5, w: 0 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: LegacyPortal = {
+			midPosition: { x: 10, y: 0, z: 5, w: 0 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const make = version === 4 ? makeLegacyV4Section : makeLegacyV6Section;
+		const s0 = make({
+			cornersX: [0, 10, 10, 0],
+			cornersZ: [0, 0, 10, 10],
+			portals: [portal0to1],
+		});
+		const s1 = make({
+			cornersX: [10, 20, 20, 10],
+			cornersZ: [0, 0, 10, 10],
+			portals: [portal1to0],
+		});
+		return makeLegacyModel(version, [s0, s1]);
+	}
+
+	it('moves the targeted corner via cornersX / cornersZ writeback', () => {
+		const model = makeLegacyPair();
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		// Section 0 corner 1 was (10, 0) → now (13, -1).
+		expect(next.sections[0].cornersX[1]).toBe(13);
+		expect(next.sections[0].cornersZ[1]).toBe(-1);
+		// Other corners unchanged in section 0.
+		expect(next.sections[0].cornersX[0]).toBe(0);
+		expect(next.sections[0].cornersZ[0]).toBe(0);
+		expect(next.sections[0].cornersX[3]).toBe(0);
+		expect(next.sections[0].cornersZ[3]).toBe(10);
+	});
+
+	it('drags the same-point corner on a neighbour section (smart cascade)', () => {
+		const model = makeLegacyPair();
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		// Section 1 had corner 0 at (10, 0) — the same world point as the
+		// dragged corner — so it must move with us. This is the load-bearing
+		// "shared corner" cascade that the V12 op also enforces.
+		expect(next.sections[1].cornersX[0]).toBe(13);
+		expect(next.sections[1].cornersZ[0]).toBe(-1);
+		// Section 1's corners on its far edge stay still.
+		expect(next.sections[1].cornersX[1]).toBe(20);
+		expect(next.sections[1].cornersZ[1]).toBe(0);
+	});
+
+	it('shifts boundary-line endpoints anywhere in the model that match the old corner', () => {
+		const model = makeLegacyPair();
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		// Source's portal had BL (10,0) → (10,10); the start (10,0) IS the
+		// dragged corner so it shifts. End (10,10) is corner 2, untouched.
+		expect(next.sections[0].portals[0].boundaryLines[0].verts).toEqual({
+			x: 13, y: -1, z: 10, w: 10,
+		});
+		// Neighbour's reverse BL (10,10) → (10,0); the END (10,0) matched, so
+		// it shifts. The start (10,10) is untouched.
+		expect(next.sections[1].portals[0].boundaryLines[0].verts).toEqual({
+			x: 10, y: 10, z: 13, w: -1,
+		});
+	});
+
+	it('leaves portal midPosition alone (V4 anchor invariant matches V12)', () => {
+		const model = makeLegacyPair();
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		// midPosition was (10, 0, 5, 0) on both portals — must be unchanged.
+		// (Same rationale as V12: the user may have hand-placed the anchor;
+		// dragging a corner shouldn't clobber it.)
+		expect(next.sections[0].portals[0].midPosition).toEqual({ x: 10, y: 0, z: 5, w: 0 });
+		expect(next.sections[1].portals[0].midPosition).toEqual({ x: 10, y: 0, z: 5, w: 0 });
+	});
+
+	it('shifts a noGoLine endpoint that matches the old corner', () => {
+		const base = makeLegacyPair();
+		const withNoGo: LegacyAISectionsData = {
+			...base,
+			sections: base.sections.map((s, i) =>
+				i === 0
+					? { ...s, noGoLines: [{ verts: { x: 5, y: 5, z: 10, w: 0 } }] }
+					: s,
+			),
+		};
+		const next = translateLegacyCornerWithShared(withNoGo, 0, 1, { x: 3, z: -1 });
+		// noGo endpoint (10, 0) matched corner 1 → shift end to (13, -1).
+		expect(next.sections[0].noGoLines[0].verts).toEqual({ x: 5, y: 5, z: 13, w: -1 });
+	});
+
+	it('preserves identity for sections that share no point with the dragged corner', () => {
+		const base = makeLegacyPair();
+		const farAway = makeLegacyV4Section({
+			cornersX: [100, 110, 110, 100],
+			cornersZ: [100, 100, 110, 110],
+		});
+		const expanded: LegacyAISectionsData = {
+			...base,
+			sections: [...base.sections, farAway],
+		};
+		const next = translateLegacyCornerWithShared(expanded, 0, 1, { x: 3, z: -1 });
+		// Far-away section is structurally identical (===) — important for
+		// React render-skipping in the overlay's preview path.
+		expect(next.sections[2]).toBe(farAway);
+	});
+
+	it('is a no-op for a zero offset', () => {
+		const model = makeLegacyPair();
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 0, z: 0 });
+		expect(next).toBe(model);
+	});
+
+	it('throws on out-of-range srcIdx', () => {
+		const model = makeLegacyPair();
+		expect(() => translateLegacyCornerWithShared(model, -1, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateLegacyCornerWithShared(model, 7, 0, { x: 1, z: 0 })).toThrow(RangeError);
+	});
+
+	it('throws on out-of-range cornerIdx', () => {
+		const model = makeLegacyPair();
+		expect(() => translateLegacyCornerWithShared(model, 0, -1, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateLegacyCornerWithShared(model, 0, 4, { x: 1, z: 0 })).toThrow(RangeError);
+	});
+
+	it('preserves the wrapper version field', () => {
+		const v4 = makeLegacyPair(4);
+		const v6 = makeLegacyPair(6);
+		expect(translateLegacyCornerWithShared(v4, 0, 1, { x: 1, z: 0 }).version).toBe(4);
+		expect(translateLegacyCornerWithShared(v6, 0, 1, { x: 1, z: 0 }).version).toBe(6);
+	});
+
+	it('preserves V6-only spanIndex / district on every section through a drag', () => {
+		// Round-trip safety: the V6 schema requires spanIndex + district on
+		// every section. The op must not strip or synthesise these fields,
+		// even on neighbours that move via the cascade.
+		const model = makeLegacyPair(6);
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		for (const sec of next.sections) {
+			expect(sec.spanIndex).toBeDefined();
+			expect(sec.district).toBeDefined();
+		}
+	});
+
+	it('does not synthesise V6-only fields onto a V4 section through a drag', () => {
+		// The V4 schema has no fields for spanIndex / district. Leaking them
+		// in via the op would break the V4 RecordSchema serialisation.
+		const model = makeLegacyPair(4);
+		const next = translateLegacyCornerWithShared(model, 0, 1, { x: 3, z: -1 });
+		for (const sec of next.sections) {
+			expect('spanIndex' in sec).toBe(false);
+			expect('district' in sec).toBe(false);
+		}
+	});
+
+	it("does not collapse an interior corner that didn't match the old point", () => {
+		// Drag corner 0 of section 0 (world point (0,0)). Section 1's corner 0
+		// is (10,0) — different world point — must NOT move.
+		const model = makeLegacyPair();
+		const next = translateLegacyCornerWithShared(model, 0, 0, { x: -5, z: 0 });
+		expect(next.sections[0].cornersX[0]).toBe(-5);
+		// Section 1's parallel arrays untouched.
+		expect(next.sections[1].cornersX).toEqual(model.sections[1].cornersX);
+		expect(next.sections[1].cornersZ).toEqual(model.sections[1].cornersZ);
 	});
 });

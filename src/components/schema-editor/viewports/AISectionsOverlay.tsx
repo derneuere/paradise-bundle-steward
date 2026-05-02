@@ -582,9 +582,9 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				/>
 			)}
 
-			{previewSection && drag?.kind !== 'section' && (
+			{previewCorners && drag?.kind !== 'section' && (
 				<CornerHandles
-					section={previewSection}
+					corners={previewCorners}
 					pixelSize={cornerHandlePixelSize}
 					onDrag={handleCornerDrag}
 					onCommit={handleCornerCommit}
