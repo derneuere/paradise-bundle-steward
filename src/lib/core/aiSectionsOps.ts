@@ -662,6 +662,172 @@ export function snapCornerOffset(
 }
 
 // =============================================================================
+// Legacy (V4 / V6) snap-to-edges
+// =============================================================================
+
+// V4/V6 corner storage uses parallel `cornersX[]` / `cornersZ[]` f32 arrays
+// where V12 uses `Vector2[]`. The snap math is identical — these wrappers
+// project the legacy layout into the same Vector2 form the V12 helpers
+// already work in, then convert the resulting offset back. Same adapter
+// shape #44 used for `duplicateLegacySectionThroughEdge`.
+
+/**
+ * Variant of {@link findNearestSnapTarget} that walks `LegacyAISectionsData`.
+ * Identical search semantics — every foreign corner and every foreign edge
+ * is tested against the probe point, with `cascadePartner` excluding points
+ * that are already moving with the drag.
+ */
+function findNearestLegacySnapTarget(
+	model: LegacyAISectionsData,
+	srcIdx: number,
+	probe: Vector2,
+	snapRadius: number,
+	cascadePartner: (c: Vector2) => boolean,
+): { point: Vector2; dist: number } | null {
+	if (snapRadius <= 0) return null;
+
+	let best: { point: Vector2; dist: number } | null = null;
+
+	for (let si = 0; si < model.sections.length; si++) {
+		if (si === srcIdx) continue;
+		const s = model.sections[si];
+		const N = Math.min(s.cornersX.length, s.cornersZ.length);
+		if (N === 0) continue;
+
+		// Test every corner.
+		for (let i = 0; i < N; i++) {
+			const c: Vector2 = { x: s.cornersX[i], y: s.cornersZ[i] };
+			if (cascadePartner(c)) continue;
+			const dist = Math.hypot(probe.x - c.x, probe.y - c.y);
+			if (dist < (best?.dist ?? snapRadius)) {
+				best = { point: { x: c.x, y: c.y }, dist };
+			}
+		}
+
+		// Test every edge (corner-pair). Skip edges whose endpoints are
+		// cascade partners — those edges move with us.
+		for (let i = 0; i < N; i++) {
+			const a: Vector2 = { x: s.cornersX[i], y: s.cornersZ[i] };
+			const b: Vector2 = { x: s.cornersX[(i + 1) % N], y: s.cornersZ[(i + 1) % N] };
+			if (cascadePartner(a) || cascadePartner(b)) continue;
+			const candidate = nearestPointOnSegment(probe, a, b);
+			if (candidate.dist < (best?.dist ?? snapRadius)) {
+				best = candidate;
+			}
+		}
+	}
+
+	return best;
+}
+
+/**
+ * V4/V6 sibling of {@link snapSectionOffset}. Adjusts a proposed
+ * section-translate offset so a source corner that lands within
+ * `snapRadius` of a foreign corner OR point on a foreign edge snaps onto
+ * that target exactly. Returns the original offset when nothing's in range.
+ *
+ * "Foreign" excludes corners and edges on the source legacy section
+ * itself, plus any corner on a neighbour section that happens to share a
+ * world XZ position with a source corner (a cascade partner — those
+ * neighbour corners would move along with us in a smart-translate, so
+ * they're not stationary snap targets).
+ *
+ * Note: a "smart translate with paired-portal cascade" pass for legacy
+ * sections doesn't exist yet (issue #42 ships the bare gizmo first), so
+ * the cascade-partner filter today only ever excludes the source's own
+ * corners. The filter signature is here so the snap behaviour matches
+ * V12's once a legacy smart-translate lands.
+ */
+export function snapLegacySectionOffset(
+	model: LegacyAISectionsData,
+	srcIdx: number,
+	proposedOffset: { x: number; z: number },
+	snapRadius: number,
+): { x: number; z: number } {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) return proposedOffset;
+	if (snapRadius <= 0) return proposedOffset;
+
+	const src = model.sections[srcIdx];
+	const N = Math.min(src.cornersX.length, src.cornersZ.length);
+	if (N === 0) return proposedOffset;
+
+	const isCascadePartner = (c: Vector2): boolean => {
+		for (let i = 0; i < N; i++) {
+			if (
+				Math.abs(src.cornersX[i] - c.x) < POSITION_EPS &&
+				Math.abs(src.cornersZ[i] - c.y) < POSITION_EPS
+			) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	let bestDist = snapRadius;
+	let bestAdjustment: { x: number; z: number } | null = null;
+
+	for (let i = 0; i < N; i++) {
+		const probe: Vector2 = {
+			x: src.cornersX[i] + proposedOffset.x,
+			y: src.cornersZ[i] + proposedOffset.z,
+		};
+		const found = findNearestLegacySnapTarget(model, srcIdx, probe, bestDist, isCascadePartner);
+		if (found && found.dist < bestDist) {
+			bestDist = found.dist;
+			bestAdjustment = {
+				x: found.point.x - probe.x,
+				z: found.point.y - probe.y,
+			};
+		}
+	}
+
+	if (!bestAdjustment) return proposedOffset;
+	return {
+		x: proposedOffset.x + bestAdjustment.x,
+		z: proposedOffset.z + bestAdjustment.z,
+	};
+}
+
+/**
+ * V4/V6 sibling of {@link snapCornerOffset}. Adjusts a proposed
+ * corner-drag offset so the dragged corner snaps onto the closest foreign
+ * corner OR point on a foreign edge within `snapRadius`. Returns the
+ * original offset when nothing's in range.
+ */
+export function snapLegacyCornerOffset(
+	model: LegacyAISectionsData,
+	srcIdx: number,
+	cornerIdx: number,
+	proposedOffset: { x: number; z: number },
+	snapRadius: number,
+): { x: number; z: number } {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) return proposedOffset;
+	const src = model.sections[srcIdx];
+	const N = Math.min(src.cornersX.length, src.cornersZ.length);
+	if (cornerIdx < 0 || cornerIdx >= N) return proposedOffset;
+	if (snapRadius <= 0) return proposedOffset;
+
+	const oldCornerX = src.cornersX[cornerIdx];
+	const oldCornerZ = src.cornersZ[cornerIdx];
+	const probe: Vector2 = {
+		x: oldCornerX + proposedOffset.x,
+		y: oldCornerZ + proposedOffset.z,
+	};
+
+	const isCascadePartner = (c: Vector2): boolean =>
+		Math.abs(c.x - oldCornerX) < POSITION_EPS &&
+		Math.abs(c.y - oldCornerZ) < POSITION_EPS;
+
+	const found = findNearestLegacySnapTarget(model, srcIdx, probe, snapRadius, isCascadePartner);
+	if (!found) return proposedOffset;
+
+	return {
+		x: found.point.x - oldCornerX,
+		z: found.point.y - oldCornerZ,
+	};
+}
+
+// =============================================================================
 // Smart corner-drag (with shared-point cascade)
 // =============================================================================
 
