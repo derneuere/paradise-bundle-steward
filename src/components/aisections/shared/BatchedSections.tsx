@@ -14,6 +14,14 @@
 // number arrays. Allocating an intermediate `Corner[]` per section per
 // rebuild would double the per-frame allocation budget on V4. Accessors
 // let each schema project straight from its native storage.
+//
+// Y placement (issue #27): the optional `sectionYs` parameter supplies one
+// Y value per section so the polygons render at the resolved ground height
+// rather than at the global Y=0 plane. Pass `undefined` (the default) to
+// keep the legacy flat-ground behaviour. The two visual offsets — fill at
+// +0.1, outline at +0.5 — are added on top of the per-section Y so the
+// outline still floats slightly above its fill regardless of the section's
+// resolved height.
 
 import { useCallback } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
@@ -41,10 +49,18 @@ export type BatchedSectionsScene = {
  * `sections[i]` always reports `i` in `faceToSection`, never a remapped
  * index. Callers that index into the source array via the picked face
  * relyon this invariant.
+ *
+ * `sectionYs` (issue #27) is an optional parallel array of resolved Y
+ * values: `sectionYs[i]` is added to the small visual offsets (+0.1 for
+ * fill, +0.5 for outline) before the vertex is written. Pass `undefined`
+ * to keep the legacy "everything at Y=0" behaviour — that's still what
+ * the legacy V4/V6 overlay uses today since it doesn't compose alongside
+ * WORLDCOL.
  */
 export function buildBatchedSections<T>(
 	sections: readonly T[],
 	accessor: SectionAccessor<T>,
+	sectionYs?: ArrayLike<number>,
 ): BatchedSectionsScene {
 	let totalFillVerts = 0;
 	let totalFillIndices = 0;
@@ -74,10 +90,11 @@ export function buildBatchedSections<T>(
 
 		const rgb = accessor.color(sec);
 		const baseVert = vOff / 3;
+		const baseY = sectionYs ? sectionYs[si] : 0;
 
 		for (let ci = 0; ci < n; ci++) {
 			positions[vOff] = accessor.cornerX(sec, ci);
-			positions[vOff + 1] = 0.1;
+			positions[vOff + 1] = baseY + 0.1;
 			positions[vOff + 2] = accessor.cornerZ(sec, ci);
 			colors[vOff] = rgb[0];
 			colors[vOff + 1] = rgb[1];
@@ -97,10 +114,10 @@ export function buildBatchedSections<T>(
 		for (let ci = 0; ci < n; ci++) {
 			const next = (ci + 1) % n;
 			outPositions[oOff++] = accessor.cornerX(sec, ci);
-			outPositions[oOff++] = 0.5;
+			outPositions[oOff++] = baseY + 0.5;
 			outPositions[oOff++] = accessor.cornerZ(sec, ci);
 			outPositions[oOff++] = accessor.cornerX(sec, next);
-			outPositions[oOff++] = 0.5;
+			outPositions[oOff++] = baseY + 0.5;
 			outPositions[oOff++] = accessor.cornerZ(sec, next);
 		}
 	}

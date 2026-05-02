@@ -40,6 +40,7 @@ import {
 	translateCornerWithShared,
 	translateSectionWithLinks,
 } from '@/lib/core/aiSectionsOps';
+import { resolveSectionYs } from '@/lib/core/aiSectionY';
 import { TranslateGizmo, type GizmoOffset } from '@/components/common/three/TranslateGizmo';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
@@ -162,6 +163,8 @@ function SelectedSectionDetail({
 	section: sec,
 	data,
 	marker,
+	baseY,
+	sectionYs,
 	onPickPortal,
 	onPickBoundaryLine,
 	onPickNoGoLine,
@@ -172,6 +175,15 @@ function SelectedSectionDetail({
 	section: AISection;
 	data: ParsedAISectionsV12;
 	marker: AISectionMarker;
+	/** Resolved Y for the selected section (issue #27). Used to lift the
+	 *  no-go-line layer onto the section's ground plane; portal anchors and
+	 *  portal boundary lines already carry their own absolute Y so they
+	 *  ignore this. */
+	baseY: number;
+	/** Resolved Y per section (issue #27). Looked up to land each portal-link
+	 *  dashed line on the target section's ground plane instead of dropping
+	 *  it to Y=0 in the middle of nowhere. */
+	sectionYs: ArrayLike<number>;
 	onPickPortal: (portalIndex: number) => void;
 	onPickBoundaryLine: (portalIndex: number, lineIndex: number) => void;
 	onPickNoGoLine: (lineIndex: number) => void;
@@ -190,6 +202,7 @@ function SelectedSectionDetail({
 				hoveredEdge={hoveredEdge}
 				onHoverEdge={onHoverEdge}
 				onContextMenu={onEdgeContextMenu}
+				baseY={baseY}
 			/>
 
 			{sec.portals.map((portal, pi) => {
@@ -257,14 +270,15 @@ function SelectedSectionDetail({
 			)}
 
 			{sec.noGoLines.map((bl, li) => {
-				const start: [number, number, number] = [bl.verts.x, 0.5, bl.verts.y];
-				const end: [number, number, number] = [bl.verts.z, 0.5, bl.verts.w];
+				const lineY = baseY + 0.5;
+				const start: [number, number, number] = [bl.verts.x, lineY, bl.verts.y];
+				const end: [number, number, number] = [bl.verts.z, lineY, bl.verts.w];
 				const isSel = marker?.kind === 'noGoLine' && marker.lineIndex === li;
 				return (
 					<group key={`ng-${li}`}>
 						<Line points={[start, end]} color={isSel ? '#ffaa33' : '#cc8833'} lineWidth={isSel ? 3 : 2} />
 						<mesh
-							position={[(start[0] + end[0]) / 2, 0.5, (start[2] + end[2]) / 2]}
+							position={[(start[0] + end[0]) / 2, lineY, (start[2] + end[2]) / 2]}
 							onClick={(e) => { e.stopPropagation(); onPickNoGoLine(li); }}
 						>
 							<sphereGeometry args={[2, 6, 4]} />
@@ -278,9 +292,17 @@ function SelectedSectionDetail({
 				const target = data.sections[portal.linkSection];
 				if (!target || target.corners.length < 4) return null;
 				const from: [number, number, number] = [portal.position.x, portal.position.y + 1, portal.position.z];
+				// Drop the link's far end onto the target section's resolved
+				// ground (issue #27) so the dashed line slants up/down across
+				// terrain instead of running flat at the source's portal Y
+				// over a target that lives 50m below.
+				const targetY =
+					portal.linkSection >= 0 && portal.linkSection < sectionYs.length
+						? sectionYs[portal.linkSection]
+						: 0;
 				const to: [number, number, number] = [
 					(target.corners[0].x + target.corners[2].x) / 2,
-					portal.position.y + 1,
+					targetY + 1,
 					(target.corners[0].y + target.corners[2].y) / 2,
 				];
 				return (
@@ -347,10 +369,28 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// `S` toggles snap mode.
 	useToggleHotkey('s', setSnapEnabled);
 
-	const scene = useMemo(() => buildBatchedSections(data.sections, v12Accessor), [data.sections]);
+	// Per-section ground Y (issue #27). Derived once per data change from
+	// portal Ys plus a BFS through the section graph for portal-less sections.
+	// Memoised here so the renderer doesn't re-walk all 8.7k V12 sections on
+	// every frame — the hot path is `previewModel`-driven re-renders during a
+	// drag, which never change `data.sections`.
+	const sectionYs = useMemo(() => resolveSectionYs(data), [data]);
+
+	const scene = useMemo(
+		() => buildBatchedSections(data.sections, v12Accessor, sectionYs),
+		[data.sections, sectionYs],
+	);
 
 	const selSection = selectedSectionIndex != null ? data.sections[selectedSectionIndex] ?? null : null;
 	const hovSection = hoverSectionIndex != null ? data.sections[hoverSectionIndex] ?? null : null;
+	const selectedSectionY =
+		selectedSectionIndex != null && selectedSectionIndex < sectionYs.length
+			? sectionYs[selectedSectionIndex]
+			: 0;
+	const hoverSectionY =
+		hoverSectionIndex != null && hoverSectionIndex < sectionYs.length
+			? sectionYs[hoverSectionIndex]
+			: 0;
 
 	// While a drag is in flight, run the relevant op on the live offset to
 	// derive a preview model. Used for the selection overlay on the source
@@ -401,8 +441,8 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		let sx = 0, sz = 0;
 		for (const c of previewSection.corners) { sx += c.x; sz += c.y; }
 		const n = previewSection.corners.length;
-		return [sx / n, 1.5, sz / n];
-	}, [previewSection]);
+		return [sx / n, selectedSectionY + 1.5, sz / n];
+	}, [previewSection, selectedSectionY]);
 
 	const gizmoPixelSize = 90;
 	const cornerHandlePixelSize = 12;
@@ -538,22 +578,29 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				onHoverSection={setHoverSectionIndex}
 			/>
 
-			{previewCorners && <SelectionOverlay corners={previewCorners} color="#ffaa33" />}
+			{previewCorners && (
+				<SelectionOverlay corners={previewCorners} color="#ffaa33" baseY={selectedSectionY} />
+			)}
 			{hovCorners && hoverSectionIndex !== selectedSectionIndex && (
-				<SelectionOverlay corners={hovCorners} color="#66aaff" />
+				<SelectionOverlay corners={hovCorners} color="#66aaff" baseY={hoverSectionY} />
 			)}
 
 			{drag && affectedNeighbours.map(({ idx, corners }) => (
-				<SelectionOverlay key={`cascade-${idx}`} corners={corners} color="#ddaa66" />
+				<SelectionOverlay
+					key={`cascade-${idx}`}
+					corners={corners}
+					color="#ddaa66"
+					baseY={idx < sectionYs.length ? sectionYs[idx] : 0}
+				/>
 			))}
 
 			{previewCorners && previewSection && selectedSectionIndex != null && (
-				<SectionLabel corners={previewCorners} color="#ffaa33">
+				<SectionLabel corners={previewCorners} color="#ffaa33" baseY={selectedSectionY}>
 					Sec {selectedSectionIndex} | 0x{(previewSection.id >>> 0).toString(16).toUpperCase()} | {SPEED_LABEL[previewSection.speed] ?? previewSection.speed}
 				</SectionLabel>
 			)}
 			{hovCorners && hovSection && hoverSectionIndex != null && hoverSectionIndex !== selectedSectionIndex && (
-				<SectionLabel corners={hovCorners} color="#aaaaaa">
+				<SectionLabel corners={hovCorners} color="#aaaaaa" baseY={hoverSectionY}>
 					Sec {hoverSectionIndex} | 0x{(hovSection.id >>> 0).toString(16).toUpperCase()} | {SPEED_LABEL[hovSection.speed] ?? hovSection.speed}
 				</SectionLabel>
 			)}
@@ -563,6 +610,8 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 					section={previewSection}
 					data={data}
 					marker={marker}
+					baseY={selectedSectionY}
+					sectionYs={sectionYs}
 					onPickPortal={handlePickPortal}
 					onPickBoundaryLine={handlePickBoundaryLine}
 					onPickNoGoLine={handlePickNoGoLine}
@@ -586,6 +635,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				<CornerHandles
 					corners={previewCorners}
 					pixelSize={cornerHandlePixelSize}
+					baseY={selectedSectionY}
 					onDrag={handleCornerDrag}
 					onCommit={handleCornerCommit}
 					onCancel={handleCornerCancel}

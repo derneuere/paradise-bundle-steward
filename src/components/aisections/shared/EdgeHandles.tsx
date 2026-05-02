@@ -17,11 +17,13 @@ export function EdgeHandles({
 	hoveredEdge,
 	onHoverEdge,
 	onContextMenu,
+	baseY = 0,
 }: {
 	corners: readonly Corner[];
 	hoveredEdge: number | null;
 	onHoverEdge: (edgeIdx: number | null) => void;
 	onContextMenu: (edgeIdx: number, screenX: number, screenY: number) => void;
+	baseY?: number;
 }) {
 	const N = corners.length;
 	if (N < 2) return null;
@@ -48,14 +50,14 @@ export function EdgeHandles({
 					<group key={`edge-${i}`}>
 						<Line
 							points={[
-								[A.x, 0.6, A.z],
-								[B.x, 0.6, B.z],
+								[A.x, baseY + 0.6, A.z],
+								[B.x, baseY + 0.6, B.z],
 							]}
 							color={lineColor}
 							lineWidth={lineWidth}
 						/>
 						<mesh
-							position={[midX, 0.6, midZ]}
+							position={[midX, baseY + 0.6, midZ]}
 							rotation={[0, angle, 0]}
 							onPointerOver={(e) => {
 								e.stopPropagation();
@@ -80,7 +82,7 @@ export function EdgeHandles({
 						</mesh>
 						{isHovered && (
 							<Html
-								position={[midX, 1.5, midZ]}
+								position={[midX, baseY + 1.5, midZ]}
 								center
 								distanceFactor={150}
 								style={{ pointerEvents: 'none' }}

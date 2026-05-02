@@ -149,10 +149,24 @@ describe('duplicateSectionThroughEdge', () => {
 		expect(next.sections[1].portals[0].position.y).toBe(42.5);
 	});
 
-	it('falls back to Position.y = 0 when source has no portals', () => {
+	it('falls back to Position.y = 0 when source has no portals and no portal-linked neighbours', () => {
 		const model = makeModel([makeSection({})]);
 		const next = duplicateSectionThroughEdge(model, 0, 0);
 		expect(next.sections[1].portals[0].position.y).toBe(0);
+	});
+
+	it('inherits Y from a portal-linked neighbour when source has no portals (issue #27 sub-task b)', () => {
+		// Source (section 0) has no portals; neighbour (section 1) has a
+		// portal pointing at section 0 with Y=42. The Y resolver propagates
+		// that Y to section 0, so the duplicate's portal anchor lands at 42
+		// instead of falling back to 0.
+		const neighbour = makeSection({
+			id: 99,
+			portals: [{ position: { x: 0, y: 42, z: 0 }, boundaryLines: [], linkSection: 0 }],
+		});
+		const model = makeModel([makeSection({}), neighbour]);
+		const next = duplicateSectionThroughEdge(model, 0, 0);
+		expect(next.sections[2].portals[0].position.y).toBe(42);
 	});
 
 	it('does not touch unrelated sections or their linkSection indices', () => {

@@ -1,13 +1,15 @@
 // Bright polygon highlight for the currently-selected (or hovered) section.
 //
-// Renders the polygon as a flat fill at y=0.3 plus a slightly raised
-// closed-loop outline at y=0.4 so the highlight reads above the batched
-// fill mesh (which sits at y=0.1) without z-fighting.
+// Renders the polygon as a flat fill at baseY+0.3 plus a slightly raised
+// closed-loop outline at baseY+0.4 so the highlight reads above the
+// batched fill mesh (which sits at baseY+0.1) without z-fighting.
 //
 // Corner storage differs across V12 (`Vector2[]` with y → world Z) and
 // V4/V6 (parallel `cornersX[]` + `cornersZ[]`). Both project onto the
 // same `Corner = { x, z }` shape — a small per-render allocation given
-// the highlight only renders for one or two sections at a time.
+// the highlight only renders for one or two sections at a time. Y comes
+// in via `baseY` (issue #27) so the highlight tracks the resolved
+// section ground rather than the global Y=0 plane.
 
 import { useMemo } from 'react';
 import { Line } from '@react-three/drei';
@@ -15,7 +17,15 @@ import * as THREE from 'three';
 
 export type Corner = { x: number; z: number };
 
-export function SelectionOverlay({ corners, color }: { corners: readonly Corner[]; color: string }) {
+export function SelectionOverlay({
+	corners,
+	color,
+	baseY = 0,
+}: {
+	corners: readonly Corner[];
+	color: string;
+	baseY?: number;
+}) {
 	const geometry = useMemo(() => {
 		if (corners.length < 3) return null;
 		const shape = new THREE.Shape();
@@ -35,14 +45,14 @@ export function SelectionOverlay({ corners, color }: { corners: readonly Corner[
 
 	return (
 		<>
-			<mesh geometry={geometry} position={[0, 0.3, 0]}>
+			<mesh geometry={geometry} position={[0, baseY + 0.3, 0]}>
 				<meshBasicMaterial color={color} transparent opacity={0.5} side={THREE.DoubleSide} depthWrite={false} />
 			</mesh>
 			{corners.length >= 3 && (
 				<Line
 					points={[
-						...corners.map((c): [number, number, number] => [c.x, 0.4, c.z]),
-						[corners[0].x, 0.4, corners[0].z],
+						...corners.map((c): [number, number, number] => [c.x, baseY + 0.4, c.z]),
+						[corners[0].x, baseY + 0.4, corners[0].z],
 					]}
 					color={color}
 					lineWidth={2.5}

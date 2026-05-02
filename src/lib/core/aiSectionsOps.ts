@@ -22,6 +22,7 @@ import type {
 	Portal,
 	Vector2,
 } from './aiSections';
+import { resolveLegacySectionYs, resolveSectionYs } from './aiSectionY';
 
 // =============================================================================
 // Vector helpers (XZ-plane 2D)
@@ -110,9 +111,21 @@ export function duplicateSectionThroughEdge(
 
 	const dupCorners: Vector2[] = src.corners.map((c) => v2add(c, offset));
 
-	// Anchor height: copy from the source's first existing portal, fall back
-	// to 0. Corners are 2D (XZ) so they don't carry height information.
-	const anchorY = src.portals[0]?.position.y ?? 0;
+	// Anchor height: prefer the source's first existing portal, then fall
+	// back to a section-Y resolver pass over the rest of the model
+	// (issue #27 sub-task (b)). The resolver propagates portal Ys outward
+	// across the section graph so a portal-less source still picks up its
+	// neighbour's height instead of dumping the duplicate at Y=0. Final
+	// fallback is 0 — same as pre-#27 behaviour when no portal exists
+	// anywhere on the connected component. Corners are 2D (XZ) so they
+	// don't carry height information; only the new portal anchor does.
+	let anchorY: number;
+	if (src.portals.length > 0) {
+		anchorY = src.portals[0].position.y;
+	} else {
+		const resolved = resolveSectionYs(model);
+		anchorY = resolved[srcIdx] ?? 0;
+	}
 	const anchorPos = { x: midpoint.x, y: anchorY, z: midpoint.y };
 
 	// BoundaryLine.verts is a Vector4 packing the 2D segment as
@@ -270,7 +283,17 @@ export function duplicateLegacySectionThroughEdge(
 	// is `vpu::Vector3` structural padding — zeroed on freshly created portals
 	// (the V4 parser preserves any non-zero W on existing portals for
 	// round-trip fidelity, but a duplicate has no source W to inherit).
-	const anchorY = src.portals[0]?.midPosition.y ?? 0;
+	// When the source has no portal of its own we fall back to the resolver
+	// (issue #27 sub-task (b)) so a duplicate landing off a portal-less
+	// section still inherits a sensible height from neighbours; final
+	// fallback is 0.
+	let anchorY: number;
+	if (src.portals.length > 0) {
+		anchorY = src.portals[0].midPosition.y;
+	} else {
+		const resolved = resolveLegacySectionYs(model);
+		anchorY = resolved[srcIdx] ?? 0;
+	}
 	const anchorMid = { x: midpoint.x, y: anchorY, z: midpoint.y, w: 0 };
 
 	const srcBoundary: LegacyBoundaryLine = { verts: { x: A.x, y: A.y, z: B.x, w: B.y } };
