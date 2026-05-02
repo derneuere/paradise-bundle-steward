@@ -9,9 +9,8 @@
 //
 // Entries are addressed by `(resourceKey, profileKind)` so the same
 // resource type can register different overlays for different variants
-// (e.g. AISections might one day get a V4-specific overlay alongside the
-// V12 one — the V4 profile is read-only-inspector-only for now, so its
-// entry omits the overlay).
+// (e.g. AISections registers a V12 overlay for retail and a separate
+// `AISectionsLegacyOverlay` for the V4 prototype's read-only 3D viewer).
 
 import type { ProfileRenderBinding } from './types';
 import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
@@ -22,6 +21,7 @@ import { streetDataExtensions } from '@/components/schema-editor/extensions/stre
 import { trafficDataExtensions } from '@/components/schema-editor/extensions/trafficDataExtensions';
 import { triggerDataExtensions } from '@/components/schema-editor/extensions/triggerDataExtensions';
 import { vehicleListExtensions } from '@/components/schema-editor/extensions/vehicleListExtensions';
+import { AISectionsLegacyOverlay } from '@/components/schema-editor/viewports/AISectionsLegacyOverlay';
 import { AISectionsOverlay } from '@/components/schema-editor/viewports/AISectionsOverlay';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
 import { StreetDataOverlay } from '@/components/schema-editor/viewports/StreetDataOverlay';
@@ -39,8 +39,12 @@ const BINDINGS: Record<string, Record<string, ProfileRenderBinding<unknown>>> = 
 			overlay: AISectionsOverlay as ProfileRenderBinding['overlay'],
 			extensions: aiSectionsExtensions,
 		},
-		// V4: read-only inspector only (no overlay yet); next slice adds one.
-		v4: {},
+		// V4 prototype: read-only 3D viewer — no edit ops (no gizmo, no
+		// corner handles, no edge menu, no snap toggle). Edit affordances
+		// land incrementally in the "Legacy edit op:" follow-up issues.
+		v4: {
+			overlay: AISectionsLegacyOverlay as ProfileRenderBinding['overlay'],
+		},
 	},
 	trafficData: {
 		default: {
