@@ -24,11 +24,16 @@
 //   - ['legacy', 'sections', i, 'portals', p, 'boundaryLines', l]     → boundary line
 //   - ['legacy', 'sections', i, 'noGoLines', l]                       → no-go line
 //
-// Edit ops: just one — `Duplicate section through this edge` from the edge
-// right-click menu. No translate gizmo, no corner handles, no snap toggle,
-// no marquee yet — those are follow-up slices once the V4 schema unfreezes
-// further fields. The op routes through `duplicateLegacySectionThroughEdge`
-// in `aiSectionsOps.ts`; see issue #44.
+// Edit ops:
+//   - `Duplicate section through this edge` from the edge right-click menu
+//     (`duplicateLegacySectionThroughEdge` in `aiSectionsOps.ts`; issue #44).
+//   - Section translate via the centred `TranslateGizmo` — drags the source
+//     section's corners + portals + no-go lines and cascades into linked
+//     neighbour sections (`translateLegacySectionWithLinks`; issue #42).
+//
+// Gizmo is no-snap; snap-to-edges lands as a follow-up. Corner handles and
+// marquee are still future slices once the V4 schema unfreezes further
+// fields.
 //
 // 3D primitives (BatchedSections, SelectionOverlay, SectionLabel,
 // EdgeHandles, EdgeContextMenu) live in `@/components/aisections/shared`
@@ -46,7 +51,11 @@ import type {
 	LegacyAISectionsData,
 } from '@/lib/core/aiSections';
 import { LegacyDangerRating } from '@/lib/core/aiSections';
-import { duplicateLegacySectionThroughEdge } from '@/lib/core/aiSectionsOps';
+import {
+	duplicateLegacySectionThroughEdge,
+	translateLegacySectionWithLinks,
+} from '@/lib/core/aiSectionsOps';
+import { TranslateGizmo, type GizmoOffset } from '@/components/common/three/TranslateGizmo';
 import {
 	BatchedSections,
 	buildBatchedSections,
@@ -323,6 +332,10 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	const [edgeMenu, setEdgeMenu] = useState<
 		{ x: number; y: number; sectionIndex: number; edgeIdx: number } | null
 	>(null);
+	// Live drag offset for the section translate gizmo. Held in local state
+	// so the underlying model isn't touched until release — one drag commits
+	// as one undo entry. `null` means no drag in flight.
+	const [drag, setDrag] = useState<GizmoOffset | null>(null);
 
 	const legacy = data.legacy;
 	const sections = legacy.sections;
@@ -335,14 +348,62 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	const selSection = selectedSectionIndex != null ? sections[selectedSectionIndex] ?? null : null;
 	const hovSection = hoverSectionIndex != null ? sections[hoverSectionIndex] ?? null : null;
 
+	// While a drag is in flight, run the translate op against the live offset
+	// to derive a preview model — used both for the source overlay and to
+	// highlight neighbours the cascade reaches. Same flow as the V12 overlay.
+	const previewModel = useMemo(() => {
+		if (selectedSectionIndex == null || !selSection || !drag) return null;
+		if (drag.x === 0 && drag.z === 0) return null;
+		try {
+			return translateLegacySectionWithLinks(legacy, selectedSectionIndex, drag);
+		} catch {
+			return null;
+		}
+	}, [legacy, selectedSectionIndex, selSection, drag]);
+
+	const previewSection: LegacyAISection | null = useMemo(() => {
+		if (!selSection) return null;
+		if (!previewModel || selectedSectionIndex == null) return selSection;
+		return previewModel.sections[selectedSectionIndex] ?? selSection;
+	}, [selSection, previewModel, selectedSectionIndex]);
+
 	const selCorners = useMemo(
-		() => (selSection ? legacyCorners(selSection) : null),
-		[selSection],
+		() => (previewSection ? legacyCorners(previewSection) : null),
+		[previewSection],
 	);
 	const hovCorners = useMemo(
 		() => (hovSection ? legacyCorners(hovSection) : null),
 		[hovSection],
 	);
+
+	// Neighbours the cascade reaches (their corners moved). Highlighted in a
+	// muted orange so the user can see which other sections their drag is
+	// pulling along. Mirrors the V12 overlay's `affectedNeighbours`.
+	const affectedNeighbours = useMemo(() => {
+		if (!previewModel || selectedSectionIndex == null) return [];
+		const out: { idx: number; corners: Corner[] }[] = [];
+		for (let i = 0; i < previewModel.sections.length; i++) {
+			if (i === selectedSectionIndex) continue;
+			if (previewModel.sections[i] !== legacy.sections[i]) {
+				out.push({ idx: i, corners: legacyCorners(previewModel.sections[i]) });
+			}
+		}
+		return out;
+	}, [previewModel, selectedSectionIndex, legacy]);
+
+	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
+		if (!previewSection) return null;
+		const n = legacyCornerCount(previewSection);
+		if (n === 0) return null;
+		let sx = 0, sz = 0;
+		for (let i = 0; i < n; i++) {
+			sx += previewSection.cornersX[i];
+			sz += previewSection.cornersZ[i];
+		}
+		return [sx / n, 1.5, sz / n];
+	}, [previewSection]);
+
+	const gizmoPixelSize = 90;
 
 	const handlePickSection = useCallback((sectionIndex: number) => {
 		onSelect(legacyAISectionMarkerPath({ kind: 'section', sectionIndex }));
@@ -363,12 +424,30 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 		onSelect(legacyAISectionMarkerPath({ kind: 'noGoLine', sectionIndex: selectedSectionIndex, lineIndex }));
 	}, [onSelect, selectedSectionIndex]);
 
-	// Reset transient edge UI when the selected section changes — the
-	// hover / open-menu state belongs to a section, not the overlay.
+	// Reset transient edge UI + drag when the selected section changes — the
+	// hover / open-menu / drag state belongs to a section, not the overlay.
 	useResetOnChange(selectedSectionIndex, () => {
 		setHoveredEdge(null);
 		setEdgeMenu(null);
+		setDrag(null);
 	});
+
+	const handleGizmoTranslate = useCallback((offset: GizmoOffset) => {
+		setDrag(offset);
+	}, []);
+
+	const handleGizmoCommit = useCallback((offset: GizmoOffset) => {
+		setDrag(null);
+		if (selectedSectionIndex == null || !onChange) return;
+		if (offset.x === 0 && offset.z === 0) return;
+		const nextLegacy = translateLegacySectionWithLinks(legacy, selectedSectionIndex, offset);
+		// Re-wrap into the discriminated-union root — same shape the page
+		// handed us. Mirrors the duplicate-through-edge flow above.
+		const nextRoot = { ...data, legacy: nextLegacy } as ParsedAISectionsV4 | ParsedAISectionsV6;
+		onChange(nextRoot);
+	}, [data, legacy, selectedSectionIndex, onChange]);
+
+	const handleGizmoCancel = useCallback(() => setDrag(null), []);
 
 	const handleEdgeContextMenu = useCallback(
 		(edgeIdx: number, screenX: number, screenY: number) => {
@@ -418,9 +497,13 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 				<SelectionOverlay corners={hovCorners} color="#66aaff" />
 			)}
 
-			{selCorners && selSection && selectedSectionIndex != null && (
+			{drag && affectedNeighbours.map(({ idx, corners }) => (
+				<SelectionOverlay key={`cascade-${idx}`} corners={corners} color="#ddaa66" />
+			))}
+
+			{selCorners && previewSection && selectedSectionIndex != null && (
 				<SectionLabel corners={selCorners} color="#ffaa33">
-					Sec {selectedSectionIndex} | {DANGER_SHORT[selSection.dangerRating] ?? selSection.dangerRating}
+					Sec {selectedSectionIndex} | {DANGER_SHORT[previewSection.dangerRating] ?? previewSection.dangerRating}
 				</SectionLabel>
 			)}
 			{hovCorners && hovSection && hoverSectionIndex != null && hoverSectionIndex !== selectedSectionIndex && (
@@ -429,9 +512,9 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 				</SectionLabel>
 			)}
 
-			{selectedSectionIndex != null && selSection && selCorners && (
+			{selectedSectionIndex != null && previewSection && selCorners && (
 				<SelectedSectionDetail
-					section={selSection}
+					section={previewSection}
 					data={legacy}
 					marker={marker}
 					corners={selCorners}
@@ -441,6 +524,16 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 					hoveredEdge={hoveredEdge}
 					onHoverEdge={setHoveredEdge}
 					onEdgeContextMenu={handleEdgeContextMenu}
+				/>
+			)}
+
+			{gizmoPosition && onChange && (
+				<TranslateGizmo
+					position={gizmoPosition}
+					pixelSize={gizmoPixelSize}
+					onTranslate={handleGizmoTranslate}
+					onCommit={handleGizmoCommit}
+					onCancel={handleGizmoCancel}
 				/>
 			)}
 

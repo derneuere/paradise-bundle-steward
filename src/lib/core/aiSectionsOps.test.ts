@@ -11,6 +11,7 @@ import {
 	snapCornerOffset,
 	snapSectionOffset,
 	translateCornerWithShared,
+	translateLegacySectionWithLinks,
 	translateSectionWithLinks,
 } from './aiSectionsOps';
 import {
@@ -1325,5 +1326,224 @@ describe('duplicateLegacySectionThroughEdge', () => {
 			expect(next.sections[0].portals.at(-1)!.linkSection).toBe(1);
 			expect(next.sections[1].portals[0].linkSection).toBe(0);
 		});
+	});
+});
+
+// =============================================================================
+// translateLegacySectionWithLinks (V4 / V6 smart move with paired-portal cascade)
+// =============================================================================
+
+describe('translateLegacySectionWithLinks', () => {
+	// Pair of legacy sections sharing the right edge of section 0 / left edge
+	// of section 1 (mirroring `makePair` in the V12 translateSectionWithLinks
+	// suite above):
+	//   Section 0: corners at (0,0) (10,0) (10,10) (0,10), one portal to s1
+	//              anchored at (10, 0, 5), boundary line (10,0) → (10,10).
+	//   Section 1: corners at (10,0) (20,0) (20,10) (10,10), one portal back
+	//              to s0 anchored at (10, 0, 5), boundary line reversed.
+	function makeLegacyPair(version: 4 | 6 = 4): LegacyAISectionsData {
+		const portal0to1: LegacyPortal = {
+			midPosition: { x: 10, y: 0, z: 5, w: 0 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: LegacyPortal = {
+			midPosition: { x: 10, y: 0, z: 5, w: 0 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const s0: LegacyAISection = (version === 6 ? makeLegacyV6Section : makeLegacyV4Section)({
+			cornersX: [0, 10, 10, 0],
+			cornersZ: [0, 0, 10, 10],
+			portals: [portal0to1],
+		});
+		const s1: LegacyAISection = (version === 6 ? makeLegacyV6Section : makeLegacyV4Section)({
+			cornersX: [10, 20, 20, 10],
+			cornersZ: [0, 0, 10, 10],
+			portals: [portal1to0],
+		});
+		return makeLegacyModel(version, [s0, s1]);
+	}
+
+	it('shifts every spatial field on the source section', () => {
+		const model = makeLegacyPair(4);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 3, z: -2 });
+		const s0 = next.sections[0];
+		expect(s0.cornersX).toEqual([3, 13, 13, 3]);
+		expect(s0.cornersZ).toEqual([-2, -2, 8, 8]);
+		// midPosition.y stays put — XZ-only translate. midPosition.w (vpu::Vector3
+		// structural padding) also stays put — it's not a spatial coord.
+		expect(s0.portals[0].midPosition).toEqual({ x: 13, y: 0, z: 3, w: 0 });
+		expect(s0.portals[0].boundaryLines[0].verts).toEqual({ x: 13, y: -2, z: 13, w: 8 });
+	});
+
+	it("translates the neighbour's matching portal and its boundary line (linked-from-elsewhere)", () => {
+		// This is the issue #42 acceptance criterion: portals on OTHER
+		// sections that link back to the translated section must move along
+		// with it. Section 1's portal points back at section 0 — when we
+		// translate section 0, that portal's anchor + boundary line shift.
+		const model = makeLegacyPair(4);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 3, z: -2 });
+		const s1 = next.sections[1];
+		expect(s1.portals[0].midPosition).toEqual({ x: 13, y: 0, z: 3, w: 0 });
+		// Boundary line winding stays reversed — only the endpoint coords shift.
+		expect(s1.portals[0].boundaryLines[0].verts).toEqual({ x: 13, y: 8, z: 13, w: -2 });
+	});
+
+	it('keeps the source/neighbour portal anchors equal after the move (paired)', () => {
+		const model = makeLegacyPair(4);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 7, z: 4 });
+		expect(next.sections[0].portals[0].midPosition).toEqual(next.sections[1].portals[0].midPosition);
+	});
+
+	it('shifts only the neighbour corners that lie on the shared edge', () => {
+		const model = makeLegacyPair(4);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 3, z: -2 });
+		// Shared edge endpoints (pre-translate): (10, 0) and (10, 10).
+		// Section 1 has those at indexes 0 and 3; the (20, *) corners on its
+		// far edge stay still — the polygon stretches rather than translating.
+		expect(next.sections[1].cornersX).toEqual([13, 20, 20, 13]);
+		expect(next.sections[1].cornersZ).toEqual([-2, 0, 10, 8]);
+	});
+
+	it('preserves portal midPosition.w (vpu::Vector3 structural padding)', () => {
+		// V4 fixtures may carry a non-zero W — the parser preserves it for
+		// round-trip fidelity. Translate must NOT clobber it. The V12 op has
+		// no equivalent (Vector3 has no W); this is a legacy-only invariant.
+		const portalWithPadding: LegacyPortal = {
+			midPosition: { x: 10, y: 0, z: 5, w: 1.25 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portalBackWithPadding: LegacyPortal = {
+			midPosition: { x: 10, y: 0, z: 5, w: -3.5 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const s0 = makeLegacyV4Section({
+			cornersX: [0, 10, 10, 0], cornersZ: [0, 0, 10, 10],
+			portals: [portalWithPadding],
+		});
+		const s1 = makeLegacyV4Section({
+			cornersX: [10, 20, 20, 10], cornersZ: [0, 0, 10, 10],
+			portals: [portalBackWithPadding],
+		});
+		const model = makeLegacyModel(4, [s0, s1]);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 3, z: 0 });
+		expect(next.sections[0].portals[0].midPosition.w).toBe(1.25);
+		expect(next.sections[1].portals[0].midPosition.w).toBe(-3.5);
+	});
+
+	it('skips a portal pointing at a self-link (linkSection === srcIdx)', () => {
+		const selfLinking: LegacyAISection = makeLegacyV4Section({
+			portals: [{
+				midPosition: { x: 0, y: 0, z: 0, w: 0 },
+				boundaryLines: [{ verts: { x: 0, y: 0, z: 1, w: 0 } }],
+				linkSection: 0, // points at itself
+			}],
+		});
+		const model = makeLegacyModel(4, [selfLinking]);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 5, z: 0 });
+		// Source still translates; no other section to cascade into.
+		expect(next.sections[0].cornersX[0]).toBe(5);
+	});
+
+	it('skips a portal pointing at an out-of-range index (orphan)', () => {
+		const orphan: LegacyAISection = makeLegacyV4Section({
+			portals: [{
+				midPosition: { x: 0, y: 0, z: 0, w: 0 },
+				boundaryLines: [],
+				linkSection: 999, // does not exist
+			}],
+		});
+		const model = makeLegacyModel(4, [orphan]);
+		expect(() => translateLegacySectionWithLinks(model, 0, { x: 5, z: 0 })).not.toThrow();
+	});
+
+	it("doesn't touch a neighbour's other portals (independent edges stay put)", () => {
+		// Section 1 has two portals: one back to section 0 (will move) and
+		// one to section 2 on its far edge (must NOT move). Mirrors the V12
+		// "independent edges" test.
+		const portal0to1: LegacyPortal = {
+			midPosition: { x: 10, y: 0, z: 5, w: 0 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: LegacyPortal = {
+			midPosition: { x: 10, y: 0, z: 5, w: 0 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const portal1to2: LegacyPortal = {
+			midPosition: { x: 20, y: 0, z: 5, w: 0 },
+			boundaryLines: [{ verts: { x: 20, y: 0, z: 20, w: 10 } }],
+			linkSection: 2,
+		};
+		const s0 = makeLegacyV4Section({
+			cornersX: [0, 10, 10, 0], cornersZ: [0, 0, 10, 10],
+			portals: [portal0to1],
+		});
+		const s1 = makeLegacyV4Section({
+			cornersX: [10, 20, 20, 10], cornersZ: [0, 0, 10, 10],
+			portals: [portal1to0, portal1to2],
+		});
+		const s2 = makeLegacyV4Section();
+		const model = makeLegacyModel(4, [s0, s1, s2]);
+
+		const next = translateLegacySectionWithLinks(model, 0, { x: 3, z: 0 });
+		// The s1→s2 portal is on the far edge — its anchor and BL are unchanged.
+		expect(next.sections[1].portals[1]).toBe(s1.portals[1]);
+	});
+
+	it('is a no-op for a zero offset (returns the same model reference)', () => {
+		const model = makeLegacyPair(4);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 0, z: 0 });
+		expect(next).toBe(model);
+	});
+
+	it('throws on out-of-range srcIdx', () => {
+		const model = makeLegacyPair(4);
+		expect(() => translateLegacySectionWithLinks(model, 5, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateLegacySectionWithLinks(model, -1, { x: 1, z: 0 })).toThrow(RangeError);
+	});
+
+	it("doesn't change unrelated sections by reference", () => {
+		const model = makeLegacyPair(4);
+		const detached: LegacyAISection = makeLegacyV4Section({
+			cornersX: [100, 110, 110, 100],
+			cornersZ: [100, 100, 110, 110],
+		});
+		const expanded: LegacyAISectionsData = {
+			...model,
+			sections: [...model.sections, detached],
+		};
+		const next = translateLegacySectionWithLinks(expanded, 0, { x: 4, z: 4 });
+		expect(next.sections[2]).toBe(detached);
+	});
+
+	it('preserves the wrapper version field (V4)', () => {
+		const model = makeLegacyPair(4);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 1, z: 0 });
+		expect(next.version).toBe(4);
+	});
+
+	it('preserves the wrapper version field (V6)', () => {
+		const model = makeLegacyPair(6);
+		const next = translateLegacySectionWithLinks(model, 0, { x: 1, z: 0 });
+		expect(next.version).toBe(6);
+		// And the V6-only fields on cascaded sections survive the translate.
+		expect(next.sections[1].district).toBe(LegacyEDistrict.E_DISTRICT_SUBURBS);
+	});
+
+	it('round-trips with duplicate-through-edge: translate ∘ duplicate keeps the portal pair coincident', () => {
+		// Build a single section, duplicate through edge 0 (which appends a
+		// section to its south + cross-links portals), then translate the
+		// source. The duplicate's matching portal must follow.
+		const seed = makeLegacyModel(4, [makeLegacyV4Section()]);
+		const after_dup = duplicateLegacySectionThroughEdge(seed, 0, 0);
+		const after_translate = translateLegacySectionWithLinks(after_dup, 0, { x: 5, z: 5 });
+		const srcPortal = after_translate.sections[0].portals.at(-1)!;
+		const dupPortal = after_translate.sections[1].portals[0];
+		expect(srcPortal.midPosition).toEqual(dupPortal.midPosition);
 	});
 });
