@@ -51,6 +51,7 @@ import {
 } from '@/lib/conversion/exportPlan';
 import { applyExport, defaultExportFilename } from '@/lib/conversion/applyExport';
 import type { EditableBundle } from '@/context/WorkspaceContext.types';
+import { useWorkspace } from '@/context/WorkspaceContext';
 
 type Props = {
 	bundle: EditableBundle | null;
@@ -59,6 +60,7 @@ type Props = {
 };
 
 export function ExportToVersionDialog({ bundle, open, onOpenChange }: Props) {
+	const { recordConversionProvenance } = useWorkspace();
 	// First preset is the dropdown default. Always at least one preset (we
 	// ship paradise-pc-retail at launch); if the registry ever empties, the
 	// dialog renders an empty-state instead of crashing.
@@ -124,6 +126,27 @@ export function ExportToVersionDialog({ bundle, open, onOpenChange }: Props) {
 		try {
 			const buffer = applyExport(bundle, preset, runs.runs);
 			triggerDownload(buffer, name);
+			// Record per-resource provenance so the inspector banner (issue
+			// #38) can show "Converted from V4 — defaulted: ... Interpreted:
+			// ..." on each migrated resource. Stamped against the *source*
+			// bundle that's still in the workspace — the exported file is
+			// only a download, so until bundle-persistence lands the source
+			// bundle is the only addressable surface.
+			const exportedAt = Date.now();
+			for (const run of runs.runs) {
+				recordConversionProvenance(
+					bundle.id,
+					run.migration.resourceKey,
+					run.migration.index,
+					{
+						sourceKind: run.migration.currentKind,
+						targetKind: run.migration.targetKind,
+						defaulted: run.defaulted,
+						lossy: run.lossy,
+						exportedAt,
+					},
+				);
+			}
 			toast.success(`Exported ${preset.label}`, {
 				description: `Wrote ${(buffer.byteLength / 1024).toFixed(1)} KB to ${name}.`,
 			});
