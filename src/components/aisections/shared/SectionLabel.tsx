@@ -15,17 +15,19 @@ export function SectionLabel({
 	corners,
 	color,
 	children,
+	baseY = 0,
 }: {
 	corners: readonly Corner[];
 	color: string;
 	children: ReactNode;
+	baseY?: number;
 }) {
 	if (corners.length < 4) return null;
 	return (
 		<Html
 			position={[
 				(corners[0].x + corners[2].x) / 2,
-				2,
+				baseY + 2,
 				(corners[0].z + corners[2].z) / 2,
 			]}
 			center

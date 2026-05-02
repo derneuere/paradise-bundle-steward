@@ -74,4 +74,35 @@ describe('shared buildBatchedSections', () => {
 		expect(scene.outlineGeo.getAttribute('position').count).toBe(0);
 		expect(scene.faceToSection.length).toBe(0);
 	});
+
+	it('lifts each section onto its supplied Y (issue #27 sectionYs param)', () => {
+		// Two quads, second elevated. Each corner of section 0 should write
+		// Y = 0 + 0.1; each corner of section 1 should write Y = 50 + 0.1.
+		// Outline shares the same per-section Y but offset by +0.5 instead.
+		const sections: V12Like[] = [
+			{ corners: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }], tag: 0 },
+			{ corners: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }], tag: 1 },
+		];
+		const ys = [0, 50];
+		const scene = buildBatchedSections(sections, v12Accessor, ys);
+		const positions = scene.fillGeo.getAttribute('position').array as Float32Array;
+		// Section 0's corners (4 of them, indices 0..3) → Y = 0.1.
+		for (let i = 0; i < 4; i++) {
+			expect(positions[i * 3 + 1]).toBeCloseTo(0.1);
+		}
+		// Section 1's corners (indices 4..7) → Y = 50.1.
+		for (let i = 4; i < 8; i++) {
+			expect(positions[i * 3 + 1]).toBeCloseTo(50.1);
+		}
+		const outline = scene.outlineGeo.getAttribute('position').array as Float32Array;
+		// Section 0's outline lives at Y = 0.5; section 1's at Y = 50.5.
+		// Outline writes 2 verts per edge × 4 edges per quad = 8 verts per
+		// section, so section 0 occupies indices 0..7 and section 1 8..15.
+		for (let i = 0; i < 8; i++) {
+			expect(outline[i * 3 + 1]).toBeCloseTo(0.5);
+		}
+		for (let i = 8; i < 16; i++) {
+			expect(outline[i * 3 + 1]).toBeCloseTo(50.5);
+		}
+	});
 });

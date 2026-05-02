@@ -48,6 +48,13 @@ type Props = {
 	 * TranslateGizmo. Defaults to 8 px.
 	 */
 	pixelSize?: number;
+	/**
+	 * Resolved Y for the section the corners belong to (issue #27). Each
+	 * handle sits at `baseY + 0.8` so it floats just above the section's
+	 * fill mesh regardless of where the section was placed in world Y.
+	 * Defaults to 0 — same as pre-#27 behaviour.
+	 */
+	baseY?: number;
 	/** Continuous report during drag — use to update preview state. */
 	onDrag: (cornerIdx: number, offset: CornerDragOffset) => void;
 	/** One-shot final offset on pointer release — commit point. */
@@ -71,6 +78,7 @@ const scratchVec = new THREE.Vector3();
 export const CornerHandles: React.FC<Props> = ({
 	corners,
 	pixelSize = 8,
+	baseY = 0,
 	onDrag,
 	onCommit,
 	onCancel,
@@ -104,7 +112,7 @@ export const CornerHandles: React.FC<Props> = ({
 			const mesh = meshRefs.current[i];
 			if (!mesh) continue;
 			const c2d = corners[i];
-			probe.set(c2d.x, 0.8, c2d.z);
+			probe.set(c2d.x, baseY + 0.8, c2d.z);
 			const distance = cam.position.distanceTo(probe);
 			const worldPerPixel = (2 * distance * tanHalfFov) / viewport.height;
 			const targetWorldRadius = pixelSize * worldPerPixel;
@@ -166,7 +174,7 @@ export const CornerHandles: React.FC<Props> = ({
 					<mesh
 						key={`corner-${i}`}
 						ref={(el) => { meshRefs.current[i] = el; }}
-						position={[c.x, 0.8, c.z]}
+						position={[c.x, baseY + 0.8, c.z]}
 						onPointerDown={beginDrag(i)}
 						onPointerOver={overHandler(i)}
 						onPointerOut={outHandler(i)}
