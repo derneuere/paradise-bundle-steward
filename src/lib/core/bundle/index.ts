@@ -573,6 +573,18 @@ export type ConvertTarget = {
    * skipping the byte-swap (e.g. the type-0x0003 auxiliary in BND1 PVS).
    */
   unknownResourcePolicy?: UnknownResourcePolicy;
+  /**
+   * Caller-supplied per-resource overrides (keyed by `formatResourceId(...)`
+   * hex). These take priority over the auto-generated endian-flip bytes —
+   * when present, the writer encodes the override value with the target
+   * platform's ctx, bypassing the now-stale endian-flipped bytes.
+   *
+   * Used by the "Export to game version..." flow (issue #37) to inject
+   * migrated models (e.g. AI Sections V4 → V12). Values may be either raw
+   * encoded bytes or a parsed model — `writeBundleFresh.applyOverride`
+   * dispatches accordingly. Leave undefined for the no-migration path.
+   */
+  extraOverridesByResourceId?: Record<string, Uint8Array | unknown>;
 };
 
 /**
@@ -618,12 +630,24 @@ export function convertBundle(
       : bnd2ToBnd1Shape(bundle, originalBuffer, target.platform);
   }
 
-  // 3) Write. Pass overrides via byResourceId so each resource gets its own
+  // 3) Merge caller-supplied overrides on top of the endian-flip overrides.
+  //    Caller-supplied values win because they typically carry migrated
+  //    models that already match the target shape — re-encoding the source
+  //    bytes for them would defeat the migration. The writer's applyOverride
+  //    plumbs model objects through `handler.writeRaw(model, targetCtx)`,
+  //    so dropping in the migrated model here lands target-platform bytes
+  //    in the output.
+  const merged: Record<string, Uint8Array | unknown> =
+    target.extraOverridesByResourceId
+      ? { ...overridesByResourceId, ...target.extraOverridesByResourceId }
+      : overridesByResourceId;
+
+  // 4) Write. Pass overrides via byResourceId so each resource gets its own
   //    re-encoded bytes (typeId-keyed overrides would collide on bundles
   //    with multiple resources of the same type).
   return writeBundleFresh(shaped, originalBuffer, {
     platform: target.platform,
-    overrides: { byResourceId: overridesByResourceId },
+    overrides: { byResourceId: merged },
   });
 }
 

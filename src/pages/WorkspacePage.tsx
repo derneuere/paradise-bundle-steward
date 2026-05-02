@@ -37,7 +37,7 @@
 //   │  + Add Bundle         │                       │                  │
 //   └──────────────────────┴───────────────────────┴──────────────────┘
 
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useDropStaleSelection } from '@/hooks/useDropStaleSelection';
 import {
 	ResizableHandle,
@@ -45,7 +45,8 @@ import {
 	ResizablePanelGroup,
 } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
-import { FileText, Folder, Plus, Save, X } from 'lucide-react';
+import { FileText, Folder, Plus, Save, Upload, X } from 'lucide-react';
+import { ExportToVersionDialog } from '@/components/workspace/ExportToVersionDialog';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { selectionLevel } from '@/context/WorkspaceContext.types';
 import type { EditableBundle } from '@/context/WorkspaceContext.types';
@@ -406,6 +407,9 @@ function BundleInspector({
 		() => entries.reduce((sum, e) => sum + e.count, 0),
 		[entries],
 	);
+	// Export-to-version dialog state — local to the inspector since the
+	// surface is bundle-scoped (each bundle gets its own modal lifecycle).
+	const [exportOpen, setExportOpen] = useState(false);
 	return (
 		<div className="h-full flex flex-col min-h-0 overflow-auto">
 			<div className="px-4 pt-4 pb-2 border-b bg-card/60 shrink-0">
@@ -428,7 +432,7 @@ function BundleInspector({
 					{entries.length} type{entries.length === 1 ? '' : 's'}
 				</p>
 			</div>
-			<div className="px-4 py-3 flex items-center gap-2 border-b">
+			<div className="px-4 py-3 flex flex-wrap items-center gap-2 border-b">
 				<Button
 					type="button"
 					size="sm"
@@ -444,12 +448,28 @@ function BundleInspector({
 					type="button"
 					size="sm"
 					variant="outline"
+					onClick={() => setExportOpen(true)}
+					className="gap-1"
+					title="Migrate every resource to a target game version and save as a new file"
+				>
+					<Upload className="h-3 w-3" />
+					Export to game version…
+				</Button>
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
 					onClick={() => void closeBundle(bundle.id)}
 					className="gap-1"
 				>
 					<X className="h-3 w-3" />
 					Close
 				</Button>
+				<ExportToVersionDialog
+					bundle={bundle}
+					open={exportOpen}
+					onOpenChange={setExportOpen}
+				/>
 			</div>
 			<div className="flex-1 min-h-0 overflow-auto p-4">
 				<div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
