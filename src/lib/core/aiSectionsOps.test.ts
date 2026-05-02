@@ -1119,7 +1119,7 @@ describe('translateLegacyCornerWithShared', () => {
 	function makeLegacyPair(): LegacyAISectionsData {
 		const s0 = makeLegacySection(
 			[0, 10, 10, 0],
-			[0,  0, 10, 10],
+			[0, 0, 10, 10],
 			[{
 				midPosition: { x: 10, y: 0, z: 5, w: 0 },
 				boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
@@ -1128,7 +1128,7 @@ describe('translateLegacyCornerWithShared', () => {
 		);
 		const s1 = makeLegacySection(
 			[10, 20, 20, 10],
-			[ 0,  0, 10, 10],
+			[0, 0, 10, 10],
 			[{
 				midPosition: { x: 10, y: 0, z: 5, w: 0 },
 				boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
