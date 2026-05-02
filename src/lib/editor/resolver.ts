@@ -32,15 +32,21 @@ export function pickProfileFromList(
 }
 
 /** Display-suffix helper used by tree row labels. Returns the picked
- *  profile's `displayName` only when the typeId has more than one
- *  variant registered — single-profile types don't surface a chip
- *  because there's no ambiguity to disambiguate. */
+ *  profile's `displayName` only when the picked profile is *not* the
+ *  first one in the list. The first profile is treated as the type's
+ *  "primary" / canonical variant — single-profile types and the canonical
+ *  variant of multi-profile types stay bare in the tree (no useless
+ *  `(v12 retail)` chip on the AI Sections row). Non-primary variants
+ *  (V4 / V6 prototype, future TrafficData v22, etc.) get the suffix
+ *  because the user does need the disambiguation. */
 export function suffixFromList(
 	profiles: EditorProfile<unknown>[],
 	model: unknown,
 ): string | undefined {
 	if (profiles.length < 2) return undefined;
-	return pickProfileFromList(profiles, model)?.displayName;
+	const picked = pickProfileFromList(profiles, model);
+	if (!picked || picked === profiles[0]) return undefined;
+	return picked.displayName;
 }
 
 /** Throws if two profiles in `profiles` claim the same `kind`. Called

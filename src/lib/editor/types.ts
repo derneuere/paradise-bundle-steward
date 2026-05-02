@@ -54,12 +54,18 @@ export type ConversionEntry<M, TTarget = unknown> = {
 	migrate: (model: M) => ConversionResult<TTarget>;
 };
 
-/** Optional sidecar for a profile's overlay/extension layer. The world-overlay
- *  selector in `WorldViewportComposition` and the schema editor's right-pane
- *  inspector both read these to render the right surface for the picked
- *  profile. Either may be omitted — a profile that only round-trips bytes
- *  through the core registry but has no editor UI yet (e.g. the V4/V6
- *  prototype slice) leaves both fields undefined. */
+/** EditorProfile is metadata-only: schema, kind, displayName, matches,
+ *  conversions. React-laden bindings (overlays, extension registries) live
+ *  in a sibling registry (`./bindings.ts`) addressed by `(key, kind)`. The
+ *  split keeps the metadata registry React-free so test environments — and
+ *  any non-rendering code path that just needs schema lookup — don't drag
+ *  three.js / leaflet through their import graph (issue #33 follow-up; the
+ *  helpers under `src/components/workspace/` were tripping on the eager
+ *  overlay imports otherwise).
+ *
+ *  When you need the full bundle (metadata + overlay + extensions) inside
+ *  a React render tree, call `pickRenderBinding(key, model)` from
+ *  `./bindings.ts` alongside `pickProfile(typeId, model)`. */
 export type EditorProfile<M = unknown> = {
 	/** Discriminator value the profile claims, e.g. 'v12' / 'v6' / 'v4'.
 	 *  Resources without versioning use 'default'. Must be unique within
@@ -73,16 +79,6 @@ export type EditorProfile<M = unknown> = {
 	/** Schema driving the inspector + tree's per-instance rows. */
 	schema: ResourceSchema;
 
-	/** Optional 3D overlay component mounted inside the WorldViewport
-	 *  composition for this profile. Omit when the resource has no spatial
-	 *  representation (e.g. text files, audio dictionaries). */
-	overlay?: WorldOverlayComponent<M>;
-
-	/** Optional extension registry consumed by the schema editor's
-	 *  `SchemaEditorProvider`. Powers customRenderer fields and named tab
-	 *  components. Omit when the schema's default rendering is enough. */
-	extensions?: ExtensionRegistry;
-
 	/** Optional matcher used by `pickProfile` to decide whether this profile
 	 *  applies to a given parsed model. Defaults to "always matches" so
 	 *  single-profile resources don't have to specify one. The first
@@ -94,6 +90,23 @@ export type EditorProfile<M = unknown> = {
 	 *  `kind`. The Workspace surfaces these as menu items on the resource's
 	 *  inspector header (e.g. "Convert to v12 retail"). */
 	conversions?: Record<string, ConversionEntry<M>>;
+};
+
+/** Render-time bindings for a profile — populated in `./bindings.ts` and
+ *  looked up by render sites (ViewportPane, WorldViewportComposition,
+ *  WorkspacePage). Each entry is keyed by `(resourceKey, profileKind)` so
+ *  the same resource type can register different overlays for different
+ *  variants. */
+export type ProfileRenderBinding<M = unknown> = {
+	/** Optional 3D overlay component mounted inside the WorldViewport
+	 *  composition for this profile. Omit when the resource has no spatial
+	 *  representation (e.g. text files, audio dictionaries). */
+	overlay?: WorldOverlayComponent<M>;
+
+	/** Optional extension registry consumed by the schema editor's
+	 *  `SchemaEditorProvider`. Powers customRenderer fields and named tab
+	 *  components. Omit when the schema's default rendering is enough. */
+	extensions?: ExtensionRegistry;
 };
 
 /** Re-exported for callers building extensions or overlays. */

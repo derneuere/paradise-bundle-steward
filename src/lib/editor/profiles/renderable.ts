@@ -8,11 +8,9 @@
 
 import { defineProfile } from '../types';
 import { renderableResourceSchema } from '@/lib/schema/resources/renderable';
-import { renderableExtensions } from '@/components/schema-editor/extensions/renderableExtensions';
 
 export const renderableProfile = defineProfile<unknown>({
 	kind: 'default',
 	displayName: 'Renderable',
 	schema: renderableResourceSchema,
-	extensions: renderableExtensions,
 });

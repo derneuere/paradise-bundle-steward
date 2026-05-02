@@ -79,7 +79,22 @@ describe('suffixFromList', () => {
 		expect(suffixFromList([profile('default')], { kind: 'v12' })).toBeUndefined();
 	});
 
-	it('returns the picked profile displayName when multiple are registered', () => {
+	it('returns undefined for the FIRST/primary profile (canonical variant stays bare)', () => {
+		// AI Sections issue #33: tree shows `AI Sections` for V12 retail and
+		// `AI Sections (v4 prototype)` for V4. The "primary" is whichever
+		// profile is listed first in the registration array.
+		const v12 = profile('v12', {
+			displayName: 'v12 retail',
+			matches: (m) => (m as { kind?: string })?.kind === 'v12',
+		});
+		const v4 = profile('v4', {
+			displayName: 'v4 prototype',
+			matches: (m) => (m as { kind?: string })?.kind === 'v4',
+		});
+		expect(suffixFromList([v12, v4], { kind: 'v12' })).toBeUndefined();
+	});
+
+	it('returns the picked profile displayName for non-primary variants', () => {
 		const v12 = profile('v12', {
 			displayName: 'v12 retail',
 			matches: (m) => (m as { kind?: string })?.kind === 'v12',
@@ -88,8 +103,18 @@ describe('suffixFromList', () => {
 			displayName: 'v6 prototype',
 			matches: (m) => (m as { kind?: string })?.kind === 'v6',
 		});
-		expect(suffixFromList([v12, v6], { kind: 'v12' })).toBe('v12 retail');
-		expect(suffixFromList([v12, v6], { kind: 'v6' })).toBe('v6 prototype');
+		const v4 = profile('v4', {
+			displayName: 'v4 prototype',
+			matches: (m) => (m as { kind?: string })?.kind === 'v4',
+		});
+		expect(suffixFromList([v12, v6, v4], { kind: 'v6' })).toBe('v6 prototype');
+		expect(suffixFromList([v12, v6, v4], { kind: 'v4' })).toBe('v4 prototype');
+	});
+
+	it('returns undefined when no profile matches the model (no suffix to surface)', () => {
+		const v12 = profile('v12', { matches: (m) => (m as { kind?: string })?.kind === 'v12' });
+		const v4 = profile('v4', { matches: (m) => (m as { kind?: string })?.kind === 'v4' });
+		expect(suffixFromList([v12, v4], { kind: 'v6' })).toBeUndefined();
 	});
 });
 

@@ -14,7 +14,7 @@ import { RenderableViewport } from './viewports/RenderableViewport';
 import { TextureViewport } from './viewports/TextureViewport';
 import { WorldViewport } from './viewports/WorldViewport';
 import type { ResourceSchema } from '@/lib/schema/types';
-import { pickProfileByKey } from '@/lib/editor/registry';
+import { pickRenderBinding } from '@/lib/editor/bindings';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -69,8 +69,8 @@ function ViewportPaneInner({
 		return <TextureViewport />;
 	}
 
-	const profile = pickProfileByKey(resource.key, data);
-	const Overlay = profile?.overlay;
+	const binding = pickRenderBinding(resource.key, data);
+	const Overlay = binding?.overlay;
 	if (!Overlay) {
 		return (
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground">

@@ -49,7 +49,7 @@ import { useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { WorldViewport } from '@/components/schema-editor/viewports/WorldViewport';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
-import { pickProfileByKey } from '@/lib/editor/registry';
+import { pickRenderBinding } from '@/lib/editor/bindings';
 import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorkspaceContextValue } from '@/context/WorkspaceContext.types';
@@ -125,8 +125,8 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange, isActive,
 	// profile registered for the resource key — no per-key switch here
 	// means new versioned profiles (e.g. AISections V4/V6) automatically
 	// participate once their profile lands in the registry (ADR-0008).
-	const profile = pickProfileByKey(descriptor.resourceKey, descriptor.model);
-	const Overlay = profile?.overlay;
+	const binding = pickRenderBinding(descriptor.resourceKey, descriptor.model);
+	const Overlay = binding?.overlay;
 	if (!Overlay) return null;
 	return (
 		<Overlay

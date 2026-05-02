@@ -73,13 +73,18 @@ import {
 } from '@/components/schema-editor/ShortcutsHelp';
 import { getHandlerByKey } from '@/lib/core/registry';
 import { pickProfileByKey } from '@/lib/editor/registry';
+import { pickRenderBinding } from '@/lib/editor/bindings';
 import type { NodePath } from '@/lib/schema/walk';
 
 // Per-resource schema and extension lookup is now a single call into the
 // editor registry (ADR-0008). The previous per-key `EXTENSIONS_BY_KEY` map +
 // `getSchemaByKey` calls have been folded into `pickProfileByKey(key, model)`,
 // which inspects the model's discriminator (e.g. AISections's `kind: 'v12'`)
-// to pick the right schema/extensions/overlay for variant resources.
+// to pick the right schema for variant resources. The React-laden bits
+// (extension registries) come from `pickRenderBinding` — split out so the
+// helper modules under `src/components/workspace/` can resolve schema and
+// the variant suffix without dragging overlay components into their
+// import graph.
 
 // ---------------------------------------------------------------------------
 // Inspector / viewport host — both consume the Selection
@@ -122,11 +127,15 @@ function SelectedSchemaEditorProvider({
 		const list = selectedBundle.parsedResourcesAll.get(selection.resourceKey);
 		return list?.[selection.index] ?? undefined;
 	}, [selection, selectedBundle]);
-	// Profile picks the right schema + extension registry for the model's
-	// variant — single-profile resources resolve unambiguously, AISections
-	// (and future versioned types) narrow on `kind`.
+	// Profile picks the right schema for the model's variant; the matching
+	// render binding supplies the React-laden extension registry —
+	// single-profile resources resolve both unambiguously, AISections (and
+	// future versioned types) narrow on `kind`.
 	const profile = isInstanceOrSchema && selection?.resourceKey
 		? pickProfileByKey(selection.resourceKey, data)
+		: undefined;
+	const binding = isInstanceOrSchema && selection?.resourceKey
+		? pickRenderBinding(selection.resourceKey, data)
 		: undefined;
 	const schema = profile?.schema;
 
@@ -164,7 +173,7 @@ function SelectedSchemaEditorProvider({
 			onChange={onChange}
 			selectedPath={selection.path}
 			onSelectedPathChange={setPath}
-			extensions={profile?.extensions}
+			extensions={binding?.extensions}
 		>
 			{children}
 		</SchemaEditorProvider>
@@ -342,12 +351,19 @@ function RightInspector() {
 		);
 	}
 
-	// Instance / Schema → the schema editor inspector takes over. Use the
-	// editor registry to confirm a profile exists for this resource type;
-	// the actual schema/extensions are resolved on the model inside
-	// SelectedSchemaEditorProvider.
+	// Instance / Schema → the schema editor inspector takes over. Resolve
+	// the active model first so multi-profile resources (e.g. AISections
+	// V12 vs V4) disambiguate correctly — passing `null` here would make
+	// `pickProfileByKey` return `undefined` whenever more than one profile
+	// is registered, falsely rendering the "No inspector" fallback for
+	// versioned resources.
+	const inspectorBundle = bundles.find((b) => b.id === selection.bundleId);
+	const inspectorData =
+		inspectorBundle && selection.resourceKey != null && selection.index != null
+			? inspectorBundle.parsedResourcesAll.get(selection.resourceKey)?.[selection.index]
+			: undefined;
 	const profile = selection.resourceKey
-		? pickProfileByKey(selection.resourceKey, null)
+		? pickProfileByKey(selection.resourceKey, inspectorData ?? null)
 		: undefined;
 	if (!profile && selection.resourceKey) {
 		return wrapWithBulk(

@@ -36,6 +36,7 @@ import type {
 	ResourceHandler,
 } from '@/lib/core/registry/handler';
 import { getSchemaByKey } from '@/lib/schema/resources';
+import { pickProfileByKey, profileSuffixFor } from '@/lib/editor/registry';
 import type {
 	FieldSchema,
 	ListFieldSchema,
@@ -541,7 +542,16 @@ export function buildWorkspaceFlat({
 
 		for (const entry of entries) {
 			const handler = getHandlerByKey(entry.key);
-			const label = handler?.name ?? entry.key;
+			const baseLabel = handler?.name ?? entry.key;
+			// Variant suffix on the row label — `AI Sections (v4 prototype)`
+			// when a non-primary EditorProfile matches the model. Single-
+			// instance resources (AI Sections, TrafficData, etc.) inspect
+			// `instances[0]`; multi-instance resources use the same probe
+			// because no current resource type has both multiple instances
+			// AND multiple variants. When that combination lands the suffix
+			// would migrate to per-instance rows below.
+			const variantSuffix = profileSuffixFor(entry.key, entry.instances[0]);
+			const label = variantSuffix ? `${baseLabel} (${variantSuffix})` : baseLabel;
 			const isMulti = entry.count > 1;
 			const rtKey = resourceTypeKey(bundle.id, entry.key);
 			const visibilityRelevant = isVisibilityRelevantKey(entry.key);
@@ -593,8 +603,13 @@ export function buildWorkspaceFlat({
 						selection!.bundleId === bundle.id &&
 						selection!.resourceKey === entry.key &&
 						selection!.index === i;
-					const schema = getSchemaByKey(entry.key);
 					const data = entry.instances[i];
+					// Per-instance schema lookup so each instance can resolve to
+					// its own variant (e.g., a future bundle that mixes V4 and
+					// V12 AI Sections in the same resource list). Falls back to
+					// the legacy schema lookup when no profile is registered
+					// for the key — keeps ad-hoc / non-versioned types working.
+					const schema = pickProfileByKey(entry.key, data)?.schema ?? getSchemaByKey(entry.key);
 					const expandThisInstance = instanceSelected;
 					const instanceLabel = deriveInstanceLabel(
 						handler,
@@ -634,8 +649,8 @@ export function buildWorkspaceFlat({
 			} else {
 				// Single-instance: schema subtree hangs directly under the row.
 				const instanceSelected = isSelected;
-				const schema = getSchemaByKey(entry.key);
 				const data = entry.instances[0];
+				const schema = pickProfileByKey(entry.key, data)?.schema ?? getSchemaByKey(entry.key);
 				if (instanceSelected && schema && data != null) {
 					out.push(
 						...buildSchemaFlat(

@@ -13,7 +13,7 @@
 // editor sites (`WorkspacePage`, `WorldViewportComposition`, `ViewportPane`)
 // only see the lookup helpers — never the registration array directly.
 
-import { aiSectionsV12Profile } from './profiles/aiSections';
+import { aiSectionsV12Profile, aiSectionsV4Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
@@ -48,7 +48,11 @@ const ENTRIES: RegistryEntry[] = [
 	{
 		typeId: 0x10001,
 		key: 'aiSections',
-		profiles: [aiSectionsV12Profile],
+		// Order matters: the FIRST profile is treated as the type's "primary"
+		// variant by `profileSuffixFor` (V12 retail stays bare, V4 prototype
+		// gets a `(v4 prototype)` suffix on the tree row). When V6 lands, it
+		// follows V4 in the list — same suffix treatment.
+		profiles: [aiSectionsV12Profile, aiSectionsV4Profile],
 	},
 	{
 		typeId: 0x10003,
