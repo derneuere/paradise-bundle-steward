@@ -1,8 +1,8 @@
-// AISectionsLegacyOverlay — read-only WorldViewport overlay for the V4 (and
-// later V6) prototype AI Sections data. Reads the legacy model directly —
-// no adapter to the V12 shape — so the prototype's parallel cornersX[4] +
-// cornersZ[4] storage, dangerRating enum, and Vector4 midPosition fields
-// are visible to the rendering code without lossy translation.
+// AISectionsLegacyOverlay — WorldViewport overlay for the V4/V6 prototype
+// AI Sections data. Reads the legacy model directly — no adapter to the V12
+// shape — so the prototype's parallel cornersX[4] + cornersZ[4] storage,
+// dangerRating enum, and Vector4 midPosition fields are visible to the
+// rendering code without lossy translation.
 //
 // Visual conventions mirror `AISectionsOverlay` (V12) so the two overlays
 // look like obvious siblings:
@@ -24,16 +24,21 @@
 //   - ['legacy', 'sections', i, 'portals', p, 'boundaryLines', l]     → boundary line
 //   - ['legacy', 'sections', i, 'noGoLines', l]                       → no-go line
 //
-// **No edit ops** — no onChange, no gizmo, no corner handles, no edge
-// handles, no snap toggle, no marquee. Edit ops land incrementally in
-// future "Legacy edit op:" issues.
+// Edit ops: just one — `Duplicate section through this edge` from the edge
+// right-click menu. No translate gizmo, no corner handles, no snap toggle,
+// no marquee yet — those are follow-up slices once the V4 schema unfreezes
+// further fields. The op routes through `duplicateLegacySectionThroughEdge`
+// in `aiSectionsOps.ts`; see issue #44.
 //
-// 3D primitives (BatchedSections, SelectionOverlay, SectionLabel) live in
-// `@/components/aisections/shared` so the V12 overlay consumes the same
-// code path — bug fixes land in both at once. See issue #35.
+// 3D primitives (BatchedSections, SelectionOverlay, SectionLabel,
+// EdgeHandles, EdgeContextMenu) live in `@/components/aisections/shared`
+// so the V12 overlay consumes the same code path — bug fixes land in both
+// at once. See issue #35.
 
 import { useMemo, useState, useCallback } from 'react';
 import { Html, Line } from '@react-three/drei';
+import { Copy } from 'lucide-react';
+import { useResetOnChange } from '@/hooks/useResetOnChange';
 import type {
 	ParsedAISectionsV4,
 	ParsedAISectionsV6,
@@ -41,9 +46,12 @@ import type {
 	LegacyAISectionsData,
 } from '@/lib/core/aiSections';
 import { LegacyDangerRating } from '@/lib/core/aiSections';
+import { duplicateLegacySectionThroughEdge } from '@/lib/core/aiSectionsOps';
 import {
 	BatchedSections,
 	buildBatchedSections,
+	EdgeContextMenu,
+	EdgeHandles,
 	SectionLabel,
 	SelectionOverlay,
 	portalGeo,
@@ -55,6 +63,7 @@ import {
 } from '@/components/aisections/shared';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
+import { useWorldViewportHtmlSlot } from './WorldViewport';
 
 // ---------------------------------------------------------------------------
 // Path → marker (exported for tests)
@@ -179,21 +188,35 @@ function SelectedSectionDetail({
 	section: sec,
 	data,
 	marker,
+	corners,
 	onPickPortal,
 	onPickBoundaryLine,
 	onPickNoGoLine,
+	hoveredEdge,
+	onHoverEdge,
+	onEdgeContextMenu,
 }: {
 	section: LegacyAISection;
 	data: LegacyAISectionsData;
 	marker: LegacyAISectionMarker;
+	corners: Corner[];
 	onPickPortal: (portalIndex: number) => void;
 	onPickBoundaryLine: (portalIndex: number, lineIndex: number) => void;
 	onPickNoGoLine: (lineIndex: number) => void;
+	hoveredEdge: number | null;
+	onHoverEdge: (edgeIdx: number | null) => void;
+	onEdgeContextMenu: (edgeIdx: number, screenX: number, screenY: number) => void;
 }) {
 	if (!sec) return null;
 
 	return (
 		<>
+			<EdgeHandles
+				corners={corners}
+				hoveredEdge={hoveredEdge}
+				onHoverEdge={onHoverEdge}
+				onContextMenu={onEdgeContextMenu}
+			/>
 			{sec.portals.map((portal, pi) => {
 				// midPosition is a vpu::Vector3 on the wire (xyz + 4 bytes of
 				// structural padding); the wrapper stores it as a Vector4 with
@@ -285,12 +308,21 @@ type Props = {
 	data: ParsedAISectionsV4 | ParsedAISectionsV6;
 	selectedPath: NodePath;
 	onSelect: (path: NodePath) => void;
+	onChange?: (next: ParsedAISectionsV4 | ParsedAISectionsV6) => void;
+	/** True when this overlay owns the active selection — gates HTML-slot
+	 *  registration of the edge context menu. Defaults to `true` so single-
+	 *  resource (legacy per-page) routes don't have to thread it. */
+	isActive?: boolean;
 };
 
 export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 | ParsedAISectionsV6> = ({
-	data, selectedPath, onSelect,
+	data, selectedPath, onSelect, onChange, isActive = true,
 }: Props) => {
 	const [hoverSectionIndex, setHoverSectionIndex] = useState<number | null>(null);
+	const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
+	const [edgeMenu, setEdgeMenu] = useState<
+		{ x: number; y: number; sectionIndex: number; edgeIdx: number } | null
+	>(null);
 
 	const legacy = data.legacy;
 	const sections = legacy.sections;
@@ -331,6 +363,48 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 		onSelect(legacyAISectionMarkerPath({ kind: 'noGoLine', sectionIndex: selectedSectionIndex, lineIndex }));
 	}, [onSelect, selectedSectionIndex]);
 
+	// Reset transient edge UI when the selected section changes — the
+	// hover / open-menu state belongs to a section, not the overlay.
+	useResetOnChange(selectedSectionIndex, () => {
+		setHoveredEdge(null);
+		setEdgeMenu(null);
+	});
+
+	const handleEdgeContextMenu = useCallback(
+		(edgeIdx: number, screenX: number, screenY: number) => {
+			if (selectedSectionIndex == null) return;
+			setEdgeMenu({
+				x: screenX,
+				y: screenY,
+				sectionIndex: selectedSectionIndex,
+				edgeIdx,
+			});
+		},
+		[selectedSectionIndex],
+	);
+
+	const handleDuplicateThroughEdge = useCallback(() => {
+		if (!edgeMenu || !onChange) return;
+		const nextLegacy = duplicateLegacySectionThroughEdge(
+			legacy,
+			edgeMenu.sectionIndex,
+			edgeMenu.edgeIdx,
+		);
+		// Re-wrap into the discriminated-union root so the page's setAtPath([])
+		// receives the same shape it gave us. `version` and `kind` are
+		// unchanged — the wrapper exists purely as a structural tag.
+		const nextRoot = { ...data, legacy: nextLegacy } as ParsedAISectionsV4 | ParsedAISectionsV6;
+		onChange(nextRoot);
+		const dupIdx = nextLegacy.sections.length - 1;
+		// Defer selection so it lands on the post-update model — avoids a
+		// brief flash where the inspector points at the new index but the
+		// model still has the old length. Mirrors the V12 overlay's flow.
+		requestAnimationFrame(() => {
+			onSelect(legacyAISectionMarkerPath({ kind: 'section', sectionIndex: dupIdx }));
+		});
+		setEdgeMenu(null);
+	}, [data, legacy, edgeMenu, onChange, onSelect]);
+
 	return (
 		<>
 			<BatchedSections
@@ -355,18 +429,78 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 				</SectionLabel>
 			)}
 
-			{selectedSectionIndex != null && selSection && (
+			{selectedSectionIndex != null && selSection && selCorners && (
 				<SelectedSectionDetail
 					section={selSection}
 					data={legacy}
 					marker={marker}
+					corners={selCorners}
 					onPickPortal={handlePickPortal}
 					onPickBoundaryLine={handlePickBoundaryLine}
 					onPickNoGoLine={handlePickNoGoLine}
+					hoveredEdge={hoveredEdge}
+					onHoverEdge={setHoveredEdge}
+					onEdgeContextMenu={handleEdgeContextMenu}
 				/>
 			)}
+
+			<HtmlSiblings
+				isActive={isActive}
+				edgeMenu={edgeMenu}
+				canDuplicate={!!onChange}
+				onDuplicateThroughEdge={handleDuplicateThroughEdge}
+				onCloseEdgeMenu={() => setEdgeMenu(null)}
+			/>
 		</>
 	);
 };
+
+// HtmlSiblings — DOM-overlay JSX for the edge context menu, registered into
+// the WorldViewport chrome's HTML slot so it floats above the WebGL surface.
+// Kept as a separate component (mirroring the V12 overlay) so the slot
+// re-registration deps can be tracked precisely without dragging in the
+// rest of the overlay's state.
+function HtmlSiblings({
+	isActive,
+	edgeMenu,
+	canDuplicate,
+	onDuplicateThroughEdge,
+	onCloseEdgeMenu,
+}: {
+	isActive: boolean;
+	edgeMenu: { x: number; y: number; sectionIndex: number; edgeIdx: number } | null;
+	canDuplicate: boolean;
+	onDuplicateThroughEdge: () => void;
+	onCloseEdgeMenu: () => void;
+}) {
+	const node = useMemo(
+		() => (
+			<>
+				{edgeMenu && (
+					<EdgeContextMenu
+						x={edgeMenu.x}
+						y={edgeMenu.y}
+						edgeIdx={edgeMenu.edgeIdx}
+						onClose={onCloseEdgeMenu}
+					>
+						<button
+							type="button"
+							className="w-full text-left flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+							onClick={onDuplicateThroughEdge}
+							disabled={!canDuplicate}
+							title={canDuplicate ? undefined : 'No edit handler wired — overlay is read-only here'}
+						>
+							<Copy className="h-3.5 w-3.5" />
+							Duplicate section through this edge
+						</button>
+					</EdgeContextMenu>
+				)}
+			</>
+		),
+		[edgeMenu, canDuplicate, onDuplicateThroughEdge, onCloseEdgeMenu],
+	);
+	useWorldViewportHtmlSlot(isActive ? node : null);
+	return null;
+}
 
 export default AISectionsLegacyOverlay;

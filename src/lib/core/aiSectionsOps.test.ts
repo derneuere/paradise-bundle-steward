@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	deleteSection,
+	duplicateLegacySectionThroughEdge,
 	duplicateSectionThroughEdge,
 	snapCornerOffset,
 	snapSectionOffset,
@@ -15,8 +16,13 @@ import {
 import {
 	AI_SECTIONS_VERSION,
 	EResetSpeedType,
+	LegacyDangerRating,
+	LegacyEDistrict,
 	SectionSpeed,
 	type AISection,
+	type LegacyAISection,
+	type LegacyAISectionsData,
+	type LegacyPortal,
 	type ParsedAISectionsV12,
 	type Portal,
 	type SectionResetPair,
@@ -1092,5 +1098,232 @@ describe('duplicate ↔ delete round-trip', () => {
 		// deleted), so it gets dropped — leaving the section in its original
 		// "no portals" state.
 		expect(restored.sections[0].portals).toEqual([]);
+	});
+});
+
+// =============================================================================
+// duplicateLegacySectionThroughEdge (V4 / V6 prototype layouts)
+// =============================================================================
+
+function makeLegacyV4Section(opts: {
+	cornersX?: number[];
+	cornersZ?: number[];
+	portals?: LegacyPortal[];
+	dangerRating?: number;
+	flags?: number;
+} = {}): LegacyAISection {
+	return {
+		portals: opts.portals ?? [],
+		noGoLines: [],
+		// Default unit square mirroring the V12 builder above (CCW in XZ,
+		// edge 0 = bottom, edge 1 = right, edge 2 = top, edge 3 = left).
+		cornersX: opts.cornersX ?? [0, 10, 10, 0],
+		cornersZ: opts.cornersZ ?? [0, 0, 10, 10],
+		dangerRating: opts.dangerRating ?? LegacyDangerRating.E_DANGER_RATING_NORMAL,
+		flags: opts.flags ?? 0,
+	};
+}
+
+function makeLegacyV6Section(opts: {
+	cornersX?: number[];
+	cornersZ?: number[];
+	portals?: LegacyPortal[];
+	dangerRating?: number;
+	flags?: number;
+	spanIndex?: number;
+	district?: number;
+} = {}): LegacyAISection {
+	return {
+		...makeLegacyV4Section(opts),
+		spanIndex: opts.spanIndex ?? -1,
+		district: opts.district ?? LegacyEDistrict.E_DISTRICT_SUBURBS,
+	};
+}
+
+function makeLegacyModel(version: 4 | 6, sections: LegacyAISection[]): LegacyAISectionsData {
+	return { version, sections };
+}
+
+describe('duplicateLegacySectionThroughEdge', () => {
+	describe('V4 path', () => {
+		it('appends the duplicate at the end of sections', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section(), makeLegacyV4Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			expect(next.sections).toHaveLength(3);
+			expect(next).not.toBe(model);
+			expect(next.sections[0]).not.toBe(model.sections[0]); // source mutated structurally
+		});
+
+		it('places the duplicate adjacent on the chosen edge (rectangle: opposite edge lands on chosen edge)', () => {
+			// Same square as V12 — edge 0 (bottom) → translate −Z by 10 units.
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			const dup = next.sections[1];
+			expect(dup.cornersX).toEqual([0, 10, 10, 0]);
+			expect(dup.cornersZ).toEqual([-10, -10, 0, 0]);
+		});
+
+		it('cross-links the new portal pair via linkSection', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			const srcPortal = next.sections[0].portals.at(-1)!;
+			const dupPortal = next.sections[1].portals[0];
+			expect(srcPortal.linkSection).toBe(1);
+			expect(dupPortal.linkSection).toBe(0);
+		});
+
+		it('shares midPosition between the portal pair (same world-space anchor)', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			const srcPortal = next.sections[0].portals.at(-1)!;
+			const dupPortal = next.sections[1].portals[0];
+			expect(srcPortal.midPosition).toEqual(dupPortal.midPosition);
+			// Edge 0 midpoint in world space: (5, 0). Y from no-portals fallback = 0.
+			// W is structural padding — fresh portals zero it.
+			expect(srcPortal.midPosition).toEqual({ x: 5, y: 0, z: 0, w: 0 });
+		});
+
+		it('reverses the boundary-line winding on the duplicate side', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			const srcBL = next.sections[0].portals.at(-1)!.boundaryLines[0].verts;
+			const dupBL = next.sections[1].portals[0].boundaryLines[0].verts;
+			expect(srcBL).toEqual({ x: 0, y: 0, z: 10, w: 0 });
+			expect(dupBL).toEqual({ x: 10, y: 0, z: 0, w: 0 });
+		});
+
+		it('copies anchor height from the source\'s first existing portal midPosition.y', () => {
+			const seedPortal: LegacyPortal = {
+				midPosition: { x: 0, y: 42.5, z: 0, w: 0 },
+				boundaryLines: [],
+				linkSection: 0,
+			};
+			const model = makeLegacyModel(4, [makeLegacyV4Section({ portals: [seedPortal] })]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			expect(next.sections[0].portals.at(-1)!.midPosition.y).toBe(42.5);
+			expect(next.sections[1].portals[0].midPosition.y).toBe(42.5);
+		});
+
+		it('inherits dangerRating + flags from the source', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section({
+				dangerRating: LegacyDangerRating.E_DANGER_RATING_DANGEROUS,
+				flags: 0x01,
+			})]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			const dup = next.sections[1];
+			expect(dup.dangerRating).toBe(LegacyDangerRating.E_DANGER_RATING_DANGEROUS);
+			expect(dup.flags).toBe(0x01);
+		});
+
+		it('does not synthesise V6-only spanIndex / district on a V4 source', () => {
+			// Issue #44 documented choice: V4 sections carry no spanIndex /
+			// district. The duplicate must not leak undefined-into-defined
+			// either, since the V4 RecordSchema has no fields for them.
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			const dup = next.sections[1];
+			expect('spanIndex' in dup).toBe(false);
+			expect('district' in dup).toBe(false);
+		});
+
+		it('leaves noGoLines empty on the duplicate', () => {
+			const src = makeLegacyV4Section();
+			src.noGoLines = [{ verts: { x: 1, y: 2, z: 3, w: 4 } }];
+			const model = makeLegacyModel(4, [src]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			expect(next.sections[1].noGoLines).toEqual([]);
+		});
+
+		it('does not touch unrelated sections or their linkSection indices', () => {
+			const otherPortal: LegacyPortal = {
+				midPosition: { x: 1, y: 2, z: 3, w: 0 },
+				boundaryLines: [],
+				linkSection: 0,
+			};
+			const other = makeLegacyV4Section({ portals: [otherPortal] });
+			const model = makeLegacyModel(4, [makeLegacyV4Section(), other]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			expect(next.sections[1]).toBe(other);
+			expect(next.sections[1].portals[0].linkSection).toBe(0);
+		});
+
+		it('throws on out-of-range srcIdx', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			expect(() => duplicateLegacySectionThroughEdge(model, -1, 0)).toThrow(RangeError);
+			expect(() => duplicateLegacySectionThroughEdge(model, 5, 0)).toThrow(RangeError);
+		});
+
+		it('throws on out-of-range edgeIdx', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			expect(() => duplicateLegacySectionThroughEdge(model, 0, -1)).toThrow(RangeError);
+			expect(() => duplicateLegacySectionThroughEdge(model, 0, 4)).toThrow(RangeError);
+		});
+
+		it('throws on a degenerate (zero-length) edge', () => {
+			const degenerate = makeLegacyV4Section({
+				cornersX: [5, 5, 10, 10], // corners 0+1 coincide → edge 0 zero-length
+				cornersZ: [5, 5, 5, 0],
+			});
+			const model = makeLegacyModel(4, [degenerate]);
+			expect(() => duplicateLegacySectionThroughEdge(model, 0, 0)).toThrow(/degenerate/);
+		});
+
+		it('works for each edge of a rectangle (offset direction adapts)', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			const cases: { edgeIdx: number; expected: { dx: number; dz: number } }[] = [
+				{ edgeIdx: 0, expected: { dx: 0, dz: -10 } }, // bottom → translate −Z
+				{ edgeIdx: 1, expected: { dx: 10, dz: 0 } },  // right  → translate +X
+				{ edgeIdx: 2, expected: { dx: 0, dz: 10 } },  // top    → translate +Z
+				{ edgeIdx: 3, expected: { dx: -10, dz: 0 } }, // left   → translate −X
+			];
+			for (const { edgeIdx, expected } of cases) {
+				const next = duplicateLegacySectionThroughEdge(model, 0, edgeIdx);
+				const dup = next.sections[1];
+				expect({
+					dx: dup.cornersX[0] - model.sections[0].cornersX[0],
+					dz: dup.cornersZ[0] - model.sections[0].cornersZ[0],
+				}).toEqual(expected);
+			}
+		});
+
+		it('preserves the wrapper version field', () => {
+			const model = makeLegacyModel(4, [makeLegacyV4Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			expect(next.version).toBe(4);
+		});
+	});
+
+	describe('V6 path', () => {
+		it('inherits spanIndex + district from the source', () => {
+			// Issue #44 acceptance criterion: V6 has spanIndex + district →
+			// duplicated section inherits both. The user can edit afterwards.
+			const model = makeLegacyModel(6, [makeLegacyV6Section({
+				spanIndex: 42,
+				district: LegacyEDistrict.E_DISTRICT_AIRPORT,
+			})]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			const dup = next.sections[1];
+			expect(dup.spanIndex).toBe(42);
+			expect(dup.district).toBe(LegacyEDistrict.E_DISTRICT_AIRPORT);
+		});
+
+		it('preserves the wrapper version field', () => {
+			const model = makeLegacyModel(6, [makeLegacyV6Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			expect(next.version).toBe(6);
+		});
+
+		it('preserves spanIndex = -1 (no-span sentinel) on the duplicate', () => {
+			const model = makeLegacyModel(6, [makeLegacyV6Section({ spanIndex: -1 })]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			expect(next.sections[1].spanIndex).toBe(-1);
+		});
+
+		it('cross-links the portal pair (same as V4)', () => {
+			const model = makeLegacyModel(6, [makeLegacyV6Section()]);
+			const next = duplicateLegacySectionThroughEdge(model, 0, 0);
+			expect(next.sections[0].portals.at(-1)!.linkSection).toBe(1);
+			expect(next.sections[1].portals[0].linkSection).toBe(0);
+		});
 	});
 });

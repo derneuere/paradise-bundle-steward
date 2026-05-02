@@ -14,6 +14,10 @@
 import type {
 	AISection,
 	BoundaryLine,
+	LegacyAISection,
+	LegacyAISectionsData,
+	LegacyBoundaryLine,
+	LegacyPortal,
 	ParsedAISectionsV12,
 	Portal,
 	Vector2,
@@ -169,6 +173,159 @@ function nextFreeId(model: ParsedAISectionsV12): number {
 	}
 	// Wrap defensively in case ids approach the u32 ceiling.
 	return ((max + 1) >>> 0);
+}
+
+// =============================================================================
+// Legacy (V4 / V6) duplicate-through-edge
+// =============================================================================
+
+// V4/V6 sections store corners as parallel `cornersX[4]` / `cornersZ[4]` f32
+// arrays (V12 stores them via a Vector2[4] pointer). The geometry math is
+// the same — these helpers project the parallel arrays into Vector2 form
+// and back so the duplicate-through-edge math doesn't have to fork on
+// storage layout.
+function legacyCornersAsVec2(sec: LegacyAISection): Vector2[] {
+	const n = Math.min(sec.cornersX.length, sec.cornersZ.length);
+	const out: Vector2[] = new Array(n);
+	for (let i = 0; i < n; i++) out[i] = { x: sec.cornersX[i], y: sec.cornersZ[i] };
+	return out;
+}
+
+/**
+ * Duplicate `srcIdx`'s legacy (V4 / V6) section through one of its edges,
+ * wiring up a mirrored portal pair so the two sections are AI-connected.
+ * Mirrors {@link duplicateSectionThroughEdge} for the V12 retail shape; the
+ * geometry math is identical — corners get translated perpendicular to the
+ * chosen edge by `2 × distance(centroid, edge)`, the portal pair shares a
+ * world-space midpoint anchor, and the duplicate's boundary line carries the
+ * reversed-winding endpoints.
+ *
+ * Identity differences from V12 (per issue #44):
+ *   - V4 sections have NO `id` field at all, so the duplicate's "identity"
+ *     is just its position in the array (the section's index IS its
+ *     identity in this format). dangerRating + flags are inherited from the
+ *     source.
+ *   - V6 adds `spanIndex` (StreetData span; -1 = none) and `district`
+ *     (BrnAI::EDistrict). Both are inherited from the source — the
+ *     duplicate sits in the same district and on the same span as its
+ *     parent unless the user edits afterwards.
+ *
+ * Anchor height: copied from the source's first existing portal's
+ * `midPosition.y`, or 0 when the source has no portals. Corners on the
+ * legacy section live on the XZ plane and don't carry a Y; the portal
+ * `midPosition.w` (vpu::Vector3 structural padding word) is set to 0 on the
+ * new portals.
+ *
+ * Existing `linkSection` indices in unrelated portals stay valid because
+ * the duplicate is always appended at the end of `legacy.sections`.
+ *
+ * @throws if `srcIdx` or `edgeIdx` is out of range, or if the chosen edge
+ *         is degenerate (zero-length).
+ */
+export function duplicateLegacySectionThroughEdge(
+	model: LegacyAISectionsData,
+	srcIdx: number,
+	edgeIdx: number,
+): LegacyAISectionsData {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	const src = model.sections[srcIdx];
+	const corners = legacyCornersAsVec2(src);
+	const N = corners.length;
+	if (N < 3) {
+		throw new Error(`Section ${srcIdx} has only ${N} corners; need at least 3 to define an edge`);
+	}
+	if (edgeIdx < 0 || edgeIdx >= N) {
+		throw new RangeError(`edgeIdx ${edgeIdx} out of range [0, ${N})`);
+	}
+
+	const A = corners[edgeIdx];
+	const B = corners[(edgeIdx + 1) % N];
+	const edgeDir = v2sub(B, A);
+	const edgeLen = v2len(edgeDir);
+	if (edgeLen === 0) {
+		throw new Error(`Edge ${edgeIdx} of section ${srcIdx} is degenerate (zero length)`);
+	}
+
+	const ctr = centroid(corners);
+	const midpoint: Vector2 = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 };
+	const outward = v2sub(midpoint, ctr);
+	let perp = v2perp(edgeDir);
+	perp = v2scale(perp, 1 / v2len(perp));
+	if (v2dot(perp, outward) < 0) perp = v2scale(perp, -1);
+
+	const offsetDist = 2 * v2dot(outward, perp);
+	const offset = v2scale(perp, offsetDist);
+
+	const dupCornersX: number[] = new Array(N);
+	const dupCornersZ: number[] = new Array(N);
+	for (let i = 0; i < N; i++) {
+		const c = v2add(corners[i], offset);
+		dupCornersX[i] = c.x;
+		dupCornersZ[i] = c.y;
+	}
+
+	// Anchor Y: legacy portals carry the height in midPosition.y. midPosition.w
+	// is `vpu::Vector3` structural padding — zeroed on freshly created portals
+	// (the V4 parser preserves any non-zero W on existing portals for
+	// round-trip fidelity, but a duplicate has no source W to inherit).
+	const anchorY = src.portals[0]?.midPosition.y ?? 0;
+	const anchorMid = { x: midpoint.x, y: anchorY, z: midpoint.y, w: 0 };
+
+	const srcBoundary: LegacyBoundaryLine = { verts: { x: A.x, y: A.y, z: B.x, w: B.y } };
+	const dupBoundary: LegacyBoundaryLine = { verts: { x: B.x, y: B.y, z: A.x, w: A.y } };
+
+	const dupIdx = model.sections.length;
+
+	const srcPortalNew: LegacyPortal = {
+		midPosition: { ...anchorMid },
+		boundaryLines: [srcBoundary],
+		linkSection: dupIdx,
+	};
+
+	const dupPortal: LegacyPortal = {
+		midPosition: { ...anchorMid },
+		boundaryLines: [dupBoundary],
+		linkSection: srcIdx,
+	};
+
+	const dupSection: LegacyAISection = {
+		portals: [dupPortal],
+		noGoLines: [],
+		// Always emit length-4 arrays (matches the on-disk layout —
+		// CORNERS_PER_LEGACY_SECTION = 4 in aiSectionsLegacy.ts). Pad with
+		// zeros if the source happened to be malformed.
+		cornersX: padTo4(dupCornersX),
+		cornersZ: padTo4(dupCornersZ),
+		dangerRating: src.dangerRating,
+		flags: src.flags,
+	};
+	// V6-only fields: only emit when the source carries them. Round-trip
+	// safety — a V4 section that gains an undefined spanIndex/district would
+	// no longer match the V4 schema's RecordSchema definition.
+	if (src.spanIndex !== undefined) dupSection.spanIndex = src.spanIndex;
+	if (src.district !== undefined) dupSection.district = src.district;
+
+	const updatedSrc: LegacyAISection = {
+		...src,
+		portals: [...src.portals, srcPortalNew],
+	};
+
+	const sections: LegacyAISection[] = model.sections.map((s, i) => (i === srcIdx ? updatedSrc : s));
+	sections.push(dupSection);
+
+	return {
+		...model,
+		sections,
+	};
+}
+
+function padTo4(xs: number[]): number[] {
+	if (xs.length >= 4) return xs.slice(0, 4);
+	const out = xs.slice();
+	while (out.length < 4) out.push(0);
+	return out;
 }
 
 // =============================================================================
