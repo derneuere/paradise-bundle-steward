@@ -24,12 +24,18 @@
 //   - ['legacy', 'sections', i, 'portals', p, 'boundaryLines', l]     → boundary line
 //   - ['legacy', 'sections', i, 'noGoLines', l]                       → no-go line
 //
-// Edit ops: `Duplicate section through this edge` (#44) and corner-drag with
-// smart-cascade (#41). No translate gizmo, no snap toggle, no marquee yet —
-// those are follow-up slices. Snap-to-edges for corner drag is also a
-// follow-up (#43); the initial corner drag is no-snap. The ops route through
-// `duplicateLegacySectionThroughEdge` and `translateLegacyCornerWithShared`
-// in `aiSectionsOps.ts`.
+// Edit ops:
+//   - `Duplicate section through this edge` from the edge right-click menu
+//     (`duplicateLegacySectionThroughEdge` in `aiSectionsOps.ts`; issue #44).
+//   - Corner drag with smart-cascade — drags one corner of the selected
+//     section and any neighbour section sharing that corner moves with it
+//     (`translateLegacyCornerWithShared`; issue #41).
+//   - Section translate via the centred `TranslateGizmo` — drags the source
+//     section's corners + portals + no-go lines and cascades into linked
+//     neighbour sections (`translateLegacySectionWithLinks`; issue #42).
+//
+// Both drag paths are no-snap on this slice — snap-to-edges lands as #43.
+// Marquee select is still a future slice.
 //
 // 3D primitives (BatchedSections, SelectionOverlay, SectionLabel,
 // EdgeHandles, EdgeContextMenu) live in `@/components/aisections/shared`
@@ -50,8 +56,10 @@ import { LegacyDangerRating } from '@/lib/core/aiSections';
 import {
 	duplicateLegacySectionThroughEdge,
 	translateLegacyCornerWithShared,
+	translateLegacySectionWithLinks,
 } from '@/lib/core/aiSectionsOps';
 import { CornerHandles, type CornerDragOffset } from '@/components/aisections/CornerHandles';
+import { TranslateGizmo, type GizmoOffset } from '@/components/common/three/TranslateGizmo';
 import {
 	BatchedSections,
 	buildBatchedSections,
@@ -320,11 +328,15 @@ type Props = {
 	isActive?: boolean;
 };
 
-// Live drag state — same shape the V12 overlay uses, minus the section-
-// translate variant (no translate gizmo on legacy yet). Keeping the offset
-// in transient state means the underlying model isn't touched until release,
-// so one drag commits as one undo entry.
-type ActiveCornerDrag = { cornerIdx: number; offset: CornerDragOffset };
+// Live drag state — same discriminated-union shape the V12 overlay uses.
+// Two distinct drag flavours can be active (the gizmo translates the whole
+// section; corner handles deform the polygon), and they're mutually
+// exclusive while in flight. Keeping the offset in transient state means the
+// underlying model isn't touched until release, so one drag commits as one
+// undo entry.
+type ActiveDrag =
+	| { kind: 'section'; offset: GizmoOffset }
+	| { kind: 'corner'; cornerIdx: number; offset: CornerDragOffset };
 
 export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 | ParsedAISectionsV6> = ({
 	data, selectedPath, onSelect, onChange, isActive = true,
@@ -334,7 +346,7 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	const [edgeMenu, setEdgeMenu] = useState<
 		{ x: number; y: number; sectionIndex: number; edgeIdx: number } | null
 	>(null);
-	const [drag, setDrag] = useState<ActiveCornerDrag | null>(null);
+	const [drag, setDrag] = useState<ActiveDrag | null>(null);
 
 	const legacy = data.legacy;
 	const sections = legacy.sections;
@@ -347,16 +359,20 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	const selSection = selectedSectionIndex != null ? sections[selectedSectionIndex] ?? null : null;
 	const hovSection = hoverSectionIndex != null ? sections[hoverSectionIndex] ?? null : null;
 
-	// Live-preview model: while a drag is in flight, run the op on the live
-	// offset so the selection overlay AND any cascaded-neighbour highlights
-	// track the cursor. Try/catch swallows the rare case where the offset
-	// happens to land at exactly (0,0) and the op throws or returns the same
-	// model — preview still shows the source unchanged. Mirrors V12's
-	// previewModel derivation so both overlays read the same way.
+	// Live-preview model: while a drag is in flight, run the relevant op on
+	// the live offset so the selection overlay AND any cascaded-neighbour
+	// highlights track the cursor. Branches on `drag.kind` — section-translate
+	// vs corner-deform are independent ops with different cascade behaviour.
+	// Try/catch swallows the edge case where the offset happens to land at
+	// exactly (0,0) and the op short-circuits. Mirrors V12's previewModel
+	// derivation so both overlays read the same way.
 	const previewLegacy: LegacyAISectionsData | null = useMemo(() => {
 		if (selectedSectionIndex == null || !selSection || !drag) return null;
 		if (drag.offset.x === 0 && drag.offset.z === 0) return null;
 		try {
+			if (drag.kind === 'section') {
+				return translateLegacySectionWithLinks(legacy, selectedSectionIndex, drag.offset);
+			}
 			return translateLegacyCornerWithShared(legacy, selectedSectionIndex, drag.cornerIdx, drag.offset);
 		} catch {
 			return null;
@@ -379,9 +395,9 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	);
 
 	// Sections other than the dragged one whose corners moved as part of the
-	// smart cascade — highlight them in a distinct colour so the user sees
-	// which neighbours are deforming with them. Empty when no drag is active
-	// or when nothing cascaded.
+	// smart cascade — highlighted in a distinct colour so the user sees which
+	// neighbours are deforming or moving with them. Empty when no drag is
+	// active or when nothing cascaded. Mirrors the V12 overlay.
 	const affectedNeighbours = useMemo<{ idx: number; corners: Corner[] }[]>(() => {
 		if (!previewLegacy || selectedSectionIndex == null) return [];
 		const out: { idx: number; corners: Corner[] }[] = [];
@@ -394,6 +410,21 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 		return out;
 	}, [previewLegacy, selectedSectionIndex, legacy]);
 
+	// Centre of the selected section's polygon — anchor for the translate
+	// gizmo. Computed off `previewSection` so it tracks the live drag.
+	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
+		if (!previewSection) return null;
+		const n = legacyCornerCount(previewSection);
+		if (n === 0) return null;
+		let sx = 0, sz = 0;
+		for (let i = 0; i < n; i++) {
+			sx += previewSection.cornersX[i];
+			sz += previewSection.cornersZ[i];
+		}
+		return [sx / n, 1.5, sz / n];
+	}, [previewSection]);
+
+	const gizmoPixelSize = 90;
 	const cornerHandlePixelSize = 12;
 
 	const handlePickSection = useCallback((sectionIndex: number) => {
@@ -424,14 +455,30 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 		setDrag(null);
 	});
 
-	// Corner-drag callbacks. The continuous `onDrag` keeps preview state
-	// fresh; the one-shot `onCommit` runs the smart-cascade op and emits
-	// the new root through onChange — so a single drag yields a single
-	// onChange call and therefore a single undo entry. Without onChange
-	// we still preview but the commit is a no-op (read-only mode).
-	// Snap is intentionally absent on this slice — see issue #43.
+	// Drag callbacks — gizmo translates the whole section, corner handles
+	// deform a single corner. Both go through the smart-cascade ops on commit
+	// and emit the new root via onChange. Without onChange the previews still
+	// render but the commit is a no-op (read-only mode). Snap is deliberately
+	// absent on this slice — see issue #43.
+	const handleGizmoTranslate = useCallback((offset: GizmoOffset) => {
+		setDrag({ kind: 'section', offset });
+	}, []);
+
+	const handleGizmoCommit = useCallback((offset: GizmoOffset) => {
+		setDrag(null);
+		if (selectedSectionIndex == null || !onChange) return;
+		if (offset.x === 0 && offset.z === 0) return;
+		const nextLegacy = translateLegacySectionWithLinks(legacy, selectedSectionIndex, offset);
+		// Re-wrap into the discriminated-union root — same shape the page
+		// handed us. Mirrors the duplicate-through-edge flow above.
+		const nextRoot = { ...data, legacy: nextLegacy } as ParsedAISectionsV4 | ParsedAISectionsV6;
+		onChange(nextRoot);
+	}, [data, legacy, selectedSectionIndex, onChange]);
+
+	const handleGizmoCancel = useCallback(() => setDrag(null), []);
+
 	const handleCornerDrag = useCallback((cornerIdx: number, offset: CornerDragOffset) => {
-		setDrag({ cornerIdx, offset });
+		setDrag({ kind: 'corner', cornerIdx, offset });
 	}, []);
 
 	const handleCornerCommit = useCallback((cornerIdx: number, offset: CornerDragOffset) => {
@@ -523,7 +570,17 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 				/>
 			)}
 
-			{selCorners && (
+			{gizmoPosition && onChange && drag?.kind !== 'corner' && (
+				<TranslateGizmo
+					position={gizmoPosition}
+					pixelSize={gizmoPixelSize}
+					onTranslate={handleGizmoTranslate}
+					onCommit={handleGizmoCommit}
+					onCancel={handleGizmoCancel}
+				/>
+			)}
+
+			{selCorners && drag?.kind !== 'section' && (
 				<CornerHandles
 					corners={selCorners}
 					pixelSize={cornerHandlePixelSize}

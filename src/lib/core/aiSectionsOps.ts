@@ -482,6 +482,161 @@ function applyLinkFixUp(
 }
 
 // =============================================================================
+// Smart translate — legacy (V4 / V6) variant
+// =============================================================================
+
+/**
+ * Legacy (V4 / V6) sibling of {@link translateSectionWithLinks}. The cascade
+ * algorithm is identical — translate the source section's corners + portal
+ * anchors + boundary lines + no-go lines by `(dx, dz)`, then for each portal
+ * pointing at a neighbour `N` find `N`'s reverse portal (matched by
+ * `linkSection === srcIdx` AND coincident pre-translate `midPosition.xyz`)
+ * and shift it plus the corners on `N` that lie on the shared edge.
+ *
+ * Storage differences from V12:
+ *   - Corners are parallel `cornersX[]` / `cornersZ[]` f32 arrays instead of
+ *     a `Vector2[]`. The legacy section keeps both arrays in lock-step.
+ *   - Portal anchor is `midPosition: Vector4` (xyz + structural padding `w`)
+ *     vs V12's `position: Vector3`. The translate touches xyz only — `y`
+ *     and `w` carry vertical height and round-trip padding respectively.
+ *   - No `sectionResetPairs` — the legacy format predates that table, so
+ *     the V12 cross-reference invariance comment doesn't apply here.
+ *
+ * Cascades exactly one hop, same as V12 (see that function's docstring for
+ * why two-hop propagation isn't safe on cyclic neighbour graphs).
+ */
+export function translateLegacySectionWithLinks(
+	model: LegacyAISectionsData,
+	srcIdx: number,
+	offset: { x: number; z: number },
+): LegacyAISectionsData {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	if (offset.x === 0 && offset.z === 0) return model;
+
+	const src = model.sections[srcIdx];
+	const dx = offset.x;
+	const dz = offset.z;
+
+	const srcTranslated: LegacyAISection = {
+		...src,
+		cornersX: src.cornersX.map((x) => x + dx),
+		cornersZ: src.cornersZ.map((z) => z + dz),
+		portals: src.portals.map((p) => ({
+			...p,
+			midPosition: {
+				x: p.midPosition.x + dx,
+				y: p.midPosition.y,
+				z: p.midPosition.z + dz,
+				w: p.midPosition.w,
+			},
+			boundaryLines: p.boundaryLines.map((bl) => ({
+				verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+			})),
+		})),
+		noGoLines: src.noGoLines.map((bl) => ({
+			verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+		})),
+	};
+
+	const updates = new Map<number, LegacyAISection>();
+	updates.set(srcIdx, srcTranslated);
+
+	for (const oldPortal of src.portals) {
+		const targetIdx = oldPortal.linkSection;
+		if (targetIdx === srcIdx) continue;
+		if (targetIdx < 0 || targetIdx >= model.sections.length) continue;
+
+		const current = updates.get(targetIdx) ?? model.sections[targetIdx];
+		const fixed = applyLegacyLinkFixUp(current, srcIdx, oldPortal, dx, dz);
+		if (fixed !== current) updates.set(targetIdx, fixed);
+	}
+
+	const sections = model.sections.map((s, i) => updates.get(i) ?? s);
+	return { ...model, sections };
+}
+
+/**
+ * Per-neighbour cascade for the legacy variant: translate the matching
+ * reverse portal and the corners that lie on the shared edge. Mirrors
+ * {@link applyLinkFixUp} for the V12 retail layout — see that function's
+ * docstring for the matching strategy. Storage differences:
+ *   - corners come out of parallel `cornersX[]` / `cornersZ[]` arrays;
+ *   - portal anchor is `midPosition` (Vector4) — `w` is structural padding
+ *     and stays untouched on the translate.
+ */
+function applyLegacyLinkFixUp(
+	target: LegacyAISection,
+	srcIdx: number,
+	oldSrcPortal: LegacyPortal,
+	dx: number,
+	dz: number,
+): LegacyAISection {
+	const matchIdx = target.portals.findIndex(
+		(p) => p.linkSection === srcIdx && v3Approx(p.midPosition, oldSrcPortal.midPosition),
+	);
+
+	let portals = target.portals;
+	if (matchIdx >= 0) {
+		const old = target.portals[matchIdx];
+		const updated: LegacyPortal = {
+			...old,
+			midPosition: {
+				x: old.midPosition.x + dx,
+				y: old.midPosition.y,
+				z: old.midPosition.z + dz,
+				w: old.midPosition.w,
+			},
+			boundaryLines: old.boundaryLines.map((bl) => ({
+				verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+			})),
+		};
+		portals = target.portals.slice();
+		portals[matchIdx] = updated;
+	}
+
+	// Shift corners on the neighbour that coincide with the source portal's
+	// pre-translate boundary-line endpoints. Boundary lines are typically a
+	// single edge per portal but we walk every BL for the general case.
+	const sharedPoints: Vector2[] = [];
+	for (const bl of oldSrcPortal.boundaryLines) {
+		sharedPoints.push({ x: bl.verts.x, y: bl.verts.y });
+		sharedPoints.push({ x: bl.verts.z, y: bl.verts.w });
+	}
+
+	let cornersX = target.cornersX;
+	let cornersZ = target.cornersZ;
+	if (sharedPoints.length > 0) {
+		const N = Math.min(target.cornersX.length, target.cornersZ.length);
+		let cornersChanged = false;
+		const nextX = target.cornersX.slice();
+		const nextZ = target.cornersZ.slice();
+		for (let i = 0; i < N; i++) {
+			const c: Vector2 = { x: target.cornersX[i], y: target.cornersZ[i] };
+			if (sharedPoints.some((p) => v2Approx(c, p))) {
+				cornersChanged = true;
+				nextX[i] = c.x + dx;
+				nextZ[i] = c.y + dz;
+			}
+		}
+		if (cornersChanged) {
+			cornersX = nextX;
+			cornersZ = nextZ;
+		}
+	}
+
+	if (
+		portals === target.portals &&
+		cornersX === target.cornersX &&
+		cornersZ === target.cornersZ
+	) {
+		return target;
+	}
+	return { ...target, portals, cornersX, cornersZ };
+}
+
+// =============================================================================
 // Snap-to-edges (corner & edge magnetism for the in-viewport drag gestures)
 // =============================================================================
 
