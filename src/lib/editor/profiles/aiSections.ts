@@ -22,6 +22,7 @@ import type {
 import { aiSectionsV12ResourceSchema } from '@/lib/schema/resources/aiSections/v12';
 import { aiSectionsV4ResourceSchema } from '@/lib/schema/resources/aiSections/v4';
 import { freezeSchema } from '@/lib/schema/freeze';
+import { migrateV4toV12 } from '@/lib/conversion/migrations/aiSectionsV4toV12';
 
 export const aiSectionsV12Profile = defineProfile<ParsedAISectionsV12>({
 	kind: 'v12',
@@ -40,4 +41,14 @@ export const aiSectionsV4Profile = defineProfile<ParsedAISectionsV4>({
 	// rule: editability is schema metadata, not a separate axis).
 	schema: freezeSchema(aiSectionsV4ResourceSchema),
 	matches: (model) => (model as ParsedAISections).kind === 'v4',
+	conversions: {
+		// Reachable via `pickProfile(0x10001, v4Model).conversions.v12.migrate`.
+		// The export-dialog UI that surfaces this is the next slice (#37);
+		// for now the entry point is wired so the function is callable from
+		// the CLI / tests / programmatic flows.
+		v12: {
+			label: 'Convert to v12 (Paradise PC Retail)',
+			migrate: migrateV4toV12,
+		},
+	},
 });
