@@ -2,9 +2,14 @@
 //
 // Renders roads as spheres, streets as speed-coloured cubes, and junctions
 // as octahedrons — all batched through InstancedMesh so the per-type cost
-// stays at one draw call regardless of count. Selection currency is the
-// schema NodePath (ADR-0001): the overlay matches `['roads', i]`,
-// `['streets', i]`, `['junctions', i]` directly.
+// stays at one draw call regardless of count. Selection currency (the public
+// contract per ADR-0001) is the schema NodePath: this overlay matches
+// `['roads', i]`, `['streets', i]`, `['junctions', i]` directly.
+//
+// Internally each InstancedMesh now uses the shared `useInstancedSelection`
+// hook from `./selection/`, so the per-instance paint + click + hover code
+// lives in exactly one place across overlays. The path↔Selection codec is
+// `streetSelectionCodec` below.
 //
 // `onChange` is forwarded for in-scene edits but the StreetData scene has
 // no drag handles today (the source viewport never invoked it either). The
@@ -15,47 +20,55 @@
 // and ZoneList both deliberately omit it (z-fights with their dense polys),
 // so it's a StreetData-specific decoration, not chrome default.
 
-import { useMemo, useRef, useState, useCallback } from 'react';
-import { ThreeEvent } from '@react-three/fiber';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
+import {
+	defineSelectionCodec,
+	useInstancedSelection,
+	type Selection,
+} from './selection';
 
 // ---------------------------------------------------------------------------
-// Path → marker helpers (exported for tests)
+// Path ↔ Selection codec (exported for tests)
 // ---------------------------------------------------------------------------
 
+/** Selection kinds this overlay paints. */
 export type StreetMarkerKind = 'street' | 'junction' | 'road';
-export type StreetMarker = { kind: StreetMarkerKind; index: number } | null;
 
 /**
- * Decode a schema path into the StreetData marker it points at, or null if
- * the path doesn't address a top-level street/junction/road. Sub-paths
- * collapse to "this marker is selected".
+ * Codec for the three top-level StreetData lists. Sub-paths inside an entity
+ * (e.g. drilling into `['streets', 5, 'mAiInfo', ...]`) collapse to "this
+ * entity is selected" — the inspector can refine to a primitive but the 3D
+ * overlay still highlights the parent.
  */
-export function streetPathMarker(path: NodePath): StreetMarker {
-	if (path.length < 2) return null;
-	const head = path[0];
-	const idx = path[1];
-	if (typeof idx !== 'number') return null;
-	if (head === 'streets') return { kind: 'street', index: idx };
-	if (head === 'junctions') return { kind: 'junction', index: idx };
-	if (head === 'roads') return { kind: 'road', index: idx };
-	return null;
-}
+export const streetSelectionCodec = defineSelectionCodec({
+	pathToSelection: (path: NodePath): Selection | null => {
+		if (path.length < 2) return null;
+		const head = path[0];
+		const idx = path[1];
+		if (typeof idx !== 'number') return null;
+		if (head === 'streets') return { kind: 'street', indices: [idx] };
+		if (head === 'junctions') return { kind: 'junction', indices: [idx] };
+		if (head === 'roads') return { kind: 'road', indices: [idx] };
+		return null;
+	},
+	selectionToPath: (sel: Selection): NodePath => {
+		if (sel.kind === 'street') return ['streets', sel.indices[0]];
+		if (sel.kind === 'junction') return ['junctions', sel.indices[0]];
+		if (sel.kind === 'road') return ['roads', sel.indices[0]];
+		return [];
+	},
+});
 
-/** Build the schema path for a marker. Inverse of `streetPathMarker`. */
-export function streetMarkerPath(marker: StreetMarker): NodePath {
-	if (!marker) return [];
-	switch (marker.kind) {
-		case 'street': return ['streets', marker.index];
-		case 'junction': return ['junctions', marker.index];
-		case 'road': return ['roads', marker.index];
-	}
-}
+/** Back-compat alias retained for test imports — same as the codec direction. */
+export const streetPathMarker = streetSelectionCodec.pathToSelection;
+/** Back-compat alias retained for test imports — same as the codec direction. */
+export const streetMarkerPath = (sel: Selection | null): NodePath =>
+	sel ? streetSelectionCodec.selectionToPath(sel) : [];
 
 // ---------------------------------------------------------------------------
 // Constants — shared geometries / materials kept module-scope so all overlay
@@ -78,16 +91,18 @@ const roadMat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.2 
 const streetMat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.15 });
 const junctionMat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.2 });
 
-const SEL_COLOR = new THREE.Color(0xffaa33);
-const HOV_COLOR = new THREE.Color(0x66aaff);
 const ROAD_COLOR = new THREE.Color(0x4488ff);
 const JUNCTION_COLOR = new THREE.Color(0xeecc33);
 
-/** Green→Red lerp based on speed 0-255 */
+/** Green→Red lerp based on speed 0-255. */
 function speedColor(maxSpeed: number): THREE.Color {
 	const t = Math.min(maxSpeed / 255, 1);
 	return new THREE.Color().setRGB(t, 1 - t, 0.15);
 }
+
+// StreetData has no bulk-select use case yet — share one frozen empty Set so
+// every Instances child below references the same identity (stable hook deps).
+const EMPTY_BULK: ReadonlySet<string> = new Set();
 
 // ---------------------------------------------------------------------------
 // Scene bounds — kept overlay-local so the grid sizes itself sensibly. The
@@ -109,209 +124,114 @@ function computeBounds(data: ParsedStreetData): { center: THREE.Vector3; radius:
 // Instanced markers
 // ---------------------------------------------------------------------------
 
-const _dummy = new THREE.Object3D();
-
-type HoverState = StreetMarker;
-
-function RoadInstances({
-	data, selected, hovered, onPick, onHover,
-}: {
+type InstancesProps = {
 	data: ParsedStreetData;
-	selected: StreetMarker;
-	hovered: HoverState;
-	onPick: (marker: StreetMarker) => void;
-	onHover: (s: HoverState) => void;
-}) {
+	primary: Selection | null;
+	hovered: Selection | null;
+	onPick: (sel: Selection) => void;
+	onHover: (sel: Selection | null) => void;
+};
+
+function RoadInstances({ data, primary, hovered, onPick, onHover }: InstancesProps) {
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.roads.length;
 
-	useUpdateInstancedMesh(
-		meshRef,
+	const setMatrix = useCallback((i: number, dummy: THREE.Object3D) => {
+		const r = data.roads[i];
+		dummy.position.set(r.mReferencePosition.x, r.mReferencePosition.y, r.mReferencePosition.z);
+	}, [data.roads]);
+
+	const baseColorFor = useCallback(() => ROAD_COLOR, []);
+
+	const handlers = useInstancedSelection(meshRef, {
+		kind: 'road',
 		count,
-		(mesh) => {
-			for (let i = 0; i < count; i++) {
-				const r = data.roads[i];
-				_dummy.position.set(r.mReferencePosition.x, r.mReferencePosition.y, r.mReferencePosition.z);
-				_dummy.updateMatrix();
-				mesh.setMatrixAt(i, _dummy.matrix);
-
-				const isSel = selected?.kind === 'road' && selected.index === i;
-				const isHov = hovered?.kind === 'road' && hovered.index === i;
-				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : ROAD_COLOR);
-			}
-		},
-		[data.roads, count, selected, hovered],
-	);
-
-	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-		e.stopPropagation();
-		if (e.instanceId != null) onPick({ kind: 'road', index: e.instanceId });
-	}, [onPick]);
-
-	const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
-		e.stopPropagation();
-		if (e.instanceId != null) {
-			onHover({ kind: 'road', index: e.instanceId });
-			document.body.style.cursor = 'pointer';
-		}
-	}, [onHover]);
-
-	const handlePointerOut = useCallback(() => {
-		onHover(null);
-		document.body.style.cursor = 'auto';
-	}, [onHover]);
+		primary,
+		bulk: EMPTY_BULK,
+		hovered,
+		setMatrix,
+		baseColorFor,
+		onPick,
+		onHover,
+	});
 
 	if (count === 0) return null;
-
-	return (
-		<instancedMesh
-			ref={meshRef}
-			args={[roadGeo, roadMat, count]}
-			onClick={handleClick}
-			onPointerMove={handlePointerMove}
-			onPointerOut={handlePointerOut}
-		/>
-	);
+	return <instancedMesh ref={meshRef} args={[roadGeo, roadMat, count]} {...handlers} />;
 }
 
-function StreetInstances({
-	data, selected, hovered, onPick, onHover,
-}: {
-	data: ParsedStreetData;
-	selected: StreetMarker;
-	hovered: HoverState;
-	onPick: (marker: StreetMarker) => void;
-	onHover: (s: HoverState) => void;
-}) {
+function StreetInstances({ data, primary, hovered, onPick, onHover }: InstancesProps) {
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.streets.length;
 
-	useUpdateInstancedMesh(
-		meshRef,
-		count,
-		(mesh) => {
-			for (let i = 0; i < count; i++) {
-				const street = data.streets[i];
-				const road = data.roads[street.superSpanBase.miRoadIndex];
-				if (road) {
-					_dummy.position.set(
-						road.mReferencePosition.x + ROAD_RADIUS + STREET_SIZE * 0.8,
-						road.mReferencePosition.y + (i % 3) * STREET_SIZE * 1.2,
-						road.mReferencePosition.z,
-					);
-				} else {
-					_dummy.position.set(0, -9999, 0); // hide invalid
-				}
-				_dummy.updateMatrix();
-				mesh.setMatrixAt(i, _dummy.matrix);
+	const setMatrix = useCallback((i: number, dummy: THREE.Object3D) => {
+		const street = data.streets[i];
+		const road = data.roads[street.superSpanBase.miRoadIndex];
+		if (road) {
+			dummy.position.set(
+				road.mReferencePosition.x + ROAD_RADIUS + STREET_SIZE * 0.8,
+				road.mReferencePosition.y + (i % 3) * STREET_SIZE * 1.2,
+				road.mReferencePosition.z,
+			);
+		} else {
+			dummy.position.set(0, -9999, 0); // hide invalid
+		}
+	}, [data.streets, data.roads]);
 
-				const isSel = selected?.kind === 'street' && selected.index === i;
-				const isHov = hovered?.kind === 'street' && hovered.index === i;
-				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : speedColor(street.mAiInfo.muMaxSpeedMPS));
-			}
-		},
-		[data.streets, data.roads, count, selected, hovered],
+	const baseColorFor = useCallback(
+		(i: number) => speedColor(data.streets[i].mAiInfo.muMaxSpeedMPS),
+		[data.streets],
 	);
 
-	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-		e.stopPropagation();
-		if (e.instanceId != null) onPick({ kind: 'street', index: e.instanceId });
-	}, [onPick]);
-
-	const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
-		e.stopPropagation();
-		if (e.instanceId != null) {
-			onHover({ kind: 'street', index: e.instanceId });
-			document.body.style.cursor = 'pointer';
-		}
-	}, [onHover]);
-
-	const handlePointerOut = useCallback(() => {
-		onHover(null);
-		document.body.style.cursor = 'auto';
-	}, [onHover]);
+	const handlers = useInstancedSelection(meshRef, {
+		kind: 'street',
+		count,
+		primary,
+		bulk: EMPTY_BULK,
+		hovered,
+		setMatrix,
+		baseColorFor,
+		onPick,
+		onHover,
+	});
 
 	if (count === 0) return null;
-
-	return (
-		<instancedMesh
-			ref={meshRef}
-			args={[streetGeo, streetMat, count]}
-			onClick={handleClick}
-			onPointerMove={handlePointerMove}
-			onPointerOut={handlePointerOut}
-		/>
-	);
+	return <instancedMesh ref={meshRef} args={[streetGeo, streetMat, count]} {...handlers} />;
 }
 
-function JunctionInstances({
-	data, selected, hovered, onPick, onHover,
-}: {
-	data: ParsedStreetData;
-	selected: StreetMarker;
-	hovered: HoverState;
-	onPick: (marker: StreetMarker) => void;
-	onHover: (s: HoverState) => void;
-}) {
+function JunctionInstances({ data, primary, hovered, onPick, onHover }: InstancesProps) {
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.junctions.length;
 
-	useUpdateInstancedMesh(
-		meshRef,
-		count,
-		(mesh) => {
-			for (let i = 0; i < count; i++) {
-				const junc = data.junctions[i];
-				const road = data.roads[junc.superSpanBase.miRoadIndex];
-				if (road) {
-					_dummy.position.set(
-						road.mReferencePosition.x - ROAD_RADIUS - JUNCTION_RADIUS * 0.8,
-						road.mReferencePosition.y,
-						road.mReferencePosition.z + (i % 3) * JUNCTION_RADIUS * 1.5,
-					);
-				} else {
-					_dummy.position.set(0, -9999, 0);
-				}
-				_dummy.updateMatrix();
-				mesh.setMatrixAt(i, _dummy.matrix);
-
-				const isSel = selected?.kind === 'junction' && selected.index === i;
-				const isHov = hovered?.kind === 'junction' && hovered.index === i;
-				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : JUNCTION_COLOR);
-			}
-		},
-		[data.junctions, data.roads, count, selected, hovered],
-	);
-
-	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-		e.stopPropagation();
-		if (e.instanceId != null) onPick({ kind: 'junction', index: e.instanceId });
-	}, [onPick]);
-
-	const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
-		e.stopPropagation();
-		if (e.instanceId != null) {
-			onHover({ kind: 'junction', index: e.instanceId });
-			document.body.style.cursor = 'pointer';
+	const setMatrix = useCallback((i: number, dummy: THREE.Object3D) => {
+		const junc = data.junctions[i];
+		const road = data.roads[junc.superSpanBase.miRoadIndex];
+		if (road) {
+			dummy.position.set(
+				road.mReferencePosition.x - ROAD_RADIUS - JUNCTION_RADIUS * 0.8,
+				road.mReferencePosition.y,
+				road.mReferencePosition.z + (i % 3) * JUNCTION_RADIUS * 1.5,
+			);
+		} else {
+			dummy.position.set(0, -9999, 0);
 		}
-	}, [onHover]);
+	}, [data.junctions, data.roads]);
 
-	const handlePointerOut = useCallback(() => {
-		onHover(null);
-		document.body.style.cursor = 'auto';
-	}, [onHover]);
+	const baseColorFor = useCallback(() => JUNCTION_COLOR, []);
+
+	const handlers = useInstancedSelection(meshRef, {
+		kind: 'junction',
+		count,
+		primary,
+		bulk: EMPTY_BULK,
+		hovered,
+		setMatrix,
+		baseColorFor,
+		onPick,
+		onHover,
+	});
 
 	if (count === 0) return null;
-
-	return (
-		<instancedMesh
-			ref={meshRef}
-			args={[junctionGeo, junctionMat, count]}
-			onClick={handleClick}
-			onPointerMove={handlePointerMove}
-			onPointerOut={handlePointerOut}
-		/>
-	);
+	return <instancedMesh ref={meshRef} args={[junctionGeo, junctionMat, count]} {...handlers} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,32 +239,33 @@ function JunctionInstances({
 // ---------------------------------------------------------------------------
 
 function SelectedLabel({
-	data, selected, hovered,
+	data, primary, hovered,
 }: {
 	data: ParsedStreetData;
-	selected: StreetMarker;
-	hovered: HoverState;
+	primary: Selection | null;
+	hovered: Selection | null;
 }) {
-	const pick = selected ?? hovered;
+	const pick = primary ?? hovered;
 	if (!pick) return null;
+	const idx = pick.indices[0];
 
 	let pos: [number, number, number] | null = null;
 	let label = '';
 	let color = '#fff';
 
 	if (pick.kind === 'road') {
-		const road = data.roads[pick.index];
+		const road = data.roads[idx];
 		if (!road) return null;
 		pos = [road.mReferencePosition.x, road.mReferencePosition.y + ROAD_RADIUS + 3, road.mReferencePosition.z];
-		label = `${road.macDebugName.replace(/\0+$/, '')} #${pick.index}`;
+		label = `${road.macDebugName.replace(/\0+$/, '')} #${idx}`;
 		color = '#4488ff';
 	} else if (pick.kind === 'junction') {
-		const junc = data.junctions[pick.index];
+		const junc = data.junctions[idx];
 		if (!junc) return null;
 		const road = data.roads[junc.superSpanBase.miRoadIndex];
 		if (!road) return null;
 		pos = [road.mReferencePosition.x - ROAD_RADIUS - JUNCTION_RADIUS, road.mReferencePosition.y + JUNCTION_RADIUS + 3, road.mReferencePosition.z];
-		label = `${junc.macName.replace(/\0+$/, '')} #${pick.index}`;
+		label = `${junc.macName.replace(/\0+$/, '')} #${idx}`;
 		color = '#eecc33';
 	}
 
@@ -381,13 +302,16 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 	// today because StreetData has no in-scene drag handles. Future drag work
 	// will call it with the next root.
 }: Props) => {
-	const [hovered, setHovered] = useState<HoverState>(null);
+	const [hovered, setHovered] = useState<Selection | null>(null);
 	const { center, radius } = useMemo(() => computeBounds(data), [data]);
 
-	const selected = useMemo(() => streetPathMarker(selectedPath), [selectedPath]);
+	const primary = useMemo(
+		() => streetSelectionCodec.pathToSelection(selectedPath),
+		[selectedPath],
+	);
 
 	const handlePick = useCallback(
-		(marker: StreetMarker) => onSelect(streetMarkerPath(marker)),
+		(sel: Selection) => onSelect(streetSelectionCodec.selectionToPath(sel)),
 		[onSelect],
 	);
 
@@ -403,10 +327,10 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 				fadeDistance={radius * 8}
 				infiniteGrid
 			/>
-			<RoadInstances data={data} selected={selected} hovered={hovered} onPick={handlePick} onHover={setHovered} />
-			<StreetInstances data={data} selected={selected} hovered={hovered} onPick={handlePick} onHover={setHovered} />
-			<JunctionInstances data={data} selected={selected} hovered={hovered} onPick={handlePick} onHover={setHovered} />
-			<SelectedLabel data={data} selected={selected} hovered={hovered} />
+			<RoadInstances data={data} primary={primary} hovered={hovered} onPick={handlePick} onHover={setHovered} />
+			<StreetInstances data={data} primary={primary} hovered={hovered} onPick={handlePick} onHover={setHovered} />
+			<JunctionInstances data={data} primary={primary} hovered={hovered} onPick={handlePick} onHover={setHovered} />
+			<SelectedLabel data={data} primary={primary} hovered={hovered} />
 		</>
 	);
 };

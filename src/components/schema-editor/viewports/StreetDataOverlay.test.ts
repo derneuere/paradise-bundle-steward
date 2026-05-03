@@ -1,47 +1,53 @@
 // StreetDataOverlay — selection round-trip test.
 //
-// Covers the path-marker translation in both directions (the same code the
-// rendered overlay calls to derive highlight + emit clicks):
+// Covers the path↔Selection codec the rendered overlay calls to derive
+// highlight + emit clicks. The codec lives in `streetSelectionCodec` and is
+// also re-exported as `streetPathMarker`/`streetMarkerPath` aliases so older
+// importers keep working. After the migration to the shared selection
+// module the marker shape is `{ kind, indices: [i] }` (was `{ kind, index: i }`).
 //
-//   - `streetPathMarker(['streets', i])`     → { kind: 'street', index: i }
-//   - `streetPathMarker(['junctions', i])`   → { kind: 'junction', index: i }
-//   - `streetPathMarker(['roads', i])`       → { kind: 'road', index: i }
-//   - sub-paths inside a list collapse to "this marker is selected"
+//   - `pathToSelection(['streets', i])`     → { kind: 'street', indices: [i] }
+//   - `pathToSelection(['junctions', i])`   → { kind: 'junction', indices: [i] }
+//   - `pathToSelection(['roads', i])`       → { kind: 'road', indices: [i] }
+//   - sub-paths inside a list collapse to "this entity is selected"
 //   - paths outside those three lists read as `null` (no selection)
-//   - `streetMarkerPath` is the inverse on every marker shape
+//   - `selectionToPath` is the inverse on every entity-level path
 //
 // We don't mount through react-dom because the repo has no DOM-test
 // infrastructure (vitest env: node, no jsdom, no @testing-library/react,
 // no @react-three/test-renderer). The overlay's render shape is a thin
-// wrapper over the helpers exercised here — covering them gives the same
+// wrapper over the codec exercised here — covering it gives the same
 // effective coverage at a fraction of the dep cost.
 
 import { describe, it, expect, vi } from 'vitest';
 import {
+	streetSelectionCodec,
 	streetPathMarker,
 	streetMarkerPath,
 } from './StreetDataOverlay';
 import type { NodePath } from '@/lib/schema/walk';
 
 describe('StreetDataOverlay', () => {
-	it('round-trips every marker kind through path↔marker translation', () => {
-		// Forward: path → marker
-		expect(streetPathMarker(['streets', 7])).toEqual({ kind: 'street', index: 7 });
-		expect(streetPathMarker(['junctions', 12])).toEqual({ kind: 'junction', index: 12 });
-		expect(streetPathMarker(['roads', 0])).toEqual({ kind: 'road', index: 0 });
+	it('round-trips every entity kind through path↔Selection translation', () => {
+		// Forward: path → Selection
+		expect(streetSelectionCodec.pathToSelection(['streets', 7])).toEqual({ kind: 'street', indices: [7] });
+		expect(streetSelectionCodec.pathToSelection(['junctions', 12])).toEqual({ kind: 'junction', indices: [12] });
+		expect(streetSelectionCodec.pathToSelection(['roads', 0])).toEqual({ kind: 'road', indices: [0] });
 
-		// Inverse: marker → path
-		expect(streetMarkerPath({ kind: 'street', index: 7 })).toEqual(['streets', 7]);
-		expect(streetMarkerPath({ kind: 'junction', index: 12 })).toEqual(['junctions', 12]);
-		expect(streetMarkerPath({ kind: 'road', index: 0 })).toEqual(['roads', 0]);
+		// Inverse: Selection → path
+		expect(streetSelectionCodec.selectionToPath({ kind: 'street', indices: [7] })).toEqual(['streets', 7]);
+		expect(streetSelectionCodec.selectionToPath({ kind: 'junction', indices: [12] })).toEqual(['junctions', 12]);
+		expect(streetSelectionCodec.selectionToPath({ kind: 'road', indices: [0] })).toEqual(['roads', 0]);
+
+		// Back-compat alias: `streetMarkerPath(null)` returns `[]`.
 		expect(streetMarkerPath(null)).toEqual([]);
 
-		// Sub-paths collapse to "this marker is selected" — the inspector
+		// Sub-paths collapse to "this entity is selected" — the inspector
 		// can drill into a Junction's macName, but the 3D overlay still
 		// highlights the parent junction.
-		expect(streetPathMarker(['junctions', 3, 'macName'])).toEqual({ kind: 'junction', index: 3 });
+		expect(streetPathMarker(['junctions', 3, 'macName'])).toEqual({ kind: 'junction', indices: [3] });
 		expect(streetPathMarker(['streets', 5, 'mAiInfo', 'muMaxSpeedMPS']))
-			.toEqual({ kind: 'street', index: 5 });
+			.toEqual({ kind: 'street', indices: [5] });
 
 		// Off-resource paths read as no selection.
 		expect(streetPathMarker([])).toBeNull();
@@ -50,13 +56,13 @@ describe('StreetDataOverlay', () => {
 		expect(streetPathMarker(['streets', 'notANumber'] as unknown as NodePath)).toBeNull();
 	});
 
-	it('dispatches click events as marker → path → onSelect', () => {
+	it('dispatches click events as Selection → path → onSelect', () => {
 		// Mirror the overlay's handlePick body verbatim. The instanced-mesh
-		// click handler calls onPick({ kind, index: e.instanceId }), which
-		// the overlay forwards via onSelect(streetMarkerPath(marker)).
+		// click handler fires onPick({ kind, indices: [e.instanceId] }), which
+		// the overlay forwards via onSelect(streetSelectionCodec.selectionToPath(sel)).
 		const onSelect = vi.fn();
 		const dispatch = (kind: 'street' | 'junction' | 'road', instanceId: number) => {
-			onSelect(streetMarkerPath({ kind, index: instanceId }));
+			onSelect(streetSelectionCodec.selectionToPath({ kind, indices: [instanceId] }));
 		};
 
 		dispatch('road', 4);
