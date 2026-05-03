@@ -1,12 +1,14 @@
 // Schema-driven editor for PolygonSoupList (resource type 0x43 —
 // colloquially "worldcol").
 //
-// Unlike the single-resource TrafficDataPage, WORLDCOL.BIN has hundreds of
-// PolygonSoupList resources — one per track unit. This page shows ALL of
-// them in the 3D viewport and lets the user pick which one the schema
-// editor (tree + inspector) should operate on. Clicking a face in the
-// viewport also switches the active resource and navigates the tree to the
-// clicked polygon.
+// WORLDCOL.BIN has hundreds of PolygonSoupList resources — one per track
+// unit — and the page shows ALL of them in the 3D viewport simultaneously,
+// letting the user pick which one the schema editor (tree + inspector)
+// should operate on. Clicking a face in the viewport also switches the
+// active resource and navigates the tree to the clicked polygon. This is
+// what makes PSL bespoke: a single-resource page would only ever edit one
+// soup at a time, and the cross-instance picking + batched union mesh
+// don't fit the generic Workspace-editor flow.
 //
 // Collection picker:
 // When the bundle has >1 PSL resource the HierarchyTree consumes a

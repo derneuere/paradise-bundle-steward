@@ -381,10 +381,11 @@ src/components/schema-editor/
   viewports/           # PolygonSoupListViewport, RenderableViewport, TextureViewport
   extensions/          # per-resource React adapters wrapping legacy tabs
 src/pages/
-  TrafficDataPage.tsx     # 50-line SchemaEditorProvider wrappers (same shape for every resource)
-  ChallengeListPage.tsx
-  AISectionsPage.tsx
-  … (one per schema-driven resource)
+  WorkspacePage.tsx       # /workspace — multi-Bundle editor; the home for every schema-driven resource
+  PolygonSoupListPage.tsx # bespoke pages — one per resource that needs custom UX
+  RenderablePage.tsx      #   (cross-instance picking, decoded-mesh preview,
+  TexturePage.tsx         #    shader compilation, etc.)
+  …
 ```
 
 ### Adding a new resource type
@@ -395,8 +396,8 @@ src/pages/
 4. (If editable) write `src/lib/schema/resources/<key>.ts` — a `ResourceSchema` with one `RecordSchema` per nested struct in the parser, `fieldMetadata` for hidden / derived fields, `propertyGroups` for the tab layout, and `label()` callbacks on any user-navigable list. Copy the shape of [`src/lib/schema/resources/trafficData.ts`](src/lib/schema/resources/trafficData.ts) (complex, extensions-first) or [`playerCarColours.ts`](src/lib/schema/resources/playerCarColours.ts) (minimal, schema-first).
 5. (If editable) write `src/lib/schema/resources/<key>.test.ts` modeled after `trafficData.test.ts`: assert `walkResource` coverage in both directions, `resolveSchemaAtPath` on a deep path, structural-sharing mutation, and writer idempotence against the fixture (byte-exact or `stableWriter` per the handler's declared expectation).
 6. (If preserving rich legacy tabs) write `src/components/schema-editor/extensions/<key>Extensions.tsx` with one adapter per legacy tab that translates between the schema editor's `SchemaExtensionProps` contract and the existing component props. Reference the adapter from the schema via `propertyGroups: [{ component: 'TabName' }]` or `list: { customRenderer: 'TabName' }`.
-7. Add a lazy `<key>: lazy(() => import('@/pages/<Key>Page'))` entry in `registry/editors.ts` and drop a `src/pages/<Key>Page.tsx` that's ~50 lines: a `SchemaEditorProvider` around `<SchemaEditor />` passing the schema, the data from `useBundle().getResource<T>(key)`, `setResource(key, …)` as the onChange, and the extension registry.
-8. (If a 3D / 2D viewport exists) add a branch in `ViewportPane.tsx` keyed on `resource.key === '<key>'`, and drop the viewport component under `viewports/`. Simple viewports consume `useSchemaEditor()` directly; multi-resource pages (PolygonSoupList) use a dedicated context to share state with the page.
+7. Register an `EditorProfile` in `src/lib/editor/profiles/<key>.ts` (schema, displayName, optional `matches` for versioned variants) and a render binding in `src/lib/editor/bindings.ts` (overlay + extensions keyed on `(resourceKey, profileKind)`). The `/workspace` editor consumes both — no `src/pages/` entry, no `EDITOR_PAGES` entry. Only resources that need custom UX beyond what the Workspace inspector provides (decoded-mesh preview, shader compilation, multi-instance picking) get a bespoke page registered in `EDITOR_PAGES`.
+8. (If 3D-spatial) the overlay registered in step 7 mounts inside the `WorldViewport` composition automatically. Simple overlays render their own scene primitives; multi-instance overlays (PolygonSoupList) use a dedicated context to share state with their bespoke page.
 9. (Optional) add a `HANDLER_META` entry in `src/lib/capabilities.ts` for notes and wiki URLs that aren't machine-derivable.
 
 `types.ts`, `resourceTypes.ts`, `capabilities.ts` (except meta), `BundleContext.tsx`, `ResourcesPage.tsx`, and `App.tsx` are **never touched**. The migration prompts at [`docs/schema-editor-migration.md`](docs/schema-editor-migration.md) contain copy-pasteable per-resource briefs with the gotchas each one hit.
