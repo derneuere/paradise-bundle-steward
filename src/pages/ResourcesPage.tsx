@@ -9,6 +9,7 @@ import { Database, Cpu, Filter, Search, File, Image, Volume2, Code } from 'lucid
 import { NavLink } from 'react-router-dom';
 import { CapabilityBadge } from '@/components/capabilities';
 import { getHandlerByTypeId } from '@/lib/core/registry';
+import { EDITOR_PAGES } from '@/lib/core/registry/editors';
 
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -106,6 +107,10 @@ const ResourcesPage = () => {
           {(() => {
             const handler = getHandlerByTypeId(resource.raw.resourceTypeId);
             if (!handler || !handler.caps.read) return null;
+            // Only the bespoke editors in EDITOR_PAGES have a per-resource route.
+            // Schema-driven resources are edited inside /workspace and have no
+            // standalone page.
+            if (!EDITOR_PAGES[handler.key]) return null;
             return (
               <NavLink
                 to={`/${handler.key}`}
