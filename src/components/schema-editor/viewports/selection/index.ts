@@ -21,3 +21,9 @@ export type {
 	UseInstancedSelectionOpts,
 	UseInstancedSelectionResult,
 } from './useInstancedSelection';
+
+export { useBatchedSelection } from './useBatchedSelection';
+export type {
+	UseBatchedSelectionOpts,
+	UseBatchedSelectionResult,
+} from './useBatchedSelection';
