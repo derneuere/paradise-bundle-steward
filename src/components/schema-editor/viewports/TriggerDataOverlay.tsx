@@ -20,6 +20,15 @@
 // selected" so drilling into a primitive in the inspector still keeps the
 // 3D highlight on the parent.
 //
+// Codec is `triggerSelectionCodec` (Selection-module shape: `{kind, indices}`)
+// with thin `triggerPathMarker` / `triggerMarkerPath` aliases preserved for
+// pre-migration test imports.
+//
+// The BatchedRegionBoxes mesh hosts four kinds on one InstancedMesh, so it
+// can't use the `useInstancedSelection` hook (which is single-kind). Its
+// inline paint loop stays — only the theme imports are migrated. RoamingDots
+// is single-kind and uses the hook.
+//
 // DOM siblings: marquee bulk-select rides the WorldViewport HTML slot.
 
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -35,16 +44,20 @@ import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelection
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
+import {
+	defineSelectionCodec,
+	SELECTION_THEME,
+	useInstancedSelection,
+	type Selection,
+} from './selection';
 
 // ---------------------------------------------------------------------------
-// Path ↔ trigger marker (exported for tests)
+// Path ↔ Selection codec (exported for tests)
 // ---------------------------------------------------------------------------
 
 export type TriggerMarkerKind =
 	| 'landmark' | 'generic' | 'blackspot' | 'vfx'
 	| 'spawn' | 'roaming' | 'playerStart';
-
-export type TriggerMarker = { kind: TriggerMarkerKind; index: number } | null;
 
 const PATH_HEAD_TO_KIND: Record<string, TriggerMarkerKind> = {
 	landmarks: 'landmark',
@@ -65,31 +78,49 @@ const KIND_TO_LIST: Record<Exclude<TriggerMarkerKind, 'playerStart'>, string> = 
 };
 
 /**
- * Decode a schema path into the trigger marker it points at, or null if
- * the path doesn't address a top-level trigger entity. Sub-paths drill
- * down to the parent. The two player-start singletons both collapse to
- * `{ kind: 'playerStart', index: 0 }` since they are visually represented
- * by the same gold cone.
+ * Codec for every trigger-data entity. Sub-paths inside a region (e.g.
+ * `['landmarks', 3, 'box', 'position']`) collapse to "this region is
+ * selected". Both player-start singleton path shapes
+ * (`playerStartPosition` and `playerStartDirection`) decode to the same
+ * `{ kind: 'playerStart', indices: [0] }` selection because they share
+ * the gold-cone marker; the inverse always returns the canonical
+ * `playerStartPosition` path.
  */
+export const triggerSelectionCodec = defineSelectionCodec({
+	pathToSelection: (path: NodePath): Selection | null => {
+		if (path.length === 0) return null;
+		const head = path[0];
+		if (head === 'playerStartPosition' || head === 'playerStartDirection') {
+			return { kind: 'playerStart', indices: [0] };
+		}
+		if (typeof head !== 'string') return null;
+		const kind = PATH_HEAD_TO_KIND[head];
+		if (!kind) return null;
+		const idx = path[1];
+		if (typeof idx !== 'number') return null;
+		return { kind, indices: [idx] };
+	},
+	selectionToPath: (sel: Selection): NodePath => {
+		if (sel.kind === 'playerStart') return ['playerStartPosition'];
+		const list = KIND_TO_LIST[sel.kind as Exclude<TriggerMarkerKind, 'playerStart'>];
+		return list ? [list, sel.indices[0]] : [];
+	},
+});
+
+/** Back-compat alias retained for test imports — `{kind, index}` shape over the new codec. */
+export type TriggerMarker = { kind: TriggerMarkerKind; index: number } | null;
+
+/** Back-compat alias retained for test imports. */
 export function triggerPathMarker(path: NodePath): TriggerMarker {
-	if (path.length === 0) return null;
-	const head = path[0];
-	if (head === 'playerStartPosition' || head === 'playerStartDirection') {
-		return { kind: 'playerStart', index: 0 };
-	}
-	if (typeof head !== 'string') return null;
-	const kind = PATH_HEAD_TO_KIND[head];
-	if (!kind) return null;
-	const idx = path[1];
-	if (typeof idx !== 'number') return null;
-	return { kind, index: idx };
+	const sel = triggerSelectionCodec.pathToSelection(path);
+	if (!sel) return null;
+	return { kind: sel.kind as TriggerMarkerKind, index: sel.indices[0] };
 }
 
-/** Build the schema path for a marker. Inverse of `triggerPathMarker`. */
+/** Back-compat alias retained for test imports. */
 export function triggerMarkerPath(m: TriggerMarker): NodePath {
 	if (!m) return [];
-	if (m.kind === 'playerStart') return ['playerStartPosition'];
-	return [KIND_TO_LIST[m.kind], m.index];
+	return triggerSelectionCodec.selectionToPath({ kind: m.kind, indices: [m.index] });
 }
 
 // ---------------------------------------------------------------------------
@@ -117,8 +148,6 @@ function genericColorObj(type: GenericRegionType): THREE.Color {
 const LANDMARK_COLOR = new THREE.Color('#44cc44');
 const BLACKSPOT_COLOR = new THREE.Color('#cc2222');
 const VFX_COLOR = new THREE.Color('#cc44cc');
-const SEL_COLOR = new THREE.Color('#ffaa33');
-const HOV_COLOR = new THREE.Color('#66aaff');
 
 function buildRegionList(data: ParsedTriggerData): RegionEntry[] {
 	const out: RegionEntry[] = [];
@@ -164,8 +193,6 @@ const spawnSelMat = new THREE.MeshStandardMaterial({ color: 0xffaa33, roughness:
 const roamGeo = new THREE.SphereGeometry(2, 8, 6);
 const roamMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
 const ROAM_COLOR = new THREE.Color(0x888888);
-const ROAM_SEL_COLOR = new THREE.Color(0xffaa33);
-const _roamDummy = new THREE.Object3D();
 
 const playerMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, roughness: 0.3, metalness: 0.4, emissive: 0x664400, emissiveIntensity: 0.3 });
 const playerSelMat = new THREE.MeshStandardMaterial({ color: 0xffaa33, roughness: 0.3, metalness: 0.4, emissive: 0x664400, emissiveIntensity: 0.6 });
@@ -176,17 +203,21 @@ const playerConeGeo = new THREE.ConeGeometry(5, 12, 8);
 // ---------------------------------------------------------------------------
 
 function BatchedRegionBoxes({
-	regions, marker, hovered, onPick, onHover,
+	regions, primary, hovered, onPick, onHover,
 }: {
 	regions: RegionEntry[];
-	marker: TriggerMarker;
-	hovered: TriggerMarker;
-	onPick: (m: TriggerMarker) => void;
-	onHover: (m: TriggerMarker) => void;
+	primary: Selection | null;
+	hovered: Selection | null;
+	onPick: (sel: Selection) => void;
+	onHover: (sel: Selection | null) => void;
 }) {
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = regions.length;
 
+	// Mixed-kind paint loop — one InstancedMesh hosts four selection kinds
+	// (landmark / generic / blackspot / vfx) so the per-kind hook doesn't fit
+	// here without expanding it to take a `kind` per-instance. The codec +
+	// theme migrate cleanly; the loop itself stays inline.
 	useUpdateInstancedMesh(
 		meshRef,
 		count,
@@ -199,19 +230,19 @@ function BatchedRegionBoxes({
 				_dummy.updateMatrix();
 				mesh.setMatrixAt(i, _dummy.matrix);
 
-				const isSel = marker?.kind === r.kind && marker.index === r.index;
-				const isHov = hovered?.kind === r.kind && hovered.index === r.index;
-				mesh.setColorAt(i, isSel ? SEL_COLOR : isHov ? HOV_COLOR : r.color);
+				const isSel = primary?.kind === r.kind && primary.indices[0] === r.index;
+				const isHov = hovered?.kind === r.kind && hovered.indices[0] === r.index;
+				mesh.setColorAt(i, isSel ? SELECTION_THEME.primary : isHov ? SELECTION_THEME.hover : r.color);
 			}
 		},
-		[regions, count, marker, hovered],
+		[regions, count, primary, hovered],
 	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
 		if (e.instanceId != null && e.instanceId < regions.length) {
 			const r = regions[e.instanceId];
-			onPick({ kind: r.kind, index: r.index });
+			onPick({ kind: r.kind, indices: [r.index] });
 		}
 	}, [regions, onPick]);
 
@@ -219,7 +250,7 @@ function BatchedRegionBoxes({
 		e.stopPropagation();
 		if (e.instanceId != null && e.instanceId < regions.length) {
 			const r = regions[e.instanceId];
-			onHover({ kind: r.kind, index: r.index });
+			onHover({ kind: r.kind, indices: [r.index] });
 			document.body.style.cursor = 'pointer';
 		}
 	}, [regions, onHover]);
@@ -272,17 +303,17 @@ function BoxLabel({ box, label, color }: { box: BoxRegion; label: string; color:
 }
 
 function SpawnArrows({
-	data, marker, onPick,
+	data, primary, onPick,
 }: {
 	data: ParsedTriggerData;
-	marker: TriggerMarker;
-	onPick: (m: TriggerMarker) => void;
+	primary: Selection | null;
+	onPick: (sel: Selection) => void;
 }) {
 	return (
 		<>
 			{data.spawnLocations.map((sp, i) => {
 				const pos: [number, number, number] = [sp.position.x, sp.position.y, sp.position.z];
-				const isSel = marker?.kind === 'spawn' && marker.index === i;
+				const isSel = primary?.kind === 'spawn' && primary.indices[0] === i;
 				const dir = new THREE.Vector3(sp.direction.x, sp.direction.y, sp.direction.z);
 				if (dir.lengthSq() > 0.001) dir.normalize();
 				const arrowEnd: [number, number, number] = [
@@ -294,7 +325,7 @@ function SpawnArrows({
 							geometry={coneGeo}
 							material={isSel ? spawnSelMat : spawnMat}
 							position={pos}
-							onClick={(e) => { e.stopPropagation(); onPick({ kind: 'spawn', index: i }); }}
+							onClick={(e) => { e.stopPropagation(); onPick({ kind: 'spawn', indices: [i] }); }}
 						/>
 						<Line points={[pos, arrowEnd]} color={isSel ? '#ffaa33' : '#ffffff'} lineWidth={2} />
 						{isSel && (
@@ -315,52 +346,53 @@ function SpawnArrows({
 }
 
 function RoamingDots({
-	data, marker, onPick,
+	data, primary, hovered, bulk, onPick, onHover,
 }: {
 	data: ParsedTriggerData;
-	marker: TriggerMarker;
-	onPick: (m: TriggerMarker) => void;
+	primary: Selection | null;
+	hovered: Selection | null;
+	bulk: ReadonlySet<string>;
+	onPick: (sel: Selection) => void;
+	onHover: (sel: Selection | null) => void;
 }) {
 	const meshRef = useRef<THREE.InstancedMesh>(null!);
 	const count = data.roamingLocations.length;
 
-	useUpdateInstancedMesh(
-		meshRef,
-		count,
-		(mesh) => {
-			for (let i = 0; i < count; i++) {
-				const rl = data.roamingLocations[i];
-				_roamDummy.position.set(rl.position.x, rl.position.y, rl.position.z);
-				_roamDummy.updateMatrix();
-				mesh.setMatrixAt(i, _roamDummy.matrix);
-				const isSel = marker?.kind === 'roaming' && marker.index === i;
-				mesh.setColorAt(i, isSel ? ROAM_SEL_COLOR : ROAM_COLOR);
-			}
-		},
-		[data.roamingLocations, count, marker],
-	);
+	const setMatrix = useCallback((i: number, dummy: THREE.Object3D) => {
+		const rl = data.roamingLocations[i];
+		dummy.position.set(rl.position.x, rl.position.y, rl.position.z);
+	}, [data.roamingLocations]);
 
-	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-		e.stopPropagation();
-		if (e.instanceId != null) onPick({ kind: 'roaming', index: e.instanceId });
-	}, [onPick]);
+	const baseColorFor = useCallback(() => ROAM_COLOR, []);
+
+	const handlers = useInstancedSelection(meshRef, {
+		kind: 'roaming',
+		count,
+		primary,
+		bulk,
+		hovered,
+		setMatrix,
+		baseColorFor,
+		onPick,
+		onHover,
+	});
 
 	if (count === 0) return null;
-	return <instancedMesh ref={meshRef} args={[roamGeo, roamMat, count]} onClick={handleClick} />;
+	return <instancedMesh ref={meshRef} args={[roamGeo, roamMat, count]} {...handlers} />;
 }
 
 function PlayerStartMarker({
-	data, marker, onPick,
+	data, primary, onPick,
 }: {
 	data: ParsedTriggerData;
-	marker: TriggerMarker;
-	onPick: (m: TriggerMarker) => void;
+	primary: Selection | null;
+	onPick: (sel: Selection) => void;
 }) {
 	const pos: [number, number, number] = [data.playerStartPosition.x, data.playerStartPosition.y, data.playerStartPosition.z];
 	const dir = new THREE.Vector3(data.playerStartDirection.x, data.playerStartDirection.y, data.playerStartDirection.z);
 	if (dir.lengthSq() > 0.001) dir.normalize();
 	const arrowEnd: [number, number, number] = [pos[0] + dir.x * 25, pos[1] + dir.y * 25, pos[2] + dir.z * 25];
-	const isSel = marker?.kind === 'playerStart';
+	const isSel = primary?.kind === 'playerStart';
 
 	return (
 		<group>
@@ -368,7 +400,7 @@ function PlayerStartMarker({
 				geometry={playerConeGeo}
 				material={isSel ? playerSelMat : playerMat}
 				position={pos}
-				onClick={(e) => { e.stopPropagation(); onPick({ kind: 'playerStart', index: 0 }); }}
+				onClick={(e) => { e.stopPropagation(); onPick({ kind: 'playerStart', indices: [0] }); }}
 			/>
 			<Line points={[pos, arrowEnd]} color="#ffcc00" lineWidth={3} />
 			<Html position={[pos[0], pos[1] + 15, pos[2]]} center distanceFactor={200} style={{ pointerEvents: 'none' }}>
@@ -387,6 +419,8 @@ function PlayerStartMarker({
 // Overlay
 // ---------------------------------------------------------------------------
 
+const EMPTY_BULK: ReadonlySet<string> = new Set();
+
 type Props = {
 	data: ParsedTriggerData;
 	selectedPath: NodePath;
@@ -399,31 +433,47 @@ type Props = {
 export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 	data, selectedPath, onSelect, isActive = true,
 }: Props) => {
-	const marker = useMemo(() => triggerPathMarker(selectedPath), [selectedPath]);
-	const [hovered, setHovered] = useState<TriggerMarker>(null);
+	const primary = useMemo(() => triggerSelectionCodec.pathToSelection(selectedPath), [selectedPath]);
+	const [hovered, setHovered] = useState<Selection | null>(null);
 
 	const handlePick = useCallback(
-		(m: TriggerMarker) => onSelect(triggerMarkerPath(m)),
+		(sel: Selection) => onSelect(triggerSelectionCodec.selectionToPath(sel)),
 		[onSelect],
 	);
 
 	const regions = useMemo(() => buildRegionList(data), [data]);
 
+	const bulk = useSchemaBulkSelection();
+
+	// Translate the bulk path-key set (e.g. `'roamingLocations/3'`) into the
+	// Selection-keyed Set the hook expects (`'roaming:3'`). Only the subset
+	// the hook cares about (single-kind 'roaming') need translation here.
+	const roamingBulk = useMemo<ReadonlySet<string>>(() => {
+		if (!bulk?.bulkPathKeys || bulk.bulkPathKeys.size === 0) return EMPTY_BULK;
+		const out = new Set<string>();
+		for (const k of bulk.bulkPathKeys) {
+			if (!k.startsWith('roamingLocations/')) continue;
+			const idx = Number(k.slice('roamingLocations/'.length));
+			if (Number.isFinite(idx)) out.add(`roaming:${idx}`);
+		}
+		return out;
+	}, [bulk]);
+
 	const findEntry = useCallback(
-		(m: TriggerMarker) =>
-			m && m.kind !== 'playerStart' && m.kind !== 'spawn' && m.kind !== 'roaming'
-				? regions.find((r) => r.kind === m.kind && r.index === m.index)
-				: undefined,
+		(sel: Selection | null) => {
+			if (!sel) return undefined;
+			if (sel.kind === 'playerStart' || sel.kind === 'spawn' || sel.kind === 'roaming') return undefined;
+			return regions.find((r) => r.kind === sel.kind && r.index === sel.indices[0]);
+		},
 		[regions],
 	);
-	const selEntry = findEntry(marker);
+	const selEntry = findEntry(primary);
 	const hovEntry = findEntry(hovered);
 
 	// Marquee — pick every region/spawn/roaming whose centroid falls inside
 	// the dragged rectangle. Boxes use box.position; spawns / roams use
 	// their position field.
 	const cameraBridge = useRef<CameraBridgeData | null>(null);
-	const bulk = useSchemaBulkSelection();
 	const handleMarquee = useCallback(
 		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
 			if (!bulk?.onBulkApplyPaths) return;
@@ -474,7 +524,7 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 		<>
 			<BatchedRegionBoxes
 				regions={regions}
-				marker={marker}
+				primary={primary}
 				hovered={hovered}
 				onPick={handlePick}
 				onHover={setHovered}
@@ -488,9 +538,16 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 				<BoxLabel box={hovEntry.box} label={hovEntry.label} color="#66aaff" />
 			)}
 
-			<SpawnArrows data={data} marker={marker} onPick={handlePick} />
-			<RoamingDots data={data} marker={marker} onPick={handlePick} />
-			<PlayerStartMarker data={data} marker={marker} onPick={handlePick} />
+			<SpawnArrows data={data} primary={primary} onPick={handlePick} />
+			<RoamingDots
+				data={data}
+				primary={primary}
+				hovered={hovered}
+				bulk={roamingBulk}
+				onPick={handlePick}
+				onHover={setHovered}
+			/>
+			<PlayerStartMarker data={data} primary={primary} onPick={handlePick} />
 
 			<CameraBridge bridge={cameraBridge} />
 		</>
