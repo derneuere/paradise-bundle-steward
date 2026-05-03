@@ -24,26 +24,45 @@ import {
 } from '@/lib/core/zoneList';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
+import { defineSelectionCodec, SELECTION_THEME, type Selection } from './selection';
 
 // ---------------------------------------------------------------------------
-// Path → zone-index helpers (exported for tests)
+// Path ↔ Selection codec (exported for tests)
 // ---------------------------------------------------------------------------
 
 /**
- * Decode a schema path into the zone index it points at, or -1 if the path
- * doesn't address a zone. Sub-paths inside a zone (e.g.
+ * Codec for the streaming-PVS zones. Sub-paths inside a zone (e.g.
  * `['zones', i, 'safeNeighbours', n]`) collapse to "this zone is selected".
+ * The merged BatchedGeometry paint loop stays inline — `useBatchedSelection`
+ * is a deferred follow-up; only the codec + theme migrate cleanly here.
+ */
+export const zoneSelectionCodec = defineSelectionCodec({
+	pathToSelection: (path: NodePath): Selection | null => {
+		if (path.length < 2) return null;
+		if (path[0] !== 'zones') return null;
+		const idx = path[1];
+		if (typeof idx !== 'number') return null;
+		return { kind: 'zone', indices: [idx] };
+	},
+	selectionToPath: (sel: Selection): NodePath => {
+		if (sel.kind !== 'zone') return [];
+		return ['zones', sel.indices[0]];
+	},
+});
+
+/**
+ * Back-compat alias retained for callers (and tests) that consume a bare
+ * zone index. Returns -1 for paths the codec rejects so existing
+ * "no selection" guards keep working.
  */
 export function zonePathIndex(path: NodePath): number {
-	if (path.length < 2) return -1;
-	if (path[0] !== 'zones') return -1;
-	const idx = path[1];
-	return typeof idx === 'number' ? idx : -1;
+	const sel = zoneSelectionCodec.pathToSelection(path);
+	return sel ? sel.indices[0] : -1;
 }
 
-/** Build the schema path for a zone index. Inverse of `zonePathIndex`. */
+/** Back-compat alias retained for tests. */
 export function zoneIndexPath(zoneIndex: number): NodePath {
-	return ['zones', zoneIndex];
+	return zoneSelectionCodec.selectionToPath({ kind: 'zone', indices: [zoneIndex] });
 }
 
 // ---------------------------------------------------------------------------
@@ -55,8 +74,8 @@ const ZONE_TYPE_RGB: Record<number, [number, number, number]> = {
 };
 const FALLBACK_RGB: [number, number, number] = [0.6, 0.6, 0.6];
 
-const SELECTED_COLOR = '#fff066';
-const HOVERED_COLOR = '#74d4ff';
+const SELECTED_COLOR = '#' + SELECTION_THEME.primary.getHexString();
+const HOVERED_COLOR = '#' + SELECTION_THEME.hover.getHexString();
 const SAFE_LINE_COLOR = '#7af07a';
 const UNSAFE_LINE_COLOR = '#ff8a4a';
 const IMMEDIATE_LINE_COLOR = '#ff3030';
