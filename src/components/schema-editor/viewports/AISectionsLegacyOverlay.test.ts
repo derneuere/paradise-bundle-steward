@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	legacyAISectionPathMarker,
 	legacyAISectionMarkerPath,
+	legacyAISectionSelectionCodec,
 	buildBatchedLegacySections,
 } from './AISectionsLegacyOverlay';
 import type { LegacyAISection } from '@/lib/core/aiSections';
@@ -75,6 +76,23 @@ describe('AISectionsLegacyOverlay path/marker contract', () => {
 		expect(legacyAISectionPathMarker(['legacy', 'sections'])).toBeNull();
 		expect(legacyAISectionPathMarker(['legacy', 'sections', 'notANumber'] as unknown as NodePath)).toBeNull();
 		expect(legacyAISectionMarkerPath(null)).toEqual([]);
+	});
+
+	it('exposes the new Selection-module codec with the unified `{kind, indices}` shape and the `legacy` prefix', () => {
+		expect(legacyAISectionSelectionCodec.pathToSelection(['legacy', 'sections', 42]))
+			.toEqual({ kind: 'section', indices: [42] });
+		expect(legacyAISectionSelectionCodec.pathToSelection(['legacy', 'sections', 42, 'portals', 3]))
+			.toEqual({ kind: 'portal', indices: [42, 3] });
+		expect(legacyAISectionSelectionCodec.pathToSelection(['legacy', 'sections', 42, 'portals', 3, 'boundaryLines', 1]))
+			.toEqual({ kind: 'boundaryLine', indices: [42, 3, 1] });
+		expect(legacyAISectionSelectionCodec.pathToSelection(['legacy', 'sections', 42, 'noGoLines', 7]))
+			.toEqual({ kind: 'noGoLine', indices: [42, 7] });
+		// Inverse always carries the `legacy` prefix back.
+		expect(legacyAISectionSelectionCodec.selectionToPath({ kind: 'portal', indices: [42, 3] }))
+			.toEqual(['legacy', 'sections', 42, 'portals', 3]);
+		// V12-style paths (no prefix) read as null — the codec must not
+		// false-positive on them.
+		expect(legacyAISectionSelectionCodec.pathToSelection(['sections', 42])).toBeNull();
 	});
 });
 

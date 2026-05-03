@@ -68,15 +68,19 @@ import {
 import { CornerHandles, type CornerDragOffset } from '@/components/aisections/CornerHandles';
 import { TranslateGizmo, type GizmoOffset } from '@/components/common/three/TranslateGizmo';
 import {
+	aiSectionsLegacySelectionCodec,
 	BatchedSections,
 	buildBatchedSections,
 	EdgeContextMenu,
 	EdgeHandles,
+	markerToSelection,
 	SectionLabel,
 	SelectionOverlay,
+	selectionToMarker,
 	portalGeo,
 	portalMat,
 	portalSelMat,
+	type AISectionMarker,
 	type BatchedSectionsScene,
 	type Corner,
 	type SectionAccessor,
@@ -86,63 +90,23 @@ import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
 
 // ---------------------------------------------------------------------------
-// Path → marker (exported for tests)
+// Path ↔ Selection codec — re-exported from the shared module so V12 and V4/V6
+// stay in lock-step. The marker shape is identical to V12's; only the schema
+// path prefix differs (V4/V6 paths nest under the `legacy` wrapper field).
+// The legacy `{ kind, sectionIndex, ... }` marker shape is preserved for tests.
 // ---------------------------------------------------------------------------
 
-export type LegacyAISectionMarker =
-	| { kind: 'section'; sectionIndex: number }
-	| { kind: 'portal'; sectionIndex: number; portalIndex: number }
-	| { kind: 'boundaryLine'; sectionIndex: number; portalIndex: number; lineIndex: number }
-	| { kind: 'noGoLine'; sectionIndex: number; lineIndex: number }
-	| null;
+export type LegacyAISectionMarker = AISectionMarker;
+export const legacyAISectionSelectionCodec = aiSectionsLegacySelectionCodec;
 
-/**
- * Decode a schema path into the legacy-AI-Sections marker it points at, or
- * null if the path doesn't address a section / portal / boundary line / no-go
- * line. The V4 schema nests the section list under a `legacy` wrapper field
- * (so `legacy.sections[i]` is the path to a section), and sub-paths inside a
- * primitive (e.g. a portal's `midPosition.x`) collapse to "this portal is
- * selected" — the inspector can drill deeper while the 3D overlay still
- * highlights the parent.
- */
 export function legacyAISectionPathMarker(path: NodePath): LegacyAISectionMarker {
-	if (path.length < 3) return null;
-	if (path[0] !== 'legacy' || path[1] !== 'sections') return null;
-	const sectionIndex = path[2];
-	if (typeof sectionIndex !== 'number') return null;
-	if (path.length === 3) return { kind: 'section', sectionIndex };
-
-	const list = path[3];
-	if (list === 'portals' && typeof path[4] === 'number') {
-		const portalIndex = path[4];
-		if (path.length === 5) return { kind: 'portal', sectionIndex, portalIndex };
-		if (path[5] === 'boundaryLines' && typeof path[6] === 'number') {
-			return { kind: 'boundaryLine', sectionIndex, portalIndex, lineIndex: path[6] };
-		}
-		// Sub-path within a portal (e.g. `midPosition.x`) collapses to portal selection.
-		return { kind: 'portal', sectionIndex, portalIndex };
-	}
-	if (list === 'noGoLines' && typeof path[4] === 'number') {
-		return { kind: 'noGoLine', sectionIndex, lineIndex: path[4] };
-	}
-	// Anything else under a section collapses to the section itself
-	// (e.g. `legacy.sections.i.cornersX.2` → just highlight section i).
-	return { kind: 'section', sectionIndex };
+	return selectionToMarker(aiSectionsLegacySelectionCodec.pathToSelection(path));
 }
 
-/** Build the schema path for a marker. Inverse of `legacyAISectionPathMarker`. */
 export function legacyAISectionMarkerPath(m: LegacyAISectionMarker): NodePath {
-	if (!m) return [];
-	switch (m.kind) {
-		case 'section':
-			return ['legacy', 'sections', m.sectionIndex];
-		case 'portal':
-			return ['legacy', 'sections', m.sectionIndex, 'portals', m.portalIndex];
-		case 'boundaryLine':
-			return ['legacy', 'sections', m.sectionIndex, 'portals', m.portalIndex, 'boundaryLines', m.lineIndex];
-		case 'noGoLine':
-			return ['legacy', 'sections', m.sectionIndex, 'noGoLines', m.lineIndex];
-	}
+	const sel = markerToSelection(m);
+	if (!sel) return [];
+	return aiSectionsLegacySelectionCodec.selectionToPath(sel);
 }
 
 // ---------------------------------------------------------------------------
