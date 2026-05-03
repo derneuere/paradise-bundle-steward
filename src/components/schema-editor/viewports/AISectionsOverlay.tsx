@@ -46,16 +46,20 @@ import { CameraBridge, type CameraBridgeData } from '@/components/common/three/C
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { CornerHandles, type CornerDragOffset } from '@/components/aisections/CornerHandles';
 import {
+	aiSectionsV12SelectionCodec,
 	BatchedSections,
 	buildBatchedSections,
 	EdgeContextMenu,
 	EdgeHandles,
+	markerToSelection,
 	SectionLabel,
 	SelectionOverlay,
+	selectionToMarker,
 	edgeContextMenuRootStyle as sharedEdgeContextMenuRootStyle,
 	portalGeo,
 	portalMat,
 	portalSelMat,
+	type AISectionMarker,
 	type Corner,
 	type SectionAccessor,
 } from '@/components/aisections/shared';
@@ -65,59 +69,23 @@ import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
 
 // ---------------------------------------------------------------------------
-// Path → AISection selection (exported for tests)
+// Path ↔ Selection codec — re-exported from the shared module so V12 and V4/V6
+// stay in lock-step. The `*PathMarker` / `*MarkerPath` aliases below preserve
+// the legacy `{ kind, sectionIndex, portalIndex, ... }` shape for tests and
+// callers that haven't moved to the new Selection currency yet.
 // ---------------------------------------------------------------------------
 
-export type AISectionMarker =
-	| { kind: 'section'; sectionIndex: number }
-	| { kind: 'portal'; sectionIndex: number; portalIndex: number }
-	| { kind: 'boundaryLine'; sectionIndex: number; portalIndex: number; lineIndex: number }
-	| { kind: 'noGoLine'; sectionIndex: number; lineIndex: number }
-	| null;
+export type { AISectionMarker };
+export const aiSectionSelectionCodec = aiSectionsV12SelectionCodec;
 
-/**
- * Decode a schema path into the AISections marker it points at, or null if
- * the path doesn't address an AI section / portal / boundary-line / no-go
- * line. Sub-paths inside a primitive (e.g. a portal's `position.x`) collapse
- * to "this portal is selected" — the inspector can drill deeper while the
- * 3D overlay still highlights the parent.
- */
 export function aiSectionPathMarker(path: NodePath): AISectionMarker {
-	if (path.length < 2 || path[0] !== 'sections') return null;
-	const sectionIndex = path[1];
-	if (typeof sectionIndex !== 'number') return null;
-	if (path.length === 2) return { kind: 'section', sectionIndex };
-
-	const list = path[2];
-	if (list === 'portals' && typeof path[3] === 'number') {
-		const portalIndex = path[3];
-		if (path.length === 4) return { kind: 'portal', sectionIndex, portalIndex };
-		if (path[4] === 'boundaryLines' && typeof path[5] === 'number') {
-			return { kind: 'boundaryLine', sectionIndex, portalIndex, lineIndex: path[5] };
-		}
-		// Sub-path within a portal (e.g. `position.x`) collapses to portal selection.
-		return { kind: 'portal', sectionIndex, portalIndex };
-	}
-	if (list === 'noGoLines' && typeof path[3] === 'number') {
-		return { kind: 'noGoLine', sectionIndex, lineIndex: path[3] };
-	}
-	// Anything else under a section collapses to the section itself.
-	return { kind: 'section', sectionIndex };
+	return selectionToMarker(aiSectionsV12SelectionCodec.pathToSelection(path));
 }
 
-/** Build the schema path for a marker. Inverse of `aiSectionPathMarker`. */
 export function aiSectionMarkerPath(m: AISectionMarker): NodePath {
-	if (!m) return [];
-	switch (m.kind) {
-		case 'section':
-			return ['sections', m.sectionIndex];
-		case 'portal':
-			return ['sections', m.sectionIndex, 'portals', m.portalIndex];
-		case 'boundaryLine':
-			return ['sections', m.sectionIndex, 'portals', m.portalIndex, 'boundaryLines', m.lineIndex];
-		case 'noGoLine':
-			return ['sections', m.sectionIndex, 'noGoLines', m.lineIndex];
-	}
+	const sel = markerToSelection(m);
+	if (!sel) return [];
+	return aiSectionsV12SelectionCodec.selectionToPath(sel);
 }
 
 /**

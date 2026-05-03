@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	aiSectionPathMarker,
 	aiSectionMarkerPath,
+	aiSectionSelectionCodec,
 	edgeContextMenuRootStyle,
 } from './AISectionsOverlay';
 import type { NodePath } from '@/lib/schema/walk';
@@ -69,6 +70,19 @@ describe('AISectionsOverlay', () => {
 		expect(aiSectionPathMarker(['sections'])).toBeNull();
 		expect(aiSectionPathMarker(['sections', 'notANumber'] as unknown as NodePath)).toBeNull();
 		expect(aiSectionMarkerPath(null)).toEqual([]);
+	});
+
+	it('exposes the new Selection-module codec with the unified `{kind, indices}` shape', () => {
+		expect(aiSectionSelectionCodec.pathToSelection(['sections', 42]))
+			.toEqual({ kind: 'section', indices: [42] });
+		expect(aiSectionSelectionCodec.pathToSelection(['sections', 42, 'portals', 3]))
+			.toEqual({ kind: 'portal', indices: [42, 3] });
+		expect(aiSectionSelectionCodec.pathToSelection(['sections', 42, 'portals', 3, 'boundaryLines', 1]))
+			.toEqual({ kind: 'boundaryLine', indices: [42, 3, 1] });
+		expect(aiSectionSelectionCodec.pathToSelection(['sections', 42, 'noGoLines', 7]))
+			.toEqual({ kind: 'noGoLine', indices: [42, 7] });
+		expect(aiSectionSelectionCodec.selectionToPath({ kind: 'portal', indices: [42, 3] }))
+			.toEqual(['sections', 42, 'portals', 3]);
 	});
 
 	// The menu rides the WorldViewport's HTML slot, whose wrapper sets
