@@ -13,7 +13,7 @@
 //
 // DOM siblings (marquee, status badge) ride the WorldViewport HTML slot.
 
-import { useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
@@ -28,7 +28,7 @@ import type { Edge } from '@/components/common/three/SelectionOutline';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayProps } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
-import { defineSelectionCodec, type Selection } from './selection';
+import { defineSelectionCodec, useBatchedSelection, type Selection } from './selection';
 
 // ---------------------------------------------------------------------------
 // Path ↔ Selection codec (exported for tests)
@@ -42,9 +42,6 @@ export type SoupPolyAddress = { soup: number; poly: number };
  * `['soups', 0, 'polygons', 7, 'collisionTag']`) collapse to the parent
  * polygon — drilling into a primitive in the inspector keeps the 3D outline
  * highlighted on the parent.
- *
- * The merged BatchedGeometry paint loop stays inline; `useBatchedSelection`
- * is a deferred follow-up. Only the codec migrates here.
  */
 export const polygonSoupSelectionCodec = defineSelectionCodec({
 	pathToSelection: (path: NodePath): Selection | null => {
@@ -416,6 +413,7 @@ function applyHighlight(
 
 const EMPTY_POLY_SELECTION: ReadonlySet<number> = new Set();
 const EMPTY_BUNDLE_SOUPS: (ParsedPolygonSoupList | null)[] = [];
+const EMPTY_BULK_KEYS: ReadonlySet<string> = new Set();
 
 type Props = WorldOverlayProps<ParsedPolygonSoupList> & {
 	/** The full per-Bundle list of PSL instances the overlay should render
@@ -532,32 +530,43 @@ export const PolygonSoupListOverlay = ({
 	// Dispose GPU memory when the geometry changes or the overlay unmounts.
 	useDisposeOnUnmount(batched.geometry);
 
-	const handleClick = (event: ThreeEvent<MouseEvent>) => {
-		// Resolve the receiver: page-level context (richer bulk-aware API)
-		// wins, otherwise the composition's `onPickInstancePoly` prop. If
-		// neither is supplied (truly standalone mount) we'd have nothing to
-		// route the pick to, so bail.
-		const sink = onPickFromCtx ?? onPickInstancePoly;
-		if (!sink) return;
-		const faceIdx = event.faceIndex;
-		if (faceIdx == null) return;
-		const map = batched.faceToLocation;
-		if (faceIdx * 3 + 2 >= map.length) return;
-		const modelIndex = map[faceIdx * 3 + 0];
-		const soupIndex = map[faceIdx * 3 + 1];
-		const polyIndex = map[faceIdx * 3 + 2];
-		event.stopPropagation();
-		// Forward modifier keys so the page (or composition) can branch on
-		// ctrl (toggle into bulk) / shift (extend bulk range). The composition
-		// path doesn't currently honour modifiers — it just navigates to the
-		// clicked polygon — but the signature is identical so the workspace
-		// can grow bulk-select later without churning the overlay.
-		const ne = event.nativeEvent as PointerEvent | undefined;
-		sink(modelIndex, soupIndex, polyIndex, {
-			shift: ne?.shiftKey ?? false,
-			ctrl: (ne?.ctrlKey || ne?.metaKey) ?? false,
-		});
-	};
+	// `useBatchedSelection` hosts the click decoder so PSL speaks the same
+	// dispatch dialect as ZoneList and StreetData. Paint is NOT migrated:
+	// PSL's `applyHighlight` runs a vectorized whole-attribute reset +
+	// brighten + amber-stamp pass that doesn't decompose into a per-entity
+	// callback without a perf cliff. `applyColor` is a no-op and the
+	// existing `useApplyPolygonSoupHighlight` pipeline still drives colors.
+	const sink = onPickFromCtx ?? onPickInstancePoly;
+	const map = batched.faceToLocation;
+
+	const handlers = useBatchedSelection({
+		kind: 'polygon',
+		count: batched.triangleCount,
+		primary: useMemo(() => treeSelectedPoly
+			? { kind: 'polygon', indices: [treeSelectedPoly.soup, treeSelectedPoly.poly] }
+			: null, [treeSelectedPoly]),
+		bulk: EMPTY_BULK_KEYS,
+		hovered: null,
+		faceToEntity: useCallback(
+			(face: number) => face >= 0 && face * 3 + 2 < map.length ? face : -1, [map]),
+		mapEntityToSelection: useCallback(
+			(face: number): Selection => ({
+				kind: 'polygon',
+				indices: [map[face * 3 + 1], map[face * 3 + 2]],
+			}), [map]),
+		applyColor: useCallback(() => {}, []),
+		onPick: useCallback((sel: Selection, e: ThreeEvent<MouseEvent>) => {
+			if (!sink || e.faceIndex == null) return;
+			// modelIndex isn't in the Selection (the kind+indices shape is 2-deep).
+			// Pull it from faceToLocation at the same face the hook just resolved.
+			const modelIndex = map[e.faceIndex * 3 + 0];
+			const ne = e.nativeEvent as PointerEvent | undefined;
+			sink(modelIndex, sel.indices[0], sel.indices[1], {
+				shift: ne?.shiftKey ?? false,
+				ctrl: (ne?.ctrlKey || ne?.metaKey) ?? false,
+			});
+		}, [sink, map]),
+	});
 
 	// HTML siblings — marquee + status badge.
 	const htmlNode = useMemo(() => {
@@ -612,7 +621,7 @@ export const PolygonSoupListOverlay = ({
 
 	return (
 		<>
-			<mesh geometry={batched.geometry} onClick={handleClick}>
+			<mesh geometry={batched.geometry} onClick={handlers.onClick}>
 				<meshLambertMaterial vertexColors side={THREE.DoubleSide} flatShading />
 			</mesh>
 			{/* Bulk-selection outline. depthTest=false + high renderOrder so
