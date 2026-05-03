@@ -26,6 +26,7 @@ import {
 	buildBatchedZones,
 	zoneIndexPath,
 	zonePathIndex,
+	zoneSelectionCodec,
 } from './ZoneListOverlay';
 import type { ParsedZoneList, Zone } from '@/lib/core/zoneList';
 
@@ -87,7 +88,7 @@ describe('ZoneListOverlay', () => {
 		expect(zoneIndicesInScene.size).toBe(fixture.zones.length);
 
 		// (2) Selection highlight: ['zones', 3] decodes to zone-index 3, which
-		// is what ZoneListOverlay feeds into ZoneOverlayMesh for the yellow
+		// is what ZoneListOverlay feeds into ZoneOverlayMesh for the
 		// selection overlay.
 		expect(zonePathIndex(['zones', 3])).toBe(3);
 		// Sub-paths inside a zone collapse to "this zone is selected".
@@ -95,6 +96,13 @@ describe('ZoneListOverlay', () => {
 		// Off-resource paths read as "no selection".
 		expect(zonePathIndex([])).toBe(-1);
 		expect(zonePathIndex(['somethingElse', 0])).toBe(-1);
+
+		// New Selection-module codec — same shape every overlay speaks now.
+		expect(zoneSelectionCodec.pathToSelection(['zones', 3])).toEqual({ kind: 'zone', indices: [3] });
+		expect(zoneSelectionCodec.pathToSelection(['zones', 3, 'safeNeighbours', 0]))
+			.toEqual({ kind: 'zone', indices: [3] });
+		expect(zoneSelectionCodec.pathToSelection([])).toBeNull();
+		expect(zoneSelectionCodec.selectionToPath({ kind: 'zone', indices: [3] })).toEqual(['zones', 3]);
 
 		// (3) Click dispatch: pick any face, look up its zone, and confirm the
 		// overlay's onPick → onSelect(zoneIndexPath(zoneIndex)) chain produces

@@ -28,36 +28,52 @@ import type { Edge } from '@/components/common/three/SelectionOutline';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayProps } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
+import { defineSelectionCodec, type Selection } from './selection';
 
 // ---------------------------------------------------------------------------
-// Path → polygon address (exported for tests)
+// Path ↔ Selection codec (exported for tests)
 // ---------------------------------------------------------------------------
 
 export type SoupPolyAddress = { soup: number; poly: number };
 
 /**
- * Decode a schema path into the (soup, poly) address it points at, or null
- * if the path doesn't address an editable polygon. Sub-paths inside the
- * polygon record (e.g. `['soups', 0, 'polygons', 7, 'collisionTag']`)
- * collapse to the parent polygon — drilling into a primitive in the
- * inspector keeps the 3D outline highlighted on the parent.
+ * Codec for an editable polygon inside a soup inside a PolygonSoupList
+ * resource. Sub-paths inside the polygon record (e.g.
+ * `['soups', 0, 'polygons', 7, 'collisionTag']`) collapse to the parent
+ * polygon — drilling into a primitive in the inspector keeps the 3D outline
+ * highlighted on the parent.
+ *
+ * The merged BatchedGeometry paint loop stays inline; `useBatchedSelection`
+ * is a deferred follow-up. Only the codec migrates here.
  */
+export const polygonSoupSelectionCodec = defineSelectionCodec({
+	pathToSelection: (path: NodePath): Selection | null => {
+		if (
+			path.length >= 4 &&
+			path[0] === 'soups' &&
+			typeof path[1] === 'number' &&
+			path[2] === 'polygons' &&
+			typeof path[3] === 'number'
+		) {
+			return { kind: 'polygon', indices: [path[1], path[3]] };
+		}
+		return null;
+	},
+	selectionToPath: (sel: Selection): NodePath => {
+		if (sel.kind !== 'polygon') return [];
+		return ['soups', sel.indices[0], 'polygons', sel.indices[1]];
+	},
+});
+
+/** Back-compat alias retained for tests. */
 export function soupPolyPathAddress(path: NodePath): SoupPolyAddress | null {
-	if (
-		path.length >= 4 &&
-		path[0] === 'soups' &&
-		typeof path[1] === 'number' &&
-		path[2] === 'polygons' &&
-		typeof path[3] === 'number'
-	) {
-		return { soup: path[1], poly: path[3] };
-	}
-	return null;
+	const sel = polygonSoupSelectionCodec.pathToSelection(path);
+	return sel ? { soup: sel.indices[0], poly: sel.indices[1] } : null;
 }
 
-/** Build the schema path for a polygon address. Inverse of `soupPolyPathAddress`. */
+/** Back-compat alias retained for tests. */
 export function soupPolyAddressPath(addr: SoupPolyAddress): NodePath {
-	return ['soups', addr.soup, 'polygons', addr.poly];
+	return polygonSoupSelectionCodec.selectionToPath({ kind: 'polygon', indices: [addr.soup, addr.poly] });
 }
 
 // ---------------------------------------------------------------------------

@@ -52,9 +52,10 @@ import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelection
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
+import { defineSelectionCodec, type Selection } from './selection';
 
 // ---------------------------------------------------------------------------
-// Path ↔ TrafficDataSelection translation (exported for tests)
+// Path ↔ Selection codec (exported for tests)
 // ---------------------------------------------------------------------------
 
 const SUB_TYPE_FROM_LIST: Record<string, 'section' | 'rung' | 'junction' | 'lightTrigger' | 'staticVehicle'> = {
@@ -82,39 +83,79 @@ const SUB_TYPE_TO_TAB: Record<string, string> = {
 };
 
 /**
- * Decode a schema path into the TrafficData selection it points at.
- *   ['pvs', 'hullPvsSets', N]  → { kind: 'pvsCell', cellIndex: N }
- *   ['hulls', h]               → { hullIndex: h }
- *   ['hulls', h, list, i]      → { hullIndex: h, sub: { type, index: i } }
- * Anything outside those shapes returns null. Sub-paths inside a hull-list
- * item collapse to the parent (e.g. `['hulls', 0, 'sections', 3, 'mfSpeed']`
- * → section 3).
+ * Codec for every TrafficData entity. Sub-paths inside a list item collapse
+ * to the parent (drilling into `mfSpeed` of a section keeps the section
+ * highlighted). Selection kinds:
+ *   - 'hull'         → indices: [hullIndex]
+ *   - 'section'      → indices: [hullIndex, sectionIndex]
+ *   - 'rung'         → indices: [hullIndex, rungIndex]
+ *   - 'junction'     → indices: [hullIndex, junctionIndex]
+ *   - 'lightTrigger' → indices: [hullIndex, lightTriggerIndex]
+ *   - 'staticVehicle'→ indices: [hullIndex, vehicleIndex]
+ *   - 'pvsCell'      → indices: [cellIndex]
+ *
+ * The overlay still adapts internally to the legacy `TrafficDataSelection`
+ * shape every consumer in `@/components/trafficdata/TrafficDataViewport`
+ * speaks; the codec is the public seam.
  */
-export function trafficPathSelection(path: NodePath): TrafficDataSelection {
-	if (path[0] === 'pvs' && path[1] === 'hullPvsSets' && typeof path[2] === 'number') {
-		return { kind: 'pvsCell', cellIndex: path[2] };
+export const trafficSelectionCodec = defineSelectionCodec({
+	pathToSelection: (path: NodePath): Selection | null => {
+		if (path[0] === 'pvs' && path[1] === 'hullPvsSets' && typeof path[2] === 'number') {
+			return { kind: 'pvsCell', indices: [path[2]] };
+		}
+		if (path.length < 2 || path[0] !== 'hulls') return null;
+		const hullIndex = path[1];
+		if (typeof hullIndex !== 'number') return null;
+		if (path.length === 2) return { kind: 'hull', indices: [hullIndex] };
+		const list = path[2];
+		const idx = path[3];
+		if (typeof list !== 'string' || typeof idx !== 'number') return { kind: 'hull', indices: [hullIndex] };
+		const subType = SUB_TYPE_FROM_LIST[list];
+		if (!subType) return { kind: 'hull', indices: [hullIndex] };
+		return { kind: subType, indices: [hullIndex, idx] };
+	},
+	selectionToPath: (sel: Selection): NodePath => {
+		if (sel.kind === 'pvsCell') return ['pvs', 'hullPvsSets', sel.indices[0]];
+		if (sel.kind === 'hull') return ['hulls', sel.indices[0]];
+		const list = LIST_FROM_SUB_TYPE[sel.kind];
+		return list ? ['hulls', sel.indices[0], list, sel.indices[1]] : [];
+	},
+});
+
+// Adapters between the unified Selection shape and the legacy
+// TrafficDataSelection consumed by `@/components/trafficdata/TrafficDataViewport`.
+// Kept private to this overlay — the boundary into the children is fully
+// owned here.
+function selectionToTrafficSelection(sel: Selection | null): TrafficDataSelection {
+	if (!sel) return null;
+	if (sel.kind === 'pvsCell') return { kind: 'pvsCell', cellIndex: sel.indices[0] };
+	if (sel.kind === 'hull') return { hullIndex: sel.indices[0] };
+	if (sel.kind === 'section' || sel.kind === 'rung' || sel.kind === 'junction'
+		|| sel.kind === 'lightTrigger' || sel.kind === 'staticVehicle') {
+		return { hullIndex: sel.indices[0], sub: { type: sel.kind, index: sel.indices[1] } };
 	}
-	if (path.length < 2 || path[0] !== 'hulls') return null;
-	const hullIndex = path[1];
-	if (typeof hullIndex !== 'number') return null;
-	if (path.length === 2) return { hullIndex };
-	if (path.length < 4) return { hullIndex };
-	const list = path[2];
-	const idx = path[3];
-	if (typeof list !== 'string' || typeof idx !== 'number') return { hullIndex };
-	const subType = SUB_TYPE_FROM_LIST[list];
-	if (!subType) return { hullIndex };
-	return { hullIndex, sub: { type: subType, index: idx } };
+	return null;
 }
 
-/** Inverse of `trafficPathSelection`. */
+function trafficSelectionToSelection(sel: TrafficDataSelection): Selection | null {
+	if (!sel) return null;
+	if (isPvsCellSelection(sel)) return { kind: 'pvsCell', indices: [sel.cellIndex] };
+	if (!sel.sub) return { kind: 'hull', indices: [sel.hullIndex] };
+	return { kind: sel.sub.type, indices: [sel.hullIndex, sel.sub.index] };
+}
+
+/**
+ * Back-compat alias retained for tests + any caller that still wants the
+ * legacy `TrafficDataSelection` directly.
+ */
+export function trafficPathSelection(path: NodePath): TrafficDataSelection {
+	return selectionToTrafficSelection(trafficSelectionCodec.pathToSelection(path));
+}
+
+/** Back-compat alias retained for tests. */
 export function trafficSelectionPath(sel: TrafficDataSelection): NodePath {
-	if (!sel) return [];
-	if (isPvsCellSelection(sel)) return ['pvs', 'hullPvsSets', sel.cellIndex];
-	const base: NodePath = ['hulls', sel.hullIndex];
-	if (!sel.sub) return base;
-	const list = LIST_FROM_SUB_TYPE[sel.sub.type];
-	return list ? [...base, list, sel.sub.index] : base;
+	const s = trafficSelectionToSelection(sel);
+	return s ? trafficSelectionCodec.selectionToPath(s) : [];
 }
 
 /**

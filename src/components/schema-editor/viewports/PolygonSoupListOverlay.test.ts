@@ -13,6 +13,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+	polygonSoupSelectionCodec,
 	soupPolyAddressPath,
 	soupPolyPathAddress,
 } from './PolygonSoupListOverlay';
@@ -47,5 +48,19 @@ describe('PolygonSoupListOverlay', () => {
 		// Non-numeric segments.
 		expect(soupPolyPathAddress(['soups', 'one', 'polygons', 0] as unknown as NodePath))
 			.toBeNull();
+	});
+
+	it('exposes the new Selection-module codec with the unified `{kind, indices}` shape', () => {
+		expect(polygonSoupSelectionCodec.pathToSelection(['soups', 3, 'polygons', 12]))
+			.toEqual({ kind: 'polygon', indices: [3, 12] });
+		// Sub-paths inside a polygon collapse to the parent polygon.
+		expect(polygonSoupSelectionCodec.pathToSelection(['soups', 1, 'polygons', 4, 'collisionTag']))
+			.toEqual({ kind: 'polygon', indices: [1, 4] });
+		// Inverse — every shape round-trips.
+		expect(polygonSoupSelectionCodec.selectionToPath({ kind: 'polygon', indices: [3, 12] }))
+			.toEqual(['soups', 3, 'polygons', 12]);
+		// Off-resource paths read as null.
+		expect(polygonSoupSelectionCodec.pathToSelection([])).toBeNull();
+		expect(polygonSoupSelectionCodec.pathToSelection(['soups', 1, 'vertices', 0])).toBeNull();
 	});
 });

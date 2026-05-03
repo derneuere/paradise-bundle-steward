@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	trafficActiveTabFromSelection,
 	trafficPathSelection,
+	trafficSelectionCodec,
 	trafficSelectionPath,
 } from './TrafficDataOverlay';
 import type { NodePath } from '@/lib/schema/walk';
@@ -64,6 +65,37 @@ describe('TrafficDataOverlay', () => {
 		expect(trafficPathSelection(['hulls'])).toBeNull();
 		expect(trafficPathSelection(['hulls', 'notANumber'] as unknown as NodePath)).toBeNull();
 		expect(trafficSelectionPath(null)).toEqual([]);
+	});
+
+	it('exposes the new Selection-module codec with the unified `{kind, indices}` shape', () => {
+		expect(trafficSelectionCodec.pathToSelection(['hulls', 5]))
+			.toEqual({ kind: 'hull', indices: [5] });
+		expect(trafficSelectionCodec.pathToSelection(['hulls', 3, 'sections', 12]))
+			.toEqual({ kind: 'section', indices: [3, 12] });
+		expect(trafficSelectionCodec.pathToSelection(['hulls', 3, 'rungs', 7]))
+			.toEqual({ kind: 'rung', indices: [3, 7] });
+		expect(trafficSelectionCodec.pathToSelection(['hulls', 3, 'junctions', 1]))
+			.toEqual({ kind: 'junction', indices: [3, 1] });
+		expect(trafficSelectionCodec.pathToSelection(['hulls', 3, 'lightTriggers', 4]))
+			.toEqual({ kind: 'lightTrigger', indices: [3, 4] });
+		expect(trafficSelectionCodec.pathToSelection(['hulls', 3, 'staticTrafficVehicles', 9]))
+			.toEqual({ kind: 'staticVehicle', indices: [3, 9] });
+		expect(trafficSelectionCodec.pathToSelection(['pvs', 'hullPvsSets', 42]))
+			.toEqual({ kind: 'pvsCell', indices: [42] });
+
+		// Inverse — every kind round-trips.
+		expect(trafficSelectionCodec.selectionToPath({ kind: 'hull', indices: [5] }))
+			.toEqual(['hulls', 5]);
+		expect(trafficSelectionCodec.selectionToPath({ kind: 'section', indices: [3, 12] }))
+			.toEqual(['hulls', 3, 'sections', 12]);
+		expect(trafficSelectionCodec.selectionToPath({ kind: 'rung', indices: [3, 7] }))
+			.toEqual(['hulls', 3, 'rungs', 7]);
+		expect(trafficSelectionCodec.selectionToPath({ kind: 'staticVehicle', indices: [3, 9] }))
+			.toEqual(['hulls', 3, 'staticTrafficVehicles', 9]);
+		expect(trafficSelectionCodec.selectionToPath({ kind: 'pvsCell', indices: [42] }))
+			.toEqual(['pvs', 'hullPvsSets', 42]);
+
+		expect(trafficSelectionCodec.pathToSelection([])).toBeNull();
 	});
 
 	it('derives activeTab from the sub-type — drives 3D layer highlight filtering', () => {
