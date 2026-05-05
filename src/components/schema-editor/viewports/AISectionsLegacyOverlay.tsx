@@ -38,18 +38,23 @@
 //     within a scene-scaled radius (`snapLegacySectionOffset`,
 //     `snapLegacyCornerOffset`; issue #43).
 //
-// Marquee select is still a future slice.
+// Marquee (B-key box-select) hit-tests sections by corner centroid against
+// the marquee frustum — same pattern as V12, but the centroid is folded over
+// the parallel cornersX/cornersZ arrays via the `legacyCorners` adapter
+// rather than V12's Vector2[] corners.
 //
 // 3D primitives (BatchedSections, SelectionOverlay, SectionLabel,
 // EdgeHandles, EdgeContextMenu) live in `@/components/aisections/shared`
 // so the V12 overlay consumes the same code path — bug fixes land in both
 // at once. See issue #35.
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useRef, useState, useCallback } from 'react';
 import { Copy, Magnet } from 'lucide-react';
 import * as THREE from 'three';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
+import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
+import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import type {
 	ParsedAISectionsV4,
 	ParsedAISectionsV6,
@@ -254,6 +259,7 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	const legacy = data.legacy;
 	const sections = legacy.sections;
 
+	const cameraBridge = useRef<CameraBridgeData | null>(null);
 	const aiBulk = useAISectionsBulk();
 	// Resolve "this overlay's bulk" via per-instance lookup. Legacy per-page
 	// routes don't supply `bundleId`/`index` so they degrade to "no bulk".
@@ -537,6 +543,33 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 		setEdgeMenu(null);
 	}, [data, legacy, edgeMenu, onChange, onSelect]);
 
+	// Marquee wiring: pick legacy sections whose corner-centroid is inside the
+	// dragged rectangle and union/subtract their schema paths into the
+	// workspace bulk. V4/V6 store corners as parallel cornersX/cornersZ arrays
+	// (4 each on the wire format), so the centroid is folded via `legacyCorners`
+	// — a one-pass adapter to the shared `Corner` shape — and projected onto
+	// the Y=0 ground plane (legacy data has no resolved-Y map, matching the
+	// detail layer's anchor convention).
+	const handleMarquee = useCallback(
+		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
+			if (!sectionBulk) return;
+			const hits: NodePath[] = [];
+			const pt = new THREE.Vector3();
+			for (let i = 0; i < sections.length; i++) {
+				const corners = legacyCorners(sections[i]);
+				if (corners.length === 0) continue;
+				let sx = 0, sz = 0;
+				for (const c of corners) { sx += c.x; sz += c.z; }
+				const n = corners.length;
+				pt.set(sx / n, 0, sz / n);
+				if (frustum.containsPoint(pt)) hits.push(['legacy', 'sections', i]);
+			}
+			if (hits.length === 0) return;
+			sectionBulk.onApplyPaths(hits, mode);
+		},
+		[sections, sectionBulk],
+	);
+
 	return (
 		<>
 			<BatchedSections
@@ -642,10 +675,17 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 				/>
 			)}
 
+			{/* CameraBridge mirrors camera state out to the marquee selector
+			    living in the DOM sibling slot. Lives inside Canvas so it can
+			    read three-fiber's per-frame state. Mirrors V12. */}
+			<CameraBridge bridge={cameraBridge} />
+
 			<HtmlSiblings
 				isActive={isActive}
 				snapEnabled={snapEnabled}
 				toggleSnap={() => setSnapEnabled((v) => !v)}
+				cameraBridge={cameraBridge}
+				onMarquee={handleMarquee}
 				edgeMenu={edgeMenu}
 				canDuplicate={!!onChange}
 				onDuplicateThroughEdge={handleDuplicateThroughEdge}
@@ -664,6 +704,8 @@ function HtmlSiblings({
 	isActive,
 	snapEnabled,
 	toggleSnap,
+	cameraBridge,
+	onMarquee,
 	edgeMenu,
 	canDuplicate,
 	onDuplicateThroughEdge,
@@ -672,6 +714,8 @@ function HtmlSiblings({
 	isActive: boolean;
 	snapEnabled: boolean;
 	toggleSnap: () => void;
+	cameraBridge: React.MutableRefObject<CameraBridgeData | null>;
+	onMarquee: (frustum: THREE.Frustum, mode: 'add' | 'remove') => void;
 	edgeMenu: { x: number; y: number; sectionIndex: number; edgeIdx: number } | null;
 	canDuplicate: boolean;
 	onDuplicateThroughEdge: () => void;
@@ -680,6 +724,13 @@ function HtmlSiblings({
 	const node = useMemo(
 		() => (
 			<>
+				<MarqueeSelector
+					bridge={cameraBridge}
+					far={50000}
+					onMarquee={onMarquee}
+					hintIdle="press B to box-select AI sections"
+				/>
+
 				<button
 					type="button"
 					onClick={toggleSnap}
@@ -733,7 +784,7 @@ function HtmlSiblings({
 				)}
 			</>
 		),
-		[snapEnabled, toggleSnap, edgeMenu, canDuplicate, onDuplicateThroughEdge, onCloseEdgeMenu],
+		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, canDuplicate, onDuplicateThroughEdge, onCloseEdgeMenu],
 	);
 	useWorldViewportHtmlSlot(isActive ? node : null);
 	return null;

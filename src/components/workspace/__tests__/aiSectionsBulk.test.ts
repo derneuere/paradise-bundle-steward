@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+	applyPaths,
 	normaliseToSectionPath,
 	parseSectionAddress,
 	parseSectionPathKey,
@@ -197,6 +198,65 @@ describe('rangeAddSections', () => {
 		const start = new Set(['sections/5']);
 		const next = rangeAddSections(start, ['sections', 0], ['unrelated']);
 		expect([...next]).toEqual([...start]);
+	});
+});
+
+describe('applyPaths', () => {
+	it('adds every input path to an empty set', () => {
+		const next = applyPaths(new Set(), [
+			['sections', 1],
+			['sections', 2],
+			['sections', 3],
+		], 'add');
+		expect([...next].sort()).toEqual(['sections/1', 'sections/2', 'sections/3']);
+	});
+
+	it('unions into a non-empty set without dropping prior entries', () => {
+		const start = new Set(['sections/9']);
+		const next = applyPaths(start, [['sections', 1], ['sections', 2]], 'add');
+		expect([...next].sort()).toEqual(['sections/1', 'sections/2', 'sections/9']);
+	});
+
+	it('removes entries that exist in the set', () => {
+		const start = new Set(['sections/1', 'sections/2', 'sections/3']);
+		const next = applyPaths(start, [['sections', 2]], 'remove');
+		expect([...next].sort()).toEqual(['sections/1', 'sections/3']);
+	});
+
+	it('is a no-op when removing entries that are not in the set', () => {
+		const start = new Set(['sections/1']);
+		const next = applyPaths(start, [['sections', 99]], 'remove');
+		expect([...next].sort()).toEqual(['sections/1']);
+	});
+
+	it('silently skips paths outside an AI Sections resource (mixed valid + invalid)', () => {
+		const next = applyPaths(new Set(), [
+			['sections', 1],
+			['header', 'flags'],
+			['unrelated'],
+			['sections', 4],
+		], 'add');
+		expect([...next].sort()).toEqual(['sections/1', 'sections/4']);
+	});
+
+	it('normalises sub-paths to the containing section before applying', () => {
+		// The marquee never emits sub-paths today, but this property keeps
+		// the API symmetric with `toggleSection` so a future caller passing
+		// e.g. portal paths still ends up with section-level keys.
+		const next = applyPaths(new Set(), [
+			['sections', 5, 'portals', 3],
+			['sections', 5, 'noGoLines', 0],
+			['legacy', 'sections', 7, 'portals', 2, 'boundaryLines', 1],
+		], 'add');
+		expect([...next].sort()).toEqual(['legacy/sections/7', 'sections/5']);
+	});
+
+	it('handles V12 + legacy path shapes in the same call', () => {
+		const next = applyPaths(new Set(), [
+			['sections', 1],
+			['legacy', 'sections', 1],
+		], 'add');
+		expect([...next].sort()).toEqual(['legacy/sections/1', 'sections/1']);
 	});
 });
 

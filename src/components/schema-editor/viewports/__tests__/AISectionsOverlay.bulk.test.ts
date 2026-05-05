@@ -18,6 +18,10 @@
 // entities and would land here loudly.
 
 import { describe, it, expect } from 'vitest';
+import * as THREE from 'three';
+import type { AISection } from '@/lib/core/aiSections';
+import { SectionSpeed } from '@/lib/core/aiSections';
+import type { NodePath } from '@/lib/schema/walk';
 import { aiSectionSelectionCodec } from '../AISectionsOverlay';
 import { legacyAISectionSelectionCodec } from '../AISectionsLegacyOverlay';
 import { selectionKey } from '../selection';
@@ -53,5 +57,85 @@ describe('AISections overlay bulk wiring', () => {
 		// still match.
 		expect(v12Portal?.kind).toBe('portal');
 		expect(v12Portal?.indices[0]).toBe(5);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// V12 marquee centroid hit-test — pins the cornersX/cornersY → (avgX, 0, avgY)
+// projection. V12 stores corners as Vector2 where `.y` is the world Z axis;
+// regressing this to either dimension would silently misroute every hit.
+// ---------------------------------------------------------------------------
+
+function v12MarqueeHits(
+	sections: readonly AISection[],
+	frustum: THREE.Frustum,
+): NodePath[] {
+	const hits: NodePath[] = [];
+	const pt = new THREE.Vector3();
+	for (let i = 0; i < sections.length; i++) {
+		const corners = sections[i].corners;
+		if (corners.length === 0) continue;
+		let sx = 0, sy = 0;
+		for (const c of corners) { sx += c.x; sy += c.y; }
+		const n = corners.length;
+		pt.set(sx / n, 0, sy / n);
+		if (frustum.containsPoint(pt)) hits.push(['sections', i]);
+	}
+	return hits;
+}
+
+function makeV12Section(
+	corners: Array<{ x: number; y: number }>,
+	id: number = 0,
+): AISection {
+	return {
+		id,
+		spanIndex: 0,
+		speed: SectionSpeed.E_SECTION_SPEED_NORMAL,
+		district: 0,
+		flags: 0,
+		corners: corners.map((c) => new THREE.Vector2(c.x, c.y)),
+		portals: [],
+		noGoLines: [],
+	};
+}
+
+function buildBoxFrustum(
+	xMin: number, xMax: number,
+	yMin: number, yMax: number,
+	zMin: number, zMax: number,
+): THREE.Frustum {
+	const planes = [
+		new THREE.Plane(new THREE.Vector3(1, 0, 0), -xMin),
+		new THREE.Plane(new THREE.Vector3(-1, 0, 0), xMax),
+		new THREE.Plane(new THREE.Vector3(0, 1, 0), -yMin),
+		new THREE.Plane(new THREE.Vector3(0, -1, 0), yMax),
+		new THREE.Plane(new THREE.Vector3(0, 0, 1), -zMin),
+		new THREE.Plane(new THREE.Vector3(0, 0, -1), zMax),
+	];
+	const f = new THREE.Frustum();
+	for (let i = 0; i < 6; i++) f.planes[i].copy(planes[i]);
+	return f;
+}
+
+describe('AISectionsOverlay V12 marquee centroid hit-test', () => {
+	const sections: AISection[] = [
+		makeV12Section([{ x: -5, y: -5 }, { x: 5, y: -5 }, { x: 5, y: 5 }, { x: -5, y: 5 }]),
+		makeV12Section([{ x: 95, y: -5 }, { x: 105, y: -5 }, { x: 105, y: 5 }, { x: 95, y: 5 }]),
+		makeV12Section([{ x: 195, y: -5 }, { x: 205, y: -5 }, { x: 205, y: 5 }, { x: 195, y: 5 }]),
+	];
+
+	it('returns only the section whose centroid lies inside the frustum', () => {
+		const frustum = buildBoxFrustum(80, 120, -1, 1, -50, 50);
+		expect(v12MarqueeHits(sections, frustum)).toEqual([['sections', 1]]);
+	});
+
+	it('emits paths WITHOUT the `legacy` prefix (V12 lives at the root)', () => {
+		const frustum = buildBoxFrustum(-50, 250, -1, 1, -50, 50);
+		const hits = v12MarqueeHits(sections, frustum);
+		expect(hits.length).toBe(3);
+		for (const h of hits) {
+			expect(h[0]).toBe('sections');
+		}
 	});
 });

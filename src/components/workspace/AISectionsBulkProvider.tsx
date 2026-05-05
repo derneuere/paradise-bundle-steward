@@ -38,6 +38,7 @@ import {
 } from 'react';
 import { selectionKey } from '@/components/schema-editor/viewports/selection';
 import {
+	applyPaths,
 	parseSectionPathKey,
 	rangeAddSections,
 	toggleSection,
@@ -95,6 +96,11 @@ export type AISectionsBulkInstanceValue = {
 	onToggleSection: (sectionIndex: number) => void;
 	/** Extend the bulk from `fromIndex` to `toIndex` inclusive. */
 	onRangeSection: (fromIndex: number | null, toIndex: number) => void;
+	/** Batch-apply schema paths to the bulk Set in one pass. The 3D marquee
+	 *  emits a hit-array spanning every section inside the dragged rectangle
+	 *  and dispatches once with `mode === 'add'` (default) or `'remove'` (Alt).
+	 *  Non-section paths are silently dropped — see `applyPaths`. */
+	onApplyPaths: (paths: ReadonlyArray<NodePath>, mode: 'add' | 'remove') => void;
 	/** Clear this instance's bulk. */
 	onClear: () => void;
 };
@@ -153,6 +159,16 @@ export type WorkspaceAISectionsBulkValue = {
 		index: number,
 		from: NodePath,
 		to: NodePath,
+	) => void;
+	/** Batch-apply schema paths to `(bundleId, index)`'s bulk in one pass.
+	 *  Mirrors `onBulkToggle`'s sub-path normalisation but folds many paths
+	 *  into a single state update — the 3D marquee emits all hits at once
+	 *  rather than dispatching per-section. */
+	onBulkApplyPaths: (
+		bundleId: BundleId,
+		index: number,
+		paths: ReadonlyArray<NodePath>,
+		mode: 'add' | 'remove',
 	) => void;
 	/** Clear the bulk for `(bundleId, index)` — drives the panel `[✕]`. */
 	onClear: (bundleId: BundleId, index: number) => void;
@@ -272,6 +288,18 @@ export function AISectionsBulkProvider({
 		[writeEntry],
 	);
 
+	const onWsApplyPaths = useCallback(
+		(
+			bundleId: BundleId,
+			index: number,
+			paths: ReadonlyArray<NodePath>,
+			mode: 'add' | 'remove',
+		) => {
+			writeEntry(bundleId, index, (cur) => applyPaths(cur, paths, mode));
+		},
+		[writeEntry],
+	);
+
 	const onWsClear = useCallback(
 		(bundleId: BundleId, index: number) => {
 			writeEntry(bundleId, index, () => new Set<string>());
@@ -315,9 +343,10 @@ export function AISectionsBulkProvider({
 			getPathKeys,
 			onBulkToggle: onWsToggle,
 			onBulkRange: onWsRange,
+			onBulkApplyPaths: onWsApplyPaths,
 			onClear: onWsClear,
 		}),
-		[summaries, getCount, getPathKeys, onWsToggle, onWsRange, onWsClear],
+		[summaries, getCount, getPathKeys, onWsToggle, onWsRange, onWsApplyPaths, onWsClear],
 	);
 
 	// ---- Overlay-side context ----
@@ -357,6 +386,9 @@ export function AISectionsBulkProvider({
 					writeEntry(bundleId, index, (paths) =>
 						rangeAddSections(paths, fromPath, toPath),
 					);
+				},
+				onApplyPaths: (paths, mode) => {
+					writeEntry(bundleId, index, (cur) => applyPaths(cur, paths, mode));
 				},
 				onClear: () => {
 					writeEntry(bundleId, index, () => new Set<string>());

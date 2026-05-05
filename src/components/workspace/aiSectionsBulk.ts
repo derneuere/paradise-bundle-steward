@@ -138,6 +138,30 @@ export function rangeAddSections(
 	return next;
 }
 
+/** Batch-apply a list of paths to the bulk set in one pass — `'add'` unions
+ *  them in, `'remove'` subtracts them. Mirrors `toggleSection`'s
+ *  normalisation: each input path is collapsed to its containing section
+ *  before the membership change, and non-section paths are silently skipped
+ *  so the marquee can pass arbitrary `['sections', i]`-shaped hits without
+ *  per-element pre-validation. Single-pass collapse (vs. N `toggleSection`
+ *  calls) is the whole point — the 3D marquee can hit hundreds of sections
+ *  in one drag and we want one Set rebuild, not N. */
+export function applyPaths(
+	prev: ReadonlySet<string>,
+	paths: ReadonlyArray<NodePath>,
+	mode: 'add' | 'remove',
+): Set<string> {
+	const next = new Set(prev);
+	for (const p of paths) {
+		const norm = normaliseToSectionPath(p);
+		if (!norm) continue;
+		const key = sectionPathKey(norm);
+		if (mode === 'add') next.add(key);
+		else next.delete(key);
+	}
+	return next;
+}
+
 /** Filter a bulk set to only entries whose section index is within `[0,
  *  maxIndex)` for the given variant. Used when the underlying model shrinks
  *  (e.g. a section was deleted) so stale keys don't paint rows that no

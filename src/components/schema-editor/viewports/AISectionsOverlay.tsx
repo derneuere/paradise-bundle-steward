@@ -64,7 +64,6 @@ import {
 	type SectionAccessor,
 	type SectionDetailAccessor,
 } from '@/components/aisections/shared';
-import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import { useAISectionsBulk } from '@/components/workspace/AISectionsBulkProvider';
 import {
 	useBatchedSelection,
@@ -216,7 +215,6 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	const [snapEnabled, setSnapEnabled] = useState(false);
 
 	const cameraBridge = useRef<CameraBridgeData | null>(null);
-	const bulk = useSchemaBulkSelection();
 	const aiBulk = useAISectionsBulk();
 	// Resolve "this overlay's bulk" via the workspace bulk's per-instance
 	// lookup. When `bundleId`/`index` are missing (legacy single-resource
@@ -491,11 +489,15 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 
 	// Marquee wiring: pick AI sections whose corner-centroid is inside the
 	// dragged rectangle and union/subtract their schema paths into the
-	// bulk set. Sections store XY corners on the Y=0 ground plane (height
-	// is implicit), so the centroid we project is (avgX, 0, avgY).
+	// workspace bulk. Sections store XY corners on the Y=0 ground plane
+	// (height is implicit), so the centroid we project is (avgX, 0, avgY).
+	// Routes through `sectionBulk.onApplyPaths` — the workspace-side bulk —
+	// so the right-sidebar BulkPanelStack, the tree's amber rows, and the
+	// persistent yellow-outline-with-portals overlay rendering all light up
+	// in one dispatch.
 	const handleMarquee = useCallback(
 		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
-			if (!bulk?.onBulkApplyPaths) return;
+			if (!sectionBulk) return;
 			const hits: NodePath[] = [];
 			const pt = new THREE.Vector3();
 			for (let i = 0; i < data.sections.length; i++) {
@@ -508,9 +510,9 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				if (frustum.containsPoint(pt)) hits.push(['sections', i]);
 			}
 			if (hits.length === 0) return;
-			bulk.onBulkApplyPaths(hits, mode);
+			sectionBulk.onApplyPaths(hits, mode);
 		},
-		[data, bulk],
+		[data, sectionBulk],
 	);
 
 	return (
