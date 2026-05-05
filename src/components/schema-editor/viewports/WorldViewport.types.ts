@@ -89,6 +89,20 @@ export type WorldOverlayProps<T = unknown> = {
 	 * while editing a polygonSoupList instance (issue #24 follow-up).
 	 */
 	isActive?: boolean;
+
+	/**
+	 * Optional Bundle / instance identity for the overlay, supplied by the
+	 * Workspace composition (`WorldViewportComposition`). Overlays that need
+	 * to consult workspace-level per-instance state — e.g. AI Sections'
+	 * cross-selection bulk Set, which persists when the inspector navigates
+	 * away — read these to look up "MY bulk" rather than guessing from the
+	 * active Selection (which has moved off the overlay's own resource).
+	 *
+	 * Legacy per-resource pages don't supply these; the overlay must fall
+	 * back to a sensible no-op when both are undefined.
+	 */
+	bundleId?: string;
+	index?: number;
 };
 
 /**

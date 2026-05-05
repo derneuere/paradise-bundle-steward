@@ -136,6 +136,8 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange, isActive,
 			onSelect={onSelect}
 			onChange={onChange}
 			isActive={isActive}
+			bundleId={descriptor.bundleId}
+			index={descriptor.index}
 		/>
 	);
 }

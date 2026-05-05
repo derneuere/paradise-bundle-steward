@@ -63,6 +63,8 @@ import {
 	PSLBulkProvider,
 	useWorkspacePSLBulk,
 } from '@/components/workspace/PSLBulkProvider';
+import { AISectionsBulkProvider } from '@/components/workspace/AISectionsBulkProvider';
+import { BulkPanelStack } from '@/components/workspace/BulkPanelStack';
 import { BulkEditPanel } from '@/components/polygonSoupList/BulkEditPanel';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
 import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
@@ -661,7 +663,9 @@ function WorkspaceBulkWrapper({ children }: { children: React.ReactNode }) {
 			setResourceAt={setResourceAt}
 			isVisible={isVisible}
 		>
-			{children}
+			<AISectionsBulkProvider bundles={bundles}>
+				{children}
+			</AISectionsBulkProvider>
 		</PSLBulkProvider>
 	);
 }
@@ -780,8 +784,17 @@ const WorkspacePage = () => {
 						<div className="px-3 py-2 border-b text-xs font-semibold tracking-wide text-muted-foreground">
 							Inspector
 						</div>
-						<div className="flex-1 min-h-0">
-							<RightInspector />
+						<div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+							<div className="flex-1 min-h-0">
+								<RightInspector />
+							</div>
+							{/* AI Sections bulk panels — visible regardless of which
+							    inspector level is active so the user can return to
+							    a bulk after navigating elsewhere. PSL bulk-edit
+							    lives inside `RightInspector`'s wrapper for
+							    historical reasons (issue #24); generalising both
+							    behind one stack is Slice 2 work. */}
+							<BulkPanelStack />
 						</div>
 					</div>
 				</ResizablePanel>

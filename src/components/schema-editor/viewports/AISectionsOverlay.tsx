@@ -26,8 +26,8 @@
 // land in both at once. See issue #35.
 
 import { useMemo, useRef, useState, useCallback } from 'react';
-import { Html, Line } from '@react-three/drei';
-import { Copy, Magnet } from 'lucide-react';
+import { Magnet } from 'lucide-react';
+import { Copy } from 'lucide-react';
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';
@@ -52,18 +52,26 @@ import {
 	EdgeContextMenu,
 	EdgeHandles,
 	markerToSelection,
+	SectionDetail,
 	SectionLabel,
 	SelectionOverlay,
 	selectionToMarker,
 	edgeContextMenuRootStyle as sharedEdgeContextMenuRootStyle,
-	portalGeo,
-	portalMat,
-	portalSelMat,
 	type AISectionMarker,
 	type Corner,
+	type DisplayPortal,
+	type DisplayBoundaryLine,
 	type SectionAccessor,
+	type SectionDetailAccessor,
 } from '@/components/aisections/shared';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
+import { useAISectionsBulk } from '@/components/workspace/AISectionsBulkProvider';
+import {
+	useBatchedSelection,
+	selectionKey,
+	type Selection,
+} from '@/components/schema-editor/viewports/selection';
+import type { ThreeEvent } from '@react-three/fiber';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
@@ -123,162 +131,50 @@ function v12Corners(section: AISection): Corner[] {
 
 const SPEED_LABEL = ['VSLOW', 'SLOW', 'NORM', 'FAST', 'VFAST'];
 
+const EMPTY_BULK_SET: ReadonlySet<string> = new Set();
+
 // ---------------------------------------------------------------------------
-// Detail layer for the selected section
+// V12 → SectionDetail accessor
+//
+// The V12 storage shape:
+//   - portal.position is a Vector3 already (xyz)
+//   - portal.boundaryLines: Vector4 (start XZ, end XZ) — same display shape
+//   - section.corners: Vector2[] where `y` is the world Z axis
+//   - sectionYs is a parallel `ArrayLike<number>` resolved off the V12 model
+//     (see issue #27 — portal Ys + BFS through the section graph for portal-
+//     less sections). Captured by closure in `makeV12Accessor`.
 // ---------------------------------------------------------------------------
 
-function SelectedSectionDetail({
-	section: sec,
-	data,
-	marker,
-	baseY,
-	sectionYs,
-	onPickPortal,
-	onPickBoundaryLine,
-	onPickNoGoLine,
-	hoveredEdge,
-	onHoverEdge,
-	onEdgeContextMenu,
-}: {
-	section: AISection;
-	data: ParsedAISectionsV12;
-	marker: AISectionMarker;
-	/** Resolved Y for the selected section (issue #27). Used to lift the
-	 *  no-go-line layer onto the section's ground plane; portal anchors and
-	 *  portal boundary lines already carry their own absolute Y so they
-	 *  ignore this. */
-	baseY: number;
-	/** Resolved Y per section (issue #27). Looked up to land each portal-link
-	 *  dashed line on the target section's ground plane instead of dropping
-	 *  it to Y=0 in the middle of nowhere. */
-	sectionYs: ArrayLike<number>;
-	onPickPortal: (portalIndex: number) => void;
-	onPickBoundaryLine: (portalIndex: number, lineIndex: number) => void;
-	onPickNoGoLine: (lineIndex: number) => void;
-	hoveredEdge: number | null;
-	onHoverEdge: (edgeIdx: number | null) => void;
-	onEdgeContextMenu: (edgeIdx: number, screenX: number, screenY: number) => void;
-}) {
-	if (!sec) return null;
-
-	const corners = useMemo(() => v12Corners(sec), [sec]);
-
-	return (
-		<>
-			<EdgeHandles
-				corners={corners}
-				hoveredEdge={hoveredEdge}
-				onHoverEdge={onHoverEdge}
-				onContextMenu={onEdgeContextMenu}
-				baseY={baseY}
-			/>
-
-			{sec.portals.map((portal, pi) => {
-				const pos: [number, number, number] = [portal.position.x, portal.position.y, portal.position.z];
-				const isSel = marker?.kind === 'portal' && marker.portalIndex === pi;
-				return (
-					<group key={`portal-${pi}`} position={pos}>
-						<mesh
-							geometry={portalGeo}
-							material={isSel ? portalSelMat : portalMat}
-							onClick={(e) => { e.stopPropagation(); onPickPortal(pi); }}
-						/>
-						<Html center distanceFactor={150} style={{ pointerEvents: 'none' }}>
-							<div style={{
-								background: 'rgba(0,0,0,0.75)', color: '#33cccc', padding: '2px 6px',
-								borderRadius: 4, fontSize: 10, whiteSpace: 'nowrap', fontFamily: 'monospace',
-							}}>
-								Portal {pi} → Sec {portal.linkSection}
-							</div>
-						</Html>
-					</group>
-				);
-			})}
-
-			{sec.portals.map((portal, pi) =>
-				portal.boundaryLines.map((bl, li) => {
-					const start: [number, number, number] = [bl.verts.x, portal.position.y + 0.5, bl.verts.y];
-					const end: [number, number, number] = [bl.verts.z, portal.position.y + 0.5, bl.verts.w];
-					const isSel = marker?.kind === 'boundaryLine' && marker.portalIndex === pi && marker.lineIndex === li;
-					return (
-						<group key={`bl-${pi}-${li}`}>
-							<Line points={[start, end]} color={isSel ? '#ffaa33' : '#cc3333'} lineWidth={isSel ? 3 : 2} />
-							<mesh
-								position={[(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2]}
-								onClick={(e) => { e.stopPropagation(); onPickBoundaryLine(pi, li); }}
-							>
-								<sphereGeometry args={[2, 6, 4]} />
-								<meshBasicMaterial transparent opacity={0} />
-							</mesh>
-							{isSel && (
-								<>
-									<mesh position={start}>
-										<sphereGeometry args={[1.5, 8, 6]} />
-										<meshStandardMaterial color="#ff4444" emissive="#441111" emissiveIntensity={0.5} />
-									</mesh>
-									<mesh position={end}>
-										<sphereGeometry args={[1.5, 8, 6]} />
-										<meshStandardMaterial color="#4444ff" emissive="#111144" emissiveIntensity={0.5} />
-									</mesh>
-									<Html position={start} center distanceFactor={120} style={{ pointerEvents: 'none' }}>
-										<div style={{ background: 'rgba(0,0,0,0.8)', color: '#ff6666', padding: '1px 4px', borderRadius: 3, fontSize: 9, fontFamily: 'monospace' }}>
-											X={bl.verts.x.toFixed(1)} Y={bl.verts.y.toFixed(1)}
-										</div>
-									</Html>
-									<Html position={end} center distanceFactor={120} style={{ pointerEvents: 'none' }}>
-										<div style={{ background: 'rgba(0,0,0,0.8)', color: '#6666ff', padding: '1px 4px', borderRadius: 3, fontSize: 9, fontFamily: 'monospace' }}>
-											Z={bl.verts.z.toFixed(1)} W={bl.verts.w.toFixed(1)}
-										</div>
-									</Html>
-								</>
-							)}
-						</group>
-					);
-				}),
-			)}
-
-			{sec.noGoLines.map((bl, li) => {
-				const lineY = baseY + 0.5;
-				const start: [number, number, number] = [bl.verts.x, lineY, bl.verts.y];
-				const end: [number, number, number] = [bl.verts.z, lineY, bl.verts.w];
-				const isSel = marker?.kind === 'noGoLine' && marker.lineIndex === li;
-				return (
-					<group key={`ng-${li}`}>
-						<Line points={[start, end]} color={isSel ? '#ffaa33' : '#cc8833'} lineWidth={isSel ? 3 : 2} />
-						<mesh
-							position={[(start[0] + end[0]) / 2, lineY, (start[2] + end[2]) / 2]}
-							onClick={(e) => { e.stopPropagation(); onPickNoGoLine(li); }}
-						>
-							<sphereGeometry args={[2, 6, 4]} />
-							<meshBasicMaterial transparent opacity={0} />
-						</mesh>
-					</group>
-				);
-			})}
-
-			{sec.portals.map((portal, pi) => {
-				const target = data.sections[portal.linkSection];
-				if (!target || target.corners.length < 4) return null;
-				const from: [number, number, number] = [portal.position.x, portal.position.y + 1, portal.position.z];
-				// Drop the link's far end onto the target section's resolved
-				// ground (issue #27) so the dashed line slants up/down across
-				// terrain instead of running flat at the source's portal Y
-				// over a target that lives 50m below.
-				const targetY =
-					portal.linkSection >= 0 && portal.linkSection < sectionYs.length
-						? sectionYs[portal.linkSection]
-						: 0;
-				const to: [number, number, number] = [
-					(target.corners[0].x + target.corners[2].x) / 2,
-					targetY + 1,
-					(target.corners[0].y + target.corners[2].y) / 2,
-				];
-				return (
-					<Line key={`link-${pi}`} points={[from, to]} color="#33cccc" lineWidth={1} dashed dashSize={4} gapSize={3} />
-				);
-			})}
-		</>
-	);
+function makeV12Accessor(sectionYs: ArrayLike<number>): SectionDetailAccessor<AISection, ParsedAISectionsV12> {
+	return {
+		portals: (s) =>
+			s.portals.map<DisplayPortal>((p) => ({
+				position: { x: p.position.x, y: p.position.y, z: p.position.z },
+				linkSection: p.linkSection,
+				boundaryLines: p.boundaryLines as readonly DisplayBoundaryLine[],
+			})),
+		noGoLines: (s) => s.noGoLines as readonly DisplayBoundaryLine[],
+		sectionAt: (root, idx) => {
+			if (idx < 0 || idx >= root.sections.length) return null;
+			const target = root.sections[idx];
+			// Need at least 4 corners to compute a centre between
+			// `corners[0]` and `corners[2]` — V12 always emits quads, but
+			// synthetic test fixtures occasionally ship triangles.
+			if (target.corners.length < 4) return null;
+			return target;
+		},
+		centreOf: (root, idx) => {
+			if (idx < 0 || idx >= root.sections.length) return null;
+			const target = root.sections[idx];
+			if (target.corners.length < 4) return null;
+			const y = idx < sectionYs.length ? sectionYs[idx] : 0;
+			return {
+				x: (target.corners[0].x + target.corners[2].x) / 2,
+				y,
+				z: (target.corners[0].y + target.corners[2].y) / 2,
+			};
+		},
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -301,10 +197,15 @@ type Props = {
 	onChange?: (next: ParsedAISectionsV12) => void;
 	/** True when this overlay owns the active selection — gates tool registration. */
 	isActive?: boolean;
+	/** Bundle / instance identity, supplied by `WorldViewportComposition` so
+	 *  the overlay can resolve "MY bulk" via `forInstance(bundleId, index)`.
+	 *  Optional so legacy per-resource pages still mount cleanly. */
+	bundleId?: string;
+	index?: number;
 };
 
 export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
-	data, selectedPath, onSelect, onChange, isActive = true,
+	data, selectedPath, onSelect, onChange, isActive = true, bundleId, index,
 }: Props) => {
 	const [hoverSectionIndex, setHoverSectionIndex] = useState<number | null>(null);
 	const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
@@ -316,6 +217,15 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 
 	const cameraBridge = useRef<CameraBridgeData | null>(null);
 	const bulk = useSchemaBulkSelection();
+	const aiBulk = useAISectionsBulk();
+	// Resolve "this overlay's bulk" via the workspace bulk's per-instance
+	// lookup. When `bundleId`/`index` are missing (legacy single-resource
+	// page route) we synthesise an empty handle so the rest of the overlay
+	// reads as "no bulk active".
+	const sectionBulk = useMemo(() => {
+		if (!aiBulk || bundleId == null || index == null) return null;
+		return aiBulk.forInstance(bundleId, index);
+	}, [aiBulk, bundleId, index]);
 
 	const marker = useMemo(() => aiSectionPathMarker(selectedPath), [selectedPath]);
 	const selectedSectionIndex = marker ? marker.sectionIndex : null;
@@ -415,10 +325,75 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	const gizmoPixelSize = 90;
 	const cornerHandlePixelSize = 12;
 
-	// Selection / pick callbacks — all funnel through onSelect with the right path.
-	const handlePickSection = useCallback((sectionIndex: number) => {
-		onSelect(aiSectionMarkerPath({ kind: 'section', sectionIndex }));
-	}, [onSelect]);
+	const detailAccessor = useMemo(() => makeV12Accessor(sectionYs), [sectionYs]);
+
+	// 3D click on a section. The hook forwards the raw event so we can branch
+	// on Ctrl/Shift modifiers:
+	//   - Ctrl/Cmd: toggle the clicked section in the bulk Set; do NOT move
+	//               the inspector. The user is curating a multi-selection.
+	//   - Shift:    extend the bulk range from the inspector's current
+	//               anchor to the clicked section, then advance the
+	//               inspector so subsequent shifts extend outward.
+	//   - Plain:    navigate the inspector; do NOT touch the bulk.
+	const handleSectionClick = useCallback(
+		(sel: Selection, e: ThreeEvent<MouseEvent>) => {
+			const sectionIdx = sel.indices[0];
+			const ne = e.nativeEvent as MouseEvent | undefined;
+			const ctrl = (ne?.ctrlKey || ne?.metaKey) ?? false;
+			const shift = ne?.shiftKey ?? false;
+			if (ctrl) {
+				sectionBulk?.onToggleSection(sectionIdx);
+				return;
+			}
+			if (shift) {
+				sectionBulk?.onRangeSection(selectedSectionIndex, sectionIdx);
+				onSelect(aiSectionMarkerPath({ kind: 'section', sectionIndex: sectionIdx }));
+				return;
+			}
+			onSelect(aiSectionMarkerPath({ kind: 'section', sectionIndex: sectionIdx }));
+		},
+		[sectionBulk, selectedSectionIndex, onSelect],
+	);
+
+	// Hook-driven hover bridges into the existing `hoverSectionIndex` state
+	// the SectionLabel + SelectionOverlay branches read from.
+	const handleSectionHover = useCallback(
+		(sel: Selection | null) => {
+			setHoverSectionIndex(sel ? sel.indices[0] : null);
+		},
+		[],
+	);
+
+	const faceToSectionMap = scene.faceToSection;
+	const hoveredSelection: Selection | null = useMemo(
+		() => (hoverSectionIndex != null
+			? { kind: 'section', indices: [hoverSectionIndex] }
+			: null),
+		[hoverSectionIndex],
+	);
+	const primarySelection: Selection | null = useMemo(
+		() => (selectedSectionIndex != null
+			? { kind: 'section', indices: [selectedSectionIndex] }
+			: null),
+		[selectedSectionIndex],
+	);
+	const noopApplyColor = useCallback(() => {}, []);
+	const faceToEntity = useCallback(
+		(face: number) =>
+			face >= 0 && face < faceToSectionMap.length ? faceToSectionMap[face] : -1,
+		[faceToSectionMap],
+	);
+	const handlers = useBatchedSelection({
+		kind: 'section',
+		count: data.sections.length,
+		primary: primarySelection,
+		bulk: sectionBulk?.bulkSet ?? EMPTY_BULK_SET,
+		hovered: hoveredSelection,
+		faceToEntity,
+		applyColor: noopApplyColor,
+		onPick: handleSectionClick,
+		onHover: handleSectionHover,
+	});
 
 	const handlePickPortal = useCallback((portalIndex: number) => {
 		if (selectedSectionIndex == null) return;
@@ -542,8 +517,9 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		<>
 			<BatchedSections
 				scene={scene}
-				onPickSection={handlePickSection}
-				onHoverSection={setHoverSectionIndex}
+				onClick={handlers.onClick}
+				onPointerMove={handlers.onPointerMove}
+				onPointerOut={handlers.onPointerOut}
 			/>
 
 			{previewCorners && (
@@ -552,6 +528,29 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			{hovCorners && hoverSectionIndex !== selectedSectionIndex && (
 				<SelectionOverlay corners={hovCorners} color="#66aaff" baseY={hoverSectionY} />
 			)}
+
+			{/* Yellow outline for every bulk member that ISN'T the inspector
+			    pick. The inspector pick already wears the orange overlay
+			    above; promoting it to yellow as well would hide the
+			    "currently editing" cue. */}
+			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
+				const parts = key.split(':');
+				if (parts[0] !== 'section') return null;
+				const idx = Number(parts[1]);
+				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
+				const sec = data.sections[idx];
+				if (!sec) return null;
+				const corners = v12Corners(sec);
+				const y = idx < sectionYs.length ? sectionYs[idx] : 0;
+				return (
+					<SelectionOverlay
+						key={`bulk-${idx}`}
+						corners={corners}
+						color="#ffd633"
+						baseY={y}
+					/>
+				);
+			})}
 
 			{drag && affectedNeighbours.map(({ idx, corners }) => (
 				<SelectionOverlay
@@ -573,21 +572,57 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				</SectionLabel>
 			)}
 
-			{selectedSectionIndex != null && previewSection && (
-				<SelectedSectionDetail
-					section={previewSection}
-					data={data}
-					marker={marker}
-					baseY={selectedSectionY}
-					sectionYs={sectionYs}
-					onPickPortal={handlePickPortal}
-					onPickBoundaryLine={handlePickBoundaryLine}
-					onPickNoGoLine={handlePickNoGoLine}
-					hoveredEdge={hoveredEdge}
-					onHoverEdge={setHoveredEdge}
-					onEdgeContextMenu={handleEdgeContextMenu}
-				/>
+			{/* Edge handles + sub-entity highlights for the inspector pick only.
+			    Bulk members get the structural detail layer below but no edge
+			    edit affordances — those are an inspector-only edit gesture. */}
+			{selectedSectionIndex != null && previewSection && previewCorners && (
+				<>
+					<EdgeHandles
+						corners={previewCorners}
+						hoveredEdge={hoveredEdge}
+						onHoverEdge={setHoveredEdge}
+						onContextMenu={handleEdgeContextMenu}
+						baseY={selectedSectionY}
+					/>
+					<SectionDetail
+						section={previewSection}
+						root={data}
+						accessor={detailAccessor}
+						marker={marker}
+						baseY={selectedSectionY}
+						onPickPortal={handlePickPortal}
+						onPickBoundaryLine={handlePickBoundaryLine}
+						onPickNoGoLine={handlePickNoGoLine}
+					/>
+				</>
 			)}
+
+			{/* Detail layer for every bulk member that isn't the inspector
+			    pick. This is the "leave portals on screen at all times" fix
+			    (the central reason for Slice 1). Bulk members render with
+			    `marker={null}` so only structural geometry shows — no
+			    portal-orange / boundary-line endpoint labels — keeping the
+			    inspector's editing cues isolated to the one section the user
+			    is actually editing. */}
+			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
+				const parts = key.split(':');
+				if (parts[0] !== 'section') return null;
+				const idx = Number(parts[1]);
+				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
+				const sec = data.sections[idx];
+				if (!sec) return null;
+				const y = idx < sectionYs.length ? sectionYs[idx] : 0;
+				return (
+					<SectionDetail
+						key={`bulk-detail-${idx}`}
+						section={sec}
+						root={data}
+						accessor={detailAccessor}
+						marker={null}
+						baseY={y}
+					/>
+				);
+			})}
 
 			{gizmoPosition && drag?.kind !== 'corner' && (
 				<TranslateGizmo

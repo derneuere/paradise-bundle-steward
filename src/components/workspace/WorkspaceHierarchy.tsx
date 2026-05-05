@@ -27,9 +27,11 @@ import {
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import type { VisibilityNode, WorkspaceSelection } from '@/context/WorkspaceContext.types';
 import { useWorkspacePSLBulk } from './PSLBulkProvider';
+import { useWorkspaceAISectionsBulk } from './AISectionsBulkProvider';
 import type { NodePath } from '@/lib/schema/walk';
 import {
 	bundleKey,
@@ -42,13 +44,43 @@ import {
 } from './WorkspaceHierarchy.helpers';
 
 // Return the path the bulk-range "from" anchor should use. We read the
-// inspector's current schema path; if the current selection isn't in PSL
-// territory we hand back an empty path so `onBulkRange` falls through to
-// its "no-anchor → just add the endpoint" branch.
-function selectionAnchorPath(selection: WorkspaceSelection): NodePath {
+// inspector's current schema path; if the current selection isn't on a
+// bulk-eligible resource we hand back an empty path so `onBulkRange` falls
+// through to its "no-anchor → just add the endpoint" branch.
+function selectionAnchorPath(
+	selection: WorkspaceSelection,
+	resourceKey: string,
+): NodePath {
 	if (!selection) return [];
-	if (selection.resourceKey !== 'polygonSoupList') return [];
+	if (selection.resourceKey !== resourceKey) return [];
 	return selection.path ?? [];
+}
+
+// True when `schemaPath` lives strictly underneath any bulk-member section
+// path in `bulkKeys`. Used so a sub-row of a bulk-member section (a portal
+// row, a no-go-line row) inherits the amber tint — without this the only
+// row painted amber would be the top-level `Sec N` row, which is rarely
+// visible since users tend to expand into the section they care about.
+function isPathInsideBulkSection(
+	schemaPath: NodePath,
+	bulkKeys: ReadonlySet<string>,
+): boolean {
+	for (const key of bulkKeys) {
+		const parts = key.split('/');
+		if (parts.length > schemaPath.length) continue;
+		let prefixOk = true;
+		for (let i = 0; i < parts.length; i++) {
+			const ours = schemaPath[i];
+			// Bulk keys store numbers as their stringified form; equality
+			// must compare via toString to match either side.
+			if (String(ours) !== parts[i]) {
+				prefixOk = false;
+				break;
+			}
+		}
+		if (prefixOk) return true;
+	}
+	return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +137,11 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 	// PSL bulk handle — null when no PSL is active. Drives the schema-row
 	// Ctrl/Shift-click semantics + the amber-accent highlight on bulk rows.
 	const bulk = useWorkspacePSLBulk();
+	// AI Sections bulk handle — always non-null when the workspace tree is
+	// mounted (the provider wraps the page), but the bulk Sets are empty
+	// until the user starts curating. Drives the same Ctrl/Shift semantics
+	// + amber row tint + per-resource-row count Badge.
+	const aiBulk = useWorkspaceAISectionsBulk();
 
 	// Persisted expansion state. Default-expanded behaviour mirrors the
 	// pre-WorkspaceHierarchy tree:
@@ -166,31 +203,42 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 			schemaPath: NodePath,
 			modifiers?: { shift?: boolean; ctrl?: boolean },
 		) => {
-			// Bulk semantics on schema rows live behind a PSL handle — only PSL
-			// instances support polygon-row Ctrl/Shift bulk-edit. Other
-			// resources fall through to plain selection unconditionally.
+			// Bulk semantics on schema rows are dispatched per-resource. PSL
+			// owns polygon rows; AI Sections owns section / portal / boundary-
+			// line / no-go-line rows. Other resources fall through to plain
+			// selection unconditionally.
 			if (bulk && resourceKey === 'polygonSoupList') {
 				if (modifiers?.ctrl) {
-					// Ctrl/Cmd-click: toggle this row in the bulk set without
-					// moving the inspector — same semantics as the legacy
-					// HierarchyTree bulk-pick flow.
 					bulk.onBulkToggle(schemaPath);
 					return;
 				}
 				if (modifiers?.shift) {
-					// Shift-click: extend the bulk range from the inspector's
-					// current path to the clicked row, then move the inspector
-					// so subsequent shifts extend outward (matching the
-					// legacy "anchor advances with shift" behaviour).
-					const fromPath: NodePath = selectionAnchorPath(selection);
+					const fromPath: NodePath = selectionAnchorPath(selection, 'polygonSoupList');
 					bulk.onBulkRange(fromPath, schemaPath);
+					select({ bundleId, resourceKey, index, path: schemaPath });
+					return;
+				}
+			}
+			if (aiBulk && resourceKey === 'aiSections') {
+				if (modifiers?.ctrl) {
+					// Ctrl/Cmd: toggle the row's containing section in the
+					// bulk Set without moving the inspector. Sub-paths under
+					// a section (a portal, a no-go line) collapse to the
+					// parent section inside `onBulkToggle` — picking
+					// granularity stays at the section level.
+					aiBulk.onBulkToggle(bundleId, index, schemaPath);
+					return;
+				}
+				if (modifiers?.shift) {
+					const fromPath: NodePath = selectionAnchorPath(selection, 'aiSections');
+					aiBulk.onBulkRange(bundleId, index, fromPath, schemaPath);
 					select({ bundleId, resourceKey, index, path: schemaPath });
 					return;
 				}
 			}
 			select({ bundleId, resourceKey, index, path: schemaPath });
 		},
-		[select, bulk, selection],
+		[select, bulk, aiBulk, selection],
 	);
 
 	// ---------------------- Virtualizer ----------------------
@@ -282,7 +330,9 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 									onSelectSchema={onSelectSchema}
 									saveBundle={saveBundle}
 									closeBundle={closeBundle}
-									bulkPathKeys={bulk?.bulkPathKeys ?? null}
+									pslBulkPathKeys={bulk?.bulkPathKeys ?? null}
+									aiBulkGetPathKeys={aiBulk?.getPathKeys ?? null}
+									aiBulkGetCount={aiBulk?.getCount ?? null}
 								/>
 							</div>
 						);
@@ -328,7 +378,18 @@ type HierarchyRowProps = {
 	/** Path-key set of polys currently in the PSL bulk — drives amber tint
 	 *  on schema rows that match. `null` when no PSL is active or no bulk
 	 *  context is available. */
-	bulkPathKeys: ReadonlySet<string> | null;
+	pslBulkPathKeys: ReadonlySet<string> | null;
+	/** Lookup the AI sections bulk path-key set for `(bundleId, index)` —
+	 *  drives amber tint on AI section schema rows. Returns null when the
+	 *  bulk for that instance is empty. `null` (the function itself) means
+	 *  the AI bulk provider isn't mounted; callers should treat that as
+	 *  "no AI bulk anywhere". */
+	aiBulkGetPathKeys:
+		| ((bundleId: string, index: number) => ReadonlySet<string> | null)
+		| null;
+	/** Cheap count lookup for the resource-type-row Badge. Same null-vs-fn
+	 *  contract as `aiBulkGetPathKeys`. */
+	aiBulkGetCount: ((bundleId: string, index: number) => number) | null;
 };
 
 function HierarchyRow(props: HierarchyRowProps) {
@@ -444,7 +505,18 @@ function ResourceTypeRow({
 	node,
 	onToggleExpansion,
 	onSelectResourceType,
+	aiBulkGetCount,
 }: HierarchyRowProps & { node: ResourceTypeFlatNode }) {
+	// Per-resource bulk badge. AI Sections is single-instance so the count
+	// reads directly off (bundleId, 0) — no fan-out across instances needed
+	// today. When a future resource grows multi-instance bulk support
+	// (e.g. PSL retrofitted onto the panel stack) this badge will need to
+	// sum over indices, but Slice 1 doesn't.
+	const aiCount =
+		node.resourceKey === 'aiSections' && aiBulkGetCount && !node.isMultiInstance
+			? aiBulkGetCount(node.bundleId, 0)
+			: 0;
+
 	return (
 		<div
 			className={cn(
@@ -485,6 +557,15 @@ function ResourceTypeRow({
 					<span className="text-[10px] opacity-70"> ({node.count})</span>
 				)}
 			</span>
+			{aiCount > 0 && (
+				<Badge
+					variant="outline"
+					className="h-4 px-1 text-[10px] tabular-nums shrink-0 border-amber-500/60 text-amber-700"
+					title={`${aiCount} section${aiCount === 1 ? '' : 's'} in bulk`}
+				>
+					{aiCount}
+				</Badge>
+			)}
 			{node.showVisibility && (
 				<VisibilityToggle
 					node={
@@ -559,17 +640,35 @@ function SchemaRow({
 	node,
 	onToggleExpansion,
 	onSelectSchema,
-	bulkPathKeys,
+	pslBulkPathKeys,
+	aiBulkGetPathKeys,
 }: HierarchyRowProps & { node: SchemaFlatNode }) {
-	// Polygon rows that match the active PSL bulk set wear an amber border +
-	// faint amber tint — same accent as the legacy schema HierarchyTree so
-	// users coming from the per-resource page see the same cue.
+	// Resolve the right bulk-path-key set for THIS row's resource. PSL is a
+	// single global Set today (one bulk active at a time); AI sections is
+	// per-(bundleId, index) so the same row in two different bundles can be
+	// in or out of bulk independently.
+	const activeBulkKeys: ReadonlySet<string> | null =
+		node.resourceKey === 'polygonSoupList'
+			? pslBulkPathKeys
+			: node.resourceKey === 'aiSections' && aiBulkGetPathKeys
+				? aiBulkGetPathKeys(node.bundleId, node.index)
+				: null;
+
+	// Schema rows whose schema path is in the active bulk wear an amber
+	// border + faint amber tint — same accent as the legacy schema
+	// HierarchyTree so users coming from the per-resource page see the
+	// same cue. AI sections sub-paths normalise to their containing
+	// section path inside `onBulkToggle`, so e.g. clicking a portal row
+	// adds the section's path and the section's row goes amber — drilling
+	// deeper into the same section wears the amber too via prefix match.
 	const isInBulk =
-		bulkPathKeys != null &&
-		// Schema-row pathKey is "sch:bundle::key::index::path" — the bulk set
-		// uses the bare schema-path-only key, so we strip the prefix before
-		// comparing.
-		bulkPathKeys.has(node.schemaPath.join('/'));
+		activeBulkKeys != null &&
+		(activeBulkKeys.has(node.schemaPath.join('/')) ||
+			// Sub-paths inside a bulk-member section (e.g. clicking 'portals'
+			// under section 5) inherit the amber tint so the user sees the
+			// path THROUGH the bulk member, not just its top.
+			(node.resourceKey === 'aiSections' &&
+				isPathInsideBulkSection(node.schemaPath, activeBulkKeys)));
 	return (
 		<div
 			className={cn(

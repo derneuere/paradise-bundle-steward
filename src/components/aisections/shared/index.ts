@@ -14,6 +14,12 @@ export { SectionLabel } from './SectionLabel';
 export { EdgeHandles } from './EdgeHandles';
 export { EdgeContextMenu, edgeContextMenuRootStyle } from './EdgeContextMenu';
 export {
+	SectionDetail,
+	type SectionDetailAccessor,
+	type DisplayPortal,
+	type DisplayBoundaryLine,
+} from './SectionDetail';
+export {
 	aiSectionsV12SelectionCodec,
 	aiSectionsLegacySelectionCodec,
 	markerToSelection,

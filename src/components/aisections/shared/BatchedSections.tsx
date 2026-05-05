@@ -23,7 +23,6 @@
 // outline still floats slightly above its fill regardless of the section's
 // resolved height.
 
-import { useCallback } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { fillMaterial, outlineMaterial } from './materials';
@@ -135,54 +134,38 @@ export function buildBatchedSections<T>(
 	return { fillGeo, outlineGeo, faceToSection };
 }
 
+/**
+ * Render the batched fill+outline scene. Pointer handlers come in directly
+ * from `useBatchedSelection` (sibling overlay convention — see
+ * `ZoneListOverlay` and `PolygonSoupListOverlay`); the `faceToSection` decoder
+ * is fed to the hook as `faceToEntity`, so all click/hover routing through
+ * this component is handler-as-prop.
+ *
+ * Why no internal click decoder anymore: the V12 / V4 overlays now drive
+ * Ctrl/Shift modifier branching from the hook's `onPick(sel, e)` callback
+ * (event forwarding is part of the hook's contract). Re-implementing that
+ * inside this component would either lose the modifier info or duplicate
+ * the kind-filtering logic the hook centralises.
+ */
 export function BatchedSections({
 	scene,
-	onPickSection,
-	onHoverSection,
+	onClick,
+	onPointerMove,
+	onPointerOut,
 }: {
 	scene: BatchedSectionsScene;
-	onPickSection: (sectionIndex: number) => void;
-	onHoverSection: (sectionIndex: number | null) => void;
+	onClick?: (e: ThreeEvent<MouseEvent>) => void;
+	onPointerMove?: (e: ThreeEvent<PointerEvent>) => void;
+	onPointerOut?: () => void;
 }) {
-	const handleClick = useCallback(
-		(e: ThreeEvent<MouseEvent>) => {
-			e.stopPropagation();
-			if (e.faceIndex == null) return;
-			const si = scene.faceToSection[e.faceIndex];
-			if (si != null && si >= 0) onPickSection(si);
-		},
-		[scene.faceToSection, onPickSection],
-	);
-
-	const handlePointerMove = useCallback(
-		(e: ThreeEvent<PointerEvent>) => {
-			e.stopPropagation();
-			if (e.faceIndex == null) {
-				onHoverSection(null);
-				return;
-			}
-			const si = scene.faceToSection[e.faceIndex];
-			if (si != null && si >= 0) {
-				onHoverSection(si);
-				document.body.style.cursor = 'pointer';
-			}
-		},
-		[scene.faceToSection, onHoverSection],
-	);
-
-	const handlePointerOut = useCallback(() => {
-		onHoverSection(null);
-		document.body.style.cursor = 'auto';
-	}, [onHoverSection]);
-
 	return (
 		<>
 			<mesh
 				geometry={scene.fillGeo}
 				material={fillMaterial}
-				onClick={handleClick}
-				onPointerMove={handlePointerMove}
-				onPointerOut={handlePointerOut}
+				onClick={onClick}
+				onPointerMove={onPointerMove}
+				onPointerOut={onPointerOut}
 			/>
 			<lineSegments geometry={scene.outlineGeo} material={outlineMaterial} />
 		</>

@@ -46,7 +46,6 @@
 // at once. See issue #35.
 
 import { useMemo, useState, useCallback } from 'react';
-import { Html, Line } from '@react-three/drei';
 import { Copy, Magnet } from 'lucide-react';
 import * as THREE from 'three';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
@@ -74,17 +73,24 @@ import {
 	EdgeContextMenu,
 	EdgeHandles,
 	markerToSelection,
+	SectionDetail,
 	SectionLabel,
 	SelectionOverlay,
 	selectionToMarker,
-	portalGeo,
-	portalMat,
-	portalSelMat,
 	type AISectionMarker,
 	type BatchedSectionsScene,
 	type Corner,
+	type DisplayPortal,
+	type DisplayBoundaryLine,
 	type SectionAccessor,
+	type SectionDetailAccessor,
 } from '@/components/aisections/shared';
+import { useAISectionsBulk } from '@/components/workspace/AISectionsBulkProvider';
+import {
+	useBatchedSelection,
+	type Selection,
+} from '@/components/schema-editor/viewports/selection';
+import type { ThreeEvent } from '@react-three/fiber';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
@@ -153,6 +159,46 @@ function legacyCorners(section: LegacyAISection): Corner[] {
 	return out;
 }
 
+const EMPTY_BULK_SET: ReadonlySet<string> = new Set();
+
+// V4/V6 → SectionDetail accessor.
+//
+// Storage differences vs V12:
+//   - portal anchor lives at `portal.midPosition` (Vector4 — w byte is
+//     padding). The display shape is `Vector3`-equivalent so we drop w.
+//   - corners stored as parallel `cornersX[]`/`cornersZ[]`; centre averages
+//     `[0]` and `[2]` from each.
+//   - legacy data has no resolved-Y map; the link line lands at the
+//     SOURCE portal's Y. That's the same fallback the pre-extraction
+//     legacy overlay used (it never consulted a sectionYs map).
+const legacyDetailAccessor: SectionDetailAccessor<LegacyAISection, LegacyAISectionsData> = {
+	portals: (s) =>
+		s.portals.map<DisplayPortal>((p) => ({
+			position: { x: p.midPosition.x, y: p.midPosition.y, z: p.midPosition.z },
+			linkSection: p.linkSection,
+			boundaryLines: p.boundaryLines as readonly DisplayBoundaryLine[],
+		})),
+	noGoLines: (s) => s.noGoLines as readonly DisplayBoundaryLine[],
+	sectionAt: (root, idx) => {
+		if (idx < 0 || idx >= root.sections.length) return null;
+		const target = root.sections[idx];
+		const tn = legacyCornerCount(target);
+		if (tn < 4) return null;
+		return target;
+	},
+	centreOf: (root, idx, sourcePortalY) => {
+		if (idx < 0 || idx >= root.sections.length) return null;
+		const target = root.sections[idx];
+		const tn = legacyCornerCount(target);
+		if (tn < 4) return null;
+		return {
+			x: (target.cornersX[0] + target.cornersX[2]) / 2,
+			y: sourcePortalY,
+			z: (target.cornersZ[0] + target.cornersZ[2]) / 2,
+		};
+	},
+};
+
 /**
  * Thin wrapper around the generic shared builder, kept for
  * `AISectionsLegacyOverlay.test.ts` which exercises V4-specific
@@ -162,126 +208,6 @@ function legacyCorners(section: LegacyAISection): Corner[] {
  */
 export function buildBatchedLegacySections(sections: LegacyAISection[]): BatchedSectionsScene {
 	return buildBatchedSections(sections, legacyAccessor);
-}
-
-// ---------------------------------------------------------------------------
-// Detail layer for the selected section — read-only
-// ---------------------------------------------------------------------------
-
-function SelectedSectionDetail({
-	section: sec,
-	data,
-	marker,
-	corners,
-	onPickPortal,
-	onPickBoundaryLine,
-	onPickNoGoLine,
-	hoveredEdge,
-	onHoverEdge,
-	onEdgeContextMenu,
-}: {
-	section: LegacyAISection;
-	data: LegacyAISectionsData;
-	marker: LegacyAISectionMarker;
-	corners: Corner[];
-	onPickPortal: (portalIndex: number) => void;
-	onPickBoundaryLine: (portalIndex: number, lineIndex: number) => void;
-	onPickNoGoLine: (lineIndex: number) => void;
-	hoveredEdge: number | null;
-	onHoverEdge: (edgeIdx: number | null) => void;
-	onEdgeContextMenu: (edgeIdx: number, screenX: number, screenY: number) => void;
-}) {
-	if (!sec) return null;
-
-	return (
-		<>
-			<EdgeHandles
-				corners={corners}
-				hoveredEdge={hoveredEdge}
-				onHoverEdge={onHoverEdge}
-				onContextMenu={onEdgeContextMenu}
-			/>
-			{sec.portals.map((portal, pi) => {
-				// midPosition is a vpu::Vector3 on the wire (xyz + 4 bytes of
-				// structural padding); the wrapper stores it as a Vector4 with
-				// the 4th float preserved verbatim. For rendering we project
-				// xyz only — the w component is structural padding.
-				const pos: [number, number, number] = [portal.midPosition.x, portal.midPosition.y, portal.midPosition.z];
-				const isSel = marker?.kind === 'portal' && marker.portalIndex === pi;
-				return (
-					<group key={`portal-${pi}`} position={pos}>
-						<mesh
-							geometry={portalGeo}
-							material={isSel ? portalSelMat : portalMat}
-							onClick={(e) => { e.stopPropagation(); onPickPortal(pi); }}
-						/>
-						<Html center distanceFactor={150} style={{ pointerEvents: 'none' }}>
-							<div style={{
-								background: 'rgba(0,0,0,0.75)', color: '#33cccc', padding: '2px 6px',
-								borderRadius: 4, fontSize: 10, whiteSpace: 'nowrap', fontFamily: 'monospace',
-							}}>
-								Portal {pi} → Sec {portal.linkSection}
-							</div>
-						</Html>
-					</group>
-				);
-			})}
-
-			{sec.portals.map((portal, pi) =>
-				portal.boundaryLines.map((bl, li) => {
-					const start: [number, number, number] = [bl.verts.x, portal.midPosition.y + 0.5, bl.verts.y];
-					const end: [number, number, number] = [bl.verts.z, portal.midPosition.y + 0.5, bl.verts.w];
-					const isSel = marker?.kind === 'boundaryLine' && marker.portalIndex === pi && marker.lineIndex === li;
-					return (
-						<group key={`bl-${pi}-${li}`}>
-							<Line points={[start, end]} color={isSel ? '#ffaa33' : '#cc3333'} lineWidth={isSel ? 3 : 2} />
-							<mesh
-								position={[(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2]}
-								onClick={(e) => { e.stopPropagation(); onPickBoundaryLine(pi, li); }}
-							>
-								<sphereGeometry args={[2, 6, 4]} />
-								<meshBasicMaterial transparent opacity={0} />
-							</mesh>
-						</group>
-					);
-				}),
-			)}
-
-			{sec.noGoLines.map((bl, li) => {
-				const start: [number, number, number] = [bl.verts.x, 0.5, bl.verts.y];
-				const end: [number, number, number] = [bl.verts.z, 0.5, bl.verts.w];
-				const isSel = marker?.kind === 'noGoLine' && marker.lineIndex === li;
-				return (
-					<group key={`ng-${li}`}>
-						<Line points={[start, end]} color={isSel ? '#ffaa33' : '#cc8833'} lineWidth={isSel ? 3 : 2} />
-						<mesh
-							position={[(start[0] + end[0]) / 2, 0.5, (start[2] + end[2]) / 2]}
-							onClick={(e) => { e.stopPropagation(); onPickNoGoLine(li); }}
-						>
-							<sphereGeometry args={[2, 6, 4]} />
-							<meshBasicMaterial transparent opacity={0} />
-						</mesh>
-					</group>
-				);
-			})}
-
-			{sec.portals.map((portal, pi) => {
-				const target = data.sections[portal.linkSection];
-				if (!target) return null;
-				const tn = legacyCornerCount(target);
-				if (tn < 4) return null;
-				const from: [number, number, number] = [portal.midPosition.x, portal.midPosition.y + 1, portal.midPosition.z];
-				const to: [number, number, number] = [
-					(target.cornersX[0] + target.cornersX[2]) / 2,
-					portal.midPosition.y + 1,
-					(target.cornersZ[0] + target.cornersZ[2]) / 2,
-				];
-				return (
-					<Line key={`link-${pi}`} points={[from, to]} color="#33cccc" lineWidth={1} dashed dashSize={4} gapSize={3} />
-				);
-			})}
-		</>
-	);
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +223,11 @@ type Props = {
 	 *  registration of the edge context menu. Defaults to `true` so single-
 	 *  resource (legacy per-page) routes don't have to thread it. */
 	isActive?: boolean;
+	/** Bundle / instance identity, supplied by `WorldViewportComposition` so
+	 *  the overlay can resolve "MY bulk" via `forInstance(bundleId, index)`.
+	 *  Optional so legacy per-resource pages still mount cleanly. */
+	bundleId?: string;
+	index?: number;
 };
 
 // Live drag state — same discriminated-union shape the V12 overlay uses.
@@ -310,7 +241,7 @@ type ActiveDrag =
 	| { kind: 'corner'; cornerIdx: number; offset: CornerDragOffset };
 
 export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 | ParsedAISectionsV6> = ({
-	data, selectedPath, onSelect, onChange, isActive = true,
+	data, selectedPath, onSelect, onChange, isActive = true, bundleId, index,
 }: Props) => {
 	const [hoverSectionIndex, setHoverSectionIndex] = useState<number | null>(null);
 	const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
@@ -322,6 +253,14 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 
 	const legacy = data.legacy;
 	const sections = legacy.sections;
+
+	const aiBulk = useAISectionsBulk();
+	// Resolve "this overlay's bulk" via per-instance lookup. Legacy per-page
+	// routes don't supply `bundleId`/`index` so they degrade to "no bulk".
+	const sectionBulk = useMemo(() => {
+		if (!aiBulk || bundleId == null || index == null) return null;
+		return aiBulk.forInstance(bundleId, index);
+	}, [aiBulk, bundleId, index]);
 
 	const marker = useMemo(() => legacyAISectionPathMarker(selectedPath), [selectedPath]);
 	const selectedSectionIndex = marker ? marker.sectionIndex : null;
@@ -423,9 +362,67 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	const gizmoPixelSize = 90;
 	const cornerHandlePixelSize = 12;
 
-	const handlePickSection = useCallback((sectionIndex: number) => {
-		onSelect(legacyAISectionMarkerPath({ kind: 'section', sectionIndex }));
-	}, [onSelect]);
+	// 3D click on a section. Same Ctrl/Shift dispatch as V12 — see the V12
+	// overlay for the reasoning. The legacy overlay only differs in the
+	// schema path shape (marker output uses the `legacy` prefix), not in
+	// the bulk-select semantics.
+	const handleSectionClick = useCallback(
+		(sel: Selection, e: ThreeEvent<MouseEvent>) => {
+			const sectionIdx = sel.indices[0];
+			const ne = e.nativeEvent as MouseEvent | undefined;
+			const ctrl = (ne?.ctrlKey || ne?.metaKey) ?? false;
+			const shift = ne?.shiftKey ?? false;
+			if (ctrl) {
+				sectionBulk?.onToggleSection(sectionIdx);
+				return;
+			}
+			if (shift) {
+				sectionBulk?.onRangeSection(selectedSectionIndex, sectionIdx);
+				onSelect(legacyAISectionMarkerPath({ kind: 'section', sectionIndex: sectionIdx }));
+				return;
+			}
+			onSelect(legacyAISectionMarkerPath({ kind: 'section', sectionIndex: sectionIdx }));
+		},
+		[sectionBulk, selectedSectionIndex, onSelect],
+	);
+
+	const handleSectionHover = useCallback(
+		(sel: Selection | null) => {
+			setHoverSectionIndex(sel ? sel.indices[0] : null);
+		},
+		[],
+	);
+
+	const faceToSectionMap = scene.faceToSection;
+	const hoveredSelection: Selection | null = useMemo(
+		() => (hoverSectionIndex != null
+			? { kind: 'section', indices: [hoverSectionIndex] }
+			: null),
+		[hoverSectionIndex],
+	);
+	const primarySelection: Selection | null = useMemo(
+		() => (selectedSectionIndex != null
+			? { kind: 'section', indices: [selectedSectionIndex] }
+			: null),
+		[selectedSectionIndex],
+	);
+	const noopApplyColor = useCallback(() => {}, []);
+	const faceToEntity = useCallback(
+		(face: number) =>
+			face >= 0 && face < faceToSectionMap.length ? faceToSectionMap[face] : -1,
+		[faceToSectionMap],
+	);
+	const handlers = useBatchedSelection({
+		kind: 'section',
+		count: sections.length,
+		primary: primarySelection,
+		bulk: sectionBulk?.bulkSet ?? EMPTY_BULK_SET,
+		hovered: hoveredSelection,
+		faceToEntity,
+		applyColor: noopApplyColor,
+		onPick: handleSectionClick,
+		onHover: handleSectionHover,
+	});
 
 	const handlePickPortal = useCallback((portalIndex: number) => {
 		if (selectedSectionIndex == null) return;
@@ -544,14 +541,28 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 		<>
 			<BatchedSections
 				scene={scene}
-				onPickSection={handlePickSection}
-				onHoverSection={setHoverSectionIndex}
+				onClick={handlers.onClick}
+				onPointerMove={handlers.onPointerMove}
+				onPointerOut={handlers.onPointerOut}
 			/>
 
 			{selCorners && <SelectionOverlay corners={selCorners} color="#ffaa33" />}
 			{hovCorners && hoverSectionIndex !== selectedSectionIndex && (
 				<SelectionOverlay corners={hovCorners} color="#66aaff" />
 			)}
+
+			{/* Yellow outline for every bulk member that ISN'T the inspector
+			    pick. See V12 overlay for the rationale. */}
+			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
+				const parts = key.split(':');
+				if (parts[0] !== 'section') return null;
+				const idx = Number(parts[1]);
+				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
+				const sec = sections[idx];
+				if (!sec) return null;
+				const corners = legacyCorners(sec);
+				return <SelectionOverlay key={`bulk-${idx}`} corners={corners} color="#ffd633" />;
+			})}
 
 			{drag && affectedNeighbours.map(({ idx, corners }) => (
 				<SelectionOverlay key={`cascade-${idx}`} corners={corners} color="#ddaa66" />
@@ -569,19 +580,47 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 			)}
 
 			{selectedSectionIndex != null && previewSection && selCorners && (
-				<SelectedSectionDetail
-					section={previewSection}
-					data={legacy}
-					marker={marker}
-					corners={selCorners}
-					onPickPortal={handlePickPortal}
-					onPickBoundaryLine={handlePickBoundaryLine}
-					onPickNoGoLine={handlePickNoGoLine}
-					hoveredEdge={hoveredEdge}
-					onHoverEdge={setHoveredEdge}
-					onEdgeContextMenu={handleEdgeContextMenu}
-				/>
+				<>
+					<EdgeHandles
+						corners={selCorners}
+						hoveredEdge={hoveredEdge}
+						onHoverEdge={setHoveredEdge}
+						onContextMenu={handleEdgeContextMenu}
+					/>
+					<SectionDetail
+						section={previewSection}
+						root={legacy}
+						accessor={legacyDetailAccessor}
+						marker={marker}
+						baseY={0}
+						onPickPortal={handlePickPortal}
+						onPickBoundaryLine={handlePickBoundaryLine}
+						onPickNoGoLine={handlePickNoGoLine}
+					/>
+				</>
 			)}
+
+			{/* Detail layer for every bulk member — keeps portals + boundary
+			    lines visible even when the inspector navigates away from
+			    AI Sections (the central "leave portals on screen" fix). */}
+			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
+				const parts = key.split(':');
+				if (parts[0] !== 'section') return null;
+				const idx = Number(parts[1]);
+				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
+				const sec = sections[idx];
+				if (!sec) return null;
+				return (
+					<SectionDetail
+						key={`bulk-detail-${idx}`}
+						section={sec}
+						root={legacy}
+						accessor={legacyDetailAccessor}
+						marker={null}
+						baseY={0}
+					/>
+				);
+			})}
 
 			{gizmoPosition && onChange && drag?.kind !== 'corner' && (
 				<TranslateGizmo
