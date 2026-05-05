@@ -107,6 +107,39 @@ const DANGER_TO_SPEED: Record<number, SectionSpeed> = {
 
 type ReportSet = Set<string>;
 
+/** Per-section migration report — the set of `defaulted` / `lossy` field
+ *  paths recorded while migrating ONE V4/V6 section. The whole-resource
+ *  wrapper folds these into the union ConversionResult lists. */
+export type SectionMigrationReport = {
+	defaulted: ReadonlySet<string>;
+	lossy: ReadonlySet<string>;
+};
+
+/**
+ * Migrate a single V4/V6 legacy AI section to its V12 shape. Pure function —
+ * the only state is the local `defaulted` / `lossy` sets that the caller folds
+ * into a wider report.
+ *
+ * The `destinationIndex` hint is used ONLY for the placeholder `id` value;
+ * bulk-import callers immediately overwrite the id with their user-chosen
+ * starting id. For the whole-resource migration path, `destinationIndex`
+ * doubles as the canonical sequential id (V4 has no GameDB ids, sequential
+ * is the simplest stable choice).
+ *
+ * @param v4 The legacy section to migrate.
+ * @param options.destinationIndex Placeholder section id; the bulk-import
+ *   pipeline overwrites this after the call.
+ */
+export function migrateSectionV4toV12(
+	v4: LegacyAISection,
+	options: { destinationIndex: number },
+): { section: AISection; report: SectionMigrationReport } {
+	const defaulted: ReportSet = new Set();
+	const lossy: ReportSet = new Set();
+	const section = migrateSection(v4, options.destinationIndex, defaulted, lossy);
+	return { section, report: { defaulted, lossy } };
+}
+
 function migrateSection(
 	v4: LegacyAISection,
 	index: number,
@@ -162,7 +195,8 @@ function migrateSection(
 		corners,
 		// Sequential index — V4 has no AISectionId. Stable + deterministic
 		// + cheap; the alternative (hash-of-corners) is harder to scan and
-		// changes when a user edits geometry.
+		// changes when a user edits geometry. Bulk import overwrites this
+		// after the call (see migrateSectionV4toV12 JSDoc).
 		id: index >>> 0,
 		spanIndex: -1,
 		speed,
@@ -201,9 +235,16 @@ export function migrateV4toV12(v4: ParsedAISectionsV4): ConversionResult<ParsedA
 	defaulted.add('sectionMaxSpeeds');
 	defaulted.add('sectionResetPairs');
 
-	const sections: AISection[] = v4.legacy.sections.map((s, i) =>
-		migrateSection(s, i, defaulted, lossy),
-	);
+	// Thin wrapper over migrateSectionV4toV12 — fold each per-section report
+	// into the whole-resource defaulted/lossy unions. Same external behaviour
+	// as the pre-refactor implementation; the fixture tests in __tests__/
+	// pin this.
+	const sections: AISection[] = v4.legacy.sections.map((s, i) => {
+		const { section, report } = migrateSectionV4toV12(s, { destinationIndex: i });
+		for (const f of report.defaulted) defaulted.add(f);
+		for (const f of report.lossy) lossy.add(f);
+		return section;
+	});
 
 	const result: ParsedAISectionsV12 = {
 		kind: 'v12',

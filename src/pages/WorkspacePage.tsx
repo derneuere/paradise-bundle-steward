@@ -65,6 +65,9 @@ import {
 } from '@/components/workspace/PSLBulkProvider';
 import { AISectionsBulkProvider } from '@/components/workspace/AISectionsBulkProvider';
 import { BulkPanelStack } from '@/components/workspace/BulkPanelStack';
+import { BulkImportDialog } from '@/components/workspace/BulkImportDialog';
+import { BundleExportValidationDialog } from '@/components/workspace/BundleExportValidationDialog';
+import { findUnresolvedPortals, type UnresolvedPortal } from '@/lib/core/aiSectionsValidate';
 import { BulkEditPanel } from '@/components/polygonSoupList/BulkEditPanel';
 import { UndoRedoControls } from '@/components/UndoRedoControls';
 import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShortcuts';
@@ -269,7 +272,7 @@ function CenterViewport() {
 }
 
 function RightInspector() {
-	const { bundles, selection, select, saveBundle, closeBundle } = useWorkspace();
+	const { bundles, selection, select, saveBundle, closeBundle, setResourceAt } = useWorkspace();
 	const bulk = useWorkspacePSLBulk();
 	const level = selectionLevel(selection);
 
@@ -375,10 +378,91 @@ function RightInspector() {
 			</div>
 		);
 	}
+	// AI Sections instance-level inspector — for V12 only, surface the
+	// "Import bulk JSON" affordance above the schema form. V4 schema is
+	// frozen (no addable sections), so the V4 profile must NOT show import
+	// triggers; we gate on `profile.kind === 'v12'` plus the resource key.
+	const showAIImport =
+		selection.resourceKey === 'aiSections' &&
+		profile?.kind === 'v12' &&
+		selection.index != null &&
+		inspectorBundle != null;
+
 	return wrapWithBulk(
 		<SelectedSchemaEditorProvider>
-			<InspectorPanel />
+			{showAIImport && inspectorBundle && selection.index != null ? (
+				<AIImportInspectorWrapper
+					bundle={inspectorBundle}
+					index={selection.index}
+					setResourceAt={setResourceAt as never}
+				/>
+			) : (
+				<InspectorPanel />
+			)}
 		</SelectedSchemaEditorProvider>,
+	);
+}
+
+// Inspector wrapper that prepends the "Import bulk JSON" affordance for
+// V12 AI Sections instances. Pulled into its own component so the import
+// dialog state stays attached to the (bundle, index) pair via React keys
+// — switching to a different instance unmounts and resets the dialog.
+function AIImportInspectorWrapper({
+	bundle,
+	index,
+	setResourceAt,
+}: {
+	bundle: EditableBundle;
+	index: number;
+	setResourceAt: <T>(bundleId: string, key: string, index: number, value: T) => void;
+}) {
+	const [importOpen, setImportOpen] = useState(false);
+	const model = bundle.parsedResourcesAll.get('aiSections')?.[index] as
+		| import('@/lib/core/aiSections').ParsedAISectionsV12
+		| undefined;
+	if (!model || model.kind !== 'v12') {
+		return <InspectorPanel />;
+	}
+	return (
+		<div className="h-full flex flex-col min-h-0">
+			<div className="shrink-0 border-b bg-card/40 px-3 py-2">
+				<div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+					Import bulk JSON
+				</div>
+				<div className="flex flex-wrap gap-1.5">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="h-7 text-xs"
+						onClick={() => setImportOpen(true)}
+					>
+						Paste from clipboard
+					</Button>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="h-7 text-xs"
+						onClick={() => setImportOpen(true)}
+					>
+						From file…
+					</Button>
+				</div>
+			</div>
+			<div className="flex-1 min-h-0 overflow-auto">
+				<InspectorPanel />
+			</div>
+			<BulkImportDialog
+				open={importOpen}
+				onOpenChange={setImportOpen}
+				destination={model}
+				bundleId={bundle.id}
+				onConfirm={(result) => {
+					setResourceAt(bundle.id, 'aiSections', index, result);
+				}}
+			/>
+		</div>
 	);
 }
 
@@ -412,6 +496,30 @@ function BundleInspector({
 	// Export-to-version dialog state — local to the inspector since the
 	// surface is bundle-scoped (each bundle gets its own modal lifecycle).
 	const [exportOpen, setExportOpen] = useState(false);
+	// Pre-export validation: if the bundle's V12 AI Sections instance has
+	// unresolved portals, surface them in a non-blocking dialog before the
+	// download fires.
+	const [validationState, setValidationState] = useState<
+		| { kind: 'idle' }
+		| { kind: 'review'; unresolved: UnresolvedPortal[]; aiSectionsIndex: number }
+	>({ kind: 'idle' });
+	const handleSaveClick = () => {
+		const aiList = bundle.parsedResourcesAll.get('aiSections') ?? [];
+		// Walk every V12 AI Sections instance in the bundle. The first one
+		// with unresolved portals surfaces in the dialog; in practice every
+		// bundle has zero or one AI Sections resource so this loop is at
+		// most one iteration.
+		for (let i = 0; i < aiList.length; i++) {
+			const m = aiList[i] as import('@/lib/core/aiSections').ParsedAISections | undefined;
+			if (!m || m.kind !== 'v12') continue;
+			const unresolved = findUnresolvedPortals(m);
+			if (unresolved.length > 0) {
+				setValidationState({ kind: 'review', unresolved, aiSectionsIndex: i });
+				return;
+			}
+		}
+		void saveBundle(bundle.id);
+	};
 	return (
 		<div className="h-full flex flex-col min-h-0 overflow-auto">
 			<div className="px-4 pt-4 pb-2 border-b bg-card/60 shrink-0">
@@ -439,7 +547,7 @@ function BundleInspector({
 					type="button"
 					size="sm"
 					variant="outline"
-					onClick={() => void saveBundle(bundle.id)}
+					onClick={handleSaveClick}
 					disabled={!bundle.isModified}
 					className="gap-1"
 				>
@@ -471,6 +579,23 @@ function BundleInspector({
 					bundle={bundle}
 					open={exportOpen}
 					onOpenChange={setExportOpen}
+				/>
+				<BundleExportValidationDialog
+					open={validationState.kind === 'review'}
+					onOpenChange={(next) => {
+						if (!next) setValidationState({ kind: 'idle' });
+					}}
+					unresolvedPortals={
+						validationState.kind === 'review' ? validationState.unresolved : []
+					}
+					bundleId={bundle.id}
+					aiSectionsIndex={
+						validationState.kind === 'review' ? validationState.aiSectionsIndex : null
+					}
+					onContinue={() => {
+						setValidationState({ kind: 'idle' });
+						void saveBundle(bundle.id);
+					}}
 				/>
 			</div>
 			<div className="flex-1 min-h-0 overflow-auto p-4">

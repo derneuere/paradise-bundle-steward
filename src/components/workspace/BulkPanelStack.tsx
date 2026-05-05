@@ -18,7 +18,8 @@
 // fan out across multiple bulk-providers; we'll do that when Slice 2 needs it.
 
 import { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, X, Clipboard, Download } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -28,7 +29,13 @@ import {
 	type WorkspaceAISectionsBulkSummary,
 } from './AISectionsBulkProvider';
 import { sortBulkSummaries } from './bulkPanelStack.helpers';
+import {
+	buildEnvelopeFromBulk,
+	exportEnvelopeFilename,
+} from './bulkPanelExport.helpers';
+import { encodeBulkEnvelope } from '@/lib/clipboard/bulkEnvelope';
 import type { EditableBundle } from '@/context/WorkspaceContext.types';
+import type { ParsedAISections } from '@/lib/core/aiSections';
 
 const AI_KEY = 'aiSections';
 
@@ -98,6 +105,67 @@ export function BulkPanel({
 	const resourceLabel = handler?.name ?? AI_KEY;
 	const filename = bundle?.id ?? summary.bundleId;
 
+	const model = bundle?.parsedResourcesAll.get(AI_KEY)?.[summary.index] as
+		| ParsedAISections
+		| undefined;
+	const canExport = summary.count > 0 && model != null;
+
+	const handleExportClipboard = async () => {
+		if (!canExport || !model) return;
+		try {
+			const envelope = buildEnvelopeFromBulk(model, summary, filename);
+			const json = encodeBulkEnvelope({
+				resourceKey: envelope.resourceKey,
+				profile: envelope.profile,
+				items: envelope.items,
+				sourceBundle: envelope.sourceBundle,
+			});
+			if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(json);
+				toast.success(`Copied ${envelope.items.length} section${envelope.items.length === 1 ? '' : 's'} to clipboard`);
+			} else {
+				// Insecure-context / older-browser fallback. Slice 2's spec says
+				// "minimal" — surface the JSON so the user can copy it manually.
+				toast.error('Clipboard API unavailable', {
+					description: 'Use [Export → file…] instead — your browser blocks clipboard writes.',
+				});
+			}
+		} catch (err) {
+			console.error('Bulk export to clipboard failed:', err);
+			toast.error('Copy to clipboard failed', {
+				description: err instanceof Error ? err.message : 'Unknown error',
+			});
+		}
+	};
+
+	const handleExportFile = () => {
+		if (!canExport || !model) return;
+		try {
+			const envelope = buildEnvelopeFromBulk(model, summary, filename);
+			const json = encodeBulkEnvelope({
+				resourceKey: envelope.resourceKey,
+				profile: envelope.profile,
+				items: envelope.items,
+				sourceBundle: envelope.sourceBundle,
+			});
+			const blob = new Blob([json], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = exportEnvelopeFilename(filename);
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			setTimeout(() => URL.revokeObjectURL(url), 0);
+			toast.success(`Saved ${envelope.items.length} section${envelope.items.length === 1 ? '' : 's'}`);
+		} catch (err) {
+			console.error('Bulk export to file failed:', err);
+			toast.error('Save to file failed', {
+				description: err instanceof Error ? err.message : 'Unknown error',
+			});
+		}
+	};
+
 	return (
 		<div className="rounded border border-amber-500/40 bg-amber-500/5">
 			<div className="flex items-center gap-1 px-2 py-1.5">
@@ -142,19 +210,42 @@ export function BulkPanel({
 				</button>
 			</div>
 			{expanded && (
-				<div className="px-3 py-2 border-t border-amber-500/40">
-					<Button
-						type="button"
-						variant="ghost"
-						size="sm"
-						className="h-6 text-xs"
-						onClick={onClear}
-					>
-						Clear
-					</Button>
-					{/* TODO: Slice 2 ships export-to-JSON / import-from-JSON / V4→V12
-					    migration buttons here. Slice 1 only needs the stack to
-					    exist + clear; the buttons land in the next slice. */}
+				<div className="px-3 py-2 border-t border-amber-500/40 space-y-2">
+					<div className="flex flex-wrap gap-1.5">
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-7 text-xs gap-1"
+							disabled={!canExport}
+							onClick={() => void handleExportClipboard()}
+							title="Copy this bulk as JSON to the OS clipboard"
+						>
+							<Clipboard className="h-3 w-3" />
+							Export → clipboard
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-7 text-xs gap-1"
+							disabled={!canExport}
+							onClick={handleExportFile}
+							title="Download this bulk as a JSON file"
+						>
+							<Download className="h-3 w-3" />
+							Export → file…
+						</Button>
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="h-7 text-xs ml-auto"
+							onClick={onClear}
+						>
+							Clear
+						</Button>
+					</div>
 				</div>
 			)}
 		</div>

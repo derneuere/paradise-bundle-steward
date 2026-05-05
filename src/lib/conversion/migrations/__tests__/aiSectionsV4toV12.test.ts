@@ -26,7 +26,7 @@ import {
 	type LegacyAISection,
 	type LegacyAISectionsData,
 } from '@/lib/core/aiSections';
-import { migrateV4toV12 } from '../aiSectionsV4toV12';
+import { migrateV4toV12, migrateSectionV4toV12 } from '../aiSectionsV4toV12';
 import { aiSectionsV4Profile } from '@/lib/editor/profiles/aiSections';
 
 const V4_FIXTURE = path.resolve(__dirname, '../../../../../example/older builds/AI.dat');
@@ -253,6 +253,103 @@ describe('migrateV4toV12 — dangerRating → speed mapping', () => {
 		expect(lossy).toContain(
 			'sections[].portals[].position (V4 midPosition.w dropped — vpu::Vector3 structural padding)',
 		);
+	});
+});
+
+describe('migrateSectionV4toV12 — per-section helper', () => {
+	function makeSection(overrides: Partial<LegacyAISection> = {}): LegacyAISection {
+		return {
+			portals: [],
+			noGoLines: [],
+			cornersX: [0, 1, 1, 0],
+			cornersZ: [0, 0, 1, 1],
+			dangerRating: 1,
+			flags: 0,
+			...overrides,
+		};
+	}
+
+	it('produces a V12 section with the destinationIndex placeholder id', () => {
+		const { section } = migrateSectionV4toV12(makeSection(), { destinationIndex: 42 });
+		expect(section.id).toBe(42);
+		expect(section.spanIndex).toBe(-1);
+		expect(section.district).toBe(0);
+		expect(section.flags).toBe(0);
+	});
+
+	it('packs cornersX/cornersZ into Vector2[4] in destinationIndex form', () => {
+		const { section } = migrateSectionV4toV12(
+			makeSection({ cornersX: [10, 20, 30, 40], cornersZ: [1, 2, 3, 4] }),
+			{ destinationIndex: 0 },
+		);
+		expect(section.corners).toEqual([
+			{ x: 10, y: 1 },
+			{ x: 20, y: 2 },
+			{ x: 30, y: 3 },
+			{ x: 40, y: 4 },
+		]);
+	});
+
+	it('drops portal midPosition.w on conversion', () => {
+		const { section, report } = migrateSectionV4toV12(
+			makeSection({
+				portals: [{
+					midPosition: { x: 1, y: 2, z: 3, w: 999 },
+					boundaryLines: [],
+					linkSection: 7,
+				}],
+			}),
+			{ destinationIndex: 0 },
+		);
+		expect(section.portals[0].position).toEqual({ x: 1, y: 2, z: 3 });
+		expect(section.portals[0].linkSection).toBe(7);
+		expect(report.lossy.has(
+			'sections[].portals[].position (V4 midPosition.w dropped — vpu::Vector3 structural padding)',
+		)).toBe(true);
+	});
+
+	it('reports the documented defaulted field paths in the per-section set', () => {
+		const { report } = migrateSectionV4toV12(makeSection(), { destinationIndex: 0 });
+		expect(report.defaulted.has('sections[].id')).toBe(true);
+		expect(report.defaulted.has('sections[].spanIndex')).toBe(true);
+		expect(report.defaulted.has('sections[].district')).toBe(true);
+	});
+
+	it('reports the dangerRating-axis lossy entry on every section', () => {
+		const { report } = migrateSectionV4toV12(makeSection(), { destinationIndex: 0 });
+		expect(report.lossy.has('sections[].speed (from dangerRating)')).toBe(true);
+	});
+
+	it('omits the flag-bit lossy entry when V4 bit 0x01 is unset on this section', () => {
+		const { report } = migrateSectionV4toV12(makeSection({ flags: 0 }), { destinationIndex: 0 });
+		expect(report.lossy.has('sections[].flags (V4 bit 0x01 dropped — meaning unknown)')).toBe(false);
+	});
+
+	it('flags the flag-bit lossy entry when V4 bit 0x01 is set on this section', () => {
+		const { report } = migrateSectionV4toV12(makeSection({ flags: 0x01 }), { destinationIndex: 0 });
+		expect(report.lossy.has('sections[].flags (V4 bit 0x01 dropped — meaning unknown)')).toBe(true);
+	});
+
+	it('migrates dangerRating → speed (Freeway → Very Fast)', () => {
+		const { section } = migrateSectionV4toV12(
+			makeSection({ dangerRating: 0 }),
+			{ destinationIndex: 0 },
+		);
+		expect(section.speed).toBe(SectionSpeed.E_SECTION_SPEED_VERY_FAST);
+	});
+
+	it('preserves portal linkSection verbatim (bulk-import callers remap)', () => {
+		const { section } = migrateSectionV4toV12(
+			makeSection({
+				portals: [{
+					midPosition: { x: 0, y: 0, z: 0, w: 0 },
+					boundaryLines: [],
+					linkSection: 1234,
+				}],
+			}),
+			{ destinationIndex: 0 },
+		);
+		expect(section.portals[0].linkSection).toBe(1234);
 	});
 });
 
