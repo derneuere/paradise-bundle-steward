@@ -13,7 +13,7 @@ import {
 	legacyAISectionMarkerPath,
 	legacyAISectionSelectionCodec,
 	buildBatchedLegacySections,
-} from './AISectionsLegacyOverlay';
+} from '../AISectionsLegacyOverlay';
 import type { LegacyAISection } from '@/lib/core/aiSections';
 import { LegacyDangerRating } from '@/lib/core/aiSections';
 import type { NodePath } from '@/lib/schema/walk';

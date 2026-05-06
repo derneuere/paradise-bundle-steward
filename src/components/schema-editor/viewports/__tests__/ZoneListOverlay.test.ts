@@ -27,7 +27,7 @@ import {
 	zoneIndexPath,
 	zonePathIndex,
 	zoneSelectionCodec,
-} from './ZoneListOverlay';
+} from '../ZoneListOverlay';
 import type { ParsedZoneList, Zone } from '@/lib/core/zoneList';
 
 // ---------------------------------------------------------------------------

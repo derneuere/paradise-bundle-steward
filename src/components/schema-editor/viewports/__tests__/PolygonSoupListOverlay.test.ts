@@ -16,7 +16,7 @@ import {
 	polygonSoupSelectionCodec,
 	soupPolyAddressPath,
 	soupPolyPathAddress,
-} from './PolygonSoupListOverlay';
+} from '../PolygonSoupListOverlay';
 import type { NodePath } from '@/lib/schema/walk';
 
 describe('PolygonSoupListOverlay', () => {

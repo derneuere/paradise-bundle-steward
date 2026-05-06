@@ -14,7 +14,7 @@ import {
 	trafficPathSelection,
 	trafficSelectionCodec,
 	trafficSelectionPath,
-} from './TrafficDataOverlay';
+} from '../TrafficDataOverlay';
 import type { NodePath } from '@/lib/schema/walk';
 
 describe('TrafficDataOverlay', () => {
