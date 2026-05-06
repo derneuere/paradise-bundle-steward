@@ -10,8 +10,14 @@ type Props = FieldRendererProps<unknown> & {
 // Escape hatch — looks up a component by name in the editor extension
 // registry and embeds it with the standard extension props. If the
 // extension is not registered, renders a soft warning without crashing.
+//
+// Extensions typed as the narrow `SchemaExtensionProps` will only observe
+// `path / value / setValue / selectChild`; ones typed as
+// `WholeResourceExtensionProps` additionally observe `data / setData /
+// resource`. Runtime always hands them the full prop bag — TypeScript on
+// the consumer side decides what's visible.
 export function CustomField({ label, value, onChange, meta, schema, path }: Props) {
-	const { getExtension, data, resource, setAtPath } = useSchemaEditor();
+	const { getExtension, data, resource, setAtPath, selectPath } = useSchemaEditor();
 	const Component = getExtension(schema.component);
 	return (
 		<FieldShell label={label} description={meta?.description} warning={meta?.warning}>
@@ -20,6 +26,7 @@ export function CustomField({ label, value, onChange, meta, schema, path }: Prop
 					path={path}
 					value={value}
 					setValue={onChange}
+					selectChild={(rel) => selectPath([...path, ...rel])}
 					setData={(next) => setAtPath([], next)}
 					data={data}
 					resource={resource}

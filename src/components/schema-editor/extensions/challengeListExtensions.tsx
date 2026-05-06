@@ -20,7 +20,11 @@
 // root — structural sharing keeps siblings untouched.
 
 import React, { useMemo } from 'react';
-import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
+import type {
+	SchemaExtensionProps,
+	WholeResourceExtensionProps,
+	ExtensionRegistry,
+} from '../context';
 import type {
 	ChallengeListEntry,
 	ChallengeListEntryAction,
@@ -117,7 +121,10 @@ function computeStats(data: ParsedChallengeList): OverviewStats {
 // Root-level extension — overview statistics
 // ---------------------------------------------------------------------------
 
-export const ChallengeOverviewExtension: React.FC<SchemaExtensionProps> = ({ data }) => {
+// WholeResource: this is a root-level overview that aggregates stats across
+// every challenge in the resource — the narrow per-node view doesn't reach
+// siblings.
+export const ChallengeOverviewExtension: React.FC<WholeResourceExtensionProps> = ({ data }) => {
 	const typed = data as ParsedChallengeList;
 	const stats = useMemo(() => computeStats(typed), [typed]);
 	return <ChallengeOverview data={typed} stats={stats} />;
@@ -133,9 +140,12 @@ type ActionExtensionFactoryOptions = {
 
 function makeActionExtension(
 	{ actionIndex }: ActionExtensionFactoryOptions,
-): React.FC<SchemaExtensionProps> {
-	const Component: React.FC<SchemaExtensionProps> = ({ value, setValue }) => {
-		const challenge = value as ChallengeListEntry | undefined;
+): React.FC<SchemaExtensionProps<ChallengeListEntry | undefined>> {
+	const Component: React.FC<SchemaExtensionProps<ChallengeListEntry | undefined>> = ({
+		value,
+		setValue,
+	}) => {
+		const challenge = value;
 		if (!challenge || !Array.isArray(challenge.actions)) {
 			return (
 				<div className="text-sm text-muted-foreground">

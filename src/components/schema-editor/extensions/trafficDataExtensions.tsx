@@ -20,7 +20,7 @@
 // at mutation time.
 
 import React, { useRef } from 'react';
-import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
+import type { WholeResourceExtensionProps, ExtensionRegistry } from '../context';
 import type { ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 import type { TrafficDataSelection } from '@/components/trafficdata/useTrafficSelection';
 import { useSchemaEditor } from '../context';
@@ -82,51 +82,58 @@ function useTabSelectionBridge() {
 }
 
 // ---------------------------------------------------------------------------
-// Root-level adapters — tab owns full ParsedTrafficDataRetail
+// Root-level adapters — tab owns full ParsedTrafficDataRetail.
+// All TrafficData adapters are WholeResource: the legacy tabs were authored
+// against `{ data, onChange }` and read across `hulls`, `flowTypes`,
+// `paintColours`, etc. simultaneously. The narrow per-node view can't see
+// past one path.
 // ---------------------------------------------------------------------------
 
-export const FlowTypesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const FlowTypesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<FlowTypesTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
-export const PaintColoursExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const PaintColoursExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<PaintColoursTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
-// Overview — onHullClick routes through the schema editor's tree selection
-// so clicking a hull in the summary jumps to that hull node.
-export const OverviewExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
-	const { selectPath } = useSchemaEditor();
-	return (
-		<OverviewTab
-			data={data as ParsedTrafficDataRetail}
-			onChange={setData as (next: ParsedTrafficDataRetail) => void}
-			onHullClick={(i) => selectPath(['hulls', i])}
-		/>
-	);
-};
+// Overview — onHullClick routes through the editor's tree selection so
+// clicking a hull in the summary jumps to that hull node. `selectChild`
+// from the root resolves to the absolute path because the extension's
+// `path` is `[]` (it's a root-level property group).
+export const OverviewExtension: React.FC<WholeResourceExtensionProps> = ({
+	data,
+	setData,
+	selectChild,
+}) => (
+	<OverviewTab
+		data={data as ParsedTrafficDataRetail}
+		onChange={setData as (next: ParsedTrafficDataRetail) => void}
+		onHullClick={(i) => selectChild(['hulls', i])}
+	/>
+);
 
-export const KillZonesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const KillZonesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<KillZonesTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
-export const VehiclesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const VehiclesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<VehiclesTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
-export const TrafficLightsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const TrafficLightsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<TrafficLightsTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
@@ -145,7 +152,13 @@ function hullIndexFromPath(path: NodePath): number {
 	return idx;
 }
 
-export const SectionsExtension: React.FC<SchemaExtensionProps> = ({ path, data, setData }) => {
+// WholeResource: SectionsTab needs the full `data` to walk parallel arrays
+// (sections + flows) per hull, and the legacy `onChange` replaces the root.
+export const SectionsExtension: React.FC<WholeResourceExtensionProps> = ({
+	path,
+	data,
+	setData,
+}) => {
 	const hullIndex = hullIndexFromPath(path);
 	const { selected, onSelect, scrollToIndexRef } = useTabSelectionBridge();
 	return (
@@ -160,7 +173,13 @@ export const SectionsExtension: React.FC<SchemaExtensionProps> = ({ path, data, 
 	);
 };
 
-export const LaneRungsExtension: React.FC<SchemaExtensionProps> = ({ path, data, setData }) => {
+// WholeResource: same reasoning as SectionsExtension — LaneRungsTab walks
+// per-hull arrays from the root.
+export const LaneRungsExtension: React.FC<WholeResourceExtensionProps> = ({
+	path,
+	data,
+	setData,
+}) => {
 	const hullIndex = hullIndexFromPath(path);
 	const { scrollToIndexRef } = useTabSelectionBridge();
 	return (

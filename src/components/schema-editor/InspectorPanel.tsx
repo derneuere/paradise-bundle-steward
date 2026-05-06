@@ -290,7 +290,8 @@ function CustomExtensionGroup({
 	path: NodePath;
 	value: unknown;
 }) {
-	const { data, resource, updateAtPath, setAtPath, getExtension } = useSchemaEditor();
+	const { data, resource, updateAtPath, setAtPath, getExtension, selectPath } =
+		useSchemaEditor();
 	const Component = getExtension(componentName);
 	if (!Component) {
 		return (
@@ -304,6 +305,7 @@ function CustomExtensionGroup({
 			path={path}
 			value={value}
 			setValue={(next) => updateAtPath(path, () => next)}
+			selectChild={(rel) => selectPath([...path, ...rel])}
 			setData={(next) => setAtPath([], next)}
 			data={data}
 			resource={resource}

@@ -23,27 +23,57 @@ import {
 // Extension registry
 // ---------------------------------------------------------------------------
 
-// Props passed to any React component registered as a custom field renderer
-// via schema.kind === 'custom' or propertyGroup.component. Same mental model
-// as visual-react's EditingExtensionProps — the extension gets the value at
-// its path, a setter, and the full root for cross-ref lookups.
-export type SchemaExtensionProps = {
+// Props passed to a schema-editor extension component (registered via
+// `{ kind: 'custom', component }` on a field, or `propertyGroup.component`
+// on a record). The default contract is deliberately narrow: an extension
+// gets a path-rooted view of one node and the means to mutate / navigate
+// inside it.
+//
+// If an extension genuinely owns the whole resource (e.g., a list-of-X tab
+// that pages through siblings the schema can't address from a single node),
+// type its props as `WholeResourceExtensionProps` and add a comment line
+// justifying why the wider surface is needed. Don't widen
+// `SchemaExtensionProps` itself — the narrow form is the default for a
+// reason: every extra field on the prop bag is friction for whoever writes
+// the next extension.
+export type SchemaExtensionProps<T = unknown> = {
 	/** Path to the value this extension owns. */
 	path: NodePath;
 	/** Current value at `path`. */
-	value: unknown;
+	value: T;
 	/** Replace the value at `path`. */
-	setValue: (next: unknown) => void;
-	/** Replace the entire resource root. Useful for legacy tab adapters
-	 * whose contract is `(data, onChange(data)) => JSX`. */
-	setData: (next: unknown) => void;
+	setValue: (next: T) => void;
+	/** Move the editor's selection to a node relative to this extension's
+	 * `path` (`rel` is appended to `path`). Pass `[]` to re-select this
+	 * extension's own node. */
+	selectChild: (rel: NodePath) => void;
+};
+
+// Props for extensions that genuinely operate on the resource as a whole
+// — typically root-level tabs whose pre-schema contract was
+// `(data, onChange(data)) => JSX`, or list tabs that need to walk sibling
+// arrays the schema can't reach from a single node. Each call site that
+// uses this type should justify it with a one-line comment.
+export type WholeResourceExtensionProps<T = unknown> = SchemaExtensionProps<T> & {
 	/** Full resource root — read-only for cross-reference lookups. */
 	data: unknown;
+	/** Replace the entire resource root. Mirrors the legacy tab contract
+	 * `(data, onChange(data)) => JSX`. */
+	setData: (next: unknown) => void;
 	/** The resource schema — for ref target resolution. */
 	resource: ResourceSchema;
 };
 
-export type SchemaExtension = React.ComponentType<SchemaExtensionProps>;
+// The registry stores components in their type-erased form. Runtime
+// always hands them the full `WholeResourceExtensionProps` prop bag;
+// each component's declared props (narrow or wide) decide what's
+// observed on the consumer side. Using `any` for `value` lets us put
+// both `React.FC<SchemaExtensionProps<ChallengeListEntry>>` and
+// `React.FC<WholeResourceExtensionProps>` in the same map without
+// fighting variance.
+//
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- variance escape hatch for the heterogeneous registry; see comment above.
+export type SchemaExtension = React.ComponentType<WholeResourceExtensionProps<any>>;
 export type ExtensionRegistry = Record<string, SchemaExtension>;
 
 // ---------------------------------------------------------------------------
