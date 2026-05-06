@@ -40,7 +40,7 @@ import type { ParsedTriggerData, BoxRegion, Vector4 } from '@/lib/core/triggerDa
 import { GenericRegionType } from '@/lib/core/triggerData';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
-import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
+import { useTriggerDataBulk } from '@/components/workspace/TriggerDataBulkProvider';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
@@ -416,6 +416,46 @@ function PlayerStartMarker({
 }
 
 // ---------------------------------------------------------------------------
+// Marquee centroid collector — extracted as a pure function so the bulk
+// wiring spec can pin the projection (box.position for boxes, position for
+// vectors) without mounting r3f. Mirrors AISectionsOverlay's marquee codec
+// extraction in `__tests__/AISectionsOverlay.bulk.test.ts`.
+// ---------------------------------------------------------------------------
+
+/** Walk every bulk-eligible TriggerData list and return schema paths whose
+ *  representative point falls inside `frustum`. Boxes project on
+ *  `box.position`; spawns / roams project on `position`. The path shape is
+ *  exactly what the bulk reducer expects (`[listKey, index]`). */
+export function collectMarqueeHits(
+	data: ParsedTriggerData,
+	frustum: THREE.Frustum,
+): NodePath[] {
+	const hits: NodePath[] = [];
+	const pt = new THREE.Vector3();
+	const tryBox = (listKey: string, list: { box: BoxRegion }[]) => {
+		for (let i = 0; i < list.length; i++) {
+			const p = list[i].box.position;
+			pt.set(p.x, p.y, p.z);
+			if (frustum.containsPoint(pt)) hits.push([listKey, i]);
+		}
+	};
+	const tryVec = (listKey: string, list: { position: Vector4 }[]) => {
+		for (let i = 0; i < list.length; i++) {
+			const p = list[i].position;
+			pt.set(p.x, p.y, p.z);
+			if (frustum.containsPoint(pt)) hits.push([listKey, i]);
+		}
+	};
+	tryBox('landmarks', data.landmarks);
+	tryBox('genericRegions', data.genericRegions);
+	tryBox('blackspots', data.blackspots);
+	tryBox('vfxBoxRegions', data.vfxBoxRegions);
+	tryVec('spawnLocations', data.spawnLocations);
+	tryVec('roamingLocations', data.roamingLocations);
+	return hits;
+}
+
+// ---------------------------------------------------------------------------
 // Overlay
 // ---------------------------------------------------------------------------
 
@@ -428,10 +468,15 @@ type Props = {
 	onChange?: (next: ParsedTriggerData) => void;
 	/** True when this overlay owns the active selection — gates tool registration. */
 	isActive?: boolean;
+	/** Bundle / instance identity, supplied by `WorldViewportComposition` so
+	 *  the overlay can resolve "MY bulk" via `forInstance(bundleId, index)`.
+	 *  Optional so legacy per-resource pages still mount cleanly with no bulk. */
+	bundleId?: string;
+	index?: number;
 };
 
 export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
-	data, selectedPath, onSelect, isActive = true,
+	data, selectedPath, onSelect, isActive = true, bundleId, index,
 }: Props) => {
 	const primary = useMemo(() => triggerSelectionCodec.pathToSelection(selectedPath), [selectedPath]);
 	const [hovered, setHovered] = useState<Selection | null>(null);
@@ -443,21 +488,34 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 
 	const regions = useMemo(() => buildRegionList(data), [data]);
 
-	const bulk = useSchemaBulkSelection();
+	// Workspace-wide TriggerData bulk handle. Resolves "this overlay's bulk"
+	// via per-instance lookup so two TriggerData overlays from two bundles
+	// keep independent bulk Sets. When `bundleId`/`index` are missing (legacy
+	// single-resource page route) we treat the bulk as absent.
+	const triggerBulk = useTriggerDataBulk();
+	const instanceBulk = useMemo(() => {
+		if (!triggerBulk || bundleId == null || index == null) return null;
+		return triggerBulk.forInstance(bundleId, index);
+	}, [triggerBulk, bundleId, index]);
 
 	// Translate the bulk path-key set (e.g. `'roamingLocations/3'`) into the
-	// Selection-keyed Set the hook expects (`'roaming:3'`). Only the subset
-	// the hook cares about (single-kind 'roaming') need translation here.
+	// Selection-keyed Set `useInstancedSelection` expects (`'roaming:3'`).
+	// Only the subset the hook cares about (single-kind 'roaming') needs
+	// translation; other entry kinds (landmarks/genericRegions/blackspots/
+	// vfxBoxRegions/spawnLocations) participate in the bulk Set without yet
+	// being painted in 3D — paint will land when the per-kind paint loop is
+	// extended in a follow-up.
 	const roamingBulk = useMemo<ReadonlySet<string>>(() => {
-		if (!bulk?.bulkPathKeys || bulk.bulkPathKeys.size === 0) return EMPTY_BULK;
+		const keys = instanceBulk?.bulkPathKeys;
+		if (!keys || keys.size === 0) return EMPTY_BULK;
 		const out = new Set<string>();
-		for (const k of bulk.bulkPathKeys) {
+		for (const k of keys) {
 			if (!k.startsWith('roamingLocations/')) continue;
 			const idx = Number(k.slice('roamingLocations/'.length));
 			if (Number.isFinite(idx)) out.add(`roaming:${idx}`);
 		}
 		return out;
-	}, [bulk]);
+	}, [instanceBulk]);
 
 	const findEntry = useCallback(
 		(sel: Selection | null) => {
@@ -472,37 +530,18 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 
 	// Marquee — pick every region/spawn/roaming whose centroid falls inside
 	// the dragged rectangle. Boxes use box.position; spawns / roams use
-	// their position field.
+	// their position field. Routes through the workspace-side
+	// `instanceBulk.onApplyPaths` so the right-sidebar BulkPanelStack and
+	// future tree decoration light up in one dispatch.
 	const cameraBridge = useRef<CameraBridgeData | null>(null);
 	const handleMarquee = useCallback(
 		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
-			if (!bulk?.onBulkApplyPaths) return;
-			const hits: NodePath[] = [];
-			const pt = new THREE.Vector3();
-			const tryBox = (listKey: string, list: { box: BoxRegion }[]) => {
-				for (let i = 0; i < list.length; i++) {
-					const p = list[i].box.position;
-					pt.set(p.x, p.y, p.z);
-					if (frustum.containsPoint(pt)) hits.push([listKey, i]);
-				}
-			};
-			const tryVec = (listKey: string, list: { position: Vector4 }[]) => {
-				for (let i = 0; i < list.length; i++) {
-					const p = list[i].position;
-					pt.set(p.x, p.y, p.z);
-					if (frustum.containsPoint(pt)) hits.push([listKey, i]);
-				}
-			};
-			tryBox('landmarks', data.landmarks);
-			tryBox('genericRegions', data.genericRegions);
-			tryBox('blackspots', data.blackspots);
-			tryBox('vfxBoxRegions', data.vfxBoxRegions);
-			tryVec('spawnLocations', data.spawnLocations);
-			tryVec('roamingLocations', data.roamingLocations);
+			if (!instanceBulk) return;
+			const hits = collectMarqueeHits(data, frustum);
 			if (hits.length === 0) return;
-			bulk.onBulkApplyPaths(hits, mode);
+			instanceBulk.onApplyPaths(hits, mode);
 		},
-		[data, bulk],
+		[data, instanceBulk],
 	);
 
 	const htmlNode = useMemo(
