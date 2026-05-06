@@ -21,9 +21,9 @@ import { buildRungToSectionMap, speedToRGB } from './constants';
 import { AutoFit } from '@/components/common/three/AutoFit';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
-import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
-import { useApplyMatrixToObject } from '@/hooks/useApplyMatrixToObject';
-import { useFlyCameraToTarget } from '@/hooks/useFlyCameraToTarget';
+import { useUpdateInstancedMesh } from '@/lib/three/scene/useUpdateInstancedMesh';
+import { useApplyMatrixToObject } from '@/lib/three/scene/useApplyMatrixToObject';
+import { useFlyCameraToTarget } from '@/lib/three/scene/useFlyCameraToTarget';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 

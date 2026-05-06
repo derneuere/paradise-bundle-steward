@@ -10,7 +10,7 @@
 // This file is the pure-function half: `buildLineSegmentsGeometry` packs
 // edges into a `THREE.BufferGeometry`. The React-integration half — a
 // memoizing hook that owns the geometry's lifecycle — lives at
-// `src/hooks/useLineSegmentsGeometry.ts`.
+// `src/lib/three/scene/useLineSegmentsGeometry.ts`.
 //
 // The rendering itself is two lines of JSX (R3F's <lineSegments> + a
 // <lineBasicMaterial>) so we don't wrap that — keeps the call site

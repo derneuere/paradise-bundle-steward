@@ -20,7 +20,7 @@ import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygon
 import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
-import { useLineSegmentsGeometry } from '@/hooks/useLineSegmentsGeometry';
+import { useLineSegmentsGeometry } from '@/lib/three/scene/useLineSegmentsGeometry';
 import { useCachedColorAttribute } from '@/hooks/useCachedColorAttribute';
 import { useApplyPolygonSoupHighlight } from '@/hooks/useApplyPolygonSoupHighlight';
 import { useDisposeOnUnmount } from '@/hooks/useDisposeOnUnmount';

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { MapContainer, Polygon, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { useFitMapBounds } from '@/hooks/useFitMapBounds';
+import { useFitMapBounds } from '@/lib/three/scene/useFitMapBounds';
 import type { ParsedTriggerData, Landmark, GenericRegion, BoxRegion } from '@/lib/core/triggerData';
 import { GenericRegionType, StuntCameraType } from '@/lib/core/triggerData';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';

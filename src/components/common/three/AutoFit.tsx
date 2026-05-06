@@ -12,7 +12,7 @@
 
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useAutoFitCamera } from '@/hooks/useAutoFitCamera';
+import { useAutoFitCamera } from '@/lib/three/scene/useAutoFitCamera';
 
 export type AutoFitProps = {
 	center: THREE.Vector3;

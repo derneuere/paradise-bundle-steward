@@ -10,7 +10,7 @@ import { OrbitControls, Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 import { AutoFit } from '@/components/common/three/AutoFit';
-import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
+import { useUpdateInstancedMesh } from '@/lib/three/scene/useUpdateInstancedMesh';
 
 // ---------------------------------------------------------------------------
 // Types

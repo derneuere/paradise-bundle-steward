@@ -11,7 +11,7 @@ import { OrbitControls, Html, Line } from '@react-three/drei';
 import { AutoFit } from '@/components/common/three/AutoFit';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
-import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
+import { useUpdateInstancedMesh } from '@/lib/three/scene/useUpdateInstancedMesh';
 import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
 import type { NodePath } from '@/lib/schema/walk';
 import * as THREE from 'three';
