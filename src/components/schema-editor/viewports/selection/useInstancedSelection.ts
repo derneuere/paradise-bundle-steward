@@ -19,7 +19,7 @@
 import { useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import type { ThreeEvent } from '@react-three/fiber';
-import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
+import { useUpdateInstancedMesh } from '@/lib/three/scene/useUpdateInstancedMesh';
 import type { Selection } from './selection';
 import { selectionEquals, selectionKey } from './selection';
 import { SELECTION_THEME, type SelectionTheme } from './theme';

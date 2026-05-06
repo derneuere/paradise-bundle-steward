@@ -25,7 +25,7 @@
 import { useCallback, useMemo, useState, Suspense } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
-import { useSceneEnvironment } from '@/hooks/useSceneEnvironment';
+import { useSceneEnvironment } from '@/lib/three/scene/useSceneEnvironment';
 import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';

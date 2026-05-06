@@ -12,7 +12,7 @@ import { useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useMirrorRef } from '@/hooks/useMirrorRef';
-import { useApplyDisplayMatrix } from '@/hooks/useApplyDisplayMatrix';
+import { useApplyDisplayMatrix } from '@/lib/three/scene/useApplyDisplayMatrix';
 
 // ---------------------------------------------------------------------------
 // Helpers — matrix ↔ storage conversion

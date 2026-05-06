@@ -22,7 +22,7 @@
 // viewport, generalize the data type then.
 
 import { useThree } from '@react-three/fiber';
-import { useCameraBridgeSync, type CameraBridgeData } from '@/hooks/useCameraBridgeSync';
+import { useCameraBridgeSync, type CameraBridgeData } from '@/lib/three/scene/useCameraBridgeSync';
 
 export type { CameraBridgeData };
 

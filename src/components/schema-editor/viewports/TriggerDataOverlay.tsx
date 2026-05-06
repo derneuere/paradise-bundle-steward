@@ -32,7 +32,7 @@
 // DOM siblings: marquee bulk-select rides the WorldViewport HTML slot.
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { useUpdateInstancedMesh } from '@/hooks/useUpdateInstancedMesh';
+import { useUpdateInstancedMesh } from '@/lib/three/scene/useUpdateInstancedMesh';
 import { ThreeEvent } from '@react-three/fiber';
 import { Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
