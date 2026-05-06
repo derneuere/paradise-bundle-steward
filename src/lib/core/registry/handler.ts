@@ -122,6 +122,16 @@ export interface ResourceHandler<Model = unknown> {
 	readonly caps: HandlerCaps;
 
 	/**
+	 * Optional UI-facing identifier used as `FeatureCapability.id`. Defaults
+	 * to `key` when omitted. Provided as an explicit override for handlers
+	 * that ship a kebab-case slug to keep the public surface stable across
+	 * UI badges, the unsupported-write warning, and any saved state that
+	 * captured the previous identifier (e.g. `'street-data'` rather than
+	 * `'streetData'`). New handlers can omit this and inherit `key`.
+	 */
+	readonly featureId?: string;
+
+	/**
 	 * Optional human-readable note shown in capability tooltips and the
 	 * unsupported-write warning. Plain text — the registry layer is framework-
 	 * agnostic, so no JSX / Markdown rendering happens here.

@@ -9,12 +9,16 @@
 import {
   getHandlerByKey,
   getHandlerByTypeId as registryGetHandlerByTypeId,
+  registry,
   type ResourceHandler,
 } from './core/registry';
 import { EDITOR_PAGES } from './core/registry/editors';
 
 export type FeatureCapability = {
-  /** Stable identifier — the handler's `key` (camelCase). */
+  /**
+   * Stable identifier — handler's `featureId` if declared (kebab-case slug),
+   * otherwise its `key` (camelCase). Consumed by `CapabilityWarning` lookup.
+   */
   id: string;
   name: string;
   resourceTypeId?: number;
@@ -28,7 +32,9 @@ export type FeatureCapability = {
 function capabilityFromHandler(h: ResourceHandler): FeatureCapability {
   const overrides = h.capabilityOverrides;
   return {
-    id: h.key,
+    // featureId opt-in keeps the public id stable for handlers that ship a
+    // kebab-case slug; new handlers can omit it and inherit `key`.
+    id: h.featureId ?? h.key,
     name: h.name,
     resourceTypeId: h.typeId,
     // capabilityOverrides lets a handler declare a softer UI signal (e.g.
@@ -44,7 +50,11 @@ function capabilityFromHandler(h: ResourceHandler): FeatureCapability {
 }
 
 export function getCapability(id: string): FeatureCapability | undefined {
-  const handler = getHandlerByKey(id);
+  // Accept either form — featureId (kebab) for stable public ids, key
+  // (camelCase) for the registry-internal name. featureId wins when both
+  // resolve, since it's the explicit override.
+  const handler =
+    registry.find((h) => (h.featureId ?? h.key) === id) ?? getHandlerByKey(id);
   return handler ? capabilityFromHandler(handler) : undefined;
 }
 

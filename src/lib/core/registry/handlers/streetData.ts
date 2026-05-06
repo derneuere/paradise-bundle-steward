@@ -14,6 +14,7 @@ import type { ResourceHandler } from '../handler';
 export const streetDataHandler: ResourceHandler<ParsedStreetData> = {
 	typeId: 0x10018,
 	key: 'streetData',
+	featureId: 'street-data',
 	name: 'Street Data',
 	description: 'Streets, junctions, roads, and per-challenge par scores used by the road network',
 	category: 'Data',

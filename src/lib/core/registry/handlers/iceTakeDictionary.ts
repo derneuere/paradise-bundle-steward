@@ -15,6 +15,7 @@ import type { ResourceHandler } from '../handler';
 export const iceTakeDictionaryHandler: ResourceHandler<ParsedIceTakeDictionary> = {
 	typeId: 0x41,
 	key: 'iceTakeDictionary',
+	featureId: 'icetake-dictionary',
 	name: 'ICE Dictionary',
 	description: 'In-game Camera Editor take dictionary (camera cuts for race starts, Picture Paradise, Super Jumps)',
 	category: 'Camera',

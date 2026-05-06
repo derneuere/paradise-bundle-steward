@@ -10,6 +10,7 @@ import type { ResourceHandler } from '../handler';
 export const triggerDataHandler: ResourceHandler<ParsedTriggerData> = {
 	typeId: 0x10003,
 	key: 'triggerData',
+	featureId: 'trigger-data',
 	name: 'Trigger Data',
 	description: 'Landmarks, generic regions, blackspots, VFX regions, spawn and roaming locations',
 	category: 'Data',

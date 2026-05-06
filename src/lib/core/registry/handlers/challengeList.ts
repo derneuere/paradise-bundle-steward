@@ -10,6 +10,7 @@ import type { ResourceHandler } from '../handler';
 export const challengeListHandler: ResourceHandler<ParsedChallengeList> = {
 	typeId: 0x1001F,
 	key: 'challengeList',
+	featureId: 'challenge-list',
 	name: 'Challenge List',
 	description: 'Freeburn challenges with their actions, locations, and rewards',
 	category: 'Data',
