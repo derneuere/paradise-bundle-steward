@@ -18,6 +18,8 @@ export const streetDataHandler: ResourceHandler<ParsedStreetData> = {
 	description: 'Streets, junctions, roads, and per-challenge par scores used by the road network',
 	category: 'Data',
 	caps: { read: true, write: true },
+	notes: 'Full read/write support for streets, junctions, roads, and challenge par scores. Per-junction exits / per-road spans are not written (the retail game ignores them due to a FixUp bug).',
+	wikiUrl: 'https://burnout.wiki/wiki/Street_Data',
 
 	parseRaw(raw, _ctx) {
 		return parseStreetDataData(raw);

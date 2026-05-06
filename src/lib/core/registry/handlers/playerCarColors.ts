@@ -14,6 +14,8 @@ export const playerCarColoursHandler: ResourceHandler<PlayerCarColours> = {
 	description: 'Paint and pearl color palettes for player vehicles (Gloss, Metallic, Pearlescent, Special, Party)',
 	category: 'Graphics',
 	caps: { read: true, write: true },
+	notes: 'Read-only support. Can view all color palettes but writing not yet implemented.',
+	wikiUrl: 'https://burnout.wiki/wiki/Player_Car_Colours',
 
 	parseRaw(raw, _ctx) {
 		return parsePlayerCarColoursData(raw);

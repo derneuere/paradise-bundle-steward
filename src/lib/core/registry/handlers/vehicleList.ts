@@ -28,6 +28,8 @@ export const vehicleListHandler: ResourceHandler<ParsedVehicleList> = {
 	description: 'Complete list of vehicles with gameplay stats, audio config, and unlock metadata',
 	category: 'Data',
 	caps: { read: true, write: true },
+	notes: 'Full read/write support with visual editor. Writer round-trips byte-exact against the reference fixture.',
+	wikiUrl: 'https://burnout.wiki/wiki/Vehicle_List',
 
 	parseRaw(raw, ctx) {
 		return parseVehicleListData(raw, { littleEndian: ctx.littleEndian });

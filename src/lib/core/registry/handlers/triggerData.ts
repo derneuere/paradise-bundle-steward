@@ -14,6 +14,8 @@ export const triggerDataHandler: ResourceHandler<ParsedTriggerData> = {
 	description: 'Landmarks, generic regions, blackspots, VFX regions, spawn and roaming locations',
 	category: 'Data',
 	caps: { read: true, write: true },
+	notes: 'Full read/write support for landmarks, regions, blackspots, VFX, spawn locations',
+	wikiUrl: 'https://burnout.wiki/wiki/Trigger_Data',
 
 	parseRaw(raw, ctx) {
 		return parseTriggerDataData(raw, ctx.littleEndian);
