@@ -4,14 +4,13 @@
 // inlined inside StreetDataEditor.tsx) so the schema editor can reuse them
 // as custom renderers without rewriting the per-row edit logic.
 //
-// The contract is identical to trafficDataExtensions.tsx — an adapter
-// receives `(path, value, setValue, setData, data, resource)` and delegates
-// to a classic `{ data, onChange }` tab by passing `setData` through as
-// `onChange`. Tabs only ever mutate their own list, so behavior matches
-// the pre-schema editor.
+// All five adapters take `WholeResourceExtensionProps`: the legacy tabs
+// were authored against the resource root (`{ data, onChange }`) and
+// fan out across multiple sibling arrays, which the narrow per-node view
+// can't reach.
 
 import React from 'react';
-import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
+import type { WholeResourceExtensionProps, ExtensionRegistry } from '../context';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 
 import { OverviewTab } from '@/components/streetdata/OverviewTab';
@@ -21,10 +20,10 @@ import { RoadsTab } from '@/components/streetdata/RoadsTab';
 import { ChallengesTab } from '@/components/streetdata/ChallengesTab';
 
 // ---------------------------------------------------------------------------
-// Adapters
+// Adapters — every one is WholeResource (legacy whole-tree tabs).
 // ---------------------------------------------------------------------------
 
-export const StreetDataOverviewExtension: React.FC<SchemaExtensionProps> = ({
+export const StreetDataOverviewExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 }) => (
@@ -34,28 +33,28 @@ export const StreetDataOverviewExtension: React.FC<SchemaExtensionProps> = ({
 	/>
 );
 
-export const StreetsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const StreetsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<StreetsTab
 		data={data as ParsedStreetData}
 		onChange={setData as (next: ParsedStreetData) => void}
 	/>
 );
 
-export const JunctionsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const JunctionsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<JunctionsTab
 		data={data as ParsedStreetData}
 		onChange={setData as (next: ParsedStreetData) => void}
 	/>
 );
 
-export const RoadsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const RoadsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<RoadsTab
 		data={data as ParsedStreetData}
 		onChange={setData as (next: ParsedStreetData) => void}
 	/>
 );
 
-export const ChallengesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+export const ChallengesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<ChallengesTab
 		data={data as ParsedStreetData}
 		onChange={setData as (next: ParsedStreetData) => void}

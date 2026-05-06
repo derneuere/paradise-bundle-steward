@@ -28,8 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search } from 'lucide-react';
 
-import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
-import { useSchemaEditor } from '../context';
+import type { WholeResourceExtensionProps, ExtensionRegistry } from '../context';
 import type { NodePath } from '@/lib/schema/walk';
 import type {
 	ParsedTriggerData,
@@ -153,8 +152,10 @@ function makeScrollPosRef() {
 // Map the "Edit Box" button click onto a schema selection. In the old
 // editor, the button opened a modal dialog. In the schema editor we let
 // the inspector handle the box form — just navigate the selection.
-function useBoxNavigator() {
-	const { selectPath } = useSchemaEditor();
+//
+// Callers pass their `selectChild`; for these root-level extensions the
+// extension's `path` is `[]`, so child paths are effectively absolute.
+function makeBoxNavigator(selectChild: (rel: NodePath) => void) {
 	return (kind: 'landmark' | 'generic' | 'blackspot' | 'vfx', index: number) => {
 		const pathByKind: Record<typeof kind, NodePath> = {
 			landmark: ['landmarks', index, 'box'],
@@ -162,7 +163,7 @@ function useBoxNavigator() {
 			blackspot: ['blackspots', index, 'box'],
 			vfx: ['vfxBoxRegions', index, 'box'],
 		};
-		selectPath(pathByKind[kind]);
+		selectChild(pathByKind[kind]);
 	};
 }
 
@@ -203,7 +204,8 @@ function FilterBar({
 // Header extension — wraps HeaderEditor for the TriggerData root form
 // ---------------------------------------------------------------------------
 
-export const HeaderExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => (
+// WholeResource: legacy header tab operates on the resource root.
+export const HeaderExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<Card>
 		<CardHeader>
 			<CardTitle className="text-sm">Header</CardTitle>
@@ -221,7 +223,8 @@ export const HeaderExtension: React.FC<SchemaExtensionProps> = ({ data, setData 
 // Regions 2D map — read-only leaflet view of every region
 // ---------------------------------------------------------------------------
 
-export const RegionsMapExtension: React.FC<SchemaExtensionProps> = ({ data }) => (
+// WholeResource: 2D map renders every region in the resource at once.
+export const RegionsMapExtension: React.FC<WholeResourceExtensionProps> = ({ data }) => (
 	<Card>
 		<CardHeader>
 			<CardTitle className="text-sm">Region Map (2D)</CardTitle>
@@ -236,7 +239,13 @@ export const RegionsMapExtension: React.FC<SchemaExtensionProps> = ({ data }) =>
 // Complex list extensions — virtualized tables with filter + clone / add
 // ---------------------------------------------------------------------------
 
-export const LandmarksExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
+// WholeResource: list tab walks the full landmarks array; box-edit
+// navigation jumps to other root-level paths via selectChild.
+export const LandmarksExtension: React.FC<WholeResourceExtensionProps> = ({
+	data,
+	setData,
+	selectChild,
+}) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -246,7 +255,7 @@ export const LandmarksExtension: React.FC<SchemaExtensionProps> = ({ data, setDa
 		() => buildFilteredIndices(td.landmarks as unknown as Record<string, unknown>[], filterQuery),
 		[td.landmarks, filterQuery],
 	);
-	const navigateToBox = useBoxNavigator();
+	const navigateToBox = makeBoxNavigator(selectChild);
 
 	const addLandmark = () => {
 		const lm: Landmark = {
@@ -306,7 +315,12 @@ export const LandmarksExtension: React.FC<SchemaExtensionProps> = ({ data, setDa
 	);
 };
 
-export const GenericRegionsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
+// WholeResource: same shape as LandmarksExtension above.
+export const GenericRegionsExtension: React.FC<WholeResourceExtensionProps> = ({
+	data,
+	setData,
+	selectChild,
+}) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -320,7 +334,7 @@ export const GenericRegionsExtension: React.FC<SchemaExtensionProps> = ({ data, 
 			),
 		[td.genericRegions, filterQuery],
 	);
-	const navigateToBox = useBoxNavigator();
+	const navigateToBox = makeBoxNavigator(selectChild);
 
 	const addGeneric = () => {
 		const gr: GenericRegion = {
@@ -386,7 +400,12 @@ export const GenericRegionsExtension: React.FC<SchemaExtensionProps> = ({ data, 
 	);
 };
 
-export const BlackspotsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
+// WholeResource: same shape as LandmarksExtension above.
+export const BlackspotsExtension: React.FC<WholeResourceExtensionProps> = ({
+	data,
+	setData,
+	selectChild,
+}) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -397,7 +416,7 @@ export const BlackspotsExtension: React.FC<SchemaExtensionProps> = ({ data, setD
 			buildFilteredIndices(td.blackspots as unknown as Record<string, unknown>[], filterQuery),
 		[td.blackspots, filterQuery],
 	);
-	const navigateToBox = useBoxNavigator();
+	const navigateToBox = makeBoxNavigator(selectChild);
 
 	const addBlackspot = () => {
 		const bs: Blackspot = {
@@ -458,7 +477,12 @@ export const BlackspotsExtension: React.FC<SchemaExtensionProps> = ({ data, setD
 	);
 };
 
-export const VfxExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
+// WholeResource: same shape as LandmarksExtension above.
+export const VfxExtension: React.FC<WholeResourceExtensionProps> = ({
+	data,
+	setData,
+	selectChild,
+}) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -472,7 +496,7 @@ export const VfxExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) 
 			),
 		[td.vfxBoxRegions, filterQuery],
 	);
-	const navigateToBox = useBoxNavigator();
+	const navigateToBox = makeBoxNavigator(selectChild);
 
 	const addVfx = () => {
 		const v: VFXBoxRegion = {
@@ -533,7 +557,8 @@ export const VfxExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) 
 // shape, so the extension just wires up a filter bar + add handler.
 // ---------------------------------------------------------------------------
 
-export const SignatureStuntsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
+// WholeResource: list tab walks the full signatureStunts array.
+export const SignatureStuntsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -569,7 +594,8 @@ export const SignatureStuntsExtension: React.FC<SchemaExtensionProps> = ({ data,
 	);
 };
 
-export const KillzonesExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
+// WholeResource: list tab walks the full killzones array.
+export const KillzonesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -602,7 +628,8 @@ export const KillzonesExtension: React.FC<SchemaExtensionProps> = ({ data, setDa
 	);
 };
 
-export const RoamingExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
+// WholeResource: list tab walks the full roamingLocations array.
+export const RoamingExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -638,7 +665,8 @@ export const RoamingExtension: React.FC<SchemaExtensionProps> = ({ data, setData
 	);
 };
 
-export const SpawnsExtension: React.FC<SchemaExtensionProps> = ({ data, setData }) => {
+// WholeResource: list tab walks the full spawnLocations array.
+export const SpawnsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');

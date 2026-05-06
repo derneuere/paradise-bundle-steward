@@ -11,7 +11,9 @@ import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
 import type { VehicleListEntry } from '@/lib/core/vehicleList';
 import { VehicleEditorForm } from '@/components/VehicleEditorForm';
 
-export const VehicleEditorExtension: React.FC<SchemaExtensionProps> = ({ value, setValue }) => {
+export const VehicleEditorExtension: React.FC<
+	SchemaExtensionProps<VehicleListEntry | undefined>
+> = ({ value, setValue }) => {
 	if (!value || typeof value !== 'object') {
 		return (
 			<div className="text-xs text-muted-foreground">
@@ -19,12 +21,7 @@ export const VehicleEditorExtension: React.FC<SchemaExtensionProps> = ({ value, 
 			</div>
 		);
 	}
-	return (
-		<VehicleEditorForm
-			vehicle={value as VehicleListEntry}
-			onChange={(next) => setValue(next)}
-		/>
-	);
+	return <VehicleEditorForm vehicle={value} onChange={(next) => setValue(next)} />;
 };
 
 export const vehicleListExtensions: ExtensionRegistry = {
