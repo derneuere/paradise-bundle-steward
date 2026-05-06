@@ -10,10 +10,13 @@ import type { ResourceHandler } from '../handler';
 export const challengeListHandler: ResourceHandler<ParsedChallengeList> = {
 	typeId: 0x1001F,
 	key: 'challengeList',
+	featureId: 'challenge-list',
 	name: 'Challenge List',
 	description: 'Freeburn challenges with their actions, locations, and rewards',
 	category: 'Data',
 	caps: { read: true, write: true },
+	notes: 'Full read/write support with visual editor',
+	wikiUrl: 'https://burnout.wiki/wiki/Challenge_List',
 
 	parseRaw(raw, ctx) {
 		return parseChallengeListData(raw, ctx.littleEndian);

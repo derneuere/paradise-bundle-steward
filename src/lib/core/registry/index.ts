@@ -121,6 +121,7 @@ export {
 	type ResourceHandler,
 	type ResourceFixture,
 	type HandlerCaps,
+	type HandlerCapabilityOverrides,
 	type ResourceCtx,
 	type ResourceCategory,
 	type StressScenario,

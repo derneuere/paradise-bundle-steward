@@ -93,6 +93,25 @@ export type PickerConfig<Model = unknown> = {
 	searchText?(model: Model | null, ctx: PickerResourceCtx): string;
 };
 
+/**
+ * UI-facing refinement of a handler's coarse `caps` flags.
+ *
+ * `caps.read` / `caps.write` are *machine* gates: "do parseRaw / writeRaw
+ * exist and produce useful output?" They drive the CLI, exporter, and
+ * unsupported-write warnings — toggling one to `false` removes the parser.
+ *
+ * `capabilityOverrides` is the *UI* tier: when the parser nominally works
+ * but the spec is incomplete (e.g. ICE Take Dictionary), or when the editor
+ * is partial, the handler can declare `'partial'` here to surface a softer
+ * badge / warning without disabling the parser. Omit fields default to the
+ * machine value (read/write) or to `EDITOR_PAGES[key] !== undefined` (editor).
+ */
+export type HandlerCapabilityOverrides = {
+	read?: 'partial' | boolean;
+	write?: 'partial' | boolean;
+	editor?: 'partial' | boolean;
+};
+
 export interface ResourceHandler<Model = unknown> {
 	readonly typeId: number;
 	/** Stable slug used in JSON dumps, CLI --type flags, and UI route paths. */
@@ -101,6 +120,35 @@ export interface ResourceHandler<Model = unknown> {
 	readonly description: string;
 	readonly category: ResourceCategory;
 	readonly caps: HandlerCaps;
+
+	/**
+	 * Optional UI-facing identifier used as `FeatureCapability.id`. Defaults
+	 * to `key` when omitted. Provided as an explicit override for handlers
+	 * that ship a kebab-case slug to keep the public surface stable across
+	 * UI badges, the unsupported-write warning, and any saved state that
+	 * captured the previous identifier (e.g. `'street-data'` rather than
+	 * `'streetData'`). New handlers can omit this and inherit `key`.
+	 */
+	readonly featureId?: string;
+
+	/**
+	 * Optional human-readable note shown in capability tooltips and the
+	 * unsupported-write warning. Plain text — the registry layer is framework-
+	 * agnostic, so no JSX / Markdown rendering happens here.
+	 */
+	readonly notes?: string;
+
+	/**
+	 * Optional Burnout Wiki URL for this resource type. Surfaced by the UI
+	 * capability matrix; CLI ignores it.
+	 */
+	readonly wikiUrl?: string;
+
+	/**
+	 * Optional UI-facing refinement of `caps`. See {@link HandlerCapabilityOverrides}
+	 * for why this is separate from `caps`.
+	 */
+	readonly capabilityOverrides?: HandlerCapabilityOverrides;
 
 	/**
 	 * Optional picker config for the tree-embedded resource switcher. Only

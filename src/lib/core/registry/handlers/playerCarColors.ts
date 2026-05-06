@@ -10,10 +10,17 @@ import type { ResourceHandler } from '../handler';
 export const playerCarColoursHandler: ResourceHandler<PlayerCarColours> = {
 	typeId: 0x1001E,
 	key: 'playerCarColours',
+	featureId: 'player-car-colours',
 	name: 'Player Car Colours',
 	description: 'Paint and pearl color palettes for player vehicles (Gloss, Metallic, Pearlescent, Special, Party)',
 	category: 'Graphics',
 	caps: { read: true, write: true },
+	// Writer normalizes retail palette gaps / aliased pointers between palettes
+	// and reconciles `numColours` against realized array lengths (the neon-colour
+	// exploit), so the first write is intentionally lossy and only subsequent
+	// writes are byte-stable — see fixture `expect: { stableWriter: true }`.
+	notes: 'Full read/write support. Writer normalizes retail palette gaps / aliased pointers and is idempotent after the first pass.',
+	wikiUrl: 'https://burnout.wiki/wiki/Player_Car_Colours',
 
 	parseRaw(raw, _ctx) {
 		return parsePlayerCarColoursData(raw);

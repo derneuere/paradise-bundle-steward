@@ -1,15 +1,24 @@
-// Feature Capabilities — UI metadata derived from the handler registry.
+// Feature Capabilities — UI-facing view derived from the handler registry.
 //
-// Step 7 of the CLI-first refactor replaced the hand-written CAPABILITIES
-// array with a registry-driven derivation. Handlers declare `caps: { read, write }`
-// and whether they have an editor (determined by the presence of an entry
-// in EDITOR_PAGES). Per-handler notes / wiki URLs live in a single lookup
-// table in this file so they can be updated without touching each handler.
+// Each handler (`src/lib/core/registry/handlers/*.ts`) carries its own
+// `notes`, `wikiUrl`, and optional `capabilityOverrides`. This file is a
+// thin selector that lifts those into a stable shape the React badges /
+// tooltips / export-warning modal consume. There is no side-table here —
+// adding a handler is still one file plus one `index.ts` line.
 
-import { registry } from './core/registry';
+import {
+  getHandlerByKey,
+  getHandlerByTypeId as registryGetHandlerByTypeId,
+  registry,
+  type ResourceHandler,
+} from './core/registry';
 import { EDITOR_PAGES } from './core/registry/editors';
 
 export type FeatureCapability = {
+  /**
+   * Stable identifier — handler's `featureId` if declared (kebab-case slug),
+   * otherwise its `key` (camelCase). Consumed by `CapabilityWarning` lookup.
+   */
   id: string;
   name: string;
   resourceTypeId?: number;
@@ -20,120 +29,36 @@ export type FeatureCapability = {
   wikiUrl?: string;
 };
 
-export type FeatureCapabilities = {
-  resources: FeatureCapability[];
-  tools: FeatureCapability[];
-};
-
-/**
- * Per-handler free-form metadata. Keyed by handler.key. Anything a handler
- * author wants surfaced in the UI feature matrix but that isn't machine-
- * derivable from the registry itself goes here.
- */
-const HANDLER_META: Record<string, { id: string; notes?: string; wikiUrl?: string; readOverride?: 'partial' | boolean; writeOverride?: 'partial' | boolean; editorOverride?: 'partial' | boolean }> = {
-  streetData: {
-    id: 'street-data',
-    notes: 'Full read/write support for streets, junctions, roads, and challenge par scores. Per-junction exits / per-road spans are not written (the retail game ignores them due to a FixUp bug).',
-    wikiUrl: 'https://burnout.wiki/wiki/Street_Data',
-  },
-  triggerData: {
-    id: 'trigger-data',
-    notes: 'Full read/write support for landmarks, regions, blackspots, VFX, spawn locations',
-    wikiUrl: 'https://burnout.wiki/wiki/Trigger_Data',
-  },
-  challengeList: {
-    id: 'challenge-list',
-    notes: 'Full read/write support with visual editor',
-    wikiUrl: 'https://burnout.wiki/wiki/Challenge_List',
-  },
-  vehicleList: {
-    id: 'vehicle-list',
-    notes: 'Full read/write support with visual editor. Writer round-trips byte-exact against the reference fixture.',
-    wikiUrl: 'https://burnout.wiki/wiki/Vehicle_List',
-  },
-  playerCarColours: {
-    id: 'player-car-colours',
-    notes: 'Read-only support. Can view all color palettes but writing not yet implemented.',
-    wikiUrl: 'https://burnout.wiki/wiki/Player_Car_Colours',
-  },
-  iceTakeDictionary: {
-    id: 'icetake-dictionary',
-    notes: 'Partial support: can view some of the data, but not save changes. Blocked: specification missing from Burnout Wiki.',
-    readOverride: 'partial',
-    editorOverride: 'partial',
-    wikiUrl: 'https://burnout.wiki/wiki/ICE_Take_Dictionary',
-  },
-};
-
-function capabilityFromHandler(h: (typeof registry)[number]): FeatureCapability {
-  const meta = HANDLER_META[h.key] ?? { id: h.key };
+function capabilityFromHandler(h: ResourceHandler): FeatureCapability {
+  const overrides = h.capabilityOverrides;
   return {
-    id: meta.id,
+    // featureId opt-in keeps the public id stable for handlers that ship a
+    // kebab-case slug; new handlers can omit it and inherit `key`.
+    id: h.featureId ?? h.key,
     name: h.name,
     resourceTypeId: h.typeId,
-    read: meta.readOverride ?? h.caps.read,
-    write: meta.writeOverride ?? h.caps.write,
-    editor: meta.editorOverride ?? (EDITOR_PAGES[h.key] !== undefined),
-    notes: meta.notes,
-    wikiUrl: meta.wikiUrl,
+    // capabilityOverrides lets a handler declare a softer UI signal (e.g.
+    // `'partial'`) without disabling the parser. Falls back to the machine
+    // gate (`caps.read` / `caps.write`) and to EDITOR_PAGES presence for
+    // the editor flag.
+    read: overrides?.read ?? h.caps.read,
+    write: overrides?.write ?? h.caps.write,
+    editor: overrides?.editor ?? (EDITOR_PAGES[h.key] !== undefined),
+    notes: h.notes,
+    wikiUrl: h.wikiUrl,
   };
 }
 
-export const CAPABILITIES: FeatureCapabilities = {
-  resources: registry.map(capabilityFromHandler),
-  tools: [
-    {
-      id: 'hex-viewer',
-      name: 'Hex Viewer',
-      read: true,
-      write: false,
-      editor: true,
-      notes: 'Fully functional hex viewer with resource inspection and navigation',
-    },
-  ],
-};
-
-// ============================================================================
-// Utilities
-// ============================================================================
-
 export function getCapability(id: string): FeatureCapability | undefined {
-  return CAPABILITIES.resources.find((cap) => cap.id === id) ||
-         CAPABILITIES.tools.find((cap) => cap.id === id);
+  // Accept either form — featureId (kebab) for stable public ids, key
+  // (camelCase) for the registry-internal name. featureId wins when both
+  // resolve, since it's the explicit override.
+  const handler =
+    registry.find((h) => (h.featureId ?? h.key) === id) ?? getHandlerByKey(id);
+  return handler ? capabilityFromHandler(handler) : undefined;
 }
 
 export function getCapabilityByTypeId(typeId: number): FeatureCapability | undefined {
-  return CAPABILITIES.resources.find((cap) => cap.resourceTypeId === typeId);
-}
-
-export function hasFullSupport(id: string): boolean {
-  const cap = getCapability(id);
-  return cap ? (cap.read === true && cap.write === true && cap.editor === true) : false;
-}
-
-export function hasAnySupport(id: string): boolean {
-  const cap = getCapability(id);
-  return cap ? (cap.read === true || cap.write === true || cap.editor === true) : false;
-}
-
-export function getFullySupportedFeatures(): FeatureCapability[] {
-  return CAPABILITIES.resources.filter((cap) => cap.read === true && cap.write === true && cap.editor === true);
-}
-
-export function getReadOnlyFeatures(): FeatureCapability[] {
-  return CAPABILITIES.resources.filter((cap) => cap.read && !cap.write);
-}
-
-export function getUnimplementedFeatures(): FeatureCapability[] {
-  return CAPABILITIES.resources.filter((cap) => !cap.read && !cap.write && !cap.editor);
-}
-
-export function getCapabilitiesSummary() {
-  const resources = CAPABILITIES.resources;
-  return {
-    total: resources.length,
-    fullySupported: resources.filter((c) => c.read && c.write && c.editor).length,
-    readOnly: resources.filter((c) => c.read && !c.write).length,
-    unimplemented: resources.filter((c) => !c.read && !c.write && !c.editor).length,
-  };
+  const handler = registryGetHandlerByTypeId(typeId);
+  return handler ? capabilityFromHandler(handler) : undefined;
 }
