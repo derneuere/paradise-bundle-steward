@@ -64,6 +64,7 @@ import {
 	useWorkspacePSLBulk,
 } from '@/components/workspace/PSLBulkProvider';
 import { AISectionsBulkProvider } from '@/components/workspace/AISectionsBulkProvider';
+import { TriggerDataBulkProvider } from '@/components/workspace/TriggerDataBulkProvider';
 import { BulkPanelStack } from '@/components/workspace/BulkPanelStack';
 import { BulkImportDialog } from '@/components/workspace/BulkImportDialog';
 import { BundleExportValidationDialog } from '@/components/workspace/BundleExportValidationDialog';
@@ -789,7 +790,9 @@ function WorkspaceBulkWrapper({ children }: { children: React.ReactNode }) {
 			isVisible={isVisible}
 		>
 			<AISectionsBulkProvider bundles={bundles}>
-				{children}
+				<TriggerDataBulkProvider bundles={bundles}>
+					{children}
+				</TriggerDataBulkProvider>
 			</AISectionsBulkProvider>
 		</PSLBulkProvider>
 	);

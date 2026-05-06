@@ -32,6 +32,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import type { VisibilityNode, WorkspaceSelection } from '@/context/WorkspaceContext.types';
 import { useWorkspacePSLBulk } from './PSLBulkProvider';
 import { useWorkspaceAISectionsBulk } from './AISectionsBulkProvider';
+import { useWorkspaceTriggerDataBulk } from './TriggerDataBulkProvider';
 import type { NodePath } from '@/lib/schema/walk';
 import {
 	bundleKey,
@@ -142,6 +143,10 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 	// until the user starts curating. Drives the same Ctrl/Shift semantics
 	// + amber row tint + per-resource-row count Badge.
 	const aiBulk = useWorkspaceAISectionsBulk();
+	// TriggerData bulk handle — sibling shape to AI Sections. The marquee
+	// owns the only producer today; tree-row Ctrl/Shift below extends the
+	// dispatch surface so users can curate from the schema rows too.
+	const triggerBulk = useWorkspaceTriggerDataBulk();
 
 	// Persisted expansion state. Default-expanded behaviour mirrors the
 	// pre-WorkspaceHierarchy tree:
@@ -236,9 +241,29 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 					return;
 				}
 			}
+			if (triggerBulk && resourceKey === 'triggerData') {
+				if (modifiers?.ctrl) {
+					// Ctrl/Cmd: toggle the row's containing entry (landmark /
+					// generic / blackspot / vfx / spawn / roaming). Player-
+					// start singleton rows aren't bulk-eligible — the toggle
+					// reducer drops them silently and we still want a plain
+					// select for that row, so we DON'T early-return when the
+					// path can't normalise. The reducer's no-op makes the
+					// Ctrl-click safe; falling through to `select(...)` keeps
+					// the inspector behaviour for non-bulk rows.
+					triggerBulk.onBulkToggle(bundleId, index, schemaPath);
+					return;
+				}
+				if (modifiers?.shift) {
+					const fromPath: NodePath = selectionAnchorPath(selection, 'triggerData');
+					triggerBulk.onBulkRange(bundleId, index, fromPath, schemaPath);
+					select({ bundleId, resourceKey, index, path: schemaPath });
+					return;
+				}
+			}
 			select({ bundleId, resourceKey, index, path: schemaPath });
 		},
-		[select, bulk, aiBulk, selection],
+		[select, bulk, aiBulk, triggerBulk, selection],
 	);
 
 	// ---------------------- Virtualizer ----------------------
