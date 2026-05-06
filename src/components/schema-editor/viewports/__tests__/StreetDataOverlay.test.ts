@@ -24,7 +24,7 @@ import {
 	streetSelectionCodec,
 	streetPathMarker,
 	streetMarkerPath,
-} from './StreetDataOverlay';
+} from '../StreetDataOverlay';
 import type { NodePath } from '@/lib/schema/walk';
 
 describe('StreetDataOverlay', () => {

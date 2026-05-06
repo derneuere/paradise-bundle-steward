@@ -17,7 +17,7 @@ import {
 	triggerMarkerPath,
 	triggerPathMarker,
 	triggerSelectionCodec,
-} from './TriggerDataOverlay';
+} from '../TriggerDataOverlay';
 import type { NodePath } from '@/lib/schema/walk';
 
 describe('TriggerDataOverlay', () => {

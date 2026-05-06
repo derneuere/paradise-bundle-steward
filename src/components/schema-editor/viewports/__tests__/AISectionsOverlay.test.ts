@@ -18,7 +18,7 @@ import {
 	aiSectionMarkerPath,
 	aiSectionSelectionCodec,
 	edgeContextMenuRootStyle,
-} from './AISectionsOverlay';
+} from '../AISectionsOverlay';
 import type { NodePath } from '@/lib/schema/walk';
 
 describe('AISectionsOverlay', () => {
