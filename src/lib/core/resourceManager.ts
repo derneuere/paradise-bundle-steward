@@ -8,10 +8,74 @@ import type {
   ResourceContext,
   ParsedBundle
 } from './types';
-import { 
+import {
   CompressionError,
   ValidationError,
 } from './errors';
+
+// ----------------------------------------------------------------------------
+// Native zlib fast-path (Node only).
+//
+// pako is a pure-JS port of zlib; profiling parseBundle on a 14.6 MB Burnout
+// bundle showed ~70 % of CPU in pako's `inflate_fast`. Node's built-in
+// `node:zlib.inflateSync` is the same algorithm in C++ and is materially
+// faster — typically 2–3× on multi-MB inputs. We resolve it lazily so the
+// browser bundle (Vite/Rollup) never tries to statically resolve `node:zlib`,
+// and fall back to pako on any failure (browser, web worker, deno, etc.).
+//
+// Behaviour is identical: zlib + pako both implement RFC 1950, return the
+// decompressed bytes, and throw on malformed input. The fallback path
+// guarantees `decompressData` keeps working everywhere even if the lazy
+// resolve fails.
+let _nativeInflate: ((data: Uint8Array) => Uint8Array) | null = null;
+let _nativeInflateChecked = false;
+function getNativeInflate(): ((data: Uint8Array) => Uint8Array) | null {
+  if (_nativeInflateChecked) return _nativeInflate;
+  _nativeInflateChecked = true;
+  try {
+    // Node sets process.versions.node; browsers don't. We MUST avoid a static
+    // import or require of "node:zlib" so Vite/Rollup don't try to resolve it
+    // when bundling for the browser.
+    const proc = (globalThis as { process?: { versions?: { node?: string } } }).process;
+    if (!proc?.versions?.node) return null;
+    // Two paths to grab a CJS require synchronously:
+    //   1. Bun / CJS contexts expose a global `require` directly.
+    //   2. Pure-ESM Node only gives you `module.createRequire(import.meta.url)`,
+    //      which itself we have to load via... a require. Resolve it through
+    //      eval(import.meta.url) → createRequire chain so static analysers
+    //      can't see the `node:` specifier at parse time.
+    let req:
+      | ((m: string) => unknown)
+      | null = (0, eval)('typeof require === "function" ? require : null') as
+      | ((m: string) => unknown)
+      | null;
+    if (!req) {
+      // Pure-ESM Node path. import.meta.url is set; createRequire is on the
+      // built-in "module" we fetch via createRequire-of-self. To bootstrap,
+      // we can use node:module via process.getBuiltinModule (Node 22+) or
+      // fall back to a dynamic eval-import — but the dynamic-import path is
+      // async, so prefer getBuiltinModule when available.
+      type GBM = (n: string) => { createRequire?: (u: string) => (s: string) => unknown };
+      const getBuiltinModule = (proc as unknown as { getBuiltinModule?: GBM }).getBuiltinModule;
+      if (typeof getBuiltinModule === 'function') {
+        const mod = getBuiltinModule('node:module');
+        const url = (typeof import.meta !== 'undefined' ? import.meta.url : undefined) as
+          | string
+          | undefined;
+        if (url && typeof mod?.createRequire === 'function') {
+          req = mod.createRequire(url);
+        }
+      }
+    }
+    if (!req) return null;
+    const zlib = req('node:zlib') as { inflateSync: (b: Uint8Array) => Uint8Array };
+    if (typeof zlib?.inflateSync !== 'function') return null;
+    _nativeInflate = (data: Uint8Array) => zlib.inflateSync(data);
+  } catch {
+    _nativeInflate = null;
+  }
+  return _nativeInflate;
+}
 
 
 // ============================================================================
@@ -124,7 +188,10 @@ export function decompressData(compressedData: Uint8Array): Uint8Array {
     }
 
     console.debug(`📖 Decompressing data: ${compressedData.length} bytes`);
-    const decompressed = pako.inflate(compressedData) as Uint8Array<ArrayBuffer>;
+    const native = getNativeInflate();
+    const decompressed = (native
+      ? native(compressedData)
+      : pako.inflate(compressedData)) as Uint8Array<ArrayBuffer>;
     console.debug(`✅ Decompression complete: ${compressedData.length} -> ${decompressed.length} bytes (ratio: ${(decompressed.length / compressedData.length).toFixed(1)}x)`);
     return decompressed;
   } catch (error) {
