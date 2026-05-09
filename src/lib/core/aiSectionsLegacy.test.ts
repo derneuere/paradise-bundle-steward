@@ -2,7 +2,8 @@
 //
 // The byte-roundtrip-against-fixture test lives in registry.test.ts —
 // auto-generated from the handler's fixture list (`example/older builds/AI.dat`
-// is a v4 X360 BE bundle). This file pins the stronger invariants:
+// is a v4 X360 BE bundle; `example/older builds/AI v6.DAT` is a v6 X360 BE
+// bundle from the 2007-02-22 prototype). This file pins the stronger invariants:
 //
 //   1. parseAISectionsData dispatches into the legacy code path when
 //      muVersion is 4 or 6, returning a `kind: 'v4'` or `kind: 'v6'`
@@ -10,9 +11,13 @@
 //   2. Cross-platform self-consistency: V4 payload → write as PC (LE) →
 //      reparse → write as X360 (BE) === source. Proves the writer is
 //      endianness-clean for legacy too.
-//   3. Synthetic V6 payload → write → reparse round-trips losslessly.
-//      We don't have a V6 fixture, but the writer must still produce
-//      bytes the parser accepts so the format is exercised end-to-end.
+//   3. The V6 prototype writes muVersion=4 in the header even though its
+//      sections are the V6 0x34-byte layout — disambiguation is structural.
+//      We assert detectLegacyVersion picks 6 here, the parser captures the
+//      on-disk muVersion verbatim, and the writer echoes it back so the
+//      round-trip stays byte-exact.
+//   4. Synthetic V6 payload → write → reparse round-trips losslessly.
+//      Covers the V6 layout end-to-end without needing the fixture.
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -36,6 +41,7 @@ import {
 } from './aiSectionsLegacy';
 
 const LEGACY_FIXTURE = path.resolve(__dirname, '../../../example/older builds/AI.dat');
+const LEGACY_V6_FIXTURE = path.resolve(__dirname, '../../../example/older builds/AI v6.DAT');
 
 function loadResourceBytes(fixturePath: string, isLittleEndian: boolean): Uint8Array {
 	const raw = fs.readFileSync(fixturePath);
@@ -89,6 +95,41 @@ describe('AI Sections legacy V4/V6 dispatch', () => {
 
 	it('writeAISectionsData routes legacy models through the legacy writer', () => {
 		const slice = loadResourceBytes(LEGACY_FIXTURE, false);
+		const model = parseAISectionsData(slice, /* littleEndian */ false);
+		const written = writeAISectionsData(model, /* littleEndian */ false);
+		expect(bytesEqual(written, slice)).toBe(true);
+	});
+});
+
+describe('AI Sections legacy V6 fixture (2007-02-22 X360 prototype)', () => {
+	// The V6 prototype writes 4 to the on-disk muVersion field even though its
+	// sections are the V6 0x34-byte layout. detectLegacyVersion has to pick
+	// the layout structurally; the parser then captures muVersion=4 separately
+	// in `headerVersion` so the writer can echo it back for a byte-exact
+	// round-trip.
+
+	it('detectLegacyVersion picks V6 from the section layout despite muVersion=4 on disk', () => {
+		const slice = loadResourceBytes(LEGACY_V6_FIXTURE, false);
+		// Header byte alone reads 4 — proves the heuristic is doing the work.
+		const dv = new DataView(slice.buffer, slice.byteOffset, slice.byteLength);
+		expect(dv.getUint32(0x8, /* littleEndian */ false)).toBe(4);
+		expect(detectLegacyVersion(slice, /* littleEndian */ false)).toBe(6);
+	});
+
+	it('parseAISectionsData dispatches V6 payload into a kind: "v6" variant', () => {
+		const slice = loadResourceBytes(LEGACY_V6_FIXTURE, false);
+		const model = parseAISectionsData(slice, /* littleEndian */ false);
+		expect(model.kind).toBe('v6');
+		if (model.kind !== 'v6') return;
+		expect(model.legacy.version).toBe(6);
+		// The on-disk muVersion is preserved separately so the writer can
+		// reproduce the prototype's quirky "V6 layout, muVersion=4" header.
+		expect(model.legacy.headerVersion).toBe(4);
+		expect(model.legacy.sections.length).toBe(3900);
+	});
+
+	it('writeAISectionsData round-trips the V6 fixture byte-exact', () => {
+		const slice = loadResourceBytes(LEGACY_V6_FIXTURE, false);
 		const model = parseAISectionsData(slice, /* littleEndian */ false);
 		const written = writeAISectionsData(model, /* littleEndian */ false);
 		expect(bytesEqual(written, slice)).toBe(true);

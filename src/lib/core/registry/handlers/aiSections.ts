@@ -62,6 +62,14 @@ export const aiSectionsHandler: ResourceHandler<ParsedAISections> = {
 			bundle: 'example/older builds/AI.dat',
 			expect: { parseOk: true, byteRoundTrip: true, stableWriter: true },
 		},
+		// Burnout 5 prototype Feb-2007 build (X360, BE) — version 6 legacy
+		// layout: 0x34-byte sections with miSpanIndex + mu8eDistrict added.
+		// The on-disk muVersion field still reads 4 in this build, so V4 vs
+		// V6 is disambiguated structurally (see detectLegacyVersion).
+		{
+			bundle: 'example/older builds/AI v6.DAT',
+			expect: { parseOk: true, byteRoundTrip: true, stableWriter: true },
+		},
 	],
 
 	// All scenarios target the retail (v12) shape — they read `sections[0].id`,

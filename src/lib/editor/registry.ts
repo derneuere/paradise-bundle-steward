@@ -13,7 +13,7 @@
 // editor sites (`WorkspacePage`, `WorldViewportComposition`, `ViewportPane`)
 // only see the lookup helpers — never the registration array directly.
 
-import { aiSectionsV12Profile, aiSectionsV4Profile } from './profiles/aiSections';
+import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
@@ -53,10 +53,10 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x10001,
 		key: 'aiSections',
 		// Order matters: the FIRST profile is treated as the type's "primary"
-		// variant by `profileSuffixFor` (V12 retail stays bare, V4 prototype
-		// gets a `(v4 prototype)` suffix on the tree row). When V6 lands, it
-		// follows V4 in the list — same suffix treatment.
-		profiles: [aiSectionsV12Profile, aiSectionsV4Profile],
+		// variant by `profileSuffixFor` (V12 retail stays bare; V4 + V6
+		// prototypes get `(v4 prototype)` / `(v6 prototype)` suffixes on the
+		// tree row).
+		profiles: [aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile],
 	},
 	{
 		// 0x10002 — matches the core registry handler (`trafficDataHandler`).

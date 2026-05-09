@@ -10,17 +10,21 @@
 // `freezeSchema()` so every field renders as read-only and lists can't
 // be added to / removed from. No 3D overlay yet (next slice). The
 // 2,442-section example/older builds/AI.dat fixture exercises this path.
-// V6 prototype: parses + round-trips via the core registry but has no
-// editor profile yet (no fixture for it; synthetic test coverage only).
+// V6 prototype: parses + round-trips via the core registry (the
+// 3,900-section example/older builds/AI v6.DAT fixture from the
+// 2007-02-22 X360 build pins this end-to-end). No editor profile yet —
+// the V6 schema/overlay slice will mirror V4's read-only treatment.
 
 import { defineProfile } from '../types';
 import type {
 	ParsedAISectionsV12,
 	ParsedAISectionsV4,
+	ParsedAISectionsV6,
 	ParsedAISections,
 } from '@/lib/core/aiSections';
 import { aiSectionsV12ResourceSchema } from '@/lib/schema/resources/aiSections/v12';
 import { aiSectionsV4ResourceSchema } from '@/lib/schema/resources/aiSections/v4';
+import { aiSectionsV6ResourceSchema } from '@/lib/schema/resources/aiSections/v6';
 import { freezeSchema } from '@/lib/schema/freeze';
 import { migrateV4toV12 } from '@/lib/conversion/migrations/aiSectionsV4toV12';
 
@@ -51,4 +55,17 @@ export const aiSectionsV4Profile = defineProfile<ParsedAISectionsV4>({
 			migrate: migrateV4toV12,
 		},
 	},
+});
+
+export const aiSectionsV6Profile = defineProfile<ParsedAISectionsV6>({
+	kind: 'v6',
+	displayName: 'v6 prototype',
+	// Same freeze treatment as V4 — the V6 prototype data is read-only in the
+	// inspector for now (no migration / edit-op coverage yet). The 3D overlay
+	// binding (`AISectionsLegacyOverlay`) already accepts the V4 | V6 union,
+	// so registering this profile lights up the same viewport rendering V4
+	// gets, plus the schema inspector with the V6-specific spanIndex/district
+	// fields surfaced.
+	schema: freezeSchema(aiSectionsV6ResourceSchema),
+	matches: (model) => (model as ParsedAISections).kind === 'v6',
 });

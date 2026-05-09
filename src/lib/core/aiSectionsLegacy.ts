@@ -106,7 +106,17 @@ export type LegacyAISection = {
 };
 
 export type LegacyAISectionsData = {
+	/** Structural section-layout version (4 ⇒ 0x30-byte sections, 6 ⇒ 0x34-byte sections).
+	 *  The 2007-02-22 "V6" prototype build's payload still writes the integer 4 to its
+	 *  on-disk muVersion field, so we can't trust the header byte alone — see
+	 *  {@link detectLegacyVersion}. The structural version is what the parser/writer
+	 *  use to size sections; the on-disk muVersion is preserved separately via
+	 *  {@link headerVersion} so round-trips stay byte-exact. */
 	version: LegacyAISectionsVersion;
+	/** Optional override for the on-disk muVersion field. When omitted the writer
+	 *  echoes the structural version. Only set this when the on-disk byte differs
+	 *  from the structural version (the V6 prototype, where muVersion=4 on disk). */
+	headerVersion?: number;
 	sections: LegacyAISection[];
 };
 
@@ -115,18 +125,82 @@ export type LegacyAISectionsData = {
 // =============================================================================
 
 /**
- * Peek the muVersion field at offset 0x8 to decide whether the payload is
- * a legacy (V4/V6) AISections resource. Returns the version when matched,
- * or null when the bytes look like a different layout (e.g. retail v12).
+ * Decide whether `raw` is a legacy (V4/V6) AISections payload, and if so which
+ * structural section layout it uses. Returns the version when matched, or
+ * null when the bytes look like something else (e.g. retail v12).
+ *
+ * Why the heuristic isn't "read muVersion at +0x8": both prototype builds we
+ * have on hand write the literal integer 4 to muVersion — including the
+ * 2007-02-22 build whose section structure is the *V6* 0x34-byte form. The
+ * on-disk version field never bumped to 6 even though the AISection layout
+ * did. So we use the muVersion field only as a coarse "is this legacy at all"
+ * gate (must be 4 or 6) and pick V4 vs V6 by trying both section sizes and
+ * seeing which one yields in-bounds, post-section-table portal/noGo offsets.
  *
  * V12 stores muVersion at offset 0x38 — its offset 0x8 holds a float
- * (sectionMinSpeeds[0]), which would never coincidentally read as 4 or 6.
+ * (sectionMinSpeeds[0]) which is exceedingly unlikely to read as 4 or 6.
  */
 export function detectLegacyVersion(raw: Uint8Array, littleEndian: boolean): LegacyAISectionsVersion | null {
 	if (raw.byteLength < LEGACY_HEADER_SIZE) return null;
 	const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
-	const version = dv.getUint32(0x8, littleEndian);
-	return (version === 4 || version === 6) ? version : null;
+	const headerVersion = dv.getUint32(0x8, littleEndian);
+	if (headerVersion !== 4 && headerVersion !== 6) return null;
+
+	const numSections = dv.getUint32(0x4, littleEndian);
+	if (numSections === 0) return headerVersion === 6 ? 6 : 4;
+	if (numSections > 100000) return null; // sanity cap — corrupt payload
+
+	const tryLayout = (sectionSize: number): { ok: boolean; minPtr: number; tableEnd: number } => {
+		const tableEnd = LEGACY_HEADER_SIZE + numSections * sectionSize;
+		if (tableEnd > raw.byteLength) return { ok: false, minPtr: 0, tableEnd };
+		let minPtr = Number.POSITIVE_INFINITY;
+		for (let i = 0; i < numSections; i++) {
+			const off = LEGACY_HEADER_SIZE + i * sectionSize;
+			const portalsOff = dv.getUint32(off + 0, littleEndian);
+			const noGoOff    = dv.getUint32(off + 4, littleEndian);
+			// A non-zero pointer must land inside the per-section payload area
+			// (between the section table end and the buffer end, inclusive of
+			// byteLength itself — the writer can place an empty portal/noGo
+			// slot exactly at end-of-file). The wrong layout reads payload
+			// bytes as section pointers — those values almost always violate
+			// this invariant.
+			if (portalsOff > 0) {
+				if (portalsOff < tableEnd || portalsOff > raw.byteLength) {
+					return { ok: false, minPtr: 0, tableEnd };
+				}
+				if (portalsOff < minPtr) minPtr = portalsOff;
+			}
+			if (noGoOff > 0) {
+				if (noGoOff < tableEnd || noGoOff > raw.byteLength) {
+					return { ok: false, minPtr: 0, tableEnd };
+				}
+				if (noGoOff < minPtr) minPtr = noGoOff;
+			}
+		}
+		return { ok: true, minPtr, tableEnd };
+	};
+
+	const v6 = tryLayout(SECTION_SIZE_V6);
+	const v4 = tryLayout(SECTION_SIZE_V4);
+
+	if (v6.ok && !v4.ok) return 6;
+	if (v4.ok && !v6.ok) return 4;
+	if (!v4.ok && !v6.ok) return null;
+
+	// Both layouts pass the in-bounds check (e.g. a payload sparse enough that
+	// the wrong layout doesn't trip). Prefer the one whose section table ends
+	// exactly at the lowest non-zero pointer — the writer always places the
+	// per-section payload immediately after the table, so the correct layout
+	// is the one that fits tightly with no gap.
+	const v6Tight = v6.minPtr === v6.tableEnd;
+	const v4Tight = v4.minPtr === v4.tableEnd;
+	if (v6Tight && !v4Tight) return 6;
+	if (v4Tight && !v6Tight) return 4;
+
+	// Last resort: trust the on-disk muVersion byte. This branch is a true
+	// ambiguity (e.g. all sections empty or both layouts coincidentally tight)
+	// where either answer is observationally indistinguishable.
+	return headerVersion === 6 ? 6 : 4;
 }
 
 // =============================================================================
@@ -134,6 +208,18 @@ export function detectLegacyVersion(raw: Uint8Array, littleEndian: boolean): Leg
 // =============================================================================
 
 export function parseLegacyAISectionsData(raw: Uint8Array, littleEndian: boolean = true): LegacyAISectionsData {
+	// Decide the structural section layout up-front — the on-disk muVersion
+	// byte alone can't disambiguate V4 vs V6 because the 2007-02-22 prototype
+	// writes 4 to that field even though its sections are the V6 0x34-byte
+	// form. See detectLegacyVersion for the layout heuristic.
+	const structuralVersion = detectLegacyVersion(raw, littleEndian);
+	if (structuralVersion === null) {
+		throw new Error(
+			`parseLegacyAISectionsData: payload doesn't match a known legacy layout ` +
+			`(expected V4 or V6, on-disk muVersion must be ${LEGACY_AI_SECTION_VERSIONS.join(' or ')})`,
+		);
+	}
+
 	const r = new BinReader(
 		raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength),
 		littleEndian,
@@ -142,15 +228,10 @@ export function parseLegacyAISectionsData(raw: Uint8Array, littleEndian: boolean
 	// ---- Header (0x10) ----
 	const sectionsOffset = r.readU32(); // 0x0  mpaSections
 	const numSections    = r.readU32(); // 0x4  muNumSections
-	const version        = r.readU32(); // 0x8  muVersion
+	const headerVersion  = r.readU32(); // 0x8  muVersion (preserved verbatim for round-trip)
 	/* muSizeInBytes */    r.readU32(); // 0xC  back-patched by the writer
 
-	if (version !== 4 && version !== 6) {
-		throw new Error(
-			`parseLegacyAISectionsData: unsupported version ${version} ` +
-			`(expected ${LEGACY_AI_SECTION_VERSIONS.join(' or ')})`,
-		);
-	}
+	const version = structuralVersion;
 	const sectionSize = version === 6 ? SECTION_SIZE_V6 : SECTION_SIZE_V4;
 
 	// ---- Section header table ----
@@ -251,7 +332,13 @@ export function parseLegacyAISectionsData(raw: Uint8Array, littleEndian: boolean
 		sections.push(section);
 	}
 
-	return { version, sections };
+	// Preserve the on-disk muVersion only when it diverges from the structural
+	// version (the V6 prototype's "muVersion=4 with V6 sections" quirk). When
+	// they match, omit the field so synthetic models written by tests don't
+	// have to track it.
+	const data: LegacyAISectionsData = { version, sections };
+	if (headerVersion !== version) data.headerVersion = headerVersion;
+	return data;
 }
 
 // =============================================================================
@@ -285,7 +372,10 @@ export function writeLegacyAISectionsData(model: LegacyAISectionsData, littleEnd
 	// ---- Header ----
 	const headerSectionsPos = w.offset; w.writeU32(0); // mpaSections placeholder
 	w.writeU32(numSections);
-	w.writeU32(version);
+	// Echo the on-disk muVersion verbatim when the parser captured one
+	// (preserves the V6 prototype's muVersion=4 quirk for byte-exact
+	// round-trip); otherwise default to the structural version.
+	w.writeU32(model.headerVersion ?? version);
 	const sizeFieldPos = w.offset; w.writeU32(0); // muSizeInBytes placeholder
 
 	// ---- Section header table ----
