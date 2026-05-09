@@ -180,10 +180,12 @@ export {
 // =============================================================================
 
 export function parseAISectionsData(raw: Uint8Array, littleEndian: boolean = true): ParsedAISections {
-	// Burnout 5 prototype builds (versions 4 and 6) carry a different layout
-	// — see aiSectionsLegacy.ts. Detection peeks the muVersion field at
-	// offset 0x8, which would never coincidentally match 4 or 6 in retail
-	// (v12) bundles since that offset holds a float there.
+	// Burnout 5 prototype builds (V4 / V6 section layouts) carry a different
+	// shape — see aiSectionsLegacy.ts. Detection gates on the muVersion field
+	// at offset 0x8 (must be 4 or 6) and then disambiguates V4 vs V6 by the
+	// section structure since the V6 prototype writes muVersion=4 on disk.
+	// In retail v12 the offset 0x8 holds a float (sectionMinSpeeds[0]) so it
+	// will not coincidentally match.
 	const legacyVersion = detectLegacyVersion(raw, littleEndian);
 	if (legacyVersion !== null) {
 		const legacy = parseLegacyAISectionsData(raw, littleEndian);

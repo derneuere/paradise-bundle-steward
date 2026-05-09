@@ -45,6 +45,13 @@ const BINDINGS: Record<string, Record<string, ProfileRenderBinding<unknown>>> = 
 		v4: {
 			overlay: AISectionsLegacyOverlay as ProfileRenderBinding['overlay'],
 		},
+		// V6 prototype: same overlay component as V4 (the LegacyOverlay
+		// already accepts the V4 | V6 union). The schema editor's right
+		// pane gets the V6 schema with spanIndex / district fields the V4
+		// schema doesn't have. Same read-only treatment as V4.
+		v6: {
+			overlay: AISectionsLegacyOverlay as ProfileRenderBinding['overlay'],
+		},
 	},
 	trafficData: {
 		// V45 retail: the full editor surface — 3D overlay + every Phase-1/2
