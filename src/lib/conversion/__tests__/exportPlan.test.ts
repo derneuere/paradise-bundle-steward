@@ -15,6 +15,7 @@ import {
 import { getTargetPreset } from '../targets';
 
 const V4_FIXTURE = path.resolve(__dirname, '../../../../example/older builds/AI.dat');
+const V6_FIXTURE = path.resolve(__dirname, '../../../../example/older builds/AI v6.DAT');
 const V12_PC_FIXTURE = path.resolve(__dirname, '../../../../example/AI.DAT');
 
 function loadEditableBundle(fixturePath: string) {
@@ -36,6 +37,41 @@ describe('analyzeExport — V4 bundle against paradise-pc-retail', () => {
 			currentKind: 'v4',
 			targetKind: 'v12',
 		});
+	});
+});
+
+describe('analyzeExport — V6 bundle against paradise-pc-retail (issue #40)', () => {
+	it('plans exactly one V6 → V12 AI Sections migration with no blockers', () => {
+		const bundle = loadEditableBundle(V6_FIXTURE);
+		const preset = getTargetPreset('paradise-pc-retail')!;
+		const analysis = analyzeExport(bundle, preset);
+
+		expect(analysis.blockers).toEqual([]);
+		expect(analysis.migrations).toHaveLength(1);
+		expect(analysis.migrations[0]).toMatchObject({
+			resourceKey: 'aiSections',
+			currentKind: 'v6',
+			targetKind: 'v12',
+		});
+	});
+
+	it('runs the V6 → V12 migration end-to-end (V6 fixture → V12 model)', () => {
+		const bundle = loadEditableBundle(V6_FIXTURE);
+		const preset = getTargetPreset('paradise-pc-retail')!;
+		const analysis = analyzeExport(bundle, preset);
+		const result = runMigrations(analysis.migrations);
+
+		expect(result.runs).toHaveLength(1);
+		expect(result.runs[0].migration.resourceKey).toBe('aiSections');
+		const migrated = result.runs[0].result as { kind: string; version: number };
+		expect(migrated.kind).toBe('v12');
+		expect(migrated.version).toBe(12);
+		// V6 → V12 has lossy entries — the export dialog uses this to show
+		// the pre-export confirmation modal.
+		expect(result.lossy.length).toBeGreaterThan(0);
+		for (const entry of result.lossy) {
+			expect(entry.startsWith('aiSections: ')).toBe(true);
+		}
 	});
 });
 
