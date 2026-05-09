@@ -27,6 +27,7 @@ import { aiSectionsV4ResourceSchema } from '@/lib/schema/resources/aiSections/v4
 import { aiSectionsV6ResourceSchema } from '@/lib/schema/resources/aiSections/v6';
 import { freezeSchema } from '@/lib/schema/freeze';
 import { migrateV4toV12 } from '@/lib/conversion/migrations/aiSectionsV4toV12';
+import { migrateV6toV12 } from '@/lib/conversion/migrations/aiSectionsV6toV12';
 
 export const aiSectionsV12Profile = defineProfile<ParsedAISectionsV12>({
 	kind: 'v12',
@@ -61,11 +62,21 @@ export const aiSectionsV6Profile = defineProfile<ParsedAISectionsV6>({
 	kind: 'v6',
 	displayName: 'v6 prototype',
 	// Same freeze treatment as V4 — the V6 prototype data is read-only in the
-	// inspector for now (no migration / edit-op coverage yet). The 3D overlay
-	// binding (`AISectionsLegacyOverlay`) already accepts the V4 | V6 union,
-	// so registering this profile lights up the same viewport rendering V4
-	// gets, plus the schema inspector with the V6-specific spanIndex/district
-	// fields surfaced.
+	// inspector. The 3D overlay binding (`AISectionsLegacyOverlay`) already
+	// accepts the V4 | V6 union, so registering this profile lights up the
+	// same viewport rendering V4 gets, plus the schema inspector with the
+	// V6-specific spanIndex/district fields surfaced.
 	schema: freezeSchema(aiSectionsV6ResourceSchema),
 	matches: (model) => (model as ParsedAISections).kind === 'v6',
+	conversions: {
+		// Reachable via `pickProfile(0x10001, v6Model).conversions.v12.migrate`.
+		// Issue #40 — the paradise-pc-retail preset (#37) accepts V6 sources
+		// because of this entry; V6 → V12 has lossy mappings (dangerRating →
+		// speed, V6 flag-bit cognate name mapping, portal-W drop) so the
+		// export dialog will show the pre-export confirmation.
+		v12: {
+			label: 'Convert to v12 (Paradise PC Retail)',
+			migrate: migrateV6toV12,
+		},
+	},
 });
