@@ -35,13 +35,18 @@ import type { ParsedAISectionsV12, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
 	duplicateSectionThroughEdge,
+	rotateSectionAroundCentroidYaw,
 	snapCornerOffset,
-	snapSectionOffset,
 	translateCornerWithShared,
-	translateSectionWithLinks,
+	translateSectionRigid,
 } from '@/lib/core/aiSectionsOps';
 import { resolveSectionYs } from '@/lib/core/aiSectionY';
-import { TranslateGizmo, type GizmoOffset } from '@/components/common/three/TranslateGizmo';
+import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
+import { TRANSFORM_AXES_XZ_PACKED } from '@/lib/core/transformAxes';
+import {
+	type BulkTransformDelta,
+	isIdentityDelta,
+} from '@/hooks/useBulkTransformDrag';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { CornerHandles, type CornerDragOffset } from '@/components/aisections/CornerHandles';
@@ -180,13 +185,15 @@ function makeV12Accessor(sectionYs: ArrayLike<number>): SectionDetailAccessor<AI
 // Overlay
 // ---------------------------------------------------------------------------
 
-// While a drag is in flight we keep the live offset in local state so the
-// underlying model isn't touched until release — one drag commits as one
-// undo entry. Two distinct drag flavours can be active (the gizmo translates
-// the whole section; the corner handles deform the polygon), so we model it
-// as a discriminated union with mutual exclusion.
+// While a drag is in flight we keep the live delta in local state so the
+// underlying model isn't touched until release — one gesture commits as
+// one Workspace-undo entry (CONTEXT.md / "Bulk transform"). Two distinct
+// drag flavours can be active (the bulk-transform gizmo translates/rotates
+// the whole section; the corner handles deform the polygon — the latter
+// migrates to the unified gizmo in issue #73), so we model the active
+// drag as a discriminated union with mutual exclusion.
 type ActiveDrag =
-	| { kind: 'section'; offset: GizmoOffset }
+	| { kind: 'section'; delta: BulkTransformDelta }
 	| { kind: 'corner'; cornerIdx: number; offset: CornerDragOffset };
 
 type Props = {
@@ -268,17 +275,25 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			? sectionYs[hoverSectionIndex]
 			: 0;
 
-	// While a drag is in flight, run the relevant op on the live offset to
+	// While a drag is in flight, run the relevant op on the live delta to
 	// derive a preview model. Used for the selection overlay on the source
-	// AND for highlighted neighbours that the smart-cascade affects, so the
-	// user sees the move in real time.
+	// section so the user sees the gesture in real time. Section-drag uses
+	// the no-cascade ops (per ADR-0009); corner-drag still cascades into
+	// shared corners (issue #73 migrates that gesture to the unified gizmo).
 	const previewModel: ParsedAISectionsV12 | null = useMemo(() => {
 		if (selectedSectionIndex == null || !selSection || !drag) return null;
-		if (drag.offset.x === 0 && drag.offset.z === 0) return null;
 		try {
 			if (drag.kind === 'section') {
-				return translateSectionWithLinks(data, selectedSectionIndex, drag.offset);
+				if (isIdentityDelta(drag.delta)) return null;
+				const translated = translateSectionRigid(data, selectedSectionIndex, drag.delta.translate);
+				// Apply yaw rotation around the *post-translate* centroid so
+				// translate + rotate compose as a single rigid body — same
+				// shape Blender's gizmo uses for combined gestures.
+				return drag.delta.rotate.y === 0
+					? translated
+					: rotateSectionAroundCentroidYaw(translated, selectedSectionIndex, drag.delta.rotate.y);
 			}
+			if (drag.offset.x === 0 && drag.offset.z === 0) return null;
 			return translateCornerWithShared(data, selectedSectionIndex, drag.cornerIdx, drag.offset);
 		} catch {
 			return null;
@@ -408,27 +423,44 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		onSelect(aiSectionMarkerPath({ kind: 'noGoLine', sectionIndex: selectedSectionIndex, lineIndex }));
 	}, [onSelect, selectedSectionIndex]);
 
-	// Drag handlers — the gizmo translates the section, corner handles deform
-	// the polygon. Both go through the smart-cascade ops on commit and emit
+	// Drag handlers — the bulk-transform gizmo translates and yaw-rotates the
+	// section as one rigid body (no cascade per ADR-0009); corner handles
+	// deform the polygon (issue #73 migrates that gesture to the unified
+	// gizmo too). Both go through their respective ops on commit and emit
 	// the new root via onChange. Without onChange these are no-ops.
-	const handleGizmoTranslate = useCallback((offset: GizmoOffset) => {
-		const finalOffset =
-			snapEnabled && selectedSectionIndex != null
-				? snapSectionOffset(data, selectedSectionIndex, offset, snapRadius)
-				: offset;
-		setDrag({ kind: 'section', offset: finalOffset });
-	}, [snapEnabled, selectedSectionIndex, data, snapRadius]);
+	//
+	// Snap-to-edge is intentionally not applied to the bulk-transform path:
+	// snapping a section translation to neighbour edges only made sense in
+	// the cascade-on world (the cascade re-wired neighbours so the snap
+	// looked clean). Without cascade, snap would lock the section onto a
+	// neighbour edge while leaving the neighbour's reverse-portal stale —
+	// confusing UX. The corner-drag still gets snap until #73 retires it.
+	const handleGizmoTransform = useCallback((delta: BulkTransformDelta) => {
+		if (selectedSectionIndex == null) return;
+		setDrag({ kind: 'section', delta });
+	}, [selectedSectionIndex]);
 
-	const handleGizmoCommit = useCallback((offset: GizmoOffset) => {
+	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
 		setDrag(null);
 		if (selectedSectionIndex == null || !onChange) return;
-		if (offset.x === 0 && offset.z === 0) return;
-		const finalOffset = snapEnabled
-			? snapSectionOffset(data, selectedSectionIndex, offset, snapRadius)
-			: offset;
-		if (finalOffset.x === 0 && finalOffset.z === 0) return;
-		onChange(translateSectionWithLinks(data, selectedSectionIndex, finalOffset));
-	}, [data, selectedSectionIndex, snapEnabled, snapRadius, onChange]);
+		if (isIdentityDelta(delta)) return;
+		// Compose translate then yaw rotate in the same order as the preview
+		// (around the post-translate centroid) so commit and preview agree
+		// frame-for-frame.
+		let next = data;
+		if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+			next = translateSectionRigid(next, selectedSectionIndex, delta.translate);
+		}
+		if (delta.rotate.y !== 0) {
+			next = rotateSectionAroundCentroidYaw(next, selectedSectionIndex, delta.rotate.y);
+		}
+		if (next === data) return;
+		// Single onChange call ⇒ single setResourceAt ⇒ single
+		// HistoryCommit pushed onto the Workspace-undo stack. Drag-frames
+		// in between only updated local React state; they never touched
+		// `setResourceAt`, so they don't add stack entries.
+		onChange(next);
+	}, [data, selectedSectionIndex, onChange]);
 
 	const handleGizmoCancel = useCallback(() => setDrag(null), []);
 
@@ -627,10 +659,11 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			})}
 
 			{gizmoPosition && drag?.kind !== 'corner' && (
-				<TranslateGizmo
+				<BulkTransformGizmo
 					position={gizmoPosition}
 					pixelSize={gizmoPixelSize}
-					onTranslate={handleGizmoTranslate}
+					axes={TRANSFORM_AXES_XZ_PACKED}
+					onTransform={handleGizmoTransform}
 					onCommit={handleGizmoCommit}
 					onCancel={handleGizmoCancel}
 				/>

@@ -8,6 +8,7 @@ import {
 	deleteSection,
 	duplicateLegacySectionThroughEdge,
 	duplicateSectionThroughEdge,
+	rotateSectionAroundCentroidYaw,
 	snapCornerOffset,
 	snapLegacyCornerOffset,
 	snapLegacySectionOffset,
@@ -15,6 +16,7 @@ import {
 	translateCornerWithShared,
 	translateLegacyCornerWithShared,
 	translateLegacySectionWithLinks,
+	translateSectionRigid,
 	translateSectionWithLinks,
 } from './aiSectionsOps';
 import {
@@ -1966,5 +1968,339 @@ describe('snapLegacySectionOffset', () => {
 		const before = JSON.stringify(model);
 		snapLegacySectionOffset(model, 0, { x: 0.7, z: 0 }, 1.0);
 		expect(JSON.stringify(model)).toEqual(before);
+	});
+});
+
+// =============================================================================
+// translateSectionRigid (Bulk-transform: no-cascade rigid translate)
+// =============================================================================
+//
+// The Bulk-transform gizmo's default-no-modifier path. Outside neighbours
+// stay completely put (per ADR-0009) — this is what differentiates this op
+// from `translateSectionWithLinks`. The 3D offset accepts `(dx, dy, dz)`:
+// `dy` shifts portal anchor Ys but leaves the XZ-packed corners and
+// boundary lines alone (per ADR-0011).
+
+describe('translateSectionRigid', () => {
+	function makePair(): ParsedAISectionsV12 {
+		const portal0to1: Portal = {
+			position: { x: 10, y: 0, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: Portal = {
+			position: { x: 10, y: 0, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const s0 = makeSection({
+			id: 0xA,
+			corners: [
+				{ x: 0, y: 0 },
+				{ x: 10, y: 0 },
+				{ x: 10, y: 10 },
+				{ x: 0, y: 10 },
+			],
+			portals: [portal0to1],
+		});
+		const s1 = makeSection({
+			id: 0xB,
+			corners: [
+				{ x: 10, y: 0 },
+				{ x: 20, y: 0 },
+				{ x: 20, y: 10 },
+				{ x: 10, y: 10 },
+			],
+			portals: [portal1to0],
+		});
+		return makeModel([s0, s1]);
+	}
+
+	it('shifts every spatial field on the source by (dx, dy, dz)', () => {
+		const model = makePair();
+		const next = translateSectionRigid(model, 0, { x: 3, y: 2, z: -2 });
+		const s0 = next.sections[0];
+		// XZ-packed corners only see (dx, dz) — dy doesn't apply.
+		expect(s0.corners).toEqual([
+			{ x: 3, y: -2 },
+			{ x: 13, y: -2 },
+			{ x: 13, y: 8 },
+			{ x: 3, y: 8 },
+		]);
+		// Portal anchor (Vector3) sees full (dx, dy, dz).
+		expect(s0.portals[0].position).toEqual({ x: 13, y: 2, z: 3 });
+		// Portal boundary line (XZ-packed Vector4) — both endpoints shift by (dx, dz).
+		expect(s0.portals[0].boundaryLines[0].verts).toEqual({ x: 13, y: -2, z: 13, w: 8 });
+	});
+
+	it('translates noGo lines too', () => {
+		const portal: Portal = {
+			position: { x: 0, y: 0, z: 0 },
+			boundaryLines: [],
+			linkSection: 0,
+		};
+		const sec = makeSection({
+			portals: [portal],
+		});
+		sec.noGoLines = [{ verts: { x: 0, y: 0, z: 5, w: 5 } }];
+		const model = makeModel([sec]);
+		const next = translateSectionRigid(model, 0, { x: 1, y: 0, z: 2 });
+		expect(next.sections[0].noGoLines[0].verts).toEqual({ x: 1, y: 2, z: 6, w: 7 });
+	});
+
+	it('leaves outside neighbours completely put (no cascade — ADR-0009)', () => {
+		const model = makePair();
+		const next = translateSectionRigid(model, 0, { x: 3, y: 0, z: -2 });
+		// Section 1's corners, portals, and boundary lines all stay put.
+		// Reference equality on the section object proves nothing under it
+		// changed (immutable-update convention used throughout this module).
+		expect(next.sections[1]).toBe(model.sections[1]);
+	});
+
+	it('produces stale paired-portal anchors (a documented v1 trade-off — ADR-0009)', () => {
+		// The neighbour's reverse portal still claims it lives at the OLD
+		// shared-edge midpoint, while the source's portal has moved. That's
+		// the "stale" state ADR-0009 accepts as a v1 trade-off — a follow-up
+		// "dangling boundary portals" affordance highlights these.
+		const model = makePair();
+		const next = translateSectionRigid(model, 0, { x: 3, y: 0, z: -2 });
+		expect(next.sections[0].portals[0].position).toEqual({ x: 13, y: 0, z: 3 });
+		expect(next.sections[1].portals[0].position).toEqual({ x: 10, y: 0, z: 5 });
+	});
+
+	it('returns the original model reference for a (0, 0, 0) offset (no-op)', () => {
+		// Important for byte-for-byte BND2 writeback: a cancelled gesture
+		// or a click-without-drag must leave the model exactly identical.
+		const model = makePair();
+		const next = translateSectionRigid(model, 0, { x: 0, y: 0, z: 0 });
+		expect(next).toBe(model);
+	});
+
+	it('throws on out-of-range srcIdx', () => {
+		const model = makePair();
+		expect(() => translateSectionRigid(model, 5, { x: 1, y: 0, z: 0 })).toThrow(RangeError);
+		expect(() => translateSectionRigid(model, -1, { x: 1, y: 0, z: 0 })).toThrow(RangeError);
+	});
+
+	it('does not mutate the input', () => {
+		const model = makePair();
+		const before = JSON.stringify(model);
+		translateSectionRigid(model, 0, { x: 5, y: 1, z: 5 });
+		expect(JSON.stringify(model)).toEqual(before);
+	});
+
+	it('shares the unaffected source-section reference when the result is the same model (no-op)', () => {
+		// Reinforces the structural-sharing convention: a no-op never copies.
+		const model = makePair();
+		const result = translateSectionRigid(model, 0, { x: 0, y: 0, z: 0 });
+		expect(result.sections[0]).toBe(model.sections[0]);
+		expect(result.sections[1]).toBe(model.sections[1]);
+	});
+});
+
+// =============================================================================
+// rotateSectionAroundCentroidYaw (Bulk-transform: rigid yaw rotate)
+// =============================================================================
+//
+// Yaw-only rotate around the section's own corner-centroid (cardinality-1
+// pivot per CONTEXT.md / "Pivot"). Pitch/roll are not exposed because AI
+// section corners are XZ-packed (per ADR-0011 — the gizmo greys out those
+// rings; this op intentionally has no pitch/roll parameter).
+
+describe('rotateSectionAroundCentroidYaw', () => {
+	function makeRect(): ParsedAISectionsV12 {
+		// 10×10 quad centred at (5, 5).
+		const portal: Portal = {
+			position: { x: 10, y: 3, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 0,
+		};
+		const sec = makeSection({
+			id: 0xA,
+			corners: [
+				{ x: 0, y: 0 },
+				{ x: 10, y: 0 },
+				{ x: 10, y: 10 },
+				{ x: 0, y: 10 },
+			],
+			portals: [portal],
+		});
+		sec.noGoLines = [{ verts: { x: 2, y: 2, z: 8, w: 8 } }];
+		return makeModel([sec]);
+	}
+
+	it('returns the original model reference for theta = 0 (identity — byte-for-byte safe)', () => {
+		// CRITICAL: a rotate-by-0 gesture must NOT change anything. This is
+		// the byte-for-byte BND2 writeback invariant. If this fails, a user
+		// clicking the rotate ring without dragging would dirty the bundle.
+		const model = makeRect();
+		const next = rotateSectionAroundCentroidYaw(model, 0, 0);
+		expect(next).toBe(model);
+		expect(next.sections[0]).toBe(model.sections[0]);
+	});
+
+	it('rotates corners by 90° around the centroid (rigid body)', () => {
+		// Centroid of the unit square is (5, 5). Rotate +π/2 (90° yaw).
+		// Following the right-hand rule with thumb +Y: +X → +Z, +Z → -X.
+		// Corner (0, 0) → centroid offset (-5, -5) → after rot (5, -5) → (10, 0)
+		// Corner (10, 0) → offset (5, -5) → after rot (5, 5) → (10, 10)
+		// Corner (10, 10) → offset (5, 5) → after rot (-5, 5) → (0, 10)
+		// Corner (0, 10) → offset (-5, 5) → after rot (-5, -5) → (0, 0)
+		const model = makeRect();
+		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 2);
+		const corners = next.sections[0].corners;
+		expect(corners[0].x).toBeCloseTo(10, 6);
+		expect(corners[0].y).toBeCloseTo(0, 6);
+		expect(corners[1].x).toBeCloseTo(10, 6);
+		expect(corners[1].y).toBeCloseTo(10, 6);
+		expect(corners[2].x).toBeCloseTo(0, 6);
+		expect(corners[2].y).toBeCloseTo(10, 6);
+		expect(corners[3].x).toBeCloseTo(0, 6);
+		expect(corners[3].y).toBeCloseTo(0, 6);
+	});
+
+	it('preserves relative distances (rigid-body invariant)', () => {
+		// Pick an arbitrary, non-cardinal angle so floating-point trig is
+		// exercised. Any pair of corners' distance must be identical
+		// before and after rotation.
+		const model = makeRect();
+		const theta = 0.7;
+		const next = rotateSectionAroundCentroidYaw(model, 0, theta);
+		const before = model.sections[0].corners;
+		const after = next.sections[0].corners;
+		const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+			Math.hypot(a.x - b.x, a.y - b.y);
+		for (let i = 0; i < before.length; i++) {
+			for (let j = i + 1; j < before.length; j++) {
+				expect(dist(after[i], after[j])).toBeCloseTo(dist(before[i], before[j]), 6);
+			}
+		}
+	});
+
+	it('rotates portal positions on XZ but preserves portal Y', () => {
+		const model = makeRect();
+		// Portal sat at (10, 3, 5) — centroid offset on XZ is (5, 0). Rotate
+		// +π/2: offset becomes (0, 5), so position lands at (5, 3, 10). Y
+		// must be untouched (yaw doesn't tip vertically).
+		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 2);
+		const p = next.sections[0].portals[0].position;
+		expect(p.x).toBeCloseTo(5, 6);
+		expect(p.y).toBe(3); // exact, untouched
+		expect(p.z).toBeCloseTo(10, 6);
+	});
+
+	it('rotates portal boundary line endpoints', () => {
+		// BL was (10, 0) → (10, 10). Centroid (5, 5).
+		// Start offset (5, -5) → after π/2 (5, 5) → (10, 10).
+		// End   offset (5, 5)  → after π/2 (-5, 5) → (0, 10).
+		const model = makeRect();
+		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 2);
+		const bl = next.sections[0].portals[0].boundaryLines[0].verts;
+		expect(bl.x).toBeCloseTo(10, 6);
+		expect(bl.y).toBeCloseTo(10, 6);
+		expect(bl.z).toBeCloseTo(0, 6);
+		expect(bl.w).toBeCloseTo(10, 6);
+	});
+
+	it('rotates noGo line endpoints', () => {
+		// NoGo was (2, 2) → (8, 8) — diagonal across the square. Centroid (5, 5).
+		// Start offset (-3, -3) → π/2 (3, -3) → (8, 2).
+		// End   offset (3, 3)   → π/2 (-3, 3) → (2, 8).
+		const model = makeRect();
+		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 2);
+		const ng = next.sections[0].noGoLines[0].verts;
+		expect(ng.x).toBeCloseTo(8, 6);
+		expect(ng.y).toBeCloseTo(2, 6);
+		expect(ng.z).toBeCloseTo(2, 6);
+		expect(ng.w).toBeCloseTo(8, 6);
+	});
+
+	it('rotation by 2π equals identity geometry (full revolution returns to start, modulo float epsilon)', () => {
+		const model = makeRect();
+		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI * 2);
+		const before = model.sections[0].corners;
+		const after = next.sections[0].corners;
+		for (let i = 0; i < before.length; i++) {
+			expect(after[i].x).toBeCloseTo(before[i].x, 5);
+			expect(after[i].y).toBeCloseTo(before[i].y, 5);
+		}
+	});
+
+	it('does not cascade into outside neighbours (ADR-0009)', () => {
+		// Same shape as the no-cascade translate test: a paired neighbour
+		// stays put even when the source rotates.
+		const portal0to1: Portal = {
+			position: { x: 10, y: 0, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: Portal = {
+			position: { x: 10, y: 0, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const s0 = makeSection({
+			id: 0xA,
+			corners: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+			portals: [portal0to1],
+		});
+		const s1 = makeSection({
+			id: 0xB,
+			corners: [{ x: 10, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10, y: 10 }],
+			portals: [portal1to0],
+		});
+		const model = makeModel([s0, s1]);
+		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 4);
+		// s1 reference unchanged — proves nothing under it moved.
+		expect(next.sections[1]).toBe(model.sections[1]);
+	});
+
+	it('throws on out-of-range srcIdx', () => {
+		const model = makeRect();
+		expect(() => rotateSectionAroundCentroidYaw(model, 5, 1)).toThrow(RangeError);
+		expect(() => rotateSectionAroundCentroidYaw(model, -1, 1)).toThrow(RangeError);
+	});
+
+	it('does not mutate the input', () => {
+		const model = makeRect();
+		const before = JSON.stringify(model);
+		rotateSectionAroundCentroidYaw(model, 0, 0.5);
+		expect(JSON.stringify(model)).toEqual(before);
+	});
+});
+
+// =============================================================================
+// Bulk-transform compose: translate then yaw, in commit order
+// =============================================================================
+//
+// The AISectionsOverlay's gizmo commit composes translate then yaw rotate
+// in that order — yaw rotates around the *post-translate* centroid. These
+// tests pin the composition shape so the preview and commit paths stay
+// in lock-step.
+
+describe('translateSectionRigid + rotateSectionAroundCentroidYaw composition', () => {
+	function makeRect(): ParsedAISectionsV12 {
+		const sec = makeSection({
+			id: 0xA,
+			corners: [
+				{ x: 0, y: 0 },
+				{ x: 10, y: 0 },
+				{ x: 10, y: 10 },
+				{ x: 0, y: 10 },
+			],
+			portals: [],
+		});
+		return makeModel([sec]);
+	}
+
+	it('translate then yaw rotates around the post-translate centroid', () => {
+		const model = makeRect();
+		const t = translateSectionRigid(model, 0, { x: 100, y: 0, z: 200 });
+		// Post-translate centroid is (105, 205). Rotate π/2 around it.
+		const r = rotateSectionAroundCentroidYaw(t, 0, Math.PI / 2);
+		// Pre-translate corner (0,0) → post-translate (100, 200) → centroid
+		// offset (-5, -5) → π/2 → (5, -5) → (110, 200).
+		expect(r.sections[0].corners[0].x).toBeCloseTo(110, 6);
+		expect(r.sections[0].corners[0].y).toBeCloseTo(200, 6);
 	});
 });
