@@ -1320,3 +1320,174 @@ export function deleteSection(
 		sectionResetPairs: remappedResetPairs,
 	};
 }
+
+// =============================================================================
+// Bulk-transform: no-cascade rigid translate + yaw rotate
+// =============================================================================
+//
+// The Bulk-transform feature (CONTEXT.md / "Bulk transform", ADR-0009 /
+// ADR-0010 / ADR-0011) replaces the legacy single-section drag with a unified
+// gizmo whose default behaviour is "move what you selected; modifier extends
+// to connected geometry." These ops are the *no-cascade* path:
+//
+//   - `translateSectionRigid` — translate one section's corners + portal
+//     anchors + portal boundary lines + no-go lines by `(dx, dy, dz)`.
+//     Outside neighbours stay completely put. Y shifts the portal anchor
+//     heights but NOT the corners (they're XZ-packed Vector2 — see ADR-0011);
+//     the boundary lines and no-go lines are also XZ-only.
+//
+//   - `rotateSectionAroundCentroidYaw` — rotate the section as a rigid body
+//     around its own centroid (cardinality-1 pivot per CONTEXT.md / "Pivot")
+//     by an angle θ around world +Y (yaw). Corners + portal positions +
+//     portal boundary lines + no-go lines all rotate together; relative
+//     geometry is preserved exactly. Pitch/roll are not exposed by this op
+//     because the section's spatial data is XZ-packed (ADR-0011); future
+//     resource families with full 3D rotation use a different op.
+//
+// Cascade-on remains the legacy `translateSectionWithLinks` path; the
+// follow-up cascade-modifier slice (#75) wires it to the modifier press.
+
+/**
+ * Translate one AI section as a rigid body — no cascade into neighbours.
+ *
+ * Every spatial field on the source section shifts by `(dx, dy, dz)`:
+ *   - corners (Vector2 — XZ only; `dy` does not apply)
+ *   - portals[].position (Vector3 — full 3D)
+ *   - portals[].boundaryLines[].verts (Vector4 packed XZ start/end — XZ only)
+ *   - noGoLines[].verts (same shape as portal boundary lines — XZ only)
+ *
+ * Outside neighbours stay completely put. Their reverse-portal `linkSection`
+ * still points at this section by index, but the world-space anchor will
+ * be out of sync with the moved section's portal — accepted per ADR-0009.
+ * The cascade-on path is `translateSectionWithLinks` (separate function).
+ *
+ * Returns the original `model` reference when `(dx, dy, dz) === (0, 0, 0)`
+ * so byte-for-byte BND2 writeback is preserved on a no-op gesture.
+ *
+ * @throws RangeError if `srcIdx` is out of range.
+ */
+export function translateSectionRigid(
+	model: ParsedAISectionsV12,
+	srcIdx: number,
+	offset: { x: number; y: number; z: number },
+): ParsedAISectionsV12 {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	const dx = offset.x;
+	const dy = offset.y;
+	const dz = offset.z;
+	if (dx === 0 && dy === 0 && dz === 0) return model;
+
+	const src = model.sections[srcIdx];
+	const next: AISection = {
+		...src,
+		corners: src.corners.map((c) => ({ x: c.x + dx, y: c.y + dz })),
+		portals: src.portals.map((p) => ({
+			...p,
+			position: { x: p.position.x + dx, y: p.position.y + dy, z: p.position.z + dz },
+			boundaryLines: p.boundaryLines.map((bl) => ({
+				verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+			})),
+		})),
+		noGoLines: src.noGoLines.map((bl) => ({
+			verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+		})),
+	};
+
+	const sections = model.sections.map((s, i) => (i === srcIdx ? next : s));
+	return { ...model, sections };
+}
+
+/**
+ * Rotate one AI section as a rigid body around its own centroid by `theta`
+ * radians of yaw (rotation about world +Y). No cascade into neighbours.
+ *
+ * Pivot is the section's corner-centroid (cardinality-1 default per
+ * CONTEXT.md / "Pivot"). All spatial fields rotate as a single rigid body so
+ * relative distances between corners, portal positions, and line endpoints
+ * are preserved exactly:
+ *
+ *   - corners (Vector2 / XZ): rotated around (cx, cz).
+ *   - portals[].position (Vector3): X/Z rotated around (cx, cz); Y unchanged
+ *     (yaw doesn't move things vertically).
+ *   - portals[].boundaryLines[].verts (Vector4 / packed XZ start/end): both
+ *     endpoints rotated independently — keeps the line as the same world
+ *     segment relative to the corners.
+ *   - noGoLines[].verts: same as portal boundary lines.
+ *
+ * Returns the original `model` reference when `theta === 0` so byte-for-byte
+ * BND2 writeback is preserved on a no-op gesture.
+ *
+ * Yaw direction follows the right-hand rule with thumb along world +Y, so a
+ * positive `theta` rotates the +X axis towards +Z (the same convention
+ * three.js uses for `Object3D.rotation.y`).
+ *
+ * @throws RangeError if `srcIdx` is out of range.
+ */
+export function rotateSectionAroundCentroidYaw(
+	model: ParsedAISectionsV12,
+	srcIdx: number,
+	theta: number,
+): ParsedAISectionsV12 {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	if (theta === 0) return model;
+
+	const src = model.sections[srcIdx];
+	if (src.corners.length === 0) return model;
+
+	// Pivot = section centroid. AISection.Vector2 stores world XZ in `(x, y)`,
+	// so the centroid's `(cx, cz)` lives in `(centre.x, centre.y)`.
+	const c = centroid(src.corners);
+	const cx = c.x;
+	const cz = c.y;
+
+	const cosT = Math.cos(theta);
+	const sinT = Math.sin(theta);
+
+	// Yaw around world +Y: with thumb along +Y, +X rotates towards +Z.
+	//   x' = (x - cx) cos − (z - cz) sin + cx
+	//   z' = (x - cx) sin + (z - cz) cos + cz
+	const rotXZ = (x: number, z: number): { x: number; z: number } => {
+		const ox = x - cx;
+		const oz = z - cz;
+		return {
+			x: ox * cosT - oz * sinT + cx,
+			z: ox * sinT + oz * cosT + cz,
+		};
+	};
+
+	const next: AISection = {
+		...src,
+		corners: src.corners.map((corner) => {
+			const r = rotXZ(corner.x, corner.y);
+			return { x: r.x, y: r.z };
+		}),
+		portals: src.portals.map((p) => {
+			const rPos = rotXZ(p.position.x, p.position.z);
+			return {
+				...p,
+				position: { x: rPos.x, y: p.position.y, z: rPos.z },
+				boundaryLines: p.boundaryLines.map((bl) => {
+					const rStart = rotXZ(bl.verts.x, bl.verts.y);
+					const rEnd = rotXZ(bl.verts.z, bl.verts.w);
+					return {
+						verts: { x: rStart.x, y: rStart.z, z: rEnd.x, w: rEnd.z },
+					};
+				}),
+			};
+		}),
+		noGoLines: src.noGoLines.map((bl) => {
+			const rStart = rotXZ(bl.verts.x, bl.verts.y);
+			const rEnd = rotXZ(bl.verts.z, bl.verts.w);
+			return {
+				verts: { x: rStart.x, y: rStart.z, z: rEnd.x, w: rEnd.z },
+			};
+		}),
+	};
+
+	const sections = model.sections.map((s, i) => (i === srcIdx ? next : s));
+	return { ...model, sections };
+}
