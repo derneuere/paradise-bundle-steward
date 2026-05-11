@@ -133,5 +133,3 @@ export const AISectionsOverview: React.FC<Props> = ({ data, onChange }) => {
 		</div>
 	);
 };
-
-export default AISectionsOverview;
