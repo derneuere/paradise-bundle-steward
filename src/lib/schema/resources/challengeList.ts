@@ -549,9 +549,7 @@ export const challengeListResourceSchema: ResourceSchema = {
 
 // Exports used by tests and extensions.
 export {
-	ACTION_TYPE_SHORT_LABELS,
 	actionTypeShortLabel,
 	challengeLabel,
 	actionLabel,
-	locationDataLabel,
 };
