@@ -47,7 +47,7 @@ import {
 
 const GENERATOR = 'steward-worldlogic-gltf/1';
 
-export const GROUP_TRAFFIC_DATA = 'TrafficData';
+const GROUP_TRAFFIC_DATA = 'TrafficData';
 const SCENE_EXTRAS_TRAFFIC_DATA = 'trafficData';
 
 // ---------------------------------------------------------------------------
