@@ -91,13 +91,6 @@ export function parseDebugDataFromBuffer(buffer: ArrayBuffer, header: BundleHead
 // ============================================================================
 
 /**
- * Finds a debug resource by name
- */
-export function findDebugResourceByName(debugResources: DebugResource[], name: string): DebugResource | undefined {
-  return debugResources.find(r => r.name === name);
-}
-
-/**
  * Normalize a resource id to the form RST entries store: lowercase hex
  * without `0x` prefix and without leading zeros. Accepts inputs in any of:
  *   - "0x0000000000334801" (formatResourceId output, uppercase, 16 chars)
