@@ -16,7 +16,7 @@ import type {
 	ResourceSchema,
 } from './types';
 
-export type PathSegment = string | number;
+type PathSegment = string | number;
 export type NodePath = PathSegment[];
 
 // ---------------------------------------------------------------------------
@@ -225,13 +225,6 @@ export function removeListItem<T>(
 // ---------------------------------------------------------------------------
 // Path utilities
 // ---------------------------------------------------------------------------
-
-// Split a path into (parent path, last segment). Useful for "the thing that
-// contains this node".
-export function parentPath(path: NodePath): { parent: NodePath; last: PathSegment } | null {
-	if (path.length === 0) return null;
-	return { parent: path.slice(0, -1), last: path[path.length - 1] };
-}
 
 // Human-readable path string, for debugging and error messages.
 // `["hulls", 3, "sectionFlows", 7]` → `"hulls[3].sectionFlows[7]"`.
