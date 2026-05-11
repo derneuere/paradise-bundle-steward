@@ -25,10 +25,14 @@ import {
 	type HistoryStack,
 } from '@/lib/history';
 import {
+	bulkRotateEntitiesYaw,
+	bulkSelectionPivot,
+	bulkTranslateEntities,
 	rotateSectionAroundCentroidYaw,
 	rotateSectionWithLinksYaw,
 	translateSectionRigid,
 	translateSectionWithLinks,
+	type AISectionEntityRef,
 } from '@/lib/core/aiSectionsOps';
 import type {
 	EditableBundle,
@@ -289,5 +293,130 @@ describe('Bulk transform gesture → Workspace undo stack', () => {
 		expect(undoneNeighbour.portals.map((p) => p.position)).toEqual(
 			beforeNeighbourPortals.map((p) => p.position),
 		);
+	});
+});
+
+// =============================================================================
+// Multi-Selection bulk gesture (issue #74)
+// =============================================================================
+//
+// Same one-gesture-one-undo-entry contract as the single-section gestures
+// above, but applied to a list of AI section refs. The bulk ops compose
+// translate-then-rotate against the bulk Pivot inside the commit handler;
+// the workspace sees exactly one setResource per gesture.
+
+describe('Multi-Selection bulk gesture → Workspace undo stack', () => {
+	it('one bulk-translate gesture across N sections pushes exactly ONE HistoryCommit', () => {
+		// Bulk size has no bearing on the undo-stack contract — even when
+		// the gesture spans many sections, the commit handler funnels through
+		// a single setResource call and pushes one HistoryCommit. This pins
+		// CONTEXT.md / "Bulk transform"'s "one undo entry per gesture,
+		// regardless of bulk size".
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+		const refs: AISectionEntityRef[] = [
+			{ kind: 'section', sectionIdx: 0 },
+			{ kind: 'section', sectionIdx: 1 },
+			{ kind: 'section', sectionIdx: 2 },
+			{ kind: 'section', sectionIdx: 3 },
+		];
+		const next = bulkTranslateEntities(ai, refs, { x: 12, y: 0, z: -7 });
+		const after = setResource(initial, 'AI.DAT', 'aiSections', next);
+		expect(after.history.past.length).toBe(1);
+	});
+
+	it('one bulk-rotate gesture pushes exactly ONE HistoryCommit (regardless of cardinality)', () => {
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+		const refs: AISectionEntityRef[] = [
+			{ kind: 'section', sectionIdx: 0 },
+			{ kind: 'section', sectionIdx: 1 },
+			{ kind: 'section', sectionIdx: 2 },
+		];
+		const pivot = bulkSelectionPivot(ai, refs, () => 0);
+		expect(pivot).not.toBeNull();
+		const next = bulkRotateEntitiesYaw(ai, refs, { x: pivot!.x, z: pivot!.z }, 0.3);
+		const after = setResource(initial, 'AI.DAT', 'aiSections', next);
+		expect(after.history.past.length).toBe(1);
+	});
+
+	it('combined bulk translate + yaw still produces exactly one HistoryCommit', () => {
+		// The overlay's commit composes translate then yaw rotate against the
+		// post-translate pivot before calling onChange exactly once. Even
+		// though two ops produce the new model, only one setResource fires.
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+		const refs: AISectionEntityRef[] = [
+			{ kind: 'section', sectionIdx: 0 },
+			{ kind: 'section', sectionIdx: 1 },
+		];
+		const pivot = bulkSelectionPivot(ai, refs, () => 0);
+		const t = bulkTranslateEntities(ai, refs, { x: 50, y: 0, z: -30 });
+		const r = bulkRotateEntitiesYaw(t, refs, { x: pivot!.x + 50, z: pivot!.z - 30 }, 0.2);
+		const after = setResource(initial, 'AI.DAT', 'aiSections', r);
+		expect(after.history.past.length).toBe(1);
+	});
+
+	it('drag-frame previews never touch the workspace (no per-frame undo entries)', () => {
+		// Same shape as the single-section drag-frame test: 50 synthetic
+		// drag-frames each compute a preview pure, but only the commit-on-
+		// release calls setResource. The history stack must remain empty
+		// across the entire preview phase.
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+		const refs: AISectionEntityRef[] = [
+			{ kind: 'section', sectionIdx: 0 },
+			{ kind: 'section', sectionIdx: 1 },
+		];
+		let previewModel = ai;
+		for (let f = 0; f < 50; f++) {
+			previewModel = bulkTranslateEntities(ai, refs, { x: f, y: 0, z: 0 });
+		}
+		expect(initial.history.past.length).toBe(0);
+		const after = setResource(initial, 'AI.DAT', 'aiSections', previewModel);
+		expect(after.history.past.length).toBe(1);
+	});
+
+	it('bulk gesture round-trips: undo restores every entity in the bulk to its pre-gesture state', () => {
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+		const refs: AISectionEntityRef[] = [
+			{ kind: 'section', sectionIdx: 0 },
+			{ kind: 'section', sectionIdx: 1 },
+		];
+		const beforeS0 = ai.sections[0].corners.map((c) => ({ ...c }));
+		const beforeS1 = ai.sections[1].corners.map((c) => ({ ...c }));
+		const beforeS2 = ai.sections[2].corners.map((c) => ({ ...c })); // outside the bulk
+
+		const moved = bulkTranslateEntities(ai, refs, { x: 5, y: 0, z: -2 });
+		const afterEdit = setResource(initial, 'AI.DAT', 'aiSections', moved);
+		// Outside neighbour (s2) was never touched even before undo.
+		expect(getAI(afterEdit, 'AI.DAT').sections[2].corners).toEqual(beforeS2);
+
+		const afterUndo = undo(afterEdit);
+		expect(getAI(afterUndo, 'AI.DAT').sections[0].corners).toEqual(beforeS0);
+		expect(getAI(afterUndo, 'AI.DAT').sections[1].corners).toEqual(beforeS1);
+		expect(getAI(afterUndo, 'AI.DAT').sections[2].corners).toEqual(beforeS2);
+	});
+
+	it('no-op bulk gesture (zero translate + zero rotate) does not push an undo entry', () => {
+		// The commit handler's `if (isIdentityDelta(delta)) return;` guard
+		// makes a click-without-drag a true no-op. The op returns the
+		// identical model reference, setResource is never called, and the
+		// history stack stays empty — required for byte-for-byte BND2
+		// writeback safety on a cancelled gesture.
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+		const refs: AISectionEntityRef[] = [
+			{ kind: 'section', sectionIdx: 0 },
+			{ kind: 'section', sectionIdx: 1 },
+		];
+		const t = bulkTranslateEntities(ai, refs, { x: 0, y: 0, z: 0 });
+		const r = bulkRotateEntitiesYaw(t, refs, { x: 0, z: 0 }, 0);
+		// Both ops returned the same model reference; the overlay's `if (next === data) return;`
+		// guard would short-circuit before setResource. Simulate that here.
+		expect(r).toBe(ai);
+		// No setResource call happens for a no-op gesture.
+		expect(initial.history.past.length).toBe(0);
 	});
 });

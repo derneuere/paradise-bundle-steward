@@ -34,6 +34,10 @@ import * as THREE from 'three';
 import type { ParsedAISectionsV12, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
+	bulkAISectionsAxes,
+	bulkRotateEntitiesYaw,
+	bulkSelectionPivot,
+	bulkTranslateEntities,
 	duplicateSectionThroughEdge,
 	rotateSectionAroundCentroidYaw,
 	rotateSectionWithLinksYaw,
@@ -43,6 +47,7 @@ import {
 	translatePortalAnchorRigid,
 	translateSectionRigid,
 	translateSectionWithLinks,
+	type AISectionEntityRef,
 } from '@/lib/core/aiSectionsOps';
 import { resolveSectionYs } from '@/lib/core/aiSectionY';
 import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
@@ -196,13 +201,19 @@ function makeV12Accessor(sectionYs: ArrayLike<number>): SectionDetailAccessor<AI
 // underlying model isn't touched until release — one gesture commits as
 // one Workspace-undo entry (CONTEXT.md / "Bulk transform"). The drag is
 // keyed by the gizmo target — whole section, single corner, single portal
-// anchor, single boundary-line endpoint, single no-go-line endpoint. All
-// flow through the same `BulkTransformGizmo` per ADR-0010; the target
-// kind decides which no-cascade op runs on commit. Per ADR-0009 none of
-// these cascade — coincident corners, mirror portals, and the other end
-// of a line stay put.
+// anchor, single boundary-line endpoint, single no-go-line endpoint, or
+// a multi-Selection bulk (issue #74). All flow through the same
+// `BulkTransformGizmo` per ADR-0010; the target kind decides which
+// no-cascade op runs on commit. The bulk variant carries the flattened
+// `AISectionEntityRef[]` and the Pivot captured at gesture start (snapshot
+// prevents drift mid-rotate). Per ADR-0009 none of these cascade.
 type DragTarget =
 	| { kind: 'section'; sectionIdx: number }
+	| {
+			kind: 'bulk';
+			entities: readonly AISectionEntityRef[];
+			pivot: { x: number; y: number; z: number };
+		}
 	| { kind: 'corner'; sectionIdx: number; cornerIdx: number }
 	| { kind: 'portalAnchor'; sectionIdx: number; portalIdx: number }
 	| { kind: 'boundaryLineEndpoint'; sectionIdx: number; portalIdx: number; lineIdx: number; endIdx: number }
@@ -252,13 +263,86 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	const marker = useMemo(() => aiSectionPathMarker(selectedPath), [selectedPath]);
 	const selectedSectionIndex = marker ? marker.sectionIndex : null;
 
-	// Identify the gizmo's target from the marker. Sub-entity selections
-	// (corner / portal anchor / line endpoint) anchor the gizmo at the
-	// sub-entity's world position and translate ONLY that sub-entity on
-	// commit — no shared-corner cascade, no mirror-anchor sync (per
-	// ADR-0009; that's the modifier-on path in issue #75). When no marker
-	// is set, the gizmo isn't shown.
+	// Multi-Selection bulk refs (issue #74). The marquee populates
+	// `sectionBulk.bulkSet` with whole-section keys; the inspector pick may
+	// add a sub-entity. We flatten both into a single `AISectionEntityRef[]`
+	// so the bulk ops can treat them uniformly. The bulk gizmo activates
+	// when this list has 2+ distinct entries — at cardinality 1 we fall
+	// through to the single-entity gizmo (anchored at the marker).
+	const bulkRefs = useMemo<readonly AISectionEntityRef[]>(() => {
+		const out: AISectionEntityRef[] = [];
+		const seen = new Set<string>();
+		if (sectionBulk) {
+			for (const key of sectionBulk.bulkSet) {
+				const parts = key.split(':');
+				if (parts[0] !== 'section') continue;
+				const idx = Number(parts[1]);
+				if (!Number.isFinite(idx) || idx < 0 || idx >= data.sections.length) continue;
+				const k = `section:${idx}`;
+				if (seen.has(k)) continue;
+				seen.add(k);
+				out.push({ kind: 'section', sectionIdx: idx });
+			}
+		}
+		// Fold the inspector pick if it's a sub-entity of a section not
+		// already in the bulk — mixed-bulk support (whole section + a
+		// portal anchor on a different section).
+		if (marker && marker.kind !== 'section') {
+			const sIdx = marker.sectionIndex;
+			if (sIdx >= 0 && sIdx < data.sections.length && !seen.has(`section:${sIdx}`)) {
+				if (marker.kind === 'portal') {
+					out.push({ kind: 'portal', sectionIdx: sIdx, portalIdx: marker.portalIndex });
+				}
+				// boundary/no-go line *endpoints* aren't yet representable in
+				// the bulk-ops `AISectionEntityRef` set introduced by issue
+				// #74; #73 added the per-endpoint sub-entity selection. The
+				// follow-up to unify is tracked in the cleanup pass — for v1
+				// the bulk ignores standalone endpoint picks when the rest
+				// of the bulk is whole sections.
+			}
+		}
+		return out;
+	}, [data, sectionBulk, marker]);
+
+	// "How many entities live in the bulk?" — distinct addresses only.
+	const bulkEntityCount = useMemo(() => {
+		const seen = new Set<string>();
+		for (const r of bulkRefs) {
+			const key =
+				r.kind === 'section' ? `s:${r.sectionIdx}`
+				: r.kind === 'portal' ? `p:${r.sectionIdx}:${r.portalIdx}`
+				: r.kind === 'boundaryLineEndpoint' ? `bl:${r.sectionIdx}:${r.portalIdx}:${r.lineIdx}`
+				: `ng:${r.sectionIdx}:${r.lineIdx}`;
+			seen.add(key);
+		}
+		return seen.size;
+	}, [bulkRefs]);
+
+	const isBulkActive = bulkEntityCount >= 2;
+
+	// Bulk Pivot — median of every selected entity position, computed
+	// against the live data (NOT the preview model). Snapshotted at gesture
+	// start in `bulkPivotRef` so it doesn't drift mid-rotate (re-deriving
+	// from moving positions every frame would let the median precess and
+	// produce a spiral instead of a rigid rotate).
+	const bulkPivotRef = useRef<{ x: number; y: number; z: number } | null>(null);
+	const bulkPivotLive = useMemo<{ x: number; y: number; z: number } | null>(() => {
+		if (!isBulkActive) return null;
+		const yResolver = (idx: number) => (idx < sectionYs.length ? sectionYs[idx] : 0);
+		return bulkSelectionPivot(data, bulkRefs, yResolver);
+	}, [isBulkActive, bulkRefs, data, sectionYs]);
+
+	// Identify the gizmo's target. Bulk wins over single-entity when 2+
+	// entities are selected (per ADR-0010 — exactly one gizmo on screen).
+	// Sub-entity targets translate ONLY that sub-entity on commit; bulk
+	// translates/rotates every entity in `entities` around `pivot` as one
+	// rigid body. None cascade (ADR-0009; issue #75's modifier-on path).
 	const gizmoTarget = useMemo<DragTarget | null>(() => {
+		if (isBulkActive) {
+			const pivot = bulkPivotRef.current ?? bulkPivotLive;
+			if (!pivot) return null;
+			return { kind: 'bulk', entities: bulkRefs, pivot };
+		}
 		if (!marker) return null;
 		switch (marker.kind) {
 			case 'section':
@@ -297,7 +381,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			default:
 				return null;
 		}
-	}, [marker]);
+	}, [isBulkActive, bulkRefs, bulkPivotLive, marker]);
 
 	// Snap is intentionally not applied to any bulk-transform path (CONTEXT.md
 	// / ADR-0009): cascade-off makes snap incoherent (snapping the source to
@@ -381,6 +465,18 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// there is no selectable target or its data isn't resolvable.
 	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
 		if (!gizmoTarget) return null;
+		// Bulk gizmo anchors at the (snapshotted) Pivot, riding along with
+		// the live translate delta so it visually tracks the bulk during a
+		// translate gesture. Rotation doesn't move the pivot itself (the
+		// pivot IS the fixed point a rigid body rotates around).
+		if (gizmoTarget.kind === 'bulk') {
+			const dxyz = drag?.target.kind === 'bulk' ? drag.delta.translate : { x: 0, y: 0, z: 0 };
+			return [
+				gizmoTarget.pivot.x + dxyz.x,
+				gizmoTarget.pivot.y + 1.5 + dxyz.y,
+				gizmoTarget.pivot.z + dxyz.z,
+			];
+		}
 		// All sub-entity targets live in the same source section — read it
 		// off `previewSection` (which already accounts for the in-flight drag)
 		// when available, otherwise fall back to the unmodified data.
@@ -447,6 +543,14 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		switch (gizmoTarget.kind) {
 			case 'section':
 				return TRANSFORM_AXES_XZ_PACKED;
+			case 'bulk':
+				// Every AI-section entity is XZ-packed in some way — pitch
+				// and roll auto-disable per ADR-0011. `bulkAISectionsAxes`
+				// returns the AND-intersection of every selected entity's
+				// axes profile so future bulks mixing full-3D resources
+				// (trigger boxes, Matrix44 vehicles in later issues) widen
+				// the rings accordingly.
+				return bulkAISectionsAxes(gizmoTarget.entities) ?? TRANSFORM_AXES_XZ_PACKED;
 			case 'corner':
 				// Vector2 corners — translate.y is rendered but discarded on
 				// commit (see handleGizmoCommit). Rotate disabled (single point).
@@ -608,16 +712,39 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// Without onChange these are no-ops.
 	const handleGizmoTransform = useCallback((delta: BulkTransformDelta) => {
 		if (!gizmoTarget) return;
+		// Bulk gesture: snapshot the Pivot on the first frame so it doesn't
+		// drift as we drag (re-deriving the median against moving positions
+		// every frame produces a spiral instead of a rigid rotate). The
+		// gizmoTarget already carries `bulkPivotRef.current ?? bulkPivotLive`
+		// — if the ref was unset (first frame), set it now and use the live
+		// value for this frame's gesture.
+		if (gizmoTarget.kind === 'bulk') {
+			if (!bulkPivotRef.current) bulkPivotRef.current = gizmoTarget.pivot;
+			setDrag({
+				target: { ...gizmoTarget, pivot: bulkPivotRef.current },
+				delta,
+			});
+			return;
+		}
 		setDrag({ target: gizmoTarget, delta });
 	}, [gizmoTarget]);
 
 	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
 		setDrag(null);
+		const snapshotPivot = bulkPivotRef.current;
+		bulkPivotRef.current = null;
 		if (!gizmoTarget || !onChange) return;
 		if (isIdentityDelta(delta)) return;
+		// For bulk commits, use the snapshotted pivot from the gesture's
+		// first frame — NOT a freshly-computed median (which would have
+		// moved with the preview).
+		const committedTarget =
+			gizmoTarget.kind === 'bulk' && snapshotPivot
+				? { ...gizmoTarget, pivot: snapshotPivot }
+				: gizmoTarget;
 		let next: ParsedAISectionsV12;
 		try {
-			next = applyDragToModel(data, { target: gizmoTarget, delta });
+			next = applyDragToModel(data, { target: committedTarget, delta });
 		} catch {
 			return;
 		}
@@ -632,7 +759,10 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		onChange(next);
 	}, [data, gizmoTarget, onChange]);
 
-	const handleGizmoCancel = useCallback(() => setDrag(null), []);
+	const handleGizmoCancel = useCallback(() => {
+		setDrag(null);
+		bulkPivotRef.current = null;
+	}, []);
 
 	// Reset transient edge / drag UI when the selected section changes.
 	useResetOnChange(selectedSectionIndex, () => {
@@ -715,15 +845,19 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			{/* Yellow outline for every bulk member that ISN'T the inspector
 			    pick. The inspector pick already wears the orange overlay
 			    above; promoting it to yellow as well would hide the
-			    "currently editing" cue. */}
+			    "currently editing" cue. While a bulk gesture is in flight
+			    we draw against the live previewModel so every member is
+			    seen translating / rotating in lockstep. */}
 			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
 				const parts = key.split(':');
 				if (parts[0] !== 'section') return null;
 				const idx = Number(parts[1]);
 				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
-				const sec = data.sections[idx];
-				if (!sec) return null;
-				const corners = v12Corners(sec);
+				const liveSec = (drag?.target.kind === 'bulk' && previewModel)
+					? previewModel.sections[idx]
+					: data.sections[idx];
+				if (!liveSec) return null;
+				const corners = v12Corners(liveSec);
 				const y = idx < sectionYs.length ? sectionYs[idx] : 0;
 				return (
 					<SelectionOverlay
@@ -1030,6 +1164,26 @@ function applyDragToModel(
 			}
 			if (delta.rotate.y !== 0) {
 				next = rotateSectionAroundCentroidYaw(next, target.sectionIdx, delta.rotate.y);
+			}
+			return next;
+		}
+		case 'bulk': {
+			// Multi-Selection rigid body (issue #74). Translate every entity
+			// by the same delta, then yaw-rotate around the post-translate
+			// pivot — same compose order as the single-section path so
+			// preview and commit agree frame-for-frame. The pivot is the
+			// snapshot from the gesture's first frame (drift-prevented).
+			let next = model;
+			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+				next = bulkTranslateEntities(next, target.entities, delta.translate);
+			}
+			if (delta.rotate.y !== 0) {
+				next = bulkRotateEntitiesYaw(
+					next,
+					target.entities,
+					{ x: target.pivot.x + delta.translate.x, z: target.pivot.z + delta.translate.z },
+					delta.rotate.y,
+				);
 			}
 			return next;
 		}
