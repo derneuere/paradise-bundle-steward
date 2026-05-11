@@ -42,8 +42,8 @@
 import { BinReader, BinWriter } from './binTools';
 
 export const MODEL_TYPE_ID = 0x2A;
-export const MODEL_HEADER_SIZE = 0x14;
-export const MODEL_IMPORT_ENTRY_SIZE = 0x10; // u64 id + u32 ptrOffset + u32 padding
+const MODEL_HEADER_SIZE = 0x14;
+const MODEL_IMPORT_ENTRY_SIZE = 0x10; // u64 id + u32 ptrOffset + u32 padding
 
 // =============================================================================
 // Types
