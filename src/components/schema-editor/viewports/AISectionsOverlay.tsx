@@ -88,6 +88,7 @@ import {
 } from '@/components/aisections/shared';
 import { useAISectionsBulk } from '@/components/workspace/AISectionsBulkProvider';
 import { useCrossBundleBulkController } from '@/components/workspace/useCrossBundleBulkController';
+import { useWorkspacePSLBulk } from '@/components/workspace/PSLBulkProvider';
 import {
 	useBatchedSelection,
 	selectionKey,
@@ -280,6 +281,17 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		if (!aiBulk || bundleId == null || index == null) return null;
 		return aiBulk.forInstance(bundleId, index);
 	}, [aiBulk, bundleId, index]);
+	// Workspace-wide PSL bulk handle (issue #82). The current Selection
+	// model spans every workspace bulk that has entries — when the user
+	// has marquee'd both AI sections AND polygon-soup polys, the gizmo
+	// should still run on the AI sections but feed back a "N polygon
+	// soups not transformed" hint so the soup membership isn't silently
+	// dropped. Soup-only Selections are handled by the existing gizmo
+	// suppression (no AI section entities → no gizmo); this read only
+	// drives the hint copy + the soup-count partition. `null` when no
+	// PSL instance is active.
+	const pslBulk = useWorkspacePSLBulk();
+	const skippedSoupCount = pslBulk?.soupCount ?? 0;
 
 	const marker = useMemo(() => aiSectionPathMarker(selectedPath), [selectedPath]);
 	const selectedSectionIndex = marker ? marker.sectionIndex : null;
@@ -1332,6 +1344,8 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				onDuplicateThroughEdge={handleDuplicateThroughEdge}
 				onCloseEdgeMenu={() => setEdgeMenu(null)}
 				cascadeActive={drag?.kind === 'section' && drag.delta.cascade}
+				skippedSoupCount={skippedSoupCount}
+				showSkippedSoupHint={gizmoPosition != null && skippedSoupCount > 0}
 			/>
 		</>
 	);
@@ -1351,6 +1365,8 @@ function HtmlSiblings({
 	onDuplicateThroughEdge,
 	onCloseEdgeMenu,
 	cascadeActive,
+	skippedSoupCount,
+	showSkippedSoupHint,
 }: {
 	isActive: boolean;
 	snapEnabled: boolean;
@@ -1361,6 +1377,15 @@ function HtmlSiblings({
 	onDuplicateThroughEdge: () => void;
 	onCloseEdgeMenu: () => void;
 	cascadeActive: boolean;
+	/** Distinct polygon-soup count across the workspace's active PSL bulk.
+	 *  Surfaces in the gizmo's "N polygon soups not transformed" hint when
+	 *  the Selection is mixed (issue #82). */
+	skippedSoupCount: number;
+	/** True when the hint is renderable — the AI-sections side has a gizmo
+	 *  (`gizmoPosition != null`) AND the PSL side has polygon-soup polys
+	 *  to skip (`skippedSoupCount > 0`). Soup-only Selections fall through
+	 *  to no-gizmo + no-hint because there's no AI section to anchor on. */
+	showSkippedSoupHint: boolean;
 }) {
 	const node = useMemo(
 		() => (
@@ -1451,9 +1476,45 @@ function HtmlSiblings({
 						Cascade ON · outside neighbours follow
 					</div>
 				)}
+
+				{/* Polygon-soup skip hint — appears top-centre (offset down
+				    if the cascade hint is also on so they stack cleanly)
+				    when the Selection contains transformable entities AND
+				    1+ polygon soups (issue #82). Polygon soups have no
+				    world-space placement field (vertices u16-packed into
+				    local soup-space — CONTEXT.md / "Pivot"), so the
+				    transform delta is applied to the non-soup entities
+				    only. Amber tint distinguishes it from the cascade
+				    magenta — the two cues represent unrelated states. */}
+				{showSkippedSoupHint && (
+					<div
+						role="status"
+						aria-live="polite"
+						data-testid="bulk-transform-soup-skip-hint"
+						style={{
+							position: 'absolute',
+							top: cascadeActive ? 36 : 8,
+							left: '50%',
+							transform: 'translateX(-50%)',
+							padding: '4px 10px',
+							borderRadius: 6,
+							fontSize: 11,
+							fontFamily: 'monospace',
+							border: '1px solid #f59e0b',
+							background: 'rgba(245, 158, 11, 0.18)',
+							color: '#fbbf24',
+							pointerEvents: 'none',
+							userSelect: 'none',
+							boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+							whiteSpace: 'nowrap',
+						}}
+					>
+						{skippedSoupCount} polygon soup{skippedSoupCount === 1 ? '' : 's'} not transformed
+					</div>
+				)}
 			</>
 		),
-		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu, cascadeActive],
+		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu, cascadeActive, showSkippedSoupHint, skippedSoupCount],
 	);
 	// Pass `null` when this overlay isn't the active resource so the chrome
 	// drops our marquee / snap / context menu — see ADR-0007 / issue #24.

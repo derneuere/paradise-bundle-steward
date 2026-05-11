@@ -56,6 +56,13 @@ const PSL_KEY = 'polygonSoupList';
 export type WorkspacePSLBulkValue = {
 	/** Number of polygons currently in the bulk set. */
 	count: number;
+	/** Number of *distinct soups* (parents of the bulk-selected polys) in the
+	 *  active PSL instance. Drives the Bulk transform gizmo's
+	 *  "N polygon soups not transformed" hint (issue #82): a marquee that
+	 *  rakes 200 polys inside 2 soups reads as "2 polygon soups not
+	 *  transformed", not "200 polygons not transformed", because the
+	 *  rigid-body that can't be moved is the soup, not each poly. */
+	soupCount: number;
 	/** Folded collisionTag values across the bulk — drives `BulkEditPanel`. */
 	summary: BulkSummary;
 	/** Apply a collisionTag rewrite to every polygon in the bulk set. */
@@ -347,10 +354,24 @@ export function PSLBulkProvider({
 	// the hierarchy tree can wire Ctrl/Shift-click bulk semantics on
 	// polygon rows even before the bulk set has any entries. Consumers gate
 	// on `count > 0` to decide whether to mount the BulkEditPanel.
+	// Distinct soups across the bulk — drives issue #82's "N polygon soups
+	// not transformed" hint. A marquee that rakes hundreds of polys inside
+	// a handful of soups must report the soup count, not the poly count,
+	// because the rigid-body that can't be moved is the soup (vertices
+	// u16-packed into local soup space, no world-space placement).
+	const soupCount = useMemo(() => {
+		const seen = new Set<number>();
+		for (const rec of selectedPolyRecords) {
+			seen.add(rec.addr.soup);
+		}
+		return seen.size;
+	}, [selectedPolyRecords]);
+
 	const workspaceBulkValue = useMemo<WorkspacePSLBulkValue | null>(() => {
 		if (!active) return null;
 		return {
 			count: selectedPolyRecords.length,
+			soupCount,
 			summary,
 			applyBulk,
 			onClear,
@@ -361,6 +382,7 @@ export function PSLBulkProvider({
 	}, [
 		active,
 		selectedPolyRecords.length,
+		soupCount,
 		summary,
 		applyBulk,
 		onClear,

@@ -20,6 +20,7 @@ type ApplyHighlightFn = (
 	faceToLocation: Int32Array,
 	selectedModelIndex: number,
 	selectedPolysInCurrentModel: ReadonlySet<number>,
+	skippedByBulkTransform?: boolean,
 ) => void;
 
 export function useApplyPolygonSoupHighlight(
@@ -30,6 +31,12 @@ export function useApplyPolygonSoupHighlight(
 	faceToLocation: Int32Array,
 	selectedModelIndex: number,
 	selectedPolysInCurrentModel: ReadonlySet<number>,
+	/** When true, the bulk-paint colour switches to a red-tinted dim variant
+	 *  so the user can visually distinguish polygon-soup polys that the Bulk
+	 *  transform gizmo is SKIPPING (because the Selection also contains
+	 *  transformable entities — issue #82). When false, the standard amber
+	 *  paint is used. */
+	skippedByBulkTransform: boolean = false,
 ): void {
 	useEffect(() => {
 		if (!baseColorsRef.current) return;
@@ -40,6 +47,7 @@ export function useApplyPolygonSoupHighlight(
 			faceToLocation,
 			selectedModelIndex,
 			selectedPolysInCurrentModel,
+			skippedByBulkTransform,
 		);
 	}, [
 		apply,
@@ -49,5 +57,6 @@ export function useApplyPolygonSoupHighlight(
 		faceToLocation,
 		selectedModelIndex,
 		selectedPolysInCurrentModel,
+		skippedByBulkTransform,
 	]);
 }
