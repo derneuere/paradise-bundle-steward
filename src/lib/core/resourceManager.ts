@@ -269,28 +269,6 @@ export function isNestedBundle(data: Uint8Array): boolean {
   return true;
 }
 
-/**
- * Extracts data from nested bundle sections
- */
-export function extractFromNestedBundle(
-  buffer: ArrayBuffer,
-  nestedData: Uint8Array,
-  targetResourceTypeId: number
-): Uint8Array | null {
-  if (!isNestedBundle(nestedData)) {
-    return null;
-  }
-
-  try {
-    // This would need to import parseBundle, but to avoid circular deps,
-    // we'll handle this in the specific parsers
-    return null;
-  } catch (error) {
-    console.warn('Failed to parse nested bundle:', error);
-    return null;
-  }
-}
-
 // ============================================================================
 // Resource Validation
 // ============================================================================
@@ -345,20 +323,6 @@ export function validateResourceEntry(resource: ResourceEntry, bufferSize: numbe
 // ============================================================================
 
 /**
- * Finds a resource by type ID
- */
-export function findResourceByType(resources: ResourceEntry[], typeId: number): ResourceEntry | undefined {
-  return resources.find(r => r.resourceTypeId === typeId);
-}
-
-/**
- * Finds all resources of a specific type
- */
-export function findResourcesByType(resources: ResourceEntry[], typeId: number): ResourceEntry[] {
-  return resources.filter(r => r.resourceTypeId === typeId);
-}
-
-/**
  * Gets the memory type name for a platform
  */
 export function getMemoryTypeName(platform: number, memoryIndex: number): string {
@@ -369,13 +333,6 @@ export function getMemoryTypeName(platform: number, memoryIndex: number): string
   }[platform];
   
   return types?.[memoryIndex] || `Unknown Memory Type ${memoryIndex}`;
-}
-
-/**
- * Formats a resource ID as a hex string
- */
-export function formatResourceId(resourceId: bigint): string {
-  return `0x${resourceId.toString(16).toUpperCase().padStart(16, '0')}`;
 }
 
 /**

@@ -18,7 +18,7 @@
 // Opcode → (name, arity). Arity is the number of operands; `dcl_*` opcodes
 // are handled as a special case because they embed their operand count in
 // the instruction-length field.
-export const OP_TABLE: Record<number, { name: string; arity: number; kind?: 'alu' | 'cmp' | 'tex' | 'flow' | 'decl' | 'mov' }> = {
+const OP_TABLE: Record<number, { name: string; arity: number; kind?: 'alu' | 'cmp' | 'tex' | 'flow' | 'decl' | 'mov' }> = {
 	0x00: { name: 'add',   arity: 3, kind: 'alu' },
 	0x01: { name: 'and',   arity: 3, kind: 'alu' },
 	0x02: { name: 'break', arity: 0, kind: 'flow' },
@@ -111,7 +111,7 @@ export const OP_TABLE: Record<number, { name: string; arity: number; kind?: 'alu
 
 /** Operand file — which bank / namespace the operand lives in. SM5 has many;
  *  only the ones our fixture actually produces need full support. */
-export type DxbcOperandType =
+type DxbcOperandType =
 	| 'temp'           // r0..rN
 	| 'input'          // v0..vN
 	| 'output'         // o0..oN
@@ -127,7 +127,7 @@ export type DxbcOperandType =
 	| 'null'
 	| 'unknown';
 
-export type DxbcOperandIndex =
+type DxbcOperandIndex =
 	/** Literal index, e.g. r4 → { kind:'immediate', value:4 } */
 	| { kind: 'immediate'; value: number }
 	/** Relative addressing (r[r0.x+3]) → { kind:'relative', base, offset } */
@@ -162,7 +162,7 @@ export type DxbcOperand = {
 
 /** Result of decoding one `dcl_*` opcode into declaration metadata. Kept
  *  compact; the emitter only needs a subset of this. */
-export type DxbcDecl =
+type DxbcDecl =
 	| { kind: 'resource'; register: number; dim: number; returnType: number }
 	| { kind: 'sampler'; register: number; mode: number }
 	| { kind: 'constantBuffer'; register: number; size: number; accessPattern: number }

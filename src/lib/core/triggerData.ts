@@ -12,20 +12,20 @@ import { BinReader, BinWriter } from './binTools';
 // typed-binary Schemas (for header and basic structs)
 // =============================================================================
 
-export const Vector3Schema = object({
+const Vector3Schema = object({
   x: f32,
   y: f32,
   z: f32
 });
 
-export const Vector4Schema = object({
+const Vector4Schema = object({
   x: f32,
   y: f32,
   z: f32,
   w: f32
 });
 
-export const BoxRegionSchema = object({
+const BoxRegionSchema = object({
   position: Vector3Schema,
   rotation: Vector3Schema,
   dimensions: Vector3Schema,
@@ -701,19 +701,6 @@ export function writeTriggerDataData(td: ParsedTriggerData, littleEndian: boolea
 
 	return w.bytes;
 }
-
-// =============================================================================
-// High-level wrapper with progress (optional)
-// =============================================================================
-
-export function writeTriggerData(td: ParsedTriggerData, options: { littleEndian?: boolean } = {}, progress?: ProgressCallback): Uint8Array {
-	progress?.({ type: 'write', stage: 'write', progress: 0.0, message: 'Serializing TriggerData' });
-	const out = writeTriggerDataData(td, options.littleEndian !== false);
-	progress?.({ type: 'write', stage: 'write', progress: 1.0, message: 'Done' });
-	return out;
-}
-
-
 
 // =============================================================================
 // High-level parsing wrapper (mirrors vehicle list style)

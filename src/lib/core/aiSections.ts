@@ -172,7 +172,6 @@ export {
 	LegacyAISectionFlagV4,
 	LegacyAISectionFlagV6,
 	LegacyEDistrict,
-	LEGACY_AI_SECTION_VERSIONS,
 } from './aiSectionsLegacy';
 
 // =============================================================================

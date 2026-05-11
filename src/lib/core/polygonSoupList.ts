@@ -37,12 +37,12 @@ import { BinReader } from './binTools';
 // Constants
 // =============================================================================
 
-export const POLYGON_SOUP_LIST_HEADER_SIZE = 0x30;
-export const POLYGON_SOUP_STRUCT_SIZE = 0x20;
-export const POLYGON_SOUP_POLY_SIZE = 0x0C;
-export const POLYGON_SOUP_VERTEX_SIZE = 0x06;
-export const AABB4_ROW_SIZE = 0x70;
-export const SOUPS_PER_AABB4_ROW = 4;
+const POLYGON_SOUP_LIST_HEADER_SIZE = 0x30;
+const POLYGON_SOUP_STRUCT_SIZE = 0x20;
+const POLYGON_SOUP_POLY_SIZE = 0x0C;
+const POLYGON_SOUP_VERTEX_SIZE = 0x06;
+const AABB4_ROW_SIZE = 0x70;
+const SOUPS_PER_AABB4_ROW = 4;
 
 // =============================================================================
 // Types
@@ -447,7 +447,7 @@ function align4(pos: number): number {
  * a soup is missing its offset entirely. Mutations that only reorder or
  * remove soups (pop, swap) leave the layout valid and skip normalization.
  */
-export function hasLayoutConflict(model: ParsedPolygonSoupList): boolean {
+function hasLayoutConflict(model: ParsedPolygonSoupList): boolean {
 	if (model.soups.length === 0) return false;
 	const seen = new Set<number>();
 	for (const s of model.soups) {

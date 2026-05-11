@@ -702,17 +702,6 @@ const V22_HEADER_SIZE = 0x30;
 // Vec4 is missing in v22; everything else lines up.
 const V22_PVS_HEADER_SIZE = 0x30;
 
-// Read-only structural parser for the v22 prototype TrafficData payload.
-// Exported alongside the main `parseTrafficDataData` dispatcher so callers
-// who already know they have a v22 payload can skip the version probe and
-// pin the result type to `ParsedTrafficDataV22` directly.
-export function parseTrafficDataV22(
-  data: Uint8Array,
-  littleEndian = false,
-): ParsedTrafficDataV22 {
-  return parseTrafficDataV22Internal(data, littleEndian);
-}
-
 // Internal implementation. Returns a `ParsedTrafficDataV22` carrying the
 // header + Pvs + hull pointer table that decoded cleanly, plus raw bytes
 // for the hull contents and four trailing regions we don't yet interpret.
