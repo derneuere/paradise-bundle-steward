@@ -748,5 +748,3 @@ function SchemaRow({
 		</div>
 	);
 }
-
-export default WorkspaceHierarchy;
