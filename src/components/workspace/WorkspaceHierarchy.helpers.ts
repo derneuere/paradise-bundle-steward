@@ -59,7 +59,7 @@ export function isVisibilityRelevantKey(key: string): boolean {
 	return isWorldViewportFamilyKey(key);
 }
 
-export function bundleHasVisibilityRelevantResource(
+function bundleHasVisibilityRelevantResource(
 	bundle: EditableBundle,
 ): boolean {
 	for (const [key, list] of bundle.parsedResourcesAll) {
@@ -187,7 +187,7 @@ function deriveInstanceLabel(
 // Path / expansion key helpers
 // ---------------------------------------------------------------------------
 
-export function pathKey(path: NodePath): string {
+function pathKey(path: NodePath): string {
 	return path.join('/') || '__root__';
 }
 
@@ -197,14 +197,14 @@ export function bundleKey(bundleId: string): string {
 export function resourceTypeKey(bundleId: string, resourceKey: string): string {
 	return `rt:${bundleId}::${resourceKey}`;
 }
-export function instanceKey(
+function instanceKey(
 	bundleId: string,
 	resourceKey: string,
 	index: number,
 ): string {
 	return `inst:${bundleId}::${resourceKey}::${index}`;
 }
-export function schemaKey(
+function schemaKey(
 	bundleId: string,
 	resourceKey: string,
 	index: number,
