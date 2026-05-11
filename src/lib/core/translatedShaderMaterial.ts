@@ -30,7 +30,7 @@ import type { ParsedShaderConstant } from './shader';
 
 /** cb0 slot map for a given shader; matches the inferCbLayout shape used
  *  by the shader-page preview. */
-export type CbLayout = {
+type CbLayout = {
 	worldRow0: number;
 	vpRow0: number;
 	viewRow2: number;
