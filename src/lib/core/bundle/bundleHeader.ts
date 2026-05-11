@@ -35,7 +35,7 @@ export function detectBundleLittleEndian(buffer: ArrayBuffer): boolean {
 }
 
 // Bundle header schema including magic prefix for convenience
-export const BundleHeaderSchema = object({
+const BundleHeaderSchema = object({
   magic: chars(4),         // 4 bytes, typically "bnd2"
   version: u32,
   platform: u32,
@@ -81,7 +81,7 @@ export function parseHeader(
 /**
  * Validates bundle header
  */
-export function validateBundleHeader(header: BundleHeader): ValidationError[] {
+function validateBundleHeader(header: BundleHeader): ValidationError[] {
   const errors: ValidationError[] = [];
 
   if (header.magic !== 'bnd2') {
