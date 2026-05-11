@@ -37,9 +37,9 @@
 import { BinReader, BinWriter } from './binTools';
 
 export const GRAPHICS_STUB_TYPE_ID = 0x10015;
-export const GRAPHICS_STUB_HEADER_SIZE = 0x10;
-export const GRAPHICS_STUB_IMPORT_ENTRY_SIZE = 0x10;
-export const GRAPHICS_STUB_IMPORT_COUNT = 2;
+const GRAPHICS_STUB_HEADER_SIZE = 0x10;
+const GRAPHICS_STUB_IMPORT_ENTRY_SIZE = 0x10;
+const GRAPHICS_STUB_IMPORT_COUNT = 2;
 export const GRAPHICS_STUB_TOTAL_SIZE =
 	GRAPHICS_STUB_HEADER_SIZE + GRAPHICS_STUB_IMPORT_COUNT * GRAPHICS_STUB_IMPORT_ENTRY_SIZE;
 
@@ -47,7 +47,7 @@ export const GRAPHICS_STUB_TOTAL_SIZE =
 // Types
 // =============================================================================
 
-export type GraphicsStubImport = {
+type GraphicsStubImport = {
 	/** u64 resource id of the referenced spec. */
 	id: bigint;
 	/** Offset back into the GraphicsStub of the pointer slot to patch at
