@@ -26,7 +26,7 @@ import {
 
 const GENERATOR = 'steward-worldlogic-gltf/1';
 
-export const GROUP_AI_SECTIONS = 'AISections';
+const GROUP_AI_SECTIONS = 'AISections';
 const SCENE_EXTRAS_AI_SECTIONS = 'aiSections';
 
 /**
