@@ -50,6 +50,33 @@ import {
 	useInstancedSelection,
 	type Selection,
 } from './selection';
+import {
+	bulkRotateTriggerBoxes,
+	bulkTranslateTriggerBoxes,
+	bulkTriggerBoxAxes,
+	bulkTriggerBoxPivot,
+	rotateBlackspotRigid,
+	rotateGenericRigid,
+	rotateLandmarkRigid,
+	rotateVfxRigid,
+	translateBlackspotRigid,
+	translateGenericRigid,
+	translateLandmarkRigid,
+	translateRoamingRigid,
+	translateSpawnRigid,
+	translateVfxRigid,
+	triggerBoxRefAxes,
+	type TriggerBoxEntityRef,
+} from '@/lib/core/triggerDataOps';
+import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
+import {
+	TRANSFORM_AXES_FULL_3D,
+	type TransformAxes,
+} from '@/lib/core/transformAxes';
+import {
+	isIdentityDelta,
+	type BulkTransformDelta,
+} from '@/hooks/useBulkTransformDrag';
 
 // ---------------------------------------------------------------------------
 // Path ↔ Selection codec (exported for tests)
@@ -456,6 +483,169 @@ export function collectMarqueeHits(
 }
 
 // ---------------------------------------------------------------------------
+// Gizmo target — discriminated union of "what the gizmo's gesture mutates".
+//
+// Each kind maps 1:1 onto a single-entity rigid op in `triggerDataOps`. The
+// bulk case carries the flattened `TriggerBoxEntityRef[]` and the snapshot
+// Pivot captured at gesture start (snapshotted to prevent drift mid-rotate
+// — re-deriving the median against moving positions every frame would
+// produce a spiral instead of a rigid rotate). Mirrors the shape of
+// `AISectionsOverlay`'s `DragTarget`.
+// ---------------------------------------------------------------------------
+
+export type DragTarget =
+	| { kind: 'landmark'; idx: number }
+	| { kind: 'generic'; idx: number }
+	| { kind: 'blackspot'; idx: number }
+	| { kind: 'vfx'; idx: number }
+	| { kind: 'roaming'; idx: number }
+	| { kind: 'spawn'; idx: number }
+	| {
+			kind: 'bulk';
+			entities: readonly TriggerBoxEntityRef[];
+			pivot: { x: number; y: number; z: number };
+		};
+
+export type ActiveDrag = {
+	target: DragTarget;
+	delta: BulkTransformDelta;
+};
+
+// Selection kinds that map directly to a single-entity gizmo target. Player
+// start is excluded (no rigid op surfaces for it in this slice).
+type SingleTargetKind =
+	| 'landmark' | 'generic' | 'blackspot' | 'vfx' | 'roaming' | 'spawn';
+
+const SINGLE_TARGET_KINDS: ReadonlySet<string> = new Set([
+	'landmark', 'generic', 'blackspot', 'vfx', 'roaming', 'spawn',
+]);
+
+/** Map a bulk path-key (`'landmarks/3'`, `'roamingLocations/5'`, …) to a
+ *  `TriggerBoxEntityRef`. Returns null when the key isn't bulk-eligible.
+ *  Mirrors the inverse of `triggerSelectionCodec.selectionToPath` for the
+ *  bulk-eligible subset. Exported for tests. */
+export function bulkKeyToRef(key: string): TriggerBoxEntityRef | null {
+	const slash = key.indexOf('/');
+	if (slash < 0) return null;
+	const listKey = key.slice(0, slash);
+	const idx = Number(key.slice(slash + 1));
+	if (!Number.isFinite(idx) || idx < 0) return null;
+	switch (listKey) {
+		case 'landmarks': return { kind: 'landmark', idx };
+		case 'genericRegions': return { kind: 'generic', idx };
+		case 'blackspots': return { kind: 'blackspot', idx };
+		case 'vfxBoxRegions': return { kind: 'vfx', idx };
+		case 'roamingLocations': return { kind: 'roaming', idx };
+		case 'spawnLocations': return { kind: 'spawn', idx };
+		default: return null;
+	}
+}
+
+/** Map a `Selection.kind` to the matching `TriggerBoxEntityRef` (when the
+ *  selection points at a single bulk-eligible entry). Returns null for
+ *  player-start or anything outside the bulk-eligible kinds. Exported for
+ *  tests. */
+export function selectionToRef(sel: Selection | null): TriggerBoxEntityRef | null {
+	if (!sel) return null;
+	if (!SINGLE_TARGET_KINDS.has(sel.kind)) return null;
+	return { kind: sel.kind as TriggerBoxEntityRef['kind'], idx: sel.indices[0] };
+}
+
+/**
+ * Single dispatcher from a (target, delta) pair to a mutated
+ * `ParsedTriggerData`. Used twice in the overlay:
+ *
+ *   - inside `previewModel` (live drag-frame derivation; no setResource).
+ *   - inside `handleGizmoCommit` (one-shot on release; setResource pushes
+ *     exactly one HistoryCommit — the one-undo-entry-per-gesture contract).
+ *
+ * Keeping the dispatch in one helper means preview and commit cannot drift —
+ * what the user sees during the drag is bit-for-bit what lands in the
+ * model on release. Bulk gestures apply translate first, then rotate
+ * around the *post-translate* pivot, matching the compose order
+ * `AISectionsOverlay.applyDragToModel` uses.
+ */
+export function applyDragToTriggerModel(
+	model: ParsedTriggerData,
+	drag: ActiveDrag,
+): ParsedTriggerData {
+	const { target, delta } = drag;
+	switch (target.kind) {
+		case 'landmark': {
+			// Single-entity rigid: translate then rotate around the entity's
+			// own (post-translate) position. Matches the single-section path
+			// in AISectionsOverlay — rotate around the entity's pivot keeps
+			// position fixed when the user only rotates.
+			let next = model;
+			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+				next = translateLandmarkRigid(next, target.idx, delta.translate);
+			}
+			if (delta.rotate.x !== 0 || delta.rotate.y !== 0 || delta.rotate.z !== 0) {
+				const p = next.landmarks[target.idx]?.box.position;
+				if (p) next = rotateLandmarkRigid(next, target.idx, { x: p.x, y: p.y, z: p.z }, delta.rotate);
+			}
+			return next;
+		}
+		case 'generic': {
+			let next = model;
+			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+				next = translateGenericRigid(next, target.idx, delta.translate);
+			}
+			if (delta.rotate.x !== 0 || delta.rotate.y !== 0 || delta.rotate.z !== 0) {
+				const p = next.genericRegions[target.idx]?.box.position;
+				if (p) next = rotateGenericRigid(next, target.idx, { x: p.x, y: p.y, z: p.z }, delta.rotate);
+			}
+			return next;
+		}
+		case 'blackspot': {
+			let next = model;
+			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+				next = translateBlackspotRigid(next, target.idx, delta.translate);
+			}
+			if (delta.rotate.x !== 0 || delta.rotate.y !== 0 || delta.rotate.z !== 0) {
+				const p = next.blackspots[target.idx]?.box.position;
+				if (p) next = rotateBlackspotRigid(next, target.idx, { x: p.x, y: p.y, z: p.z }, delta.rotate);
+			}
+			return next;
+		}
+		case 'vfx': {
+			let next = model;
+			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+				next = translateVfxRigid(next, target.idx, delta.translate);
+			}
+			if (delta.rotate.x !== 0 || delta.rotate.y !== 0 || delta.rotate.z !== 0) {
+				const p = next.vfxBoxRegions[target.idx]?.box.position;
+				if (p) next = rotateVfxRigid(next, target.idx, { x: p.x, y: p.y, z: p.z }, delta.rotate);
+			}
+			return next;
+		}
+		case 'roaming':
+			// Roaming has no rotation field — only translate participates.
+			return translateRoamingRigid(model, target.idx, delta.translate);
+		case 'spawn':
+			// Spawn position-only; direction stays put.
+			return translateSpawnRigid(model, target.idx, delta.translate);
+		case 'bulk': {
+			let next = model;
+			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+				next = bulkTranslateTriggerBoxes(next, target.entities, delta.translate);
+			}
+			if (delta.rotate.x !== 0 || delta.rotate.y !== 0 || delta.rotate.z !== 0) {
+				// Rotate around the post-translate pivot so combined gestures
+				// compose as one rigid body.
+				const movedPivot = {
+					x: target.pivot.x + delta.translate.x,
+					y: target.pivot.y + delta.translate.y,
+					z: target.pivot.z + delta.translate.z,
+				};
+				next = bulkRotateTriggerBoxes(next, target.entities, movedPivot, delta.rotate);
+			}
+			return next;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Overlay
 // ---------------------------------------------------------------------------
 
@@ -476,10 +666,11 @@ type Props = {
 };
 
 export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
-	data, selectedPath, onSelect, isActive = true, bundleId, index,
+	data, selectedPath, onSelect, onChange, isActive = true, bundleId, index,
 }: Props) => {
 	const primary = useMemo(() => triggerSelectionCodec.pathToSelection(selectedPath), [selectedPath]);
 	const [hovered, setHovered] = useState<Selection | null>(null);
+	const [drag, setDrag] = useState<ActiveDrag | null>(null);
 
 	const handlePick = useCallback(
 		(sel: Selection) => onSelect(triggerSelectionCodec.selectionToPath(sel)),
@@ -528,6 +719,180 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 	const selEntry = findEntry(primary);
 	const hovEntry = findEntry(hovered);
 
+	// Multi-Selection bulk refs — flatten the workspace bulk-path-keys plus
+	// the inspector pick (when it adds a sub-entity not already in the bulk)
+	// into a single `TriggerBoxEntityRef[]`. The bulk gizmo activates when
+	// this list has 2+ distinct entries; at cardinality 1 we fall through
+	// to the single-entity gizmo anchored at the picked entity.
+	const bulkRefs = useMemo<readonly TriggerBoxEntityRef[]>(() => {
+		const out: TriggerBoxEntityRef[] = [];
+		const seen = new Set<string>();
+		const addUnique = (ref: TriggerBoxEntityRef) => {
+			const key = `${ref.kind}:${ref.idx}`;
+			if (seen.has(key)) return;
+			seen.add(key);
+			out.push(ref);
+		};
+		if (instanceBulk) {
+			for (const k of instanceBulk.bulkPathKeys) {
+				const ref = bulkKeyToRef(k);
+				if (ref) addUnique(ref);
+			}
+		}
+		// Fold the inspector pick if it's bulk-eligible.
+		const primaryRef = selectionToRef(primary);
+		if (primaryRef) addUnique(primaryRef);
+		return out;
+	}, [instanceBulk, primary]);
+
+	const isBulkActive = bulkRefs.length >= 2;
+
+	// Bulk Pivot snapshot. Computed against the live `data` (NOT the
+	// preview model) the first time the gesture runs, then re-used for
+	// every subsequent frame of THAT gesture so the median doesn't drift
+	// as the positions move under the rotate.
+	const bulkPivotRef = useRef<{ x: number; y: number; z: number } | null>(null);
+	const bulkPivotLive = useMemo(() => {
+		if (!isBulkActive) return null;
+		return bulkTriggerBoxPivot(data, bulkRefs);
+	}, [isBulkActive, data, bulkRefs]);
+
+	// Resolve the gizmo's target. Bulk wins over single-entity when 2+
+	// entities are selected (one gizmo on screen per ADR-0010).
+	const gizmoTarget = useMemo<DragTarget | null>(() => {
+		if (isBulkActive) {
+			const pivot = bulkPivotRef.current ?? bulkPivotLive;
+			if (!pivot) return null;
+			return { kind: 'bulk', entities: bulkRefs, pivot };
+		}
+		const primaryRef = selectionToRef(primary);
+		if (!primaryRef) return null;
+		return { kind: primaryRef.kind as SingleTargetKind, idx: primaryRef.idx };
+	}, [isBulkActive, bulkRefs, bulkPivotLive, primary]);
+
+	// Derive a preview model from the live drag so the overlay's box
+	// highlights and the gizmo position track the gesture frame-for-frame.
+	// `applyDragToTriggerModel` is the same dispatcher the commit handler
+	// runs, guaranteeing preview ≡ commit.
+	const previewModel: ParsedTriggerData | null = useMemo(() => {
+		if (!drag || isIdentityDelta(drag.delta)) return null;
+		try {
+			return applyDragToTriggerModel(data, drag);
+		} catch {
+			return null;
+		}
+	}, [data, drag]);
+
+	// Helper to read a box from either the preview or the original model.
+	// During a drag we want to see the in-flight pose; otherwise the data.
+	const readBox = useCallback(
+		(kind: 'landmark' | 'generic' | 'blackspot' | 'vfx', idx: number): BoxRegion | null => {
+			const src = previewModel ?? data;
+			const list =
+				kind === 'landmark' ? src.landmarks
+				: kind === 'generic' ? src.genericRegions
+				: kind === 'blackspot' ? src.blackspots
+				: src.vfxBoxRegions;
+			return list[idx]?.box ?? null;
+		},
+		[data, previewModel],
+	);
+
+	// Gizmo position — anchored at the picked entity's centre (single-
+	// entity) or the (snapshotted) Pivot ridden along by the live translate
+	// delta (bulk). Returns null when there's nothing to anchor on.
+	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
+		if (!gizmoTarget) return null;
+		if (gizmoTarget.kind === 'bulk') {
+			const dxyz = drag?.target.kind === 'bulk' ? drag.delta.translate : { x: 0, y: 0, z: 0 };
+			return [
+				gizmoTarget.pivot.x + dxyz.x,
+				gizmoTarget.pivot.y + dxyz.y,
+				gizmoTarget.pivot.z + dxyz.z,
+			];
+		}
+		switch (gizmoTarget.kind) {
+			case 'landmark':
+			case 'generic':
+			case 'blackspot':
+			case 'vfx': {
+				const box = readBox(gizmoTarget.kind, gizmoTarget.idx);
+				if (!box) return null;
+				return [box.position.x, box.position.y, box.position.z];
+			}
+			case 'roaming': {
+				const src = previewModel ?? data;
+				const rl = src.roamingLocations[gizmoTarget.idx];
+				if (!rl) return null;
+				return [rl.position.x, rl.position.y, rl.position.z];
+			}
+			case 'spawn': {
+				const src = previewModel ?? data;
+				const sp = src.spawnLocations[gizmoTarget.idx];
+				if (!sp) return null;
+				return [sp.position.x, sp.position.y, sp.position.z];
+			}
+		}
+	}, [gizmoTarget, data, previewModel, drag, readBox]);
+
+	// Per-axis enable flags for the gizmo. Trigger boxes get full 3-axis;
+	// roaming/spawn get translate-only. The AND-intersection happens in
+	// `bulkTriggerBoxAxes`. Single-entity targets use `triggerBoxRefAxes`.
+	const gizmoAxes = useMemo<TransformAxes>(() => {
+		if (!gizmoTarget) return TRANSFORM_AXES_FULL_3D;
+		if (gizmoTarget.kind === 'bulk') {
+			return bulkTriggerBoxAxes(gizmoTarget.entities) ?? TRANSFORM_AXES_FULL_3D;
+		}
+		return triggerBoxRefAxes({ kind: gizmoTarget.kind, idx: gizmoTarget.idx });
+	}, [gizmoTarget]);
+
+	// Drag handlers — the gizmo owns every direct-manipulation gesture in
+	// the WorldViewport per ADR-0010. Preview is local React state; commit
+	// fires onChange exactly once per gesture, which is the *only* point
+	// a Workspace-undo entry is pushed (one entry per gesture, not per
+	// drag-frame).
+	const handleGizmoTransform = useCallback((delta: BulkTransformDelta) => {
+		if (!gizmoTarget) return;
+		if (gizmoTarget.kind === 'bulk') {
+			// Snapshot the pivot on the first frame so it doesn't drift.
+			if (!bulkPivotRef.current) bulkPivotRef.current = gizmoTarget.pivot;
+			setDrag({
+				target: { ...gizmoTarget, pivot: bulkPivotRef.current },
+				delta,
+			});
+			return;
+		}
+		setDrag({ target: gizmoTarget, delta });
+	}, [gizmoTarget]);
+
+	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
+		setDrag(null);
+		const snapshotPivot = bulkPivotRef.current;
+		bulkPivotRef.current = null;
+		if (!gizmoTarget || !onChange) return;
+		if (isIdentityDelta(delta)) return;
+		const committedTarget =
+			gizmoTarget.kind === 'bulk' && snapshotPivot
+				? { ...gizmoTarget, pivot: snapshotPivot }
+				: gizmoTarget;
+		let next: ParsedTriggerData;
+		try {
+			next = applyDragToTriggerModel(data, { target: committedTarget, delta });
+		} catch {
+			return;
+		}
+		if (next === data) return;
+		// One onChange ⇒ one setResourceAt ⇒ one HistoryCommit on the
+		// Workspace-undo stack. Drag-frames in between only updated local
+		// React state — they didn't push undo entries.
+		onChange(next);
+	}, [data, gizmoTarget, onChange]);
+
+	const handleGizmoCancel = useCallback(() => {
+		setDrag(null);
+		bulkPivotRef.current = null;
+	}, []);
+
 	// Marquee — pick every region/spawn/roaming whose centroid falls inside
 	// the dragged rectangle. Boxes use box.position; spawns / roams use
 	// their position field. Routes through the workspace-side
@@ -559,6 +924,17 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 	// ADR-0007 / issue #24.
 	useWorldViewportHtmlSlot(isActive ? htmlNode : null);
 
+	// While dragging we paint the box highlight + label off the preview
+	// model so the user sees the gesture live. The picker boxes / spawn
+	// arrows / roaming dots stay on the static `data` so picking doesn't
+	// jump as the drag progresses (a moving target is hard to keep
+	// pointer-locked on).
+	const previewSelBox = useMemo(() => {
+		if (!selEntry) return null;
+		const live = readBox(selEntry.kind, selEntry.index);
+		return live ?? selEntry.box;
+	}, [selEntry, readBox]);
+
 	return (
 		<>
 			<BatchedRegionBoxes
@@ -569,10 +945,12 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 				onHover={setHovered}
 			/>
 
-			{selEntry && <BoxOverlayMesh box={selEntry.box} material={selEdgeMat} />}
+			{selEntry && previewSelBox && <BoxOverlayMesh box={previewSelBox} material={selEdgeMat} />}
 			{hovEntry && hovEntry !== selEntry && <BoxOverlayMesh box={hovEntry.box} material={hovEdgeMat} />}
 
-			{selEntry && <BoxLabel box={selEntry.box} label={selEntry.label} color="#ffaa33" />}
+			{selEntry && previewSelBox && (
+				<BoxLabel box={previewSelBox} label={selEntry.label} color="#ffaa33" />
+			)}
 			{hovEntry && hovEntry !== selEntry && (
 				<BoxLabel box={hovEntry.box} label={hovEntry.label} color="#66aaff" />
 			)}
@@ -587,6 +965,16 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 				onHover={setHovered}
 			/>
 			<PlayerStartMarker data={data} primary={primary} onPick={handlePick} />
+
+			{gizmoPosition && (
+				<BulkTransformGizmo
+					position={gizmoPosition}
+					axes={gizmoAxes}
+					onTransform={handleGizmoTransform}
+					onCommit={handleGizmoCommit}
+					onCancel={handleGizmoCancel}
+				/>
+			)}
 
 			<CameraBridge bridge={cameraBridge} />
 		</>
