@@ -125,7 +125,7 @@ export enum TriggerRegionType {
 	E_TYPE_VFXBOX_REGION = 3
 }
 
-export type TriggerRegion = {
+type TriggerRegion = {
 	box: BoxRegion;
 	id: number; // mId
 	regionIndex: number; // miRegionIndex (short)
@@ -133,7 +133,7 @@ export type TriggerRegion = {
 	enabled: number; // 0 or 1
 };
 
-export type StartingGrid = {
+type StartingGrid = {
 	startingPositions: Vector4[]; // 8
 	startingDirections: Vector4[]; // 8
 };
