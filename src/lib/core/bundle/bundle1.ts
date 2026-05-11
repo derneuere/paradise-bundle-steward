@@ -45,8 +45,7 @@ import { resourceCtxFromBundle } from '../registry/handler';
 // Magic / version constants
 // ============================================================================
 
-export const BND1_MAGIC = 'bndl';
-export const BND1_MAGIC_BYTES = new Uint8Array([0x62, 0x6E, 0x64, 0x6C]);
+const BND1_MAGIC_BYTES = new Uint8Array([0x62, 0x6E, 0x64, 0x6C]);
 
 const SUPPORTED_BND1_VERSIONS = [5] as const;
 export type Bnd1Version = typeof SUPPORTED_BND1_VERSIONS[number];
@@ -190,20 +189,6 @@ export function isBundle1Magic(buffer: ArrayBuffer): boolean {
       && dv.getUint8(1) === 0x6E
       && dv.getUint8(2) === 0x64
       && dv.getUint8(3) === 0x6C;
-}
-
-export function detectBundle1LittleEndian(buffer: ArrayBuffer): boolean {
-  // BND1 platform field is 4 bytes deep into the header — peek at version (BE)
-  // first as a coarse sanity check, then decide LE vs BE from the platform
-  // byte (PC=1=>LE, X360/PS3=>BE).
-  if (buffer.byteLength < 0x10) return true;
-  const dv = new DataView(buffer);
-  // muPlatform sits at different file offsets per platform — the easiest
-  // robust read is the version field (always at +0x04). BND1 v5 in BE is
-  // 0x00000005 in BE = 5; in LE it would be 0x05000000 = 83886080. Use
-  // the version byte to disambiguate.
-  if (dv.getUint32(0x04, false) >= 3 && dv.getUint32(0x04, false) <= 5) return false;
-  return true;
 }
 
 // ============================================================================
@@ -839,14 +824,6 @@ export function writeBundle1Fresh(
   return outBytes.buffer;
 }
 
-/**
- * Helper used by tests: decompresses a chunk if it's zlib-compressed.
- * Wraps decompressData so callers don't need to import the resource manager.
- */
-export function decompressChunkIfNeeded(bytes: Uint8Array): Uint8Array {
-  return isCompressed(bytes) ? decompressData(bytes) : bytes;
-}
-
 // ============================================================================
 // Cross-container conversion helpers
 // ============================================================================
@@ -1256,5 +1233,3 @@ export function reencodeResourceChunksForTarget(
   return overrides;
 }
 
-// Re-export the alignment helpers since some BND1 callers may want them.
-export { extractAlignment };
