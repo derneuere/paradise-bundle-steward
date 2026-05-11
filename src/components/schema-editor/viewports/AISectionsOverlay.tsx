@@ -82,6 +82,7 @@ import {
 	type SectionDetailAccessor,
 } from '@/components/aisections/shared';
 import { useAISectionsBulk } from '@/components/workspace/AISectionsBulkProvider';
+import { useCrossBundleBulkController } from '@/components/workspace/useCrossBundleBulkController';
 import {
 	useBatchedSelection,
 	selectionKey,
@@ -251,6 +252,16 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 
 	const cameraBridge = useRef<CameraBridgeData | null>(null);
 	const aiBulk = useAISectionsBulk();
+	// Cross-Bundle bulk controller — owns the workspace-wide view of every
+	// (bundleId, index) bulk + the per-Bundle dispatch on commit (issue
+	// #80). When the bulk lives in a single Bundle this is essentially
+	// dormant (slices has at most one entry, isCrossBundle === false) and
+	// the overlay falls through to the legacy single-Bundle commit path.
+	// When the bulk spans 2+ Bundles, the gizmo anchors at the cross-
+	// Bundle Pivot, the commit goes through `controller.commitDelta` (one
+	// multi-Bundle HistoryCommit), and the marquee dispatch walks every
+	// loaded + visible AI sections instance instead of just this overlay's.
+	const crossBundle = useCrossBundleBulkController();
 	// Resolve "this overlay's bulk" via the workspace bulk's per-instance
 	// lookup. When `bundleId`/`index` are missing (legacy single-resource
 	// page route) we synthesise an empty handle so the rest of the overlay
@@ -318,7 +329,16 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		return seen.size;
 	}, [bulkRefs]);
 
-	const isBulkActive = bulkEntityCount >= 2;
+	const isBulkActive = bulkEntityCount >= 2 || crossBundle.isCrossBundle;
+	// True when the bulk extends BEYOND this overlay's own (bundleId,
+	// index) — at least one other Bundle has its own non-empty bulk
+	// participating in the same gesture. The gizmo's pivot / refs / commit
+	// path branches on this: cross-Bundle gestures route through
+	// `setResourcesMulti` (one multi-Bundle HistoryCommit per gesture),
+	// single-Bundle ones stay on the legacy `onChange` → `setResourceAt`
+	// path (one single-Bundle HistoryCommit). Both produce exactly ONE
+	// Workspace-undo entry per gesture (CONTEXT.md / "Bulk transform").
+	const useCrossBundlePath = crossBundle.isCrossBundle;
 
 	// Per-section ground Y (issue #27). Derived once per data change from
 	// portal Ys plus a BFS through the section graph for portal-less sections.
@@ -339,9 +359,15 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	const bulkPivotRef = useRef<{ x: number; y: number; z: number } | null>(null);
 	const bulkPivotMedian = useMemo<{ x: number; y: number; z: number } | null>(() => {
 		if (!isBulkActive) return null;
+		// Cross-Bundle bulks anchor at the median across every slice's
+		// spatial samples — the cross-Bundle Pivot the controller exposes
+		// (issue #80 / CONTEXT.md / "Pivot"). The single-Bundle pivot
+		// stays scoped to this overlay's own data so legacy single-Bundle
+		// gestures don't pick up phantom samples from cross-Bundle code.
+		if (useCrossBundlePath) return crossBundle.pivot;
 		const yResolver = (idx: number) => (idx < sectionYs.length ? sectionYs[idx] : 0);
 		return bulkSelectionPivot(data, bulkRefs, yResolver);
-	}, [isBulkActive, bulkRefs, data, sectionYs]);
+	}, [isBulkActive, useCrossBundlePath, crossBundle.pivot, bulkRefs, data, sectionYs]);
 
 	// **Pivot drag-reposition** (issue #76 / CONTEXT.md / "Pivot"). The user
 	// can grab the dedicated pivot handle on the gizmo and drop it anywhere
@@ -790,8 +816,38 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		setDrag(null);
 		const snapshotPivot = bulkPivotRef.current;
 		bulkPivotRef.current = null;
-		if (!gizmoTarget || !onChange) return;
+		if (!gizmoTarget) return;
 		if (isIdentityDelta(delta)) return;
+		// Cross-Bundle bulk gesture (issue #80): route through the
+		// workspace-level controller so every affected Bundle is
+		// independently dirtied and one multi-Bundle HistoryCommit covers
+		// the whole gesture. The active overlay's own bundle is included
+		// as one slice among many — its single-Bundle `onChange` path is
+		// intentionally skipped here to avoid double-writing this slice
+		// (once via the per-Bundle dispatch, again via `onChange` →
+		// `setResourceAt`).
+		if (
+			gizmoTarget.kind === 'bulk' &&
+			useCrossBundlePath &&
+			snapshotPivot
+		) {
+			const written = crossBundle.commitDelta(
+				{ x: snapshotPivot.x, z: snapshotPivot.z },
+				{
+					translate: delta.translate,
+					rotateY: delta.rotate.y,
+				},
+			);
+			// `written === 0` means every slice resolved to a no-op (the
+			// model-reference identity guard in `buildCrossBundleWrites`).
+			// No history entry to push; the gesture is a true no-op.
+			void written;
+			return;
+		}
+		// Single-Bundle path — unchanged from the pre-issue-#80 shape
+		// (one setResourceAt → one HistoryCommit, regression-guarded by
+		// the existing #74 tests).
+		if (!onChange) return;
 		// For bulk commits, use the snapshotted pivot from the gesture's
 		// first frame — NOT a freshly-computed median (which would have
 		// moved with the preview).
@@ -814,7 +870,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		// ops mutate more sections per gesture, they still produce ONE
 		// resulting model committed via ONE onChange call.
 		onChange(next);
-	}, [data, gizmoTarget, onChange]);
+	}, [data, gizmoTarget, onChange, useCrossBundlePath, crossBundle]);
 
 	const handleGizmoCancel = useCallback(() => {
 		setDrag(null);
@@ -892,32 +948,24 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		setEdgeMenu(null);
 	}, [data, edgeMenu, onChange, onSelect]);
 
-	// Marquee wiring: pick AI sections whose corner-centroid is inside the
-	// dragged rectangle and union/subtract their schema paths into the
-	// workspace bulk. Sections store XY corners on the Y=0 ground plane
-	// (height is implicit), so the centroid we project is (avgX, 0, avgY).
-	// Routes through `sectionBulk.onApplyPaths` — the workspace-side bulk —
-	// so the right-sidebar BulkPanelStack, the tree's amber rows, and the
-	// persistent yellow-outline-with-portals overlay rendering all light up
-	// in one dispatch.
+	// Marquee wiring (issue #80 cross-Bundle): the marquee delegates to
+	// the workspace-level dispatcher so a rectangle spanning N Bundles
+	// hits every loaded + visible AI sections instance, not just this
+	// overlay's. Each Bundle's bulk is dispatched independently via
+	// `onBulkApplyPaths(bundleId, index, hits, mode)` — invisible
+	// Bundles / resource-types / instances are filtered out by the
+	// controller's per-instance visibility check, so a hidden Bundle's
+	// sections are never picked up even if they sit inside the marquee
+	// rectangle (acceptance criterion: "Invisible Bundles are not part
+	// of the Selection"). Routes through the same WORKSPACE
+	// `onBulkApplyPaths` the single-Bundle path used so the right-sidebar
+	// BulkPanelStack, the tree's amber rows, and the persistent yellow
+	// outline overlay rendering all light up in one dispatch per Bundle.
 	const handleMarquee = useCallback(
 		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
-			if (!sectionBulk) return;
-			const hits: NodePath[] = [];
-			const pt = new THREE.Vector3();
-			for (let i = 0; i < data.sections.length; i++) {
-				const corners = data.sections[i].corners;
-				if (corners.length === 0) continue;
-				let sx = 0, sy = 0;
-				for (const c of corners) { sx += c.x; sy += c.y; }
-				const n = corners.length;
-				pt.set(sx / n, 0, sy / n);
-				if (frustum.containsPoint(pt)) hits.push(['sections', i]);
-			}
-			if (hits.length === 0) return;
-			sectionBulk.onApplyPaths(hits, mode);
+			crossBundle.marqueeDispatch(frustum, mode);
 		},
-		[data, sectionBulk],
+		[crossBundle],
 	);
 
 	return (
@@ -1051,7 +1099,14 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				/>
 			)}
 
-			{gizmoPosition && (
+			{/* Gizmo gates on `isActive` so cross-Bundle gestures show
+			    exactly one gizmo on screen (per ADR-0010): the overlay
+			    matching the current selection renders it, every other
+			    overlay's gizmoPosition is suppressed. When no selection
+			    is in any AI Sections instance, no gizmo renders — the
+			    user clicks any section first to anchor the affordance,
+			    even for a cross-Bundle marquee. */}
+			{isActive && gizmoPosition && (
 				<BulkTransformGizmo
 					position={gizmoPosition}
 					pixelSize={gizmoPixelSize}

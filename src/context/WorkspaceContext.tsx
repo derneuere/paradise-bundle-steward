@@ -54,6 +54,7 @@ import type {
 	BundleId,
 	EditableBundle,
 	HistoryCommit,
+	HistoryCommitEntry,
 	VisibilityNode,
 	WorkspaceContextValue,
 	WorkspaceProviderProps,
@@ -252,6 +253,101 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 		[setResourceAt],
 	);
 
+	// Multi-Bundle write — one HistoryCommit of kind 'multi' covers N
+	// per-(bundleId, resourceKey, index) writes. Each affected Bundle is
+	// dirtied independently (separate dirtyMulti entries + isModified flag),
+	// but the workspace-wide history stack grows by exactly one entry. Drives
+	// the cross-Bundle bulk transform (issue #80 / CONTEXT.md "Bulk transform"
+	// cross-Bundle paragraph): a marquee that spans two Bundles + drag of the
+	// gizmo produces one atomic undo step. Writes to unloaded Bundle ids are
+	// dropped — keeps the caller from having to filter against the live
+	// bundles list across an async boundary.
+	const setResourcesMulti = useCallback(
+		(
+			writes: readonly {
+				bundleId: BundleId;
+				resourceKey: string;
+				index: number;
+				value: unknown;
+			}[],
+		) => {
+			if (writes.length === 0) return;
+			// Snapshot prior values via the live bundles list so we can build
+			// the HistoryCommitEntry shape with the correct `previous`. Writes
+			// targeting unloaded Bundles are filtered here so the resulting
+			// history entry never references a stale Bundle id.
+			const liveBundles = bundlesRef.current;
+			const entries: HistoryCommitEntry[] = [];
+			for (const w of writes) {
+				const b = liveBundles.find((x) => x.id === w.bundleId);
+				if (!b) continue;
+				const previous = b.parsedResourcesAll.get(w.resourceKey)?.[w.index] ?? null;
+				entries.push({
+					bundleId: w.bundleId,
+					resourceKey: w.resourceKey,
+					index: w.index,
+					previous,
+					next: w.value,
+				});
+			}
+			if (entries.length === 0) return;
+			// Two writes targeting the same `(bundleId, resourceKey, index)` in
+			// one dispatch is malformed — the second would clobber the first's
+			// `next` snapshot reading. We accept callers will rarely hit this
+			// (group-by-bundle in the dispatch layer already collapses per-
+			// bundle refs into a single value) so we don't defend against it
+			// here; the test suite asserts the documented single-write-per-triple
+			// invariant.
+			//
+			// Multi commit shape uses the same flat field layout as a
+			// single-Bundle commit (preserves backwards compatibility on the
+			// top-level fields) with `kind: 'multi'` + `entries` as the
+			// discriminator. The flat top-level fields are placeholder zeros
+			// — readers branch on `kind === 'multi'` before touching them.
+			const first = entries[0];
+			const multiCommit: HistoryCommit = {
+				bundleId: first.bundleId,
+				resourceKey: first.resourceKey,
+				index: first.index,
+				previous: null,
+				next: null,
+				kind: 'multi',
+				entries,
+			};
+			setHistory((prev) => recordCommit<HistoryCommit>(prev, multiCommit));
+			// Group entries by bundleId so each affected Bundle's record is
+			// rebuilt once (cumulative writes across keys/indexes inside one
+			// Bundle apply as one chained reduce — avoids stacking three Bundle
+			// records when three writes hit the same Bundle).
+			const byBundle = new Map<BundleId, HistoryCommitEntry[]>();
+			for (const e of entries) {
+				const list = byBundle.get(e.bundleId) ?? [];
+				list.push(e);
+				byBundle.set(e.bundleId, list);
+			}
+			// Apply every write in a single setBundles pass so React batches
+			// the resulting render — avoids a flash where some Bundles have
+			// updated and others haven't between consecutive setState calls.
+			setBundles((prev) =>
+				prev.map((b) => {
+					const writesForBundle = byBundle.get(b.id);
+					if (!writesForBundle) return b;
+					let nextBundle = b;
+					for (const e of writesForBundle) {
+						nextBundle = applyResourceWriteToBundle(
+							nextBundle,
+							e.resourceKey,
+							e.index,
+							e.next,
+						);
+					}
+					return nextBundle;
+				}),
+			);
+		},
+		[],
+	);
+
 	// Selection --------------------------------------------------------------
 
 	const select = useCallback((next: WorkspaceSelection) => {
@@ -285,11 +381,67 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 	}, []);
 
 	// Undo / redo ------------------------------------------------------------
+	//
+	// Both directions handle two HistoryCommit shapes:
+	//   - Single-Bundle (legacy): { bundleId, resourceKey, index, previous,
+	//     next } — kind omitted. The original pre-issue-#80 shape.
+	//   - Multi-Bundle (issue #80): { kind: 'multi', entries: [...] } — N
+	//     per-Bundle snapshots reverted/replayed atomically.
+	//
+	// In both cases we always read the *live* current value from the bundles
+	// map (not from the stack) when building the future/past head — matches
+	// the original single-Bundle approach and keeps non-tracked replaces
+	// (load, save) from desyncing.
 
 	const undo = useCallback(() => {
 		setHistory((prev) => {
 			const top = prev.past[prev.past.length - 1];
 			if (!top) return prev;
+			if (top.kind === 'multi' && top.entries) {
+				// Build `actualCurrent` by reading every live entry's current
+				// value, then revert every entry to its `previous` snapshot in
+				// one setBundles pass — atomic across N Bundles.
+				const topEntries = top.entries;
+				const liveEntries: HistoryCommitEntry[] = topEntries.map((e) => {
+					const live = bundles.find((b) => b.id === e.bundleId);
+					return {
+						bundleId: e.bundleId,
+						resourceKey: e.resourceKey,
+						index: e.index,
+						previous: e.previous,
+						next: live?.parsedResourcesAll.get(e.resourceKey)?.[e.index] ?? null,
+					};
+				});
+				const actualCurrent: HistoryCommit = {
+					bundleId: top.bundleId,
+					resourceKey: top.resourceKey,
+					index: top.index,
+					previous: null,
+					next: null,
+					kind: 'multi',
+					entries: liveEntries,
+				};
+				const out = recordUndo<HistoryCommit>(prev, actualCurrent);
+				if (!out) return prev;
+				const byBundle = new Map<BundleId, HistoryCommitEntry[]>();
+				for (const e of topEntries) {
+					const list = byBundle.get(e.bundleId) ?? [];
+					list.push(e);
+					byBundle.set(e.bundleId, list);
+				}
+				setBundles((prevBundles) =>
+					prevBundles.map((b) => {
+						const writes = byBundle.get(b.id);
+						if (!writes) return b;
+						let nb = b;
+						for (const e of writes) {
+							nb = applyResourceWriteToBundle(nb, e.resourceKey, e.index, e.previous);
+						}
+						return nb;
+					}),
+				);
+				return out.stack;
+			}
 			// Read the current value from the live bundles array — same
 			// reasoning as in BundleContext: the source of truth is the model
 			// store, not the history stack, so non-tracked replaces (load,
@@ -313,6 +465,48 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 		setHistory((prev) => {
 			const head = prev.future[0];
 			if (!head) return prev;
+			if (head.kind === 'multi' && head.entries) {
+				const headEntries = head.entries;
+				const liveEntries: HistoryCommitEntry[] = headEntries.map((e) => {
+					const live = bundles.find((b) => b.id === e.bundleId);
+					return {
+						bundleId: e.bundleId,
+						resourceKey: e.resourceKey,
+						index: e.index,
+						previous: live?.parsedResourcesAll.get(e.resourceKey)?.[e.index] ?? null,
+						next: e.next,
+					};
+				});
+				const actualCurrent: HistoryCommit = {
+					bundleId: head.bundleId,
+					resourceKey: head.resourceKey,
+					index: head.index,
+					previous: null,
+					next: null,
+					kind: 'multi',
+					entries: liveEntries,
+				};
+				const out = recordRedo<HistoryCommit>(prev, actualCurrent);
+				if (!out) return prev;
+				const byBundle = new Map<BundleId, HistoryCommitEntry[]>();
+				for (const e of headEntries) {
+					const list = byBundle.get(e.bundleId) ?? [];
+					list.push(e);
+					byBundle.set(e.bundleId, list);
+				}
+				setBundles((prevBundles) =>
+					prevBundles.map((b) => {
+						const writes = byBundle.get(b.id);
+						if (!writes) return b;
+						let nb = b;
+						for (const e of writes) {
+							nb = applyResourceWriteToBundle(nb, e.resourceKey, e.index, e.next);
+						}
+						return nb;
+					}),
+				);
+				return out.stack;
+			}
 			const live = bundles.find((b) => b.id === head.bundleId);
 			const actualCurrent: HistoryCommit = {
 				bundleId: head.bundleId,
@@ -574,6 +768,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 			getResources,
 			setResource,
 			setResourceAt,
+			setResourcesMulti,
 			selection,
 			select,
 			isVisible,
@@ -602,6 +797,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 			getResources,
 			setResource,
 			setResourceAt,
+			setResourcesMulti,
 			selection,
 			select,
 			isVisible,
