@@ -6,7 +6,7 @@
 
 import type { ParsedBundle } from '../types';
 import { extractResourceRaw } from './extract';
-import { registry, getHandlerByTypeId } from './index';
+import { registry } from './index';
 import { resourceCtxFromBundle } from './handler';
 
 /**
@@ -82,11 +82,3 @@ export function parseAllBundleResourcesViaRegistry(
 	return out;
 }
 
-/**
- * Convenience lookup used by the UI during Step 6. Returns the raw handler
- * so callers can also reach describe() / caps / name.
- */
-export function findHandlerForResource(bundle: ParsedBundle, typeId: number) {
-	if (!bundle.resources.some((r) => r.resourceTypeId === typeId)) return undefined;
-	return getHandlerByTypeId(typeId);
-}
