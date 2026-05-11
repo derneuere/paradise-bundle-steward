@@ -41,7 +41,7 @@ export type ImportMode = 'append' | 'replace';
  */
 export const NO_LINK_SENTINEL = 0xffff;
 
-export type UnlinkedPortal = {
+type UnlinkedPortal = {
 	/** Index in the FINAL destination list — i.e. after Append/Replace
 	 *  placement. */
 	destinationSectionIdx: number;
