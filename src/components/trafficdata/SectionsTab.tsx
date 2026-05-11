@@ -19,16 +19,16 @@ export const SectionsTab: React.FC<Props> = ({ data, hullIndex, onChange, select
 	const [search, setSearch] = useState('');
 	const parentRef = useRef<HTMLDivElement>(null);
 	const hull = data.hulls[hullIndex];
-	if (!hull) return null;
 
 	const filtered = useMemo(() => {
+		if (!hull) return [];
 		let list = hull.sections.map((s, i) => ({ s, i }));
 		if (search) {
 			const q = search.toLowerCase();
 			list = list.filter(({ i }) => i.toString().includes(q));
 		}
 		return list;
-	}, [hull.sections, search]);
+	}, [hull, search]);
 
 	const rowVirtualizer = useVirtualizer({
 		count: filtered.length,
@@ -36,6 +36,8 @@ export const SectionsTab: React.FC<Props> = ({ data, hullIndex, onChange, select
 		estimateSize: () => 44,
 		overscan: 12,
 	});
+
+	if (!hull) return null;
 
 	scrollToIndexRef.current = (originalIndex: number) => {
 		const filteredIdx = filtered.findIndex(({ i }) => i === originalIndex);
