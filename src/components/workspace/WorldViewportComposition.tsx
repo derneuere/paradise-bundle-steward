@@ -152,7 +152,7 @@ function renderOverlay({ descriptor, selectedPath, onSelect, onChange, isActive,
  * machinery, no companion-bundle plumbing — so it composes cleanly with a
  * stub workspace value if a future test wants to mount the chrome.
  */
-export function WorldViewportCompositionInner({
+function WorldViewportCompositionInner({
 	bundles,
 	selection,
 	select,
@@ -282,10 +282,4 @@ export function WorldViewportComposition() {
 
 // Re-export the family typing so consumers (CenterViewport's branch) can
 // reuse the same membership predicate without duplicating the key list.
-export {
-	WORLD_VIEWPORT_FAMILY_KEYS,
-	isWorldViewportFamilyKey,
-	type WorldViewportFamilyKey,
-} from './WorldViewportComposition.helpers';
-
-export default WorldViewportComposition;
+export { isWorldViewportFamilyKey } from './WorldViewportComposition.helpers';
