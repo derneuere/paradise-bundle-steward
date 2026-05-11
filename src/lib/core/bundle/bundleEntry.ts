@@ -3,7 +3,6 @@
 import {
   object,
   arrayOf,
-  string,
   u8,
   u16,
   u32,
@@ -18,7 +17,7 @@ import { bigIntToU64, u64, u64ToBigInt } from '../u64';
 // Resource Entry Schema (80 bytes)
 // ============================================================================
 
-export const ResourceEntrySchema = object({
+const ResourceEntrySchema = object({
   resourceId: u64,       // 8 bytes
   importHash: u64,       // 8 bytes
   uncompressedSizeAndAlignment: arrayOf(u32, 3), // 12 bytes
@@ -35,7 +34,7 @@ export const ResourceEntrySchema = object({
 // Import Entry Schema (16 bytes)
 // ============================================================================
 
-export const ImportEntrySchema = object({
+const ImportEntrySchema = object({
   resourceId: u64,       // 8 bytes
   offset: u32,                 // 4 bytes
   padding: u32                 // 4 bytes - padding
@@ -50,34 +49,6 @@ export type ResourceEntry = Parsed<typeof ResourceEntrySchema>;
 
 // ImportEntry with bigint conversion for resourceId
 export type ImportEntry = Parsed<typeof ImportEntrySchema>;
-
-// ============================================================================
-// Bundle Writing Schemas
-// ============================================================================
-
-// Entry block schema for writing (matches the bundleWriter EntryBlock interface)
-export const EntryBlockWriteSchema = object({
-  compressed: u8,  // Convert boolean to byte
-  compressedSize: u32,
-  uncompressedSize: u32,
-  uncompressedAlignment: u32
-  // Note: data is handled separately as it can be large and variable
-});
-
-// Bundle entry schema for writing (matches bundleWriter BundleEntry interface)
-export const BundleEntryWriteSchema = object({
-  id: object({ low: u32, high: u32 }),
-  references: object({ low: u32, high: u32 }),
-  // entryBlocks handled separately
-  dependenciesListOffset: u32,
-  type: u32,
-  dependencyCount: u32
-});
-
-// Resource string table schema
-export const ResourceStringTableSchema = object({
-  content: string  // Null-terminated string
-});
 
 // ============================================================================
 // Entry Creation and Conversion Functions
@@ -96,53 +67,6 @@ export function createEmptyResourceEntry(): ResourceEntry {
     flags: 0,
     streamIndex: 0
   };
-}
-
-// Convert bigint to schema format for writing
-export function bundleEntryToSchema(entry: {
-  id: bigint;
-  references: bigint;
-  dependenciesListOffset: number;
-  type: number;
-  dependencyCount: number;
-}): Parsed<typeof BundleEntryWriteSchema> {
-  return {
-    id: { low: Number(entry.id & 0xFFFFFFFFn), high: Number((entry.id >> 32n) & 0xFFFFFFFFn) },
-    references: { low: Number(entry.references & 0xFFFFFFFFn), high: Number((entry.references >> 32n) & 0xFFFFFFFFn) },
-    dependenciesListOffset: entry.dependenciesListOffset,
-    type: entry.type,
-    dependencyCount: entry.dependencyCount
-  };
-}
-
-// Convert resource entry to schema format
-export function resourceEntryToSchema(entry: ResourceEntry): Parsed<typeof ResourceEntrySchema> {
-  return {
-    resourceId: entry.resourceId,
-    importHash: entry.importHash,
-    uncompressedSizeAndAlignment: entry.uncompressedSizeAndAlignment.slice(0, 3) as [number, number, number],
-    sizeAndAlignmentOnDisk: entry.sizeAndAlignmentOnDisk.slice(0, 3) as [number, number, number],
-    diskOffsets: entry.diskOffsets.slice(0, 3) as [number, number, number],
-    importOffset: entry.importOffset,
-    resourceTypeId: entry.resourceTypeId,
-    importCount: entry.importCount,
-    flags: entry.flags,
-    streamIndex: entry.streamIndex
-  };
-}
-
-// ============================================================================
-// Schema Factories for Fixed-Length Collections
-// ============================================================================
-
-// Fixed-length resource entries array
-export function makeResourceEntriesSchema(count: number) {
-  return arrayOf(ResourceEntrySchema, count);
-}
-
-// Fixed-length import entries array
-export function makeImportEntriesSchema(count: number) {
-  return arrayOf(ImportEntrySchema, count);
 }
 
 // ============================================================================
