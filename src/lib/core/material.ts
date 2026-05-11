@@ -38,7 +38,7 @@
 import { BinReader, BinWriter } from './binTools';
 
 export const MATERIAL_TYPE_ID = 0x00000001;
-export const MATERIAL_IMPORT_ENTRY_SIZE = 0x10;
+const MATERIAL_IMPORT_ENTRY_SIZE = 0x10;
 /** Minimum offset of the import table — the 0x24-byte header is the shortest
  *  Material body we could plausibly see. Used as a sanity bound on parse. */
 const MATERIAL_MIN_HEADER_SIZE = 0x24;
