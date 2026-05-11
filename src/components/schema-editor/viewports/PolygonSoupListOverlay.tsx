@@ -634,5 +634,3 @@ export const PolygonSoupListOverlay = ({
 		</>
 	);
 };
-
-export default PolygonSoupListOverlay;
