@@ -319,18 +319,7 @@ function computeRotateDelta(
 	while (theta > Math.PI) theta -= 2 * Math.PI;
 	while (theta < -Math.PI) theta += 2 * Math.PI;
 
-	// Invert when the camera looks at the rotation axis from the back — so
-	// dragging the cursor right always feels like clockwise rotation from
-	// the user's perspective. The fix: take the dot of the world axis with
-	// the vector from camera to pivot; positive means the camera is on the
-	// axis side, negative means we need to flip the sign.
-	//
-	// For a top-down camera looking at +Y rotation: cam→pivot has `y < 0`,
-	// axisWorld is +Y, so dot is negative — we flip θ. Result: dragging
-	// right rotates yaw clockwise as seen from above, matching the screen.
-	const camToPivot = start.pivot.clone().sub(camera.position);
-	const sign = axisWorld.dot(camToPivot) >= 0 ? 1 : -1;
-	theta *= sign;
+	theta *= rotationSignForCameraSide(axisWorld, camera.position, start.pivot);
 
 	return {
 		translate: { x: 0, y: 0, z: 0 },
@@ -346,6 +335,38 @@ function computeRotateDelta(
 // =============================================================================
 // Helpers
 // =============================================================================
+
+/**
+ * Match the rotation direction to the cursor's screen motion regardless of
+ * which side of the rotation axis the camera sits on. Three.js's positive
+ * rotation around `+axisWorld` maps the next-axis-in-RH-order onto the
+ * following one (e.g. `+Y` rotation maps `+X → +Z`); from a camera **looking
+ * down** `-axisWorld`, that motion reads as clockwise on screen and matches
+ * a positive `atan2(dy, dx)` from `(dx, dy)` measured in screen pixels.
+ *
+ * Concretely for the typical top-down map view: camera at `(_, +y, _)`,
+ * pivot at origin, `axisWorld = (0, 1, 0)`. `cam → pivot = pivot - camera`
+ * has `y < 0`, so `axisWorld · camToPivot < 0` ⇒ **no flip** (sign = +1).
+ * The user drags the ring right, raw θ is positive, the geometry rotates
+ * clockwise on screen — direction matches.
+ *
+ * When the camera is on the `+axisWorld` side instead (looking *up* the
+ * axis from below), screen motion mirrors, so we flip the sign. The same
+ * predicate generalises to pitch (X) and roll (Z) for cameras that ever
+ * orbit there — though for AI sections in this codebase, pitch and roll
+ * rings are auto-disabled per ADR-0011 and only yaw is exercisable.
+ *
+ * Pure function so the gizmo's sign convention can be regression-tested
+ * without mounting an R3F context.
+ */
+export function rotationSignForCameraSide(
+	axisWorld: THREE.Vector3,
+	cameraPosition: THREE.Vector3,
+	pivot: THREE.Vector3,
+): 1 | -1 {
+	const camToPivot = pivot.clone().sub(cameraPosition);
+	return axisWorld.dot(camToPivot) >= 0 ? -1 : 1;
+}
 
 export function identityDelta(cascade = false): BulkTransformDelta {
 	return {
