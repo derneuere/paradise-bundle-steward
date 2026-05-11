@@ -23,7 +23,7 @@ import { ChallengesTab } from '@/components/streetdata/ChallengesTab';
 // Adapters — every one is WholeResource (legacy whole-tree tabs).
 // ---------------------------------------------------------------------------
 
-export const StreetDataOverviewExtension: React.FC<WholeResourceExtensionProps> = ({
+const StreetDataOverviewExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 }) => (
@@ -33,28 +33,28 @@ export const StreetDataOverviewExtension: React.FC<WholeResourceExtensionProps> 
 	/>
 );
 
-export const StreetsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const StreetsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<StreetsTab
 		data={data as ParsedStreetData}
 		onChange={setData as (next: ParsedStreetData) => void}
 	/>
 );
 
-export const JunctionsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const JunctionsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<JunctionsTab
 		data={data as ParsedStreetData}
 		onChange={setData as (next: ParsedStreetData) => void}
 	/>
 );
 
-export const RoadsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const RoadsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<RoadsTab
 		data={data as ParsedStreetData}
 		onChange={setData as (next: ParsedStreetData) => void}
 	/>
 );
 
-export const ChallengesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const ChallengesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<ChallengesTab
 		data={data as ParsedStreetData}
 		onChange={setData as (next: ParsedStreetData) => void}
