@@ -123,7 +123,7 @@ export type WorldOverlayComponent<T = unknown> = (props: WorldOverlayProps<T>) =
  * multi-overlay composition is "give it more children," with no descriptor
  * gymnastics.
  */
-export type WorldViewportProps = {
+type WorldViewportProps = {
 	children: ReactNode;
 };
 
