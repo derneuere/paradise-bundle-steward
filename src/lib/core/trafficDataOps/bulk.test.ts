@@ -1,8 +1,9 @@
 // Unit tests for trafficDataOps — single-entity translate, bulk translate,
 // bulk yaw rotate (with rigid-body .w composition for yaw-packed boxes),
-// axes intersection contribution.
+// bulk Matrix44 rotate (full 3-axis for static vehicles), axes intersection.
 
 import { describe, it, expect } from 'vitest';
+import * as THREE from 'three';
 import type {
 	ParsedTrafficDataRetail,
 	TrafficHull,
@@ -10,13 +11,17 @@ import type {
 	TrafficLaneRung,
 	TrafficLightCollection,
 	TrafficLightTrigger,
+	TrafficStaticVehicle,
 	Vec4,
 } from '../trafficData';
 import {
+	TRAFFIC_STATIC_VEHICLE_AXES,
 	TRAFFIC_YAW_PACKED_AXES,
+	bulkRotateTrafficEntitiesMatrix44,
 	bulkRotateTrafficEntitiesYaw,
 	bulkTrafficDataAxes,
 	bulkTranslateTrafficEntities,
+	trafficDataRefAxes,
 	trafficDataSelectionPivot,
 	translateCoronaRigid,
 	translateJunctionRigid,
@@ -25,6 +30,7 @@ import {
 	translateLightTriggerRigid,
 	type TrafficDataEntityRef,
 } from '.';
+import { intersectTransformAxes } from '../transformAxes';
 
 // ---------------------------------------------------------------------------
 // Fixtures — minimal valid retail model. Most arrays are empty; we only
@@ -64,10 +70,34 @@ function makeRung(a: Vec4, b: Vec4): TrafficLaneRung {
 	return { maPoints: [a, b] };
 }
 
+/** Build a `TrafficStaticVehicle` from a translation + Euler rotation,
+ *  composing via `THREE.Matrix4` so the storage layout (column-major) is
+ *  the canonical one — same shape `readMatrix` consumes. */
+function makeStaticVehicle(
+	pos: { x: number; y: number; z: number },
+	euler: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 },
+): TrafficStaticVehicle {
+	const mat = new THREE.Matrix4().compose(
+		new THREE.Vector3(pos.x, pos.y, pos.z),
+		new THREE.Quaternion().setFromEuler(new THREE.Euler(euler.x, euler.y, euler.z, 'XYZ')),
+		new THREE.Vector3(1, 1, 1),
+	);
+	const arr = mat.toArray();
+	arr[3] = 0; arr[7] = 0; arr[11] = 0; arr[15] = 0;
+	return {
+		mTransform: arr,
+		mFlowTypeID: 0,
+		mExistsAtAllChance: 0,
+		muFlags: 0,
+		_pad43: new Array(12).fill(0),
+	};
+}
+
 function makeHull(opts: {
 	junctions?: TrafficJunctionLogicBox[];
 	lightTriggers?: TrafficLightTrigger[];
 	rungs?: TrafficLaneRung[];
+	staticVehicles?: TrafficStaticVehicle[];
 } = {}): TrafficHull {
 	return {
 		muNumSections: 0,
@@ -75,7 +105,7 @@ function makeHull(opts: {
 		muNumJunctions: opts.junctions?.length ?? 0,
 		muNumStoplines: 0,
 		muNumNeighbours: 0,
-		muNumStaticTraffic: 0,
+		muNumStaticTraffic: opts.staticVehicles?.length ?? 0,
 		muNumVehicleAssets: 0,
 		_pad07: 0,
 		muNumRungs: opts.rungs?.length ?? 0,
@@ -88,7 +118,7 @@ function makeHull(opts: {
 		cumulativeRungLengths: [],
 		neighbours: [],
 		sectionSpans: [],
-		staticTrafficVehicles: [],
+		staticTrafficVehicles: opts.staticVehicles ?? [],
 		sectionFlows: [],
 		junctions: opts.junctions ?? [],
 		stopLines: [],
@@ -425,7 +455,7 @@ describe('trafficDataSelectionPivot', () => {
 // ---------------------------------------------------------------------------
 
 describe('bulkTrafficDataAxes', () => {
-	it('reports yaw-only for any non-empty traffic Selection', () => {
+	it('reports yaw-only for a yaw-packed Selection', () => {
 		const axes = bulkTrafficDataAxes([
 			{ kind: 'junction', hullIdx: 0, junctionIdx: 0 },
 		]);
@@ -444,7 +474,277 @@ describe('bulkTrafficDataAxes', () => {
 		expect(axes?.rotate.z).toBe(false);
 	});
 
+	it('reports full 3-axis rotate for a pure static-vehicle Selection (issue #78)', () => {
+		const axes = bulkTrafficDataAxes([
+			{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+		]);
+		expect(axes?.rotate.x).toBe(true);
+		expect(axes?.rotate.y).toBe(true);
+		expect(axes?.rotate.z).toBe(true);
+	});
+
+	it('AND-intersects: static vehicle + yaw-packed sibling → yaw-only (ADR-0011)', () => {
+		const axes = bulkTrafficDataAxes([
+			{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+			{ kind: 'junction', hullIdx: 0, junctionIdx: 0 },
+		]);
+		expect(axes?.rotate.x).toBe(false);
+		expect(axes?.rotate.y).toBe(true);
+		expect(axes?.rotate.z).toBe(false);
+	});
+
+	it('AND-intersects: static vehicle + lane rung → yaw-only', () => {
+		const axes = bulkTrafficDataAxes([
+			{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+			{ kind: 'laneRung', hullIdx: 0, rungIdx: 0 },
+		]);
+		expect(axes?.rotate.x).toBe(false);
+		expect(axes?.rotate.y).toBe(true);
+		expect(axes?.rotate.z).toBe(false);
+	});
+
 	it('returns null for empty refs', () => {
 		expect(bulkTrafficDataAxes([])).toBeNull();
+	});
+
+	it('per-ref helper: trafficDataRefAxes(staticVehicle) reports full 3D', () => {
+		expect(trafficDataRefAxes({ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 })).toEqual(
+			TRAFFIC_STATIC_VEHICLE_AXES,
+		);
+	});
+
+	it('per-ref helper: trafficDataRefAxes(junction) reports yaw-only', () => {
+		expect(trafficDataRefAxes({ kind: 'junction', hullIdx: 0, junctionIdx: 0 })).toEqual(
+			TRAFFIC_YAW_PACKED_AXES,
+		);
+	});
+
+	it('cross-resource: static vehicle + simulated trigger-box (FULL_3D) → all 3 axes (issue #77 + #78)', () => {
+		// Trigger boxes are full-3D; mixing them with a static vehicle should
+		// keep the rotate rings interactive on all three axes.
+		const svAxes = bulkTrafficDataAxes([
+			{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+		])!;
+		const triggerAxes = { translate: { x: true, y: true, z: true }, rotate: { x: true, y: true, z: true } };
+		const intersected = intersectTransformAxes([svAxes, triggerAxes]);
+		expect(intersected.rotate.x).toBe(true);
+		expect(intersected.rotate.y).toBe(true);
+		expect(intersected.rotate.z).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Static vehicle — single + bulk + cross-validation (issue #78)
+// ---------------------------------------------------------------------------
+
+describe('bulkTranslateTrafficEntities — static vehicles', () => {
+	it('shifts the translation column of every selected vehicle by the same delta', () => {
+		const a = makeStaticVehicle({ x: 0, y: 0, z: 0 });
+		const b = makeStaticVehicle({ x: 10, y: 0, z: 0 });
+		const model = makeModel({ hulls: [makeHull({ staticVehicles: [a, b] })] });
+		const next = bulkTranslateTrafficEntities(
+			model,
+			[
+				{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+				{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 1 },
+			],
+			{ x: 1, y: 2, z: 3 },
+		);
+		const v0 = next.hulls[0].staticTrafficVehicles[0];
+		const v1 = next.hulls[0].staticTrafficVehicles[1];
+		expect(v0.mTransform[12]).toBe(1);
+		expect(v0.mTransform[13]).toBe(2);
+		expect(v0.mTransform[14]).toBe(3);
+		expect(v1.mTransform[12]).toBe(11);
+		expect(v1.mTransform[13]).toBe(2);
+		expect(v1.mTransform[14]).toBe(3);
+	});
+
+	it('mixed Selection (static vehicle + junction): every entity moves by the delta', () => {
+		const sv = makeStaticVehicle({ x: 5, y: 5, z: 5 });
+		const model = makeModel({
+			hulls: [
+				makeHull({
+					junctions: [makeJunction(vec4(0, 0, 0, 1.0))],
+					staticVehicles: [sv],
+				}),
+			],
+		});
+		const next = bulkTranslateTrafficEntities(
+			model,
+			[
+				{ kind: 'junction', hullIdx: 0, junctionIdx: 0 },
+				{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+			],
+			{ x: 2, y: 0, z: -1 },
+		);
+		expect(next.hulls[0].junctions[0].mPosition).toEqual({ x: 2, y: 0, z: -1, w: 1.0 });
+		const svNext = next.hulls[0].staticTrafficVehicles[0];
+		expect(svNext.mTransform[12]).toBe(7);
+		expect(svNext.mTransform[13]).toBe(5);
+		expect(svNext.mTransform[14]).toBe(4);
+	});
+
+	it('returns the original model on identity offset', () => {
+		const sv = makeStaticVehicle({ x: 0, y: 0, z: 0 });
+		const model = makeModel({ hulls: [makeHull({ staticVehicles: [sv] })] });
+		expect(
+			bulkTranslateTrafficEntities(
+				model,
+				[{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 }],
+				{ x: 0, y: 0, z: 0 },
+			),
+		).toBe(model);
+	});
+});
+
+describe('bulkRotateTrafficEntitiesMatrix44 — static vehicles', () => {
+	it('rotates a single vehicle around its own position: position unchanged, facing rotates by delta', () => {
+		const pos = { x: 7, y: 0, z: -5 };
+		const v = makeStaticVehicle(pos);
+		const model = makeModel({ hulls: [makeHull({ staticVehicles: [v] })] });
+		const next = bulkRotateTrafficEntitiesMatrix44(
+			model,
+			[{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 }],
+			pos,
+			{ x: 0, y: Math.PI / 2, z: 0 },
+		);
+		const m = next.hulls[0].staticTrafficVehicles[0].mTransform;
+		expect(m[12]).toBeCloseTo(pos.x, 5);
+		expect(m[13]).toBeCloseTo(pos.y, 5);
+		expect(m[14]).toBeCloseTo(pos.z, 5);
+	});
+
+	it('rotates two vehicles around a common pivot: pairwise distance preserved', () => {
+		const a = makeStaticVehicle({ x: 0, y: 0, z: 0 });
+		const b = makeStaticVehicle({ x: 20, y: 0, z: 0 });
+		const model = makeModel({ hulls: [makeHull({ staticVehicles: [a, b] })] });
+		const next = bulkRotateTrafficEntitiesMatrix44(
+			model,
+			[
+				{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+				{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 1 },
+			],
+			{ x: 10, y: 0, z: 0 },
+			{ x: 0, y: Math.PI / 3, z: 0 },
+		);
+		const ta = next.hulls[0].staticTrafficVehicles[0].mTransform;
+		const tb = next.hulls[0].staticTrafficVehicles[1].mTransform;
+		const dist = Math.hypot(tb[12] - ta[12], tb[13] - ta[13], tb[14] - ta[14]);
+		expect(dist).toBeCloseTo(20, 4);
+	});
+
+	it('returns the original model on identity rotation', () => {
+		const sv = makeStaticVehicle({ x: 0, y: 0, z: 0 });
+		const model = makeModel({ hulls: [makeHull({ staticVehicles: [sv] })] });
+		expect(
+			bulkRotateTrafficEntitiesMatrix44(
+				model,
+				[{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 }],
+				{ x: 0, y: 0, z: 0 },
+				{ x: 0, y: 0, z: 0 },
+			),
+		).toBe(model);
+	});
+
+	it('no-op rotate returns the SAME mTransform reference (byte-for-byte writeback)', () => {
+		// Critical invariant: byte-for-byte BND2 writeback survives a
+		// no-op rotate gesture. The reference equality on `mTransform`
+		// (not just deep-equality) is what guarantees the writer emits
+		// identical bytes — and per the contract, `===` survives because
+		// the op short-circuits on identity delta.
+		const sv = makeStaticVehicle({ x: 12, y: 3, z: -4 }, { x: 0.1, y: 0.2, z: 0 });
+		const model = makeModel({ hulls: [makeHull({ staticVehicles: [sv] })] });
+		const next = bulkRotateTrafficEntitiesMatrix44(
+			model,
+			[{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 }],
+			{ x: 0, y: 0, z: 0 },
+			{ x: 0, y: 0, z: 0 },
+		);
+		expect(next.hulls[0].staticTrafficVehicles[0].mTransform).toBe(sv.mTransform);
+	});
+});
+
+describe('bulkRotateTrafficEntitiesYaw — static vehicles take the same yaw delta', () => {
+	it('static vehicle position orbits the pivot AND its mTransform rotation portion picks up the yaw delta', () => {
+		const sv = makeStaticVehicle({ x: 10, y: 0, z: 0 });
+		const model = makeModel({ hulls: [makeHull({ staticVehicles: [sv] })] });
+		const next = bulkRotateTrafficEntitiesYaw(
+			model,
+			[{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 }],
+			{ x: 0, z: 0 },
+			Math.PI / 2,
+		);
+		const m = next.hulls[0].staticTrafficVehicles[0].mTransform;
+		// Position orbits to (0, 0, -10) — three.js right-hand convention,
+		// same as the trigger-box adapter (issue #77).
+		expect(m[12]).toBeCloseTo(0, 5);
+		expect(m[14]).toBeCloseTo(-10, 5);
+	});
+
+	it('static vehicle yaw rotate is identical to the Matrix44 path with delta.y only', () => {
+		const sv = makeStaticVehicle({ x: 25, y: 5, z: -10 }, { x: 0, y: 0.4, z: 0 });
+		const model1 = makeModel({ hulls: [makeHull({ staticVehicles: [sv] })] });
+		const model2 = makeModel({ hulls: [makeHull({ staticVehicles: [sv] })] });
+		const a = bulkRotateTrafficEntitiesYaw(
+			model1,
+			[{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 }],
+			{ x: 5, z: -5 },
+			Math.PI / 6,
+		);
+		const b = bulkRotateTrafficEntitiesMatrix44(
+			model2,
+			[{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 }],
+			{ x: 5, y: 0, z: -5 },
+			{ x: 0, y: Math.PI / 6, z: 0 },
+		);
+		const ma = a.hulls[0].staticTrafficVehicles[0].mTransform;
+		const mb = b.hulls[0].staticTrafficVehicles[0].mTransform;
+		for (let i = 0; i < 16; i++) {
+			expect(ma[i]).toBeCloseTo(mb[i], 5);
+		}
+	});
+});
+
+describe('trafficDataSelectionPivot — static vehicles contribute their translation column', () => {
+	it('median of three vehicles at x = {0, 10, 20} is x = 10', () => {
+		const model = makeModel({
+			hulls: [
+				makeHull({
+					staticVehicles: [
+						makeStaticVehicle({ x: 0, y: 0, z: 0 }),
+						makeStaticVehicle({ x: 10, y: 0, z: 0 }),
+						makeStaticVehicle({ x: 20, y: 0, z: 0 }),
+					],
+				}),
+			],
+		});
+		const pivot = trafficDataSelectionPivot(model, [
+			{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+			{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 1 },
+			{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 2 },
+		]);
+		expect(pivot?.x).toBe(10);
+		expect(pivot?.y).toBe(0);
+		expect(pivot?.z).toBe(0);
+	});
+
+	it('mixed: static vehicle + junction contributes both', () => {
+		const model = makeModel({
+			hulls: [
+				makeHull({
+					junctions: [makeJunction(vec4(0, 0, 0, 0))],
+					staticVehicles: [makeStaticVehicle({ x: 10, y: 5, z: 20 })],
+				}),
+			],
+		});
+		const pivot = trafficDataSelectionPivot(model, [
+			{ kind: 'junction', hullIdx: 0, junctionIdx: 0 },
+			{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+		]);
+		// Two samples: medians = the per-axis mean of the two values.
+		expect(pivot?.x).toBeCloseTo(5, 6);
+		expect(pivot?.y).toBeCloseTo(2.5, 6);
+		expect(pivot?.z).toBeCloseTo(10, 6);
 	});
 });
