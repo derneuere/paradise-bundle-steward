@@ -325,6 +325,13 @@ export function removeBundleById(
  * Used by both close (after user confirms) and replace (the new bytes shadow
  * the old ones at the same id, so prior commits no longer apply cleanly).
  *
+ * For multi-Bundle commits (issue #80): drop the whole commit if any entry
+ * referenced the closed Bundle. The conservative choice — surgically
+ * removing only that Bundle's entries would leave a half-applied cross-
+ * Bundle undo step that no longer round-trips. Resurrecting a closed
+ * Bundle silently via a partial undo is far worse than losing the commit;
+ * the user can re-load the Bundle if they need the undo path back.
+ *
  * Stack identity is preserved when no entries match, so a no-op prune
  * doesn't churn React state.
  */
@@ -332,8 +339,14 @@ export function dropHistoryForBundle(
 	history: HistoryStack<HistoryCommit>,
 	bundleId: BundleId,
 ): HistoryStack<HistoryCommit> {
-	const past = history.past.filter((c) => c.bundleId !== bundleId);
-	const future = history.future.filter((c) => c.bundleId !== bundleId);
+	const commitReferencesBundle = (c: HistoryCommit): boolean => {
+		if (c.kind === 'multi' && c.entries) {
+			return c.entries.some((e) => e.bundleId === bundleId);
+		}
+		return c.bundleId === bundleId;
+	};
+	const past = history.past.filter((c) => !commitReferencesBundle(c));
+	const future = history.future.filter((c) => !commitReferencesBundle(c));
 	if (past.length === history.past.length && future.length === history.future.length) {
 		return history;
 	}

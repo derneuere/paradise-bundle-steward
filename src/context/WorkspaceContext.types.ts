@@ -199,19 +199,55 @@ export type VisibilityNode =
 // ---------------------------------------------------------------------------
 
 /**
- * One entry in the Workspace's global history stack. Records the (Bundle,
+ * One leaf in the Workspace's global history stack. Records the (Bundle,
  * resource, instance) that was edited and the before/after snapshots needed
  * to step in either direction.
  *
- * The single global stack replaces the pre-Workspace per-`(handlerKey, index)`
- * stacks — see ADR-0006 for the rationale.
+ * Used directly as a `HistoryCommit` for single-Bundle edits, and as the
+ * payload shape inside a `HistoryCommit`'s `entries` list when the commit
+ * spans multiple Bundles — the two share the same per-(Bundle, resource,
+ * index) snapshot shape so undo/redo handling can iterate uniformly.
  */
-export type HistoryCommit = {
+export type HistoryCommitEntry = {
 	bundleId: BundleId;
 	resourceKey: string;
 	index: number;
 	previous: unknown | null;
 	next: unknown | null;
+};
+
+/**
+ * One entry in the Workspace's global history stack. The pre-issue-#80
+ * shape (a flat `HistoryCommitEntry` — bundleId / resourceKey / index /
+ * previous / next at the top level) is preserved verbatim and is what
+ * every single-Bundle edit pushes today. Issue #80 adds two OPTIONAL
+ * fields for cross-Bundle bulk gestures:
+ *
+ *   - `kind?: 'multi'` — discriminator. Absent or undefined means
+ *     "this is a single-Bundle commit, read the top-level
+ *     bundleId/resourceKey/index/previous/next as usual."
+ *   - `entries?: readonly HistoryCommitEntry[]` — present iff
+ *     `kind === 'multi'`. Each entry describes one (Bundle, resource,
+ *     instance) snapshot in the multi-Bundle commit; undo/redo replay
+ *     them all atomically.
+ *
+ * Keeping the original fields at the top level (instead of splitting into
+ * a discriminated union) means existing tests / helpers that read
+ * `commit.bundleId` keep compiling and behaving correctly for
+ * single-Bundle commits. Multi-Bundle commits leave those fields as
+ * placeholders — readers MUST branch on `kind === 'multi'` before
+ * interpreting the data.
+ *
+ * The single global stack replaces the pre-Workspace per-`(handlerKey,
+ * index)` stacks — see ADR-0006 for the rationale. The multi-Bundle
+ * extension is the only way the same physical "one gesture = one undo
+ * step" contract can cover a cross-Bundle bulk transform: a single
+ * setResourcesMulti call pushes one HistoryCommit whose entries span
+ * every affected Bundle.
+ */
+export type HistoryCommit = HistoryCommitEntry & {
+	kind?: 'multi';
+	entries?: readonly HistoryCommitEntry[];
 };
 
 // ---------------------------------------------------------------------------
@@ -286,6 +322,28 @@ export type WorkspaceContextValue = {
 		key: string,
 		index: number,
 		value: T,
+	) => void;
+
+	/**
+	 * Replace N `(bundleId, resourceKey, index, value)` writes as ONE
+	 * Workspace-undo entry. Every affected Bundle is independently dirtied
+	 * (each gets its own `dirtyMulti` entry + `isModified = true`), but the
+	 * global history stack grows by exactly one commit — a `{ kind: 'multi',
+	 * entries }` HistoryCommit whose entries are the per-Bundle before/after
+	 * snapshots. Undoing reverts every entry atomically (issue #80 / cross-
+	 * Bundle bulk transform). Writes targeting Bundle ids that aren't loaded
+	 * are silently skipped — the caller is responsible for filtering against
+	 * the current visibility before dispatching.
+	 *
+	 * If `writes` is empty, this is a no-op (no history entry pushed).
+	 */
+	setResourcesMulti: (
+		writes: readonly {
+			bundleId: BundleId;
+			resourceKey: string;
+			index: number;
+			value: unknown;
+		}[],
 	) => void;
 
 	// -------------------------------------------------------------------------
