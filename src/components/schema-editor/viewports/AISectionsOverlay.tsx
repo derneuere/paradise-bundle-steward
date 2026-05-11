@@ -352,6 +352,19 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	}, [bulkRefs]);
 
 	const isBulkActive = bulkEntityCount >= 2 || crossBundle.isCrossBundle;
+
+	// Flat set of section indices in the local-Bundle bulk. Used to dedupe
+	// the affectedNeighbours render (without this, every bulk member is
+	// painted twice per drag frame — yellow by the bulk-member loop AND
+	// orange by the cascade-neighbour loop, because both branches see them
+	// as "sections that changed"). Re-derived only when bulkRefs changes.
+	const bulkSectionIndices = useMemo<ReadonlySet<number>>(() => {
+		const out = new Set<number>();
+		for (const r of bulkRefs) {
+			if (r.kind === 'section') out.add(r.sectionIdx);
+		}
+		return out;
+	}, [bulkRefs]);
 	// True when the bulk extends BEYOND this overlay's own (bundleId,
 	// index) — at least one other Bundle has its own non-empty bulk
 	// participating in the same gesture. The gizmo's pivot / refs / commit
@@ -562,12 +575,21 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		const out: { idx: number; corners: Corner[] }[] = [];
 		for (let i = 0; i < previewModel.sections.length; i++) {
 			if (i === selectedSectionIndex) continue;
+			// Skip bulk members — the yellow bulk-member render loop below
+			// already paints them with the live preview geometry. Without
+			// this filter, every bulk member gets a second SelectionOverlay
+			// (in the orange "cascade" colour) on top of its yellow outline,
+			// doubling the per-frame ShapeGeometry / Line allocation work for
+			// large bulks. Genuine cascade-touched outside neighbours
+			// (single-section + Shift drag) aren't in the bulk and still
+			// render here.
+			if (bulkSectionIndices.has(i)) continue;
 			if (previewModel.sections[i] !== data.sections[i]) {
 				out.push({ idx: i, corners: v12Corners(previewModel.sections[i]) });
 			}
 		}
 		return out;
-	}, [previewModel, selectedSectionIndex, data]);
+	}, [previewModel, selectedSectionIndex, data, bulkSectionIndices]);
 
 	// The gizmo anchors at a different point depending on the selection kind.
 	// `previewSection` is the live source section under any in-flight drag,
