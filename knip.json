@@ -1,0 +1,20 @@
+{
+	"$schema": "https://unpkg.com/knip@latest/schema.json",
+	"ignore": [
+		"src/vite-env.d.ts",
+		"src/test/setup.ts",
+		"perf/**",
+		"scripts/analyze-attribsys-ranges.ts",
+		"scripts/dev-preview.mjs",
+		"scripts/investigate-aiSections-v4-to-v12.ts",
+		"scripts/investigate-aiSections-v6-to-v12.ts",
+		"scripts/investigate-traffic-v22-mappings.ts",
+		"scripts/investigate-traffic-v22-section.ts",
+		"scripts/investigate-traffic-v22-tails.ts",
+		"scripts/investigate-traffic-v22-v45.ts",
+		"scripts/probe-graphicsspec.ts",
+		"scripts/probe-renderable.ts",
+		"scripts/survey-dxbc.ts",
+		"scripts/sweep-roundtrip.ts"
+	]
+}

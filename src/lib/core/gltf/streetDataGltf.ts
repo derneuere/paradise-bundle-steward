@@ -48,7 +48,7 @@ const GENERATOR = 'steward-worldlogic-gltf/1';
 // Node-name prefixes. `<Group>/<Type> <index> (<id>)` mirrors the
 // TriggersToGLTF convention — the `(<id>)` suffix is the canonical identity
 // token for round-trip.
-export const GROUP_STREET_DATA = 'StreetData';
+const GROUP_STREET_DATA = 'StreetData';
 const GROUP_JUNCTIONS = 'Junctions';
 const GROUP_ROADS = 'Roads';
 const GROUP_STREETS = 'Streets';

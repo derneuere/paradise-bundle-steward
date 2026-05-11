@@ -86,8 +86,8 @@ export enum EResetSpeedType {
 // =============================================================================
 
 export type Vector2 = { x: number; y: number };
-export type Vector3 = { x: number; y: number; z: number };
-export type Vector4 = { x: number; y: number; z: number; w: number };
+type Vector3 = { x: number; y: number; z: number };
+type Vector4 = { x: number; y: number; z: number; w: number };
 
 export type BoundaryLine = {
 	verts: Vector4; // (startX, startY, endX, endY) packed into xyzw

@@ -73,7 +73,7 @@ export type WholeResourceExtensionProps<T = unknown> = SchemaExtensionProps<T> &
 // fighting variance.
 //
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- variance escape hatch for the heterogeneous registry; see comment above.
-export type SchemaExtension = React.ComponentType<WholeResourceExtensionProps<any>>;
+type SchemaExtension = React.ComponentType<WholeResourceExtensionProps<any>>;
 export type ExtensionRegistry = Record<string, SchemaExtension>;
 
 // ---------------------------------------------------------------------------

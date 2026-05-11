@@ -343,8 +343,3 @@ export function TriggerDataBulkProvider({
 		</WorkspaceTriggerDataBulkContext.Provider>
 	);
 }
-
-/** Resource key the provider's panels and tree integration key off. Re-
- *  exported so `BulkPanelStack` and `WorkspaceHierarchy` can compare without
- *  re-typing the magic string. */
-export const TRIGGER_DATA_BULK_RESOURCE_KEY = TRIGGER_KEY;

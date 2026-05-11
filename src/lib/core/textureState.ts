@@ -30,14 +30,6 @@ export enum D3DTextureAddress {
 	MIRRORONCE = 5,
 }
 
-/** D3DTEXTUREFILTERTYPE values. */
-export enum D3DTextureFilter {
-	NONE = 0,
-	POINT = 1,
-	LINEAR = 2,
-	ANISOTROPIC = 3,
-}
-
 export type ParsedTextureState = {
 	addressU: number;
 	addressV: number;

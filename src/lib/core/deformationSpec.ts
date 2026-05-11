@@ -75,18 +75,18 @@
 
 export const DEFORMATION_SPEC_TYPE_ID = 0x1001C;
 
-export const DS_WHEEL_SPEC_STRIDE       = 0x30;
-export const DS_SENSOR_SPEC_STRIDE      = 0x40;
-export const DS_TAG_POINT_STRIDE        = 0x50;
-export const DS_DRIVEN_POINT_STRIDE     = 0x20;
-export const DS_TAG_STRIDE              = 0x50; // generic/camera/light
-export const DS_IK_PART_STRIDE          = 0x1E0;
-export const DS_JOINT_SPEC_STRIDE       = 0x40;
-export const DS_GLASS_PANE_STRIDE       = 0x70;
-export const DS_NUM_WHEELS              = 4;
-export const DS_NUM_SENSOR_SLOTS        = 20;
+const DS_WHEEL_SPEC_STRIDE       = 0x30;
+const DS_SENSOR_SPEC_STRIDE      = 0x40;
+const DS_TAG_POINT_STRIDE        = 0x50;
+const DS_DRIVEN_POINT_STRIDE     = 0x20;
+const DS_TAG_STRIDE              = 0x50; // generic/camera/light
+const DS_IK_PART_STRIDE          = 0x1E0;
+const DS_JOINT_SPEC_STRIDE       = 0x40;
+const DS_GLASS_PANE_STRIDE       = 0x70;
+const DS_NUM_WHEELS              = 4;
+const DS_NUM_SENSOR_SLOTS        = 20;
 
-export const DS_HEADER_END = 0x6B0;
+const DS_HEADER_END = 0x6B0;
 
 // =============================================================================
 // Numeric-vector aliases
@@ -611,7 +611,7 @@ export function parseDeformationSpecData(
  *   header → tagPoints → drivenPoints → ikParts → jointSpecs →
  *   glassPanes → genericTags → cameraTags → lightTags
  */
-export function normalizeDeformationSpecLayout(
+function normalizeDeformationSpecLayout(
 	model: ParsedDeformationSpec,
 ): ParsedDeformationSpec {
 	if (model.wheels.length !== DS_NUM_WHEELS) {

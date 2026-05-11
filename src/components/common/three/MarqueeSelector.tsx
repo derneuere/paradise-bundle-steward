@@ -33,7 +33,7 @@ import { buildMarqueeFrustum } from '@/lib/three/marqueeFrustum';
 import { useMarqueeActivation } from '@/hooks/useMarqueeActivation';
 import type { CameraBridgeData } from './CameraBridge';
 
-export type MarqueeMode = 'add' | 'remove';
+type MarqueeMode = 'add' | 'remove';
 
 export type MarqueeSelectorProps = {
 	bridge: React.MutableRefObject<CameraBridgeData | null>;

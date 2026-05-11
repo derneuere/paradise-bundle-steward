@@ -36,14 +36,14 @@ import {
   calculateBundleStats,
   decompressData
 } from '../resourceManager';
-import { parseVehicleList, type ParsedVehicleList } from '../vehicleList';
-import { parsePlayerCarColours, type PlayerCarColours } from '../playerCarColors';
+import { parseVehicleList } from '../vehicleList';
+import { parsePlayerCarColours } from '../playerCarColors';
 import { RESOURCE_TYPES } from '../../resourceTypes';
-import { parseIceTakeDictionary, type ParsedIceTakeDictionary } from '../iceTakeDictionary';
-import { type ParsedTriggerData, parseTriggerData } from '../triggerData';
+import { parseIceTakeDictionary } from '../iceTakeDictionary';
+import { parseTriggerData } from '../triggerData';
 import { extractResourceSize, extractAlignment, packSizeAndAlignment, isCompressed, compressData } from '../resourceManager';
-import { parseChallengeList, type ParsedChallengeList } from '../challengeList';
-import { parseStreetData, type ParsedStreetData } from '../streetData';
+import { parseChallengeList } from '../challengeList';
+import { parseStreetData } from '../streetData';
 import { registry, getHandlerByTypeId, resourceCtxFromBundle } from '../registry';
 import { u64ToBigInt } from '../u64';
 
@@ -691,18 +691,6 @@ function reportProgress(
 // ============================================================================
 // Resource-Specific Parsing
 // ============================================================================
-
-/**
- * Result of parsing all known resource types from a bundle
- */
-export type ParsedResources = {
-  vehicleList?: ParsedVehicleList;
-  playerCarColours?: PlayerCarColours;
-  iceTakeDictionary?: ParsedIceTakeDictionary;
-  triggerData?: ParsedTriggerData;
-  challengeList?: ParsedChallengeList;
-  streetData?: ParsedStreetData;
-};
 
 // ============================================================================
 // Import helpers are re-exported from bundleEntry.ts at the top of this file:

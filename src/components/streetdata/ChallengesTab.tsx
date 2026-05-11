@@ -89,5 +89,3 @@ export const ChallengesTab: React.FC<Props> = ({ data, onChange }) => {
 		</div>
 	);
 };
-
-export default ChallengesTab;

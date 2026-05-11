@@ -11,7 +11,7 @@ import type { SchemaExtensionProps, ExtensionRegistry } from '../context';
 import type { VehicleListEntry } from '@/lib/core/vehicleList';
 import { VehicleEditorForm } from '@/components/VehicleEditorForm';
 
-export const VehicleEditorExtension: React.FC<
+const VehicleEditorExtension: React.FC<
 	SchemaExtensionProps<VehicleListEntry | undefined>
 > = ({ value, setValue }) => {
 	if (!value || typeof value !== 'object') {

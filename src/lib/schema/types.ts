@@ -26,7 +26,7 @@
 // A ref describes "this field is an index into another list". Used for
 // FlowType references, section indexes, etc. Phase A only resolves refs
 // inside the same resource; Phase D extends this to cross-resource.
-export type RefTarget = {
+type RefTarget = {
 	// Relative path from the *resource root* to the target list.
 	// e.g. `["flowTypes"]` — select the top-level TrafficData.flowTypes list.
 	// The ref value is then used as an index into that list.
@@ -54,7 +54,7 @@ export type IntKind =
 	| 'u8' | 'u16' | 'u32'
 	| 'i8' | 'i16' | 'i32';
 
-export type PrimitiveFieldSchema =
+type PrimitiveFieldSchema =
 	| { kind: IntKind; min?: number; max?: number }
 	| { kind: 'f32'; min?: number; max?: number }
 	| { kind: 'bigint'; bytes?: number; hex?: boolean } // u64 / CgsID
@@ -62,7 +62,7 @@ export type PrimitiveFieldSchema =
 	| { kind: 'string' };
 
 // Structured primitives — leaves, not records.
-export type StructuredPrimitiveSchema =
+type StructuredPrimitiveSchema =
 	| { kind: 'vec2' }
 	| { kind: 'vec3' }
 	| { kind: 'vec4' }
@@ -215,7 +215,7 @@ export type PropertyGroup =
 	| { title: string; properties: string[]; component: string };
 
 // Validation result — severity + message, optionally tagged with a field.
-export type ValidationSeverity = 'error' | 'warning' | 'info';
+type ValidationSeverity = 'error' | 'warning' | 'info';
 export type ValidationResult = {
 	severity: ValidationSeverity;
 	message: string;

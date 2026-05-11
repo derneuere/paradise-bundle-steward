@@ -78,7 +78,7 @@ export enum LegacyEDistrict {
 // Types
 // =============================================================================
 
-export type LegacyVector4 = { x: number; y: number; z: number; w: number };
+type LegacyVector4 = { x: number; y: number; z: number; w: number };
 
 export type LegacyBoundaryLine = {
 	verts: LegacyVector4; // (startX, startY, endX, endY) packed into xyzw

@@ -133,7 +133,7 @@ const VehiclesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setDat
 	/>
 );
 
-export const TrafficLightsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const TrafficLightsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<TrafficLightsTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
@@ -154,7 +154,7 @@ function hullIndexFromPath(path: NodePath): number {
 
 // WholeResource: SectionsTab needs the full `data` to walk parallel arrays
 // (sections + flows) per hull, and the legacy `onChange` replaces the root.
-export const SectionsExtension: React.FC<WholeResourceExtensionProps> = ({
+const SectionsExtension: React.FC<WholeResourceExtensionProps> = ({
 	path,
 	data,
 	setData,
@@ -175,7 +175,7 @@ export const SectionsExtension: React.FC<WholeResourceExtensionProps> = ({
 
 // WholeResource: same reasoning as SectionsExtension — LaneRungsTab walks
 // per-hull arrays from the root.
-export const LaneRungsExtension: React.FC<WholeResourceExtensionProps> = ({
+const LaneRungsExtension: React.FC<WholeResourceExtensionProps> = ({
 	path,
 	data,
 	setData,

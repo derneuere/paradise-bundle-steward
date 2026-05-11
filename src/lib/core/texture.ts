@@ -52,7 +52,7 @@ const DXGI_R8G8B8A8_SRGB  = 29;
  * tested as an ASCII FourCC string. If it matches a known codec it maps to
  * a tag. Otherwise the raw 4-byte little-endian int is used as a D3DFORMAT.
  */
-export type TextureFormat =
+type TextureFormat =
 	| 'DXT1'
 	| 'DXT3'
 	| 'DXT5'
@@ -209,7 +209,7 @@ export function parseTextureHeader(block0: Uint8Array): ParsedTextureHeader {
  *
  * For A8B8G8R8: on-disk order is [A, B, G, R] — swizzle to [R, G, B, A].
  */
-export function decodeTexturePixels(
+function decodeTexturePixels(
 	header: ParsedTextureHeader,
 	pixelData: Uint8Array,
 ): Uint8Array {

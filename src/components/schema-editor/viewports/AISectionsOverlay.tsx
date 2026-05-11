@@ -1281,5 +1281,3 @@ function CornerPickers({
 		</>
 	);
 }
-
-export default AISectionsOverlay;

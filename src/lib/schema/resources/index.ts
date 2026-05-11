@@ -22,7 +22,7 @@ import { triggerDataResourceSchema } from './triggerData';
 import { vehicleListResourceSchema } from './vehicleList';
 import { zoneListResourceSchema } from './zoneList';
 
-export const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
+const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,

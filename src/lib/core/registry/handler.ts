@@ -16,7 +16,7 @@ export type ResourceCategory = 'Graphics' | 'Audio' | 'Data' | 'Script' | 'Camer
 export const HANDLER_PLATFORM = { PC: 1, XBOX360: 2, PS3: 3 } as const;
 export type HandlerPlatform = typeof HANDLER_PLATFORM[keyof typeof HANDLER_PLATFORM];
 
-export type HandlerCaps = {
+type HandlerCaps = {
 	read: boolean;
 	write: boolean;
 	/**
@@ -52,7 +52,7 @@ export type PickerResourceCtx = {
 	index: number;
 };
 
-export type PickerBadge = {
+type PickerBadge = {
 	label: string;
 	tone: 'muted' | 'warn' | 'accent';
 };
@@ -83,7 +83,7 @@ export type PickerSortKey<Model = unknown> = {
  * a bundle contains >1 resource of this type. Optional — handlers whose
  * bundles only ever have one resource (TrafficData, StreetData) skip it.
  */
-export type PickerConfig<Model = unknown> = {
+type PickerConfig<Model = unknown> = {
 	labelOf(model: Model | null, ctx: PickerResourceCtx): PickerLabel;
 	sortKeys: PickerSortKey<Model>[];
 	/** Id of the sort key to use by default. Must match one of `sortKeys[i].id`. */
@@ -106,7 +106,7 @@ export type PickerConfig<Model = unknown> = {
  * badge / warning without disabling the parser. Omit fields default to the
  * machine value (read/write) or to `EDITOR_PAGES[key] !== undefined` (editor).
  */
-export type HandlerCapabilityOverrides = {
+type HandlerCapabilityOverrides = {
 	read?: 'partial' | boolean;
 	write?: 'partial' | boolean;
 	editor?: 'partial' | boolean;
@@ -223,7 +223,7 @@ export type StressScenario<Model = unknown> = {
 	verify?(afterMutate: Model, afterReparse: Model): string[];
 };
 
-export type ResourceFixture = {
+type ResourceFixture = {
 	/** Repo-relative path (e.g. 'example/BTTSTREETDATA.DAT'). */
 	bundle: string;
 	expect?: {

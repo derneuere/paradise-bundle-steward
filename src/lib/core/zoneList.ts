@@ -27,7 +27,7 @@ import { BinReader, BinWriter } from './binTools';
 // Types
 // =============================================================================
 
-export type Vec2Padded = {
+type Vec2Padded = {
 	x: number;
 	y: number;
 	// f32 × 2 trailing pad — preserved verbatim for byte-exact round-trip.
@@ -41,7 +41,7 @@ export const NEIGHBOUR_FLAGS = {
 	IMMEDIATE: 0x2,
 } as const;
 
-export type Neighbour = {
+type Neighbour = {
 	zoneIndex: number;     // resolved from on-disk Zone* pointer
 	muFlags: number;       // bitfield of NEIGHBOUR_FLAGS
 	// 8 bytes of trailing pad on disk — preserved verbatim.

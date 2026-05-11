@@ -153,5 +153,3 @@ export const RoadsTab: React.FC<Props> = ({ data, onChange }) => {
 		</div>
 	);
 };
-
-export default RoadsTab;

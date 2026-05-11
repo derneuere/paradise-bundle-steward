@@ -32,7 +32,7 @@ function readCStr(r: BinReader, end: number): string | null {
 
 // ---- Types ----
 
-export type AttribEntry = {
+type AttribEntry = {
 	key: bigint;
 	data: number;       // u32 pointer — always 0 in resource
 	type: number;       // u16
@@ -40,7 +40,7 @@ export type AttribEntry = {
 	entryFlags: number; // u8
 };
 
-export type CollectionLoadData = {
+type CollectionLoadData = {
 	key: bigint;
 	classKey: bigint;
 	parent: bigint;
@@ -54,14 +54,14 @@ export type CollectionLoadData = {
 	entries: AttribEntry[];
 };
 
-export type ExportEntry = {
+type ExportEntry = {
 	id: bigint;
 	type: bigint;
 	dataBytes: number;
 	dataOffset: number;  // relative to vlt start
 };
 
-export type PtrRef = {
+type PtrRef = {
 	fixupOffset: number; // u32
 	ptrType: number;     // i16
 	index: number;       // i16

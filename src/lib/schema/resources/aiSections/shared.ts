@@ -35,7 +35,7 @@ export const f32 = (): FieldSchema => ({ kind: 'f32' });
 export const vec2 = (): FieldSchema => ({ kind: 'vec2' });
 export const vec3 = (): FieldSchema => ({ kind: 'vec3' });
 export const vec4 = (): FieldSchema => ({ kind: 'vec4' });
-export const record = (type: string): FieldSchema => ({ kind: 'record', type });
+const record = (type: string): FieldSchema => ({ kind: 'record', type });
 
 /** Fixed-size primitive tuple — e.g. `sectionMinSpeeds: f32[5]`. */
 export const fixedList = (item: FieldSchema, length: number): FieldSchema => ({

@@ -14,7 +14,7 @@
 
 import type { Scene } from '@gltf-transform/core';
 
-export const PARADISE_BUNDLE = 'paradiseBundle';
+const PARADISE_BUNDLE = 'paradiseBundle';
 
 /**
  * Extend scene.extras.paradiseBundle[subkey] with the given data. Other
@@ -211,21 +211,6 @@ export function decodeModelDeep(v: unknown): unknown {
 // round-trip. Each per-resource gltf module walks its known group/index
 // tree and overlays node translations back onto the decoded model.
 // ---------------------------------------------------------------------------
-
-/**
- * Locate a named group beneath a named root. Returns null if either the
- * root or the group is absent, so resources emit different group shapes
- * (flat vs nested) can still reuse the helper.
- */
-export function findNamedGroup(
-	scene: import('@gltf-transform/core').Scene,
-	rootName: string,
-	groupName: string,
-): import('@gltf-transform/core').Node | null {
-	const root = scene.listChildren().find((n) => n.getName() === rootName);
-	if (!root) return null;
-	return root.listChildren().find((n) => n.getName() === groupName) ?? null;
-}
 
 /**
  * Locate a subroot (direct child of the scene) by name. Returns null if

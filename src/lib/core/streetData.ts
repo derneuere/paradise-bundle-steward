@@ -74,11 +74,11 @@ export type Road = {
 	padding: number[]; // 4 bytes
 };
 
-export type ScoreList = {
+type ScoreList = {
 	maScores: number[]; // int32[2]
 };
 
-export type ChallengeData = {
+type ChallengeData = {
 	mDirty: number[]; // 8 bytes BitArray<2>
 	mValidScore: number[]; // 8 bytes BitArray<2>
 	mScoreList: ScoreList;

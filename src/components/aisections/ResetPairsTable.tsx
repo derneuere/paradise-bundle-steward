@@ -127,5 +127,3 @@ export const ResetPairsTable: React.FC<Props> = ({ data, onChange }) => {
 		</div>
 	);
 };
-
-export default ResetPairsTable;

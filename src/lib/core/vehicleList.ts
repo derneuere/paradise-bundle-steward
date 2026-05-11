@@ -29,16 +29,16 @@ import { u64, u64ToBigInt } from './u64';
 // ============================================================================
 
 // 8-byte string schema (for CgsID)
-export const cgsId = u64;
+const cgsId = u64;
 
 // 32-byte string schema
-export const string32 = arrayOf(u8, 32);
+const string32 = arrayOf(u8, 32);
 
 // 64-byte string schema
-export const string64 = arrayOf(u8, 64);
+const string64 = arrayOf(u8, 64);
 
 // Vehicle List Header Schema (16 bytes)
-export const VehicleListHeaderSchema = object({
+const VehicleListHeaderSchema = object({
   numVehicles: u32,
   startOffset: u32,
   unknown1: u32,
@@ -46,7 +46,7 @@ export const VehicleListHeaderSchema = object({
 });
 
 // Gameplay data schema
-export const GamePlayDataSchema = object({
+const GamePlayDataSchema = object({
   damageLimit: f32,
   flags: u32,
   boostBarLength: u8,
@@ -57,7 +57,7 @@ export const GamePlayDataSchema = object({
 });
 
 // Audio data schema
-export const AudioDataSchema = object({
+const AudioDataSchema = object({
   exhaustNameBytes: cgsId,
   exhaustEntityKey: object({ low: u32, high: u32 }),
   engineEntityKey: object({ low: u32, high: u32 }),
@@ -200,18 +200,6 @@ export type ParsedVehicleList = {
     unknown2: number;
   };
 };
-
-// ============================================================================
-// Schema Factory for Fixed-Length Collections
-// ============================================================================
-
-// Vehicle list with known count
-export function makeVehicleListSchema(count: number) {
-  return object({
-    header: VehicleListHeaderSchema,
-    entries: arrayOf(VehicleEntrySchema, count)
-  });
-}
 
 // ============================================================================
 // String Decoding Functions

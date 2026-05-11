@@ -45,7 +45,7 @@ const CALIPER_PTR_OFFSET = 0x08;
 // Types
 // =============================================================================
 
-export type WheelGraphicsImport = {
+type WheelGraphicsImport = {
 	/** u64 resource id of the referenced Model. */
 	id: bigint;
 	/** Offset back into the WheelGraphicsSpec of the field to patch at load

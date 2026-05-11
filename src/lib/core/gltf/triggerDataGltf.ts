@@ -30,7 +30,7 @@ import {
 
 const GENERATOR = 'steward-worldlogic-gltf/1';
 
-export const GROUP_TRIGGER_DATA = 'TriggerData';
+const GROUP_TRIGGER_DATA = 'TriggerData';
 const SCENE_EXTRAS_TRIGGER_DATA = 'triggerData';
 
 function addVisualizationNodes(

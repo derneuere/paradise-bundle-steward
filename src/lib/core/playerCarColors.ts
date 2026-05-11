@@ -42,7 +42,7 @@ export enum PaletteType {
 	NUM_PALETTES = 5,
 }
 
-export const PALETTE_TYPE_NAMES: Record<PaletteType, string> = {
+const PALETTE_TYPE_NAMES: Record<PaletteType, string> = {
 	[PaletteType.GLOSS]: 'Gloss',
 	[PaletteType.METALLIC]: 'Metallic',
 	[PaletteType.PEARLESCENT]: 'Pearlescent',
@@ -61,7 +61,7 @@ export type PlayerCarColor = {
 	isNeon: boolean;
 };
 
-export type PlayerCarColourPalette = {
+type PlayerCarColourPalette = {
 	type: PaletteType;
 	typeName: string;
 	numColours: number;

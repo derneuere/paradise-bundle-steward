@@ -19,7 +19,7 @@
 // original SelectionBox needs a different plane construction. If we
 // gain an ortho viewport later we can port that branch too.
 
-import { Frustum, Matrix4, PerspectiveCamera, Vector3 } from 'three';
+import { Frustum, PerspectiveCamera, Vector3 } from 'three';
 
 export function buildMarqueeFrustum(
 	camera: PerspectiveCamera,
@@ -70,29 +70,3 @@ export function buildMarqueeFrustum(
 	return frustum;
 }
 
-// Helper for callers that already have viewport CSS-pixel coordinates of
-// the marquee rectangle plus the canvas's bounding rect. Converts both
-// corners to NDC (z = 0, mid-frustum) and forwards to buildMarqueeFrustum.
-export function buildMarqueeFrustumFromPixels(
-	camera: PerspectiveCamera,
-	startPx: { x: number; y: number },
-	endPx: { x: number; y: number },
-	canvasRect: { left: number; top: number; width: number; height: number },
-	deep: number,
-): Frustum {
-	const start = new Vector3(
-		((startPx.x - canvasRect.left) / canvasRect.width) * 2 - 1,
-		-((startPx.y - canvasRect.top) / canvasRect.height) * 2 + 1,
-		0,
-	);
-	const end = new Vector3(
-		((endPx.x - canvasRect.left) / canvasRect.width) * 2 - 1,
-		-((endPx.y - canvasRect.top) / canvasRect.height) * 2 + 1,
-		0,
-	);
-	return buildMarqueeFrustum(camera, start, end, deep);
-}
-
-// Re-export Matrix4 so consumers don't need a separate three import for the
-// rare case they want to pre-bake transforms into a candidate position.
-export { Matrix4 };

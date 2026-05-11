@@ -8,9 +8,9 @@
 // triggers, and static vehicles use InstancedMesh with global
 // instance-to-hull mappings for picking.
 
-import { useMemo, useRef, useCallback, useState } from 'react';
-import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Html } from '@react-three/drei';
+import { useMemo, useRef, useCallback } from 'react';
+import { useThree, ThreeEvent } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ParsedTrafficDataRetail, TrafficHull, TrafficPvs } from '@/lib/core/trafficData';
 import {
@@ -18,22 +18,9 @@ import {
 	type TrafficDataSelection,
 } from './useTrafficSelection';
 import { buildRungToSectionMap, speedToRGB } from './constants';
-import { AutoFit } from '@/components/common/three/AutoFit';
-import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
-import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useUpdateInstancedMesh } from '@/lib/three/scene/useUpdateInstancedMesh';
 import { useApplyMatrixToObject } from '@/lib/three/scene/useApplyMatrixToObject';
 import { useFlyCameraToTarget } from '@/lib/three/scene/useFlyCameraToTarget';
-import { useSchemaBulkSelection } from '@/components/schema-editor/bulkSelectionContext';
-import type { NodePath } from '@/lib/schema/walk';
-
-type Props = {
-	data: ParsedTrafficDataRetail;
-	activeHullIndex: number;
-	selected: TrafficDataSelection;
-	onSelect: (sel: TrafficDataSelection) => void;
-	activeTab: string;
-};
 
 // ---------------------------------------------------------------------------
 // Scene bounds (all hulls)
@@ -1091,189 +1078,3 @@ export function PvsCellTooltip({
 		</Html>
 	);
 }
-
-// ---------------------------------------------------------------------------
-// Main viewport component
-// ---------------------------------------------------------------------------
-
-export const TrafficDataViewport: React.FC<Props> = ({ data, activeHullIndex, selected, onSelect, activeTab }) => {
-	const hulls = data.hulls;
-	if (hulls.length === 0) return <div className="h-[45vh] flex items-center justify-center text-muted-foreground">No hull data</div>;
-
-	const { center, radius } = useMemo(() => computeAllBounds(hulls), [hulls]);
-	const camDistance = radius * 1.5;
-
-	const selectedHull = selected && !isPvsCellSelection(selected) ? hulls[selected.hullIndex] : null;
-	const selectedSectionIndex = selected && !isPvsCellSelection(selected) && selected.sub?.type === 'section' ? selected.sub.index : -1;
-
-	// PVS overlay: visible by default whenever the resource has a populated
-	// grid. Toggle gates click + tooltip too — we don't want the grid mesh
-	// intercepting clicks meant for hulls / vehicles when it's hidden.
-	const hasPvsGrid = data.pvs.muNumCells_X > 0 && data.pvs.muNumCells_Z > 0 && data.pvs.hullPvsSets.length > 0;
-	const [showPvsGrid, setShowPvsGrid] = useState(hasPvsGrid);
-	const [hoverCellIndex, setHoverCellIndex] = useState<number | null>(null);
-	const [hoverWorld, setHoverWorld] = useState<THREE.Vector3 | null>(null);
-	const handleHoverCell = useCallback((idx: number | null, w: THREE.Vector3 | null) => {
-		setHoverCellIndex(idx);
-		setHoverWorld(w);
-	}, []);
-
-	// Marquee wiring: pick static traffic vehicles inside the dragged
-	// rectangle and union/subtract their schema paths into the bulk set.
-	// Other pickable item kinds (junctions, light triggers) could be
-	// added later — vehicles are the most common bulk-edit target.
-	const cameraBridge = useRef<CameraBridgeData | null>(null);
-	const bulk = useSchemaBulkSelection();
-	const handleMarquee = useCallback(
-		(frustum: THREE.Frustum, mode: 'add' | 'remove') => {
-			if (!bulk?.onBulkApplyPaths) return;
-			const hits: NodePath[] = [];
-			const pt = new THREE.Vector3();
-			for (let h = 0; h < hulls.length; h++) {
-				const list = hulls[h].staticTrafficVehicles;
-				for (let s = 0; s < list.length; s++) {
-					const m = list[s].mTransform;
-					// Translation column of the 4×4 (RwMatrix layout).
-					pt.set(m[12] ?? 0, m[13] ?? 0, m[14] ?? 0);
-					if (frustum.containsPoint(pt)) {
-						hits.push(['hulls', h, 'staticTrafficVehicles', s]);
-					}
-				}
-			}
-			if (hits.length === 0) return;
-			bulk.onBulkApplyPaths(hits, mode);
-		},
-		[hulls, bulk],
-	);
-
-	return (
-		<div style={{ height: '45vh', background: '#1a1d23', borderRadius: 8, minWidth: 0, position: 'relative' }}>
-			<Canvas
-				camera={{
-					position: [center.x, camDistance, center.z + camDistance * 0.3],
-					fov: 45,
-					near: 0.1,
-					far: Math.max(camDistance * 20, 50000),
-				}}
-				gl={{ antialias: true, logarithmicDepthBuffer: true }}
-				onPointerMissed={() => { /* deselect only on clicks outside the canvas */ }}
-			>
-				<color attach="background" args={['#1a1d23']} />
-				<AutoFit center={center} radius={radius} setFar={false} />
-				<FocusOnVehicle hulls={hulls} selected={selected} />
-				<ambientLight intensity={0.5} />
-				<hemisphereLight args={['#b1c8e8', '#4a3f2f', 0.4]} />
-				<directionalLight position={[10, 20, 5]} intensity={0.9} />
-				<directionalLight position={[-8, 15, -10]} intensity={0.4} />
-
-				{/* Invisible picking plane — catches clicks anywhere, finds nearest
-				    rung; falls through to PVS cell pick when the grid is on and
-				    the click isn't near any road. */}
-				<PickingPlane
-					hulls={hulls}
-					center={center}
-					radius={radius}
-					onSelect={onSelect}
-					pvs={hasPvsGrid ? data.pvs : null}
-					pvsActive={showPvsGrid && hasPvsGrid}
-					onHoverCell={handleHoverCell}
-				/>
-
-				{/* All lane connections (dim background lines) */}
-				<AllLaneConnections hulls={hulls} activeHullIndex={activeHullIndex} />
-
-				{/* All rung lines (active hull bright, others dimmed) */}
-				<AllRungLines hulls={hulls} activeHullIndex={activeHullIndex} />
-
-				{/* Section highlight for selected section */}
-				{selectedHull && selectedSectionIndex >= 0 && (
-					<SectionHighlight hull={selectedHull} sectionIndex={selectedSectionIndex} />
-				)}
-
-				{/* All junction markers */}
-				<AllJunctionInstances
-					hulls={hulls}
-					activeHullIndex={activeHullIndex}
-					selected={selected}
-					onSelect={onSelect}
-				/>
-
-				{/* All light trigger volumes */}
-				<AllLightTriggerInstances
-					hulls={hulls}
-					activeHullIndex={activeHullIndex}
-					onSelect={onSelect}
-				/>
-
-				{/* All static vehicles */}
-				<AllStaticVehicleInstances
-					hulls={hulls}
-					activeHullIndex={activeHullIndex}
-					selected={selected}
-					onSelect={onSelect}
-				/>
-				<SelectedVehicleOutline hulls={hulls} selected={selected} />
-
-				{/* Traffic lights (only on lights tab) */}
-				{activeTab === 'lights' && (
-					<TrafficLightInstances data={data} />
-				)}
-
-				{/* PVS grid overlay — sits on top of road geometry, picks at the
-				    XZ plane. Renders cells, the selected cell, and inverse
-				    highlights ("which cell holds this static car", "which cells
-				    list this hull"). */}
-				{showPvsGrid && hasPvsGrid && (
-					<>
-						<PvsGridOverlay
-							pvs={data.pvs}
-							hulls={hulls}
-							selected={selected}
-						/>
-						<PvsCellTooltip
-							pvs={data.pvs}
-							hoverCellIndex={hoverCellIndex}
-							hoverWorld={hoverWorld}
-						/>
-					</>
-				)}
-
-				{/* Selection label */}
-				<SelectionLabel hulls={hulls} selected={selected} />
-
-				<CameraBridge bridge={cameraBridge} />
-				<OrbitControls
-					target={[center.x, 0, center.z]}
-					enableDamping
-					dampingFactor={0.1}
-					makeDefault
-				/>
-			</Canvas>
-			<MarqueeSelector
-				bridge={cameraBridge}
-				far={Math.max(camDistance * 20, 50000)}
-				onMarquee={handleMarquee}
-				hintIdle="press B to box-select static vehicles"
-			/>
-			{hasPvsGrid && (
-				<label
-					style={{
-						position: 'absolute', top: 8, right: 8,
-						background: 'rgba(0,0,0,0.7)', color: '#cdd', padding: '4px 8px',
-						borderRadius: 4, fontSize: 11, fontFamily: 'monospace',
-						display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-						userSelect: 'none',
-					}}
-				>
-					<input
-						type="checkbox"
-						checked={showPvsGrid}
-						onChange={(e) => setShowPvsGrid(e.target.checked)}
-						style={{ margin: 0 }}
-					/>
-					PVS grid ({data.pvs.muNumCells_X}×{data.pvs.muNumCells_Z})
-				</label>
-			)}
-		</div>
-	);
-};

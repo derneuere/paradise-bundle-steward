@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 
-export type ShortcutItem = {
+type ShortcutItem = {
 	/** Ordered key tokens, rendered as stacked <kbd>s joined by " + ". Non-key
 	 *  tokens (e.g. "click", "drag") are accepted too — they render as <kbd>
 	 *  all the same, which looks consistent in the popover. */

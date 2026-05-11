@@ -176,7 +176,7 @@ export function translateCornerWithSharedGeneric<
  * `LegacyBoundaryLine` are structurally identical (both wrap a Vector4
  * packing the two endpoints) so the same helper drives both ops.
  */
-export function shiftBoundaryEndpointsAt<BL extends { verts: { x: number; y: number; z: number; w: number } }>(
+function shiftBoundaryEndpointsAt<BL extends { verts: { x: number; y: number; z: number; w: number } }>(
 	bl: BL,
 	point: Vector2,
 	dx: number,

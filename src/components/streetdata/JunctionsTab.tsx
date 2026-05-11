@@ -96,5 +96,3 @@ export const JunctionsTab: React.FC<Props> = ({ data, onChange }) => {
 		</div>
 	);
 };
-
-export default JunctionsTab;

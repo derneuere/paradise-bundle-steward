@@ -2,7 +2,6 @@
 // and V4/V6 read-only). Bug fixes and visual tweaks land in both at once.
 // See issue #35 for the extraction motivation.
 
-export { fillMaterial, outlineMaterial, portalGeo, portalMat, portalSelMat } from './materials';
 export {
 	BatchedSections,
 	buildBatchedSections,

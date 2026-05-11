@@ -59,7 +59,7 @@ function writeRefSpec(w: BinWriter, v: RefSpecValue): void {
 	w.writeU32(0); // 4-byte padding
 }
 
-export function readAttribute(r: BinReader, schema: AttribSchema): ParsedAttribute {
+function readAttribute(r: BinReader, schema: AttribSchema): ParsedAttribute {
 	const fields: Record<string, unknown> = {};
 	for (const f of schema.fields) {
 		switch (f.type) {
@@ -118,7 +118,7 @@ export function readAttribute(r: BinReader, schema: AttribSchema): ParsedAttribu
 	return { className: schema.name, classHash: schema.classHash, fields };
 }
 
-export function writeAttribute(w: BinWriter, schema: AttribSchema, data: Record<string, unknown>): void {
+function writeAttribute(w: BinWriter, schema: AttribSchema, data: Record<string, unknown>): void {
 	for (const f of schema.fields) {
 		switch (f.type) {
 			case 'f32': w.writeF32(data[f.name] as number); break;

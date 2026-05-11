@@ -4,26 +4,12 @@
 
 export {
 	defineSelectionCodec,
-	selectionEquals,
 	selectionKey,
 } from './selection';
 export type { Selection, SelectionCodec } from './selection';
 
 export { SELECTION_THEME } from './theme';
-export type { SelectionTheme } from './theme';
 
-export {
-	computeInstanceState,
-	useInstancedSelection,
-} from './useInstancedSelection';
-export type {
-	InstancedSelectionState,
-	UseInstancedSelectionOpts,
-	UseInstancedSelectionResult,
-} from './useInstancedSelection';
+export { useInstancedSelection } from './useInstancedSelection';
 
 export { useBatchedSelection } from './useBatchedSelection';
-export type {
-	UseBatchedSelectionOpts,
-	UseBatchedSelectionResult,
-} from './useBatchedSelection';

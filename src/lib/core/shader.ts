@@ -28,7 +28,7 @@ const SHADER_HEADER_ORIGINAL_PC = 0x34; // Original PC: extra HLSL ptr at +0x24
 
 /** A single ShaderTechnique decoded for display. All field offsets are
  *  relative to the ShaderTechnique struct base (see docs/Shader.md). */
-export type ParsedShaderTechnique = {
+type ParsedShaderTechnique = {
 	/** Technique name (+0x38 char*). Empty when the pointer is null. */
 	name: string;
 	/** Inline vertex-shader name string (original PC only, +0x3C). */
@@ -41,7 +41,7 @@ export type ParsedShaderTechnique = {
 	samplers: ParsedShaderSampler[];
 };
 
-export type ParsedShaderSampler = {
+type ParsedShaderSampler = {
 	/** Sampler binding name (e.g. "DiffuseSampler"). */
 	name: string;
 	/** Texture channel index (miChannel, +0x04 int16). */

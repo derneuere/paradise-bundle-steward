@@ -12,5 +12,3 @@
 // path that pre-#33 callers expect.
 
 export { aiSectionsV12ResourceSchema as aiSectionsResourceSchema } from './aiSections/v12';
-export { aiSectionsV12ResourceSchema } from './aiSections/v12';
-export { aiSectionsV4ResourceSchema } from './aiSections/v4';

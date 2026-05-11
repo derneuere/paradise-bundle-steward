@@ -205,7 +205,7 @@ function FilterBar({
 // ---------------------------------------------------------------------------
 
 // WholeResource: legacy header tab operates on the resource root.
-export const HeaderExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const HeaderExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<Card>
 		<CardHeader>
 			<CardTitle className="text-sm">Header</CardTitle>
@@ -224,7 +224,7 @@ export const HeaderExtension: React.FC<WholeResourceExtensionProps> = ({ data, s
 // ---------------------------------------------------------------------------
 
 // WholeResource: 2D map renders every region in the resource at once.
-export const RegionsMapExtension: React.FC<WholeResourceExtensionProps> = ({ data }) => (
+const RegionsMapExtension: React.FC<WholeResourceExtensionProps> = ({ data }) => (
 	<Card>
 		<CardHeader>
 			<CardTitle className="text-sm">Region Map (2D)</CardTitle>
@@ -241,7 +241,7 @@ export const RegionsMapExtension: React.FC<WholeResourceExtensionProps> = ({ dat
 
 // WholeResource: list tab walks the full landmarks array; box-edit
 // navigation jumps to other root-level paths via selectChild.
-export const LandmarksExtension: React.FC<WholeResourceExtensionProps> = ({
+const LandmarksExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 	selectChild,
@@ -316,7 +316,7 @@ export const LandmarksExtension: React.FC<WholeResourceExtensionProps> = ({
 };
 
 // WholeResource: same shape as LandmarksExtension above.
-export const GenericRegionsExtension: React.FC<WholeResourceExtensionProps> = ({
+const GenericRegionsExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 	selectChild,
@@ -401,7 +401,7 @@ export const GenericRegionsExtension: React.FC<WholeResourceExtensionProps> = ({
 };
 
 // WholeResource: same shape as LandmarksExtension above.
-export const BlackspotsExtension: React.FC<WholeResourceExtensionProps> = ({
+const BlackspotsExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 	selectChild,
@@ -478,7 +478,7 @@ export const BlackspotsExtension: React.FC<WholeResourceExtensionProps> = ({
 };
 
 // WholeResource: same shape as LandmarksExtension above.
-export const VfxExtension: React.FC<WholeResourceExtensionProps> = ({
+const VfxExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 	selectChild,
@@ -558,7 +558,7 @@ export const VfxExtension: React.FC<WholeResourceExtensionProps> = ({
 // ---------------------------------------------------------------------------
 
 // WholeResource: list tab walks the full signatureStunts array.
-export const SignatureStuntsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
+const SignatureStuntsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -595,7 +595,7 @@ export const SignatureStuntsExtension: React.FC<WholeResourceExtensionProps> = (
 };
 
 // WholeResource: list tab walks the full killzones array.
-export const KillzonesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
+const KillzonesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -629,7 +629,7 @@ export const KillzonesExtension: React.FC<WholeResourceExtensionProps> = ({ data
 };
 
 // WholeResource: list tab walks the full roamingLocations array.
-export const RoamingExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
+const RoamingExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');
@@ -666,7 +666,7 @@ export const RoamingExtension: React.FC<WholeResourceExtensionProps> = ({ data, 
 };
 
 // WholeResource: list tab walks the full spawnLocations array.
-export const SpawnsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
+const SpawnsExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => {
 	const td = data as ParsedTriggerData;
 	const onChange = setData as (next: ParsedTriggerData) => void;
 	const [filterQuery, setFilterQuery] = useState('');

@@ -158,7 +158,7 @@ export function BulkPanelStack() {
 // One panel
 // ---------------------------------------------------------------------------
 
-export function BulkPanel({
+function BulkPanel({
 	summary,
 	bundle,
 	onNavigate,
@@ -329,7 +329,7 @@ export function BulkPanel({
 // to `BulkPanel` so users see one consistent panel shape across resources.
 // ---------------------------------------------------------------------------
 
-export function TriggerDataBulkPanel({
+function TriggerDataBulkPanel({
 	summary,
 	bundle,
 	onNavigate,

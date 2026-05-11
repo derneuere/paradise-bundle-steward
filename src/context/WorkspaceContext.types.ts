@@ -67,7 +67,7 @@ export type BundleId = string;
  * Index 0 for single-instance resources; 0..N for multi-instance types
  * (PolygonSoupList, etc.).
  */
-export type DirtyKey = string;
+type DirtyKey = string;
 
 // ---------------------------------------------------------------------------
 // EditableBundle — one entry in the Workspace's `bundles` list
@@ -397,10 +397,3 @@ export type WorkspaceContextValue = {
 export type WorkspaceProviderProps = {
 	children: import('react').ReactNode;
 };
-
-/**
- * The hook every consumer uses. Throws if called outside a `WorkspaceProvider`.
- *
- * Implementation lives in `./WorkspaceContext.tsx` (TODO).
- */
-export type UseWorkspace = () => WorkspaceContextValue;

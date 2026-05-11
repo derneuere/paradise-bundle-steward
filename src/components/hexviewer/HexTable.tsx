@@ -5,7 +5,7 @@ import { formatHex } from './utils.ts';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useScrollToVirtualRow } from '@/hooks/useScrollToVirtualRow';
 
-export const BYTE_CELL_CLASS = 'px-1 py-0.5 rounded text-xs font-mono';
+const BYTE_CELL_CLASS = 'px-1 py-0.5 rounded text-xs font-mono';
 
 const ROW_HEIGHT = 30; // estimated row height in px
 const OVERSCAN = 20; // rows of overscan

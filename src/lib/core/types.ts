@@ -42,7 +42,7 @@ export const RESOURCE_TYPE_IDS = {
 // ============================================================================
 
 // Re-export for backward compatibility
-export type { ResourceEntry, ImportEntry } from './bundle/bundleEntry';
+export type { ResourceEntry } from './bundle/bundleEntry';
 
 // Import types for ParsedBundle definition
 import type { BundleHeader } from './bundle/bundleHeader';
@@ -79,36 +79,10 @@ export type ResourceContext = {
 }
 
 // ============================================================================
-// Vehicle Types (moved to vehicleList.ts)
-// ============================================================================
-
-// Re-export for backward compatibility
-export type {
-  VehicleType,
-  CarType,
-  LiveryType,
-  Rank,
-  AIEngineStream,
-  VehicleListEntryGamePlayData,
-  VehicleListEntryAudioData,
-  VehicleListEntry,
-  ParsedVehicleList
-} from './vehicleList';
-
-// ============================================================================
-// Player Car Colors Types (moved to playerCarColors.ts)
-// ============================================================================
-
-// Re-export for backward compatibility
-export type { PaletteType, PlayerCarColor } from './playerCarColors';
-
-// ============================================================================
 // Utility Types
 // ============================================================================
 
 export type Platform = typeof PLATFORMS[keyof typeof PLATFORMS];
-export type BundleFlag = typeof BUNDLE_FLAGS[keyof typeof BUNDLE_FLAGS];
-export type ResourceTypeId = typeof RESOURCE_TYPE_IDS[keyof typeof RESOURCE_TYPE_IDS];
 
 export type ParseOptions = {
   platform?: Platform;
@@ -156,7 +130,7 @@ export type WriteOptions = {
 // Event System Types (for progress tracking)
 // ============================================================================
 
-export type ProgressEvent = {
+type ProgressEvent = {
   type: 'parse' | 'write' | 'compress' | 'validate';
   stage: string;
   progress: number; // 0-1
