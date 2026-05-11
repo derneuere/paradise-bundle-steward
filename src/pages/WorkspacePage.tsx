@@ -66,6 +66,8 @@ import {
 import { AISectionsBulkProvider } from '@/components/workspace/AISectionsBulkProvider';
 import { TriggerDataBulkProvider } from '@/components/workspace/TriggerDataBulkProvider';
 import { BulkPanelStack } from '@/components/workspace/BulkPanelStack';
+import { BulkTransformGizmoSessionProvider } from '@/components/workspace/BulkTransformGizmoSession';
+import { BulkTransformNumericPanel } from '@/components/workspace/BulkTransformNumericPanel';
 import { BulkImportDialog } from '@/components/workspace/BulkImportDialog';
 import { BundleExportValidationDialog } from '@/components/workspace/BundleExportValidationDialog';
 import { findUnresolvedPortals, type UnresolvedPortal } from '@/lib/core/aiSectionsValidate';
@@ -791,7 +793,14 @@ function WorkspaceBulkWrapper({ children }: { children: React.ReactNode }) {
 		>
 			<AISectionsBulkProvider bundles={bundles}>
 				<TriggerDataBulkProvider bundles={bundles}>
-					{children}
+					{/* Gizmo-session provider sits below the bulk providers so
+					    AISectionsOverlay (deep inside the Canvas) and the
+					    inspector-side `BulkTransformNumericPanel` (deep in the
+					    right column) share one workspace-scoped session
+					    (issue #81). */}
+					<BulkTransformGizmoSessionProvider>
+						{children}
+					</BulkTransformGizmoSessionProvider>
 				</TriggerDataBulkProvider>
 			</AISectionsBulkProvider>
 		</PSLBulkProvider>
@@ -916,6 +925,14 @@ const WorkspacePage = () => {
 							<div className="flex-1 min-h-0">
 								<RightInspector />
 							</div>
+							{/* Numeric panel companion to the Bulk transform
+							    gizmo (issue #81). Renders only while a gizmo
+							    session is active — i.e. the WorldViewport
+							    currently has a Selection that exposes the
+							    BulkTransformGizmo. Sits above BulkPanelStack
+							    so the user sees Δ translate / Δ rotate /
+							    Pivot next to the live gesture. */}
+							<BulkTransformNumericPanel />
 							{/* AI Sections bulk panels — visible regardless of which
 							    inspector level is active so the user can return to
 							    a bulk after navigating elsewhere. PSL bulk-edit

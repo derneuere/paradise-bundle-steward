@@ -25,7 +25,7 @@
 // so the V4/V6 read-only overlay consumes the same code path — bug fixes
 // land in both at once. See issue #35.
 
-import { useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Magnet } from 'lucide-react';
 import { Copy } from 'lucide-react';
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
@@ -58,8 +58,13 @@ import {
 } from '@/lib/core/transformAxes';
 import {
 	type BulkTransformDelta,
+	identityDelta,
 	isIdentityDelta,
 } from '@/hooks/useBulkTransformDrag';
+import {
+	useSetBulkTransformGizmoSession,
+	type GizmoSession,
+} from '@/components/workspace/BulkTransformGizmoSession';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import {
@@ -249,6 +254,11 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	>(null);
 	const [drag, setDrag] = useState<ActiveDrag | null>(null);
 	const [snapEnabled, setSnapEnabled] = useState(false);
+	// Pivot-override state is declared a few lines below alongside
+	// `bulkPivotDragging` (issue #76 — the pivot-drag handle introduced it).
+	// Issue #81's numeric panel reuses the same `bulkPivotOverride` slot, so
+	// dragging and typing share one source of truth.
+	const setSession = useSetBulkTransformGizmoSession();
 
 	const cameraBridge = useRef<CameraBridgeData | null>(null);
 	const aiBulk = useAISectionsBulk();
@@ -429,7 +439,12 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// rigid body. None cascade (ADR-0009; issue #75's modifier-on path).
 	const gizmoTarget = useMemo<DragTarget | null>(() => {
 		if (isBulkActive) {
-			const pivot = bulkPivotRef.current ?? bulkPivotLive;
+			// During a drag, the gizmoTarget's pivot is whatever the gesture
+			// snapshotted (`bulkPivotRef.current`). Between gestures, the
+			// override wins if set (issue #81 numeric pivot edit), otherwise
+			// the live-derived bulk median. Pivot edits between gestures
+			// thereby move the rotation centre for the next gesture.
+			const pivot = bulkPivotRef.current ?? pivotOverride ?? bulkPivotLive;
 			if (!pivot) return null;
 			return { kind: 'bulk', entities: bulkRefs, pivot };
 		}
@@ -471,7 +486,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			default:
 				return null;
 		}
-	}, [isBulkActive, bulkRefs, bulkPivotLive, marker]);
+	}, [isBulkActive, bulkRefs, bulkPivotLive, marker, pivotOverride]);
 
 	// Snap is intentionally not applied to any bulk-transform path (CONTEXT.md
 	// / ADR-0009): cascade-off makes snap incoherent (snapping the source to
@@ -551,13 +566,29 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		// Bulk gizmo anchors at the (snapshotted) Pivot, riding along with
 		// the live translate delta so it visually tracks the bulk during a
 		// translate gesture. Rotation doesn't move the pivot itself (the
-		// pivot IS the fixed point a rigid body rotates around).
+		// pivot IS the fixed point a rigid body rotates around). Pivot drag
+		// (issue #76) and numeric-panel pivot edit (issue #81) both write
+		// to `bulkPivotOverride` — `gizmoTarget.pivot` already incorporates
+		// it via the gizmoTarget memo, so we don't need to layer it here.
 		if (gizmoTarget.kind === 'bulk') {
 			const dxyz = drag?.target.kind === 'bulk' ? drag.delta.translate : { x: 0, y: 0, z: 0 };
 			return [
 				gizmoTarget.pivot.x + dxyz.x,
 				gizmoTarget.pivot.y + 1.5 + dxyz.y,
 				gizmoTarget.pivot.z + dxyz.z,
+			];
+		}
+		// Numeric-panel pivot override for sub-entity selections (issue #81).
+		// When the user types a pivot while a sub-entity is selected, the
+		// gizmo follows the typed coordinate verbatim. Translate preview
+		// still rides on top so a typed-Δ live update visually moves the
+		// gizmo along with the staged delta.
+		if (bulkPivotOverride) {
+			const dxyz = drag?.delta.translate ?? { x: 0, y: 0, z: 0 };
+			return [
+				bulkPivotOverride.x + dxyz.x,
+				bulkPivotOverride.y + dxyz.y,
+				bulkPivotOverride.z + dxyz.z,
 			];
 		}
 		// All sub-entity targets live in the same source section — read it
@@ -612,7 +643,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				return [x, selectedSectionY + 0.5, z];
 			}
 		}
-	}, [gizmoTarget, previewSection, data, selectedSectionY]);
+	}, [gizmoTarget, previewSection, data, selectedSectionY, bulkPivotOverride, drag]);
 
 	// The gizmo's axis profile depends on what's being moved:
 	//   - section / corner / line endpoint: XZ-packed (ADR-0011 — no Y component)
@@ -914,11 +945,167 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		setBulkPivotDragging(null);
 	}, []);
 
+	// =========================================================================
+	// Bulk-transform numeric panel companion (issue #81)
+	// =========================================================================
+	//
+	// Publish the active gizmo's staged state to the workspace-scoped
+	// `BulkTransformGizmoSessionProvider` so the inspector-side numeric panel
+	// can read AND write the same delta + pivot the gizmo uses. The session is
+	// keyed by (bundleId, index, marker shape) so the panel resets typed
+	// fields when the user picks a different entity.
+	//
+	// `setDelta` updates the local drag state in preview mode — same shape as
+	// `handleGizmoTransform` minus the `gizmoTarget` precondition (which the
+	// useMemo below already guards). `commit` reuses `handleGizmoCommit` so
+	// the one-undo-per-gesture contract is preserved whether the gesture came
+	// from a drag or from a typed Enter. `setPivot` updates `bulkPivotOverride`
+	// — the same state the pivot-drag handle uses (issue #76), so typed and
+	// dragged pivot edits share one source of truth.
+
+	// The pivot the panel shows — the gizmo's anchor projected to the
+	// "absolute world coords" the issue calls out. For bulk gestures this is
+	// the snapshotted bulk pivot; for sub-entity gestures it's the anchor
+	// itself (corner XZ on section Y, portal Vector3, etc.). We use the raw
+	// auto-anchor (no +1.5 Y offset) so the typed values round-trip cleanly:
+	// the +1.5 is a "lift above the fill mesh" visual nudge, not part of the
+	// pivot value the user cares about.
+	const sessionPivot = useMemo<{ x: number; y: number; z: number } | null>(() => {
+		if (bulkPivotOverride) return bulkPivotOverride;
+		if (!gizmoTarget) return null;
+		if (gizmoTarget.kind === 'bulk') return gizmoTarget.pivot;
+		const liveSection = data.sections[gizmoTarget.sectionIdx];
+		if (!liveSection) return null;
+		switch (gizmoTarget.kind) {
+			case 'section': {
+				if (liveSection.corners.length === 0) return null;
+				let sx = 0, sz = 0;
+				for (const c of liveSection.corners) { sx += c.x; sz += c.y; }
+				const n = liveSection.corners.length;
+				return { x: sx / n, y: selectedSectionY, z: sz / n };
+			}
+			case 'corner': {
+				const c = liveSection.corners[gizmoTarget.cornerIdx];
+				if (!c) return null;
+				return { x: c.x, y: selectedSectionY, z: c.y };
+			}
+			case 'portalAnchor': {
+				const p = liveSection.portals[gizmoTarget.portalIdx];
+				if (!p) return null;
+				return { x: p.position.x, y: p.position.y, z: p.position.z };
+			}
+			case 'boundaryLineEndpoint': {
+				const p = liveSection.portals[gizmoTarget.portalIdx];
+				if (!p) return null;
+				const line = p.boundaryLines[gizmoTarget.lineIdx];
+				if (!line) return null;
+				const v = line.verts;
+				const x = gizmoTarget.endIdx === 0 ? v.x : v.z;
+				const z = gizmoTarget.endIdx === 0 ? v.y : v.w;
+				return { x, y: p.position.y, z };
+			}
+			case 'noGoLineEndpoint': {
+				const line = liveSection.noGoLines[gizmoTarget.lineIdx];
+				if (!line) return null;
+				const v = line.verts;
+				const x = gizmoTarget.endIdx === 0 ? v.x : v.z;
+				const z = gizmoTarget.endIdx === 0 ? v.y : v.w;
+				return { x, y: selectedSectionY, z };
+			}
+		}
+	}, [gizmoTarget, bulkPivotOverride, data, selectedSectionY]);
+
+	const handleSessionSetDelta = useCallback((next: BulkTransformDelta) => {
+		if (!gizmoTarget) return;
+		if (isIdentityDelta(next)) {
+			setDrag(null);
+			return;
+		}
+		// Same shape as a live drag-frame, but the pivot for a bulk gesture
+		// uses whatever the gizmoTarget already carries (override-aware via
+		// the memo above). No need to snapshot bulkPivotRef on a typed edit
+		// — a typed commit is a one-shot, not a multi-frame gesture, so
+		// pivot drift can't happen.
+		setDrag({ target: gizmoTarget, delta: next });
+	}, [gizmoTarget]);
+
+	const handleSessionCommit = useCallback((typed: BulkTransformDelta) => {
+		// Drop any in-flight preview before the commit so the next session
+		// state has delta = identity (the "reset to zero after every commit"
+		// rule per issue #81 / Blender N panel idiom).
+		setDrag(null);
+		handleGizmoCommit(typed);
+	}, [handleGizmoCommit]);
+
+	const handleSessionSetPivot = useCallback((world: { x: number; y: number; z: number }) => {
+		// Typed pivot edit — wires into the same `bulkPivotOverride` slot
+		// the pivot-drag handle uses (issue #76 + #81 share one source of
+		// truth). No undo entry: pivot is part of the Tools surface, not
+		// the Workspace history.
+		setBulkPivotOverride(world);
+	}, []);
+
+	// Publish the session whenever its observables change. `null` while no
+	// gizmo target exists so the panel hides itself.
+	useEffect(() => {
+		if (!isActive || !gizmoTarget || !sessionPivot) {
+			setSession(null);
+			return;
+		}
+		const markerKey =
+			gizmoTarget.kind === 'bulk'
+				? `bulk:${gizmoTarget.entities.length}`
+				: gizmoTarget.kind === 'section'
+					? `s:${gizmoTarget.sectionIdx}`
+					: gizmoTarget.kind === 'corner'
+						? `c:${gizmoTarget.sectionIdx}:${gizmoTarget.cornerIdx}`
+						: gizmoTarget.kind === 'portalAnchor'
+							? `pa:${gizmoTarget.sectionIdx}:${gizmoTarget.portalIdx}`
+							: gizmoTarget.kind === 'boundaryLineEndpoint'
+								? `ble:${gizmoTarget.sectionIdx}:${gizmoTarget.portalIdx}:${gizmoTarget.lineIdx}:${gizmoTarget.endIdx}`
+								: `nge:${gizmoTarget.sectionIdx}:${gizmoTarget.lineIdx}:${gizmoTarget.endIdx}`;
+		const session: GizmoSession = {
+			id: `aiSections::${bundleId ?? '?'}::${index ?? '?'}::${markerKey}`,
+			delta: drag?.delta ?? identityDelta(),
+			pivot: sessionPivot,
+			axes: gizmoAxes,
+			setDelta: handleSessionSetDelta,
+			commit: handleSessionCommit,
+			setPivot: handleSessionSetPivot,
+		};
+		setSession(session);
+	}, [
+		isActive,
+		gizmoTarget,
+		sessionPivot,
+		gizmoAxes,
+		drag,
+		bundleId,
+		index,
+		handleSessionSetDelta,
+		handleSessionCommit,
+		handleSessionSetPivot,
+		setSession,
+	]);
+
+	// Clear the session on unmount — happens when the user navigates the
+	// inspector to a non-world resource (Bundle / Resource-type level), at
+	// which point the overlay drops out of the scene composition.
+	useEffect(() => {
+		return () => setSession(null);
+	}, [setSession]);
+
+
 	// Reset transient edge / drag UI when the selected section changes.
 	useResetOnChange(selectedSectionIndex, () => {
 		setHoveredEdge(null);
 		setEdgeMenu(null);
 		setDrag(null);
+		// Also reset any typed pivot override (issue #81) — the next
+		// selection brings its own auto-anchor; carrying over a manual
+		// pivot from a different section would surprise the user.
+		setBulkPivotOverride(null);
+		setBulkPivotDragging(null);
 	});
 
 	const handleEdgeContextMenu = useCallback(
