@@ -789,5 +789,3 @@ function HtmlSiblings({
 	useWorldViewportHtmlSlot(isActive ? node : null);
 	return null;
 }
-
-export default AISectionsLegacyOverlay;
