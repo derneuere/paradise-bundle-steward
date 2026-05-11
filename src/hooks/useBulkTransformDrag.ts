@@ -36,10 +36,20 @@ export type GizmoHandleAxis = 'x' | 'y' | 'z';
  * the gizmo's pivot. Pitch/roll are present in the type so future slices
  * (trigger box gizmo) get the same shape — for the AI section MVP only
  * `rotate.y` is ever non-zero (ADR-0011 yaw-lock).
+ *
+ * `cascade` is the **Cascade** opt-in flag (CONTEXT.md / "Cascade", ADR-0009
+ * and issue #75). Captured at gesture START — pressing or releasing the
+ * cascade modifier mid-drag does NOT flip the mode for consistent gesture
+ * semantics. When true, consumers should route to the cascade-on op variants
+ * (`translateSectionWithLinks`, `rotateSectionWithLinksYaw`, etc.) that drag
+ * outside-neighbour reverse portals and shared corners along with the
+ * selection; when false (the ADR-0009 default), consumers run the rigid /
+ * no-cascade ops and outside neighbours stay put.
  */
 export type BulkTransformDelta = {
 	translate: { x: number; y: number; z: number };
 	rotate: { x: number; y: number; z: number };
+	cascade: boolean;
 };
 
 export type BulkTransformDragOptions = {
@@ -59,6 +69,10 @@ export type BulkTransformDragOptions = {
 		anchorWorld?: THREE.Vector3;
 		anchorAngle?: number;
 		rotationAxisWorld?: THREE.Vector3;
+		/** **Cascade** opt-in flag captured at pointer-down. Stays fixed for
+		 *  the lifetime of the gesture — pressing or releasing the modifier
+		 *  mid-drag does NOT switch modes. See `BulkTransformDelta.cascade`. */
+		cascade?: boolean;
 	} | null>;
 	onTransform: (delta: BulkTransformDelta) => void;
 	onCommit: (delta: BulkTransformDelta) => void;
@@ -104,7 +118,8 @@ export function useBulkTransformDrag({
 		};
 
 		const handleUp = (e: PointerEvent) => {
-			const delta = computeDelta(e.clientX, e.clientY) ?? identityDelta();
+			const cascade = dragStart.current?.cascade === true;
+			const delta = computeDelta(e.clientX, e.clientY) ?? identityDelta(cascade);
 			dragStart.current = null;
 			setActive(null);
 			onCommit(delta);
@@ -112,9 +127,10 @@ export function useBulkTransformDrag({
 
 		const handleKey = (e: KeyboardEvent) => {
 			if (e.key !== 'Escape') return;
+			const cascade = dragStart.current?.cascade === true;
 			dragStart.current = null;
 			setActive(null);
-			onTransform(identityDelta());
+			onTransform(identityDelta(cascade));
 			onCancel?.();
 		};
 
@@ -156,6 +172,7 @@ function computeTranslateDelta(
 	return {
 		translate: { x: projected.x, y: projected.y, z: projected.z },
 		rotate: { x: 0, y: 0, z: 0 },
+		cascade: start.cascade === true,
 	};
 }
 
@@ -231,6 +248,7 @@ function computeRotateDelta(
 			y: start.axis === 'y' ? theta : 0,
 			z: start.axis === 'z' ? theta : 0,
 		},
+		cascade: start.cascade === true,
 	};
 }
 
@@ -238,14 +256,18 @@ function computeRotateDelta(
 // Helpers
 // =============================================================================
 
-export function identityDelta(): BulkTransformDelta {
+export function identityDelta(cascade = false): BulkTransformDelta {
 	return {
 		translate: { x: 0, y: 0, z: 0 },
 		rotate: { x: 0, y: 0, z: 0 },
+		cascade,
 	};
 }
 
 export function isIdentityDelta(d: BulkTransformDelta): boolean {
+	// `cascade` is metadata about *how* to apply the delta, not part of the
+	// spatial change itself — a cascade=true delta with zero translate/rotate
+	// is still a no-op gesture (nothing to push to the undo stack).
 	return (
 		d.translate.x === 0 &&
 		d.translate.y === 0 &&

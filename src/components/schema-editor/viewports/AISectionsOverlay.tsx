@@ -36,9 +36,11 @@ import { SectionSpeed } from '@/lib/core/aiSections';
 import {
 	duplicateSectionThroughEdge,
 	rotateSectionAroundCentroidYaw,
+	rotateSectionWithLinksYaw,
 	snapCornerOffset,
 	translateCornerWithShared,
 	translateSectionRigid,
+	translateSectionWithLinks,
 } from '@/lib/core/aiSectionsOps';
 import { resolveSectionYs } from '@/lib/core/aiSectionY';
 import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
@@ -277,14 +279,33 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 
 	// While a drag is in flight, run the relevant op on the live delta to
 	// derive a preview model. Used for the selection overlay on the source
-	// section so the user sees the gesture in real time. Section-drag uses
-	// the no-cascade ops (per ADR-0009); corner-drag still cascades into
-	// shared corners (issue #73 migrates that gesture to the unified gizmo).
+	// section so the user sees the gesture in real time. Section-drag picks
+	// between no-cascade ops (the ADR-0009 default) and cascade-on ops
+	// (`translateSectionWithLinks` / `rotateSectionWithLinksYaw`) based on
+	// `delta.cascade` — captured at gesture start from Shift, per issue #75.
+	// Corner-drag still cascades into shared corners (issue #73 migrates that
+	// gesture to the unified gizmo).
 	const previewModel: ParsedAISectionsV12 | null = useMemo(() => {
 		if (selectedSectionIndex == null || !selSection || !drag) return null;
 		try {
 			if (drag.kind === 'section') {
 				if (isIdentityDelta(drag.delta)) return null;
+				if (drag.delta.cascade) {
+					// Cascade-on path: translateSectionWithLinks for translate
+					// (the legacy auto-cascade behaviour preserved as the
+					// modifier-on implementation per ADR-0009), then a yaw
+					// rotate that ALSO cascades around the same pivot. We
+					// compute the rotate pivot from the source centroid AFTER
+					// translate so combined gestures compose like Blender.
+					let next = translateSectionWithLinks(data, selectedSectionIndex, {
+						x: drag.delta.translate.x,
+						z: drag.delta.translate.z,
+					});
+					if (drag.delta.rotate.y !== 0) {
+						next = rotateSectionWithLinksYaw(next, selectedSectionIndex, drag.delta.rotate.y);
+					}
+					return next;
+				}
 				const translated = translateSectionRigid(data, selectedSectionIndex, drag.delta.translate);
 				// Apply yaw rotation around the *post-translate* centroid so
 				// translate + rotate compose as a single rigid body — same
@@ -444,21 +465,43 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		setDrag(null);
 		if (selectedSectionIndex == null || !onChange) return;
 		if (isIdentityDelta(delta)) return;
-		// Compose translate then yaw rotate in the same order as the preview
-		// (around the post-translate centroid) so commit and preview agree
-		// frame-for-frame.
 		let next = data;
-		if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
-			next = translateSectionRigid(next, selectedSectionIndex, delta.translate);
-		}
-		if (delta.rotate.y !== 0) {
-			next = rotateSectionAroundCentroidYaw(next, selectedSectionIndex, delta.rotate.y);
+		if (delta.cascade) {
+			// Cascade-on path (Shift held at gesture start per issue #75 +
+			// ADR-0009). Same op composition as the preview branch above —
+			// translate-with-links, then rotate-with-links — so commit and
+			// preview agree frame-for-frame. The yaw cascade pivots on the
+			// post-translate source centroid implicitly (the rotate-with-
+			// links op recomputes it from the section's current corners).
+			if (delta.translate.x !== 0 || delta.translate.z !== 0) {
+				next = translateSectionWithLinks(next, selectedSectionIndex, {
+					x: delta.translate.x,
+					z: delta.translate.z,
+				});
+			}
+			if (delta.rotate.y !== 0) {
+				next = rotateSectionWithLinksYaw(next, selectedSectionIndex, delta.rotate.y);
+			}
+		} else {
+			// Cascade-off path (the ADR-0009 default). Compose translate then
+			// yaw rotate in the same order as the preview (around the
+			// post-translate centroid) so commit and preview agree frame-for-
+			// frame.
+			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+				next = translateSectionRigid(next, selectedSectionIndex, delta.translate);
+			}
+			if (delta.rotate.y !== 0) {
+				next = rotateSectionAroundCentroidYaw(next, selectedSectionIndex, delta.rotate.y);
+			}
 		}
 		if (next === data) return;
 		// Single onChange call ⇒ single setResourceAt ⇒ single
 		// HistoryCommit pushed onto the Workspace-undo stack. Drag-frames
 		// in between only updated local React state; they never touched
-		// `setResourceAt`, so they don't add stack entries.
+		// `setResourceAt`, so they don't add stack entries. Cascade-on
+		// paths preserve this invariant: even though the cascade-with-links
+		// ops mutate more sections per gesture, they still produce ONE
+		// resulting model committed via ONE onChange call.
 		onChange(next);
 	}, [data, selectedSectionIndex, onChange]);
 
@@ -686,9 +729,9 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			<CameraBridge bridge={cameraBridge} />
 
 			{/* DOM siblings — snap toggle, marquee rectangle, edge context
-			    menu — registered into the chrome's HTML slot. The slot
-			    renders these outside the Canvas in React-DOM-land, avoiding
-			    cross-reconciler portal quirks. */}
+			    menu, cascade-on hint — registered into the chrome's HTML
+			    slot. The slot renders these outside the Canvas in React-
+			    DOM-land, avoiding cross-reconciler portal quirks. */}
 			<HtmlSiblings
 				isActive={isActive}
 				snapEnabled={snapEnabled}
@@ -698,6 +741,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				edgeMenu={edgeMenu}
 				onDuplicateThroughEdge={handleDuplicateThroughEdge}
 				onCloseEdgeMenu={() => setEdgeMenu(null)}
+				cascadeActive={drag?.kind === 'section' && drag.delta.cascade}
 			/>
 		</>
 	);
@@ -716,6 +760,7 @@ function HtmlSiblings({
 	edgeMenu,
 	onDuplicateThroughEdge,
 	onCloseEdgeMenu,
+	cascadeActive,
 }: {
 	isActive: boolean;
 	snapEnabled: boolean;
@@ -725,6 +770,7 @@ function HtmlSiblings({
 	edgeMenu: { x: number; y: number; sectionIndex: number; edgeIdx: number } | null;
 	onDuplicateThroughEdge: () => void;
 	onCloseEdgeMenu: () => void;
+	cascadeActive: boolean;
 }) {
 	const node = useMemo(
 		() => (
@@ -785,9 +831,39 @@ function HtmlSiblings({
 						</button>
 					</EdgeContextMenu>
 				)}
+
+				{/* Cascade status hint — appears top-centre during a Shift-
+				    held bulk-transform gesture (CONTEXT.md / "Cascade",
+				    ADR-0009, issue #75). Magenta tint matches the gizmo's
+				    cascade halo so the two cues read as one mode. */}
+				{cascadeActive && (
+					<div
+						role="status"
+						aria-live="polite"
+						style={{
+							position: 'absolute',
+							top: 8,
+							left: '50%',
+							transform: 'translateX(-50%)',
+							padding: '4px 10px',
+							borderRadius: 6,
+							fontSize: 11,
+							fontFamily: 'monospace',
+							border: '1px solid #ff66cc',
+							background: 'rgba(255, 102, 204, 0.18)',
+							color: '#ffaadd',
+							pointerEvents: 'none',
+							userSelect: 'none',
+							boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+							whiteSpace: 'nowrap',
+						}}
+					>
+						Cascade ON · outside neighbours follow
+					</div>
+				)}
 			</>
 		),
-		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu],
+		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu, cascadeActive],
 	);
 	// Pass `null` when this overlay isn't the active resource so the chrome
 	// drops our marquee / snap / context menu — see ADR-0007 / issue #24.

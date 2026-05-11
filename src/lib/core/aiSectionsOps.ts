@@ -1491,3 +1491,487 @@ export function rotateSectionAroundCentroidYaw(
 	const sections = model.sections.map((s, i) => (i === srcIdx ? next : s));
 	return { ...model, sections };
 }
+
+// =============================================================================
+// Bulk-transform: cascade-on variants (held-modifier opt-in path)
+// =============================================================================
+//
+// The **Cascade** modifier path of the **Bulk transform** gizmo (CONTEXT.md /
+// "Cascade", ADR-0009, issue #75). When the user holds the modifier (Shift)
+// at gesture start the gizmo routes through these ops instead of the rigid /
+// no-cascade ones — the same one-hop cascade `translateSectionWithLinks`
+// pioneered, generalised to rotate, single-corner, and single-portal-anchor
+// drags. The mental model is one sentence from the ADR: "the gizmo moves
+// what you selected; modifier extends to connected geometry."
+//
+// One-hop semantics are inherited from `translateSectionWithLinks`. We do not
+// chase the cascade through a neighbour's *other* portals because that doesn't
+// terminate cleanly on cyclic neighbour graphs — same trade-off documented on
+// the translate op (a two-hop drift is the user's call to fix).
+
+/**
+ * Rotate one AI section around its own centroid by `theta` radians of yaw,
+ * cascading the rotation into every neighbour the section shares a portal
+ * with — the rotate-axis sibling of {@link translateSectionWithLinks}.
+ *
+ * The source section rotates as a rigid body (corners + portal positions +
+ * portal boundary lines + no-go lines all spin together) around the
+ * pre-rotate centroid. For each `srcIdx` portal `P` pointing at neighbour
+ * `N`:
+ *
+ *   - Find `N`'s reverse portal (matched by `linkSection === srcIdx` AND a
+ *     pre-rotate `position` that approximates `P`'s pre-rotate `position`).
+ *     Rotate its `position` and every `boundaryLine.verts` endpoint around
+ *     the SAME centroid — keeping the portal pair at one shared world XZ
+ *     coordinate post-rotation (Y is unchanged by yaw).
+ *   - Rotate `N`'s corners that coincide with `P`'s pre-rotate boundary
+ *     endpoints around the centroid. `N`'s other corners stay put, so `N`
+ *     "stretches" along its other edges — same shape the translate cascade
+ *     uses, just with rotation as the per-point transform.
+ *
+ * Returns the original `model` reference when `theta === 0` so byte-for-byte
+ * BND2 writeback is preserved on a no-op gesture.
+ *
+ * Why the existing translate algorithm doesn't extend trivially: the
+ * translate cascade shifts every cascade-partner by the SAME `(dx, dz)`
+ * vector, so the order of operations doesn't matter. Rotation isn't a
+ * translation — every point's new position depends on its OWN offset from
+ * the pivot — so we have to identify the cascade partners (reverse portals,
+ * shared corners) on the *pre-rotate* geometry, then apply the rotation
+ * point-by-point with the same `(cx, cz, theta)` to each. We use the source
+ * section's centroid as the pivot rather than the section-pair centroid
+ * because the gizmo's pivot for a cardinality-1 **Selection** IS the source
+ * section's centroid (CONTEXT.md / "Pivot"). Neighbours' OTHER edges (those
+ * not shared with the source) accept the cascade-driven stretch on their
+ * shared corners and stay rigid otherwise.
+ *
+ * Cross-references via `sectionResetPairs` are not touched — they reference
+ * sections by index, not by world position, so a rotate doesn't break them.
+ *
+ * @throws RangeError if `srcIdx` is out of range.
+ */
+export function rotateSectionWithLinksYaw(
+	model: ParsedAISectionsV12,
+	srcIdx: number,
+	theta: number,
+): ParsedAISectionsV12 {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	if (theta === 0) return model;
+
+	const src = model.sections[srcIdx];
+	if (src.corners.length === 0) return model;
+
+	// Pivot = source section centroid (cardinality-1 default per CONTEXT.md /
+	// "Pivot"). AISection.Vector2 stores world XZ in `(x, y)`, so the
+	// centroid's `(cx, cz)` lives in `(centre.x, centre.y)`.
+	const c = centroid(src.corners);
+	const cx = c.x;
+	const cz = c.y;
+	const cosT = Math.cos(theta);
+	const sinT = Math.sin(theta);
+
+	// Yaw around world +Y: with thumb along +Y, +X rotates towards +Z. Mirrors
+	// the rigid yaw op exactly so combined gestures compose deterministically.
+	const rotXZ = (x: number, z: number): { x: number; z: number } => {
+		const ox = x - cx;
+		const oz = z - cz;
+		return {
+			x: ox * cosT - oz * sinT + cx,
+			z: ox * sinT + oz * cosT + cz,
+		};
+	};
+
+	const srcRotated: AISection = {
+		...src,
+		corners: src.corners.map((corner) => {
+			const r = rotXZ(corner.x, corner.y);
+			return { x: r.x, y: r.z };
+		}),
+		portals: src.portals.map((p) => {
+			const rPos = rotXZ(p.position.x, p.position.z);
+			return {
+				...p,
+				position: { x: rPos.x, y: p.position.y, z: rPos.z },
+				boundaryLines: p.boundaryLines.map((bl) => {
+					const rStart = rotXZ(bl.verts.x, bl.verts.y);
+					const rEnd = rotXZ(bl.verts.z, bl.verts.w);
+					return { verts: { x: rStart.x, y: rStart.z, z: rEnd.x, w: rEnd.z } };
+				}),
+			};
+		}),
+		noGoLines: src.noGoLines.map((bl) => {
+			const rStart = rotXZ(bl.verts.x, bl.verts.y);
+			const rEnd = rotXZ(bl.verts.z, bl.verts.w);
+			return { verts: { x: rStart.x, y: rStart.z, z: rEnd.x, w: rEnd.z } };
+		}),
+	};
+
+	// Neighbour fix-ups — one per source portal pointing at a distinct
+	// neighbour. Multiple portals can point at the same neighbour (rare A↔B
+	// dual-edge connection): in that case each portal's fix-up applies on
+	// top of the running state via the same map-keyed accumulator the
+	// translate cascade uses.
+	const updates = new Map<number, AISection>();
+	updates.set(srcIdx, srcRotated);
+
+	for (const oldPortal of src.portals) {
+		const targetIdx = oldPortal.linkSection;
+		if (targetIdx === srcIdx) continue;
+		if (targetIdx < 0 || targetIdx >= model.sections.length) continue;
+
+		const current = updates.get(targetIdx) ?? model.sections[targetIdx];
+		const fixed = applyRotateLinkFixUp(current, srcIdx, oldPortal, rotXZ);
+		if (fixed !== current) updates.set(targetIdx, fixed);
+	}
+
+	const sections = model.sections.map((s, i) => updates.get(i) ?? s);
+	return { ...model, sections };
+}
+
+/**
+ * Per-neighbour rotate cascade: rotate the matching reverse portal and any
+ * corners on the shared edge around the same pivot the source spun about.
+ * Mirrors {@link applyLinkFixUp}'s shape — match the reverse portal by
+ * `linkSection` AND coincident pre-rotate `position`, then apply `rotXZ`
+ * point-by-point to that portal's position, its boundary-line endpoints,
+ * and the neighbour corners coincident with the source portal's pre-rotate
+ * boundary-line endpoints.
+ */
+function applyRotateLinkFixUp(
+	target: AISection,
+	srcIdx: number,
+	oldSrcPortal: Portal,
+	rotXZ: (x: number, z: number) => { x: number; z: number },
+): AISection {
+	const matchIdx = target.portals.findIndex(
+		(p) => p.linkSection === srcIdx && v3Approx(p.position, oldSrcPortal.position),
+	);
+
+	let portals = target.portals;
+	if (matchIdx >= 0) {
+		const old = target.portals[matchIdx];
+		const rPos = rotXZ(old.position.x, old.position.z);
+		const updated: Portal = {
+			...old,
+			position: { x: rPos.x, y: old.position.y, z: rPos.z },
+			boundaryLines: old.boundaryLines.map((bl) => {
+				const rStart = rotXZ(bl.verts.x, bl.verts.y);
+				const rEnd = rotXZ(bl.verts.z, bl.verts.w);
+				return { verts: { x: rStart.x, y: rStart.z, z: rEnd.x, w: rEnd.z } };
+			}),
+		};
+		portals = target.portals.slice();
+		portals[matchIdx] = updated;
+	}
+
+	// Identify shared corners by matching the source portal's pre-rotate
+	// boundary-line endpoints — same lookup the translate cascade uses.
+	const sharedPoints: Vector2[] = [];
+	for (const bl of oldSrcPortal.boundaryLines) {
+		sharedPoints.push({ x: bl.verts.x, y: bl.verts.y });
+		sharedPoints.push({ x: bl.verts.z, y: bl.verts.w });
+	}
+
+	let corners = target.corners;
+	if (sharedPoints.length > 0) {
+		let cornersChanged = false;
+		const next = target.corners.map((c) => {
+			if (sharedPoints.some((p) => v2Approx(c, p))) {
+				cornersChanged = true;
+				const r = rotXZ(c.x, c.y);
+				return { x: r.x, y: r.z };
+			}
+			return c;
+		});
+		if (cornersChanged) corners = next;
+	}
+
+	if (portals === target.portals && corners === target.corners) return target;
+	return { ...target, portals, corners };
+}
+
+/**
+ * Cascade-on translate of a single portal anchor by `(dx, dy, dz)`. The
+ * source portal at `(sectionIdx, portalIdx)` moves to its new position, and
+ * the **mirror portal** on the linked section (matched by `linkSection ===
+ * sectionIdx` AND a pre-translate `position` coincident with the source
+ * portal's pre-translate `position`) moves by the same delta so the
+ * connection stays geometrically coherent.
+ *
+ * Unlike {@link translateSectionWithLinks}, this op does NOT touch corners
+ * or boundary-line endpoints on either section. The portal anchor is a
+ * 3D point at an edge midpoint by convention (the duplicate-through-edge
+ * op's choice); dragging it slides the anchor along the connection without
+ * deforming either polygon. The user can drag corners separately to
+ * re-align the shared edge if they want.
+ *
+ * Returns the original `model` reference when `(dx, dy, dz) === (0, 0, 0)`
+ * so byte-for-byte BND2 writeback is preserved on a no-op gesture.
+ *
+ * @throws RangeError if `sectionIdx` or `portalIdx` is out of range.
+ */
+export function translatePortalAnchorWithMirror(
+	model: ParsedAISectionsV12,
+	sectionIdx: number,
+	portalIdx: number,
+	offset: { x: number; y: number; z: number },
+): ParsedAISectionsV12 {
+	if (sectionIdx < 0 || sectionIdx >= model.sections.length) {
+		throw new RangeError(`sectionIdx ${sectionIdx} out of range [0, ${model.sections.length})`);
+	}
+	const src = model.sections[sectionIdx];
+	if (portalIdx < 0 || portalIdx >= src.portals.length) {
+		throw new RangeError(`portalIdx ${portalIdx} out of range [0, ${src.portals.length})`);
+	}
+	const dx = offset.x;
+	const dy = offset.y;
+	const dz = offset.z;
+	if (dx === 0 && dy === 0 && dz === 0) return model;
+
+	const oldPortal = src.portals[portalIdx];
+	const oldPosition = { ...oldPortal.position };
+	const movedPortal: Portal = {
+		...oldPortal,
+		position: { x: oldPortal.position.x + dx, y: oldPortal.position.y + dy, z: oldPortal.position.z + dz },
+	};
+	const updatedSrc: AISection = {
+		...src,
+		portals: src.portals.map((p, i) => (i === portalIdx ? movedPortal : p)),
+	};
+
+	const updates = new Map<number, AISection>();
+	updates.set(sectionIdx, updatedSrc);
+
+	// Mirror lookup: the linked section's portal pointing back at us whose
+	// pre-translate position approximates ours. Same matching strategy as
+	// `applyLinkFixUp` so a neighbour with multiple portals back to the
+	// source resolves to the right one.
+	const linkIdx = oldPortal.linkSection;
+	if (linkIdx !== sectionIdx && linkIdx >= 0 && linkIdx < model.sections.length) {
+		const neighbour = model.sections[linkIdx];
+		const mirrorIdx = neighbour.portals.findIndex(
+			(p) => p.linkSection === sectionIdx && v3Approx(p.position, oldPosition),
+		);
+		if (mirrorIdx >= 0) {
+			const oldMirror = neighbour.portals[mirrorIdx];
+			const movedMirror: Portal = {
+				...oldMirror,
+				position: {
+					x: oldMirror.position.x + dx,
+					y: oldMirror.position.y + dy,
+					z: oldMirror.position.z + dz,
+				},
+			};
+			const updatedNeighbour: AISection = {
+				...neighbour,
+				portals: neighbour.portals.map((p, i) => (i === mirrorIdx ? movedMirror : p)),
+			};
+			updates.set(linkIdx, updatedNeighbour);
+		}
+	}
+
+	const sections = model.sections.map((s, i) => updates.get(i) ?? s);
+	return { ...model, sections };
+}
+
+/**
+ * Cascade-on translate of a multi-section **Selection** by an XZ offset.
+ * Layered on top of {@link translateSectionWithLinks}: each selected section
+ * is translated with the one-hop cascade rule, but cascades INTO other
+ * Selection members are skipped — the inside of the Selection moves as one
+ * rigid body, and only OUTSIDE neighbours get their reverse portals + shared
+ * corners dragged along (per the issue #75 acceptance criterion "cascade
+ * applied to every Selection-boundary portal/corner").
+ *
+ * Why we can't just call `translateSectionWithLinks` per member: cascading
+ * into another Selection member would double-translate that member (once by
+ * its own gizmo translate, once by the cascade from the previous member).
+ * The inside-Selection cascade is also redundant — both members move by the
+ * same delta, so their shared boundary stays coincident either way.
+ *
+ * Algorithm:
+ *   1. Build a set of cascade-target indices = the Selection's complement,
+ *      restricted to neighbours of any Selection member.
+ *   2. For each Selection member: apply the rigid translate to the source,
+ *      then for each of its portals pointing at a target NOT in the
+ *      Selection, apply the same one-hop fix-up `applyLinkFixUp` uses
+ *      (translate the reverse portal + shared corners).
+ *   3. Selection-internal portals get their `position` and `boundaryLines`
+ *      translated as part of the rigid move on the source side; the matching
+ *      reverse portal on the OTHER Selection member is similarly translated
+ *      by its own pass, so the pair stays coherent without explicit cascade.
+ *
+ * Returns the original `model` reference when `(dx, dz) === (0, 0)` so
+ * byte-for-byte BND2 writeback is preserved on a no-op gesture.
+ *
+ * Layered on top of issue #74's bulk path — when #74 lands and the bulk
+ * Selection has its own carrier, this op consumes the same `readonly
+ * number[]` of section indices. Today's caller is issue #75's cascade-on
+ * path for single-section selections too (selectedIndices = [i]); behaviour
+ * matches `translateSectionWithLinks` exactly in that single-member case.
+ *
+ * @throws RangeError if any index in `selectedIndices` is out of range.
+ */
+export function translateSelectionWithLinks(
+	model: ParsedAISectionsV12,
+	selectedIndices: readonly number[],
+	offset: { x: number; z: number },
+): ParsedAISectionsV12 {
+	if (selectedIndices.length === 0) return model;
+	for (const idx of selectedIndices) {
+		if (idx < 0 || idx >= model.sections.length) {
+			throw new RangeError(`section index ${idx} out of range [0, ${model.sections.length})`);
+		}
+	}
+	if (offset.x === 0 && offset.z === 0) return model;
+
+	const dx = offset.x;
+	const dz = offset.z;
+	const selectedSet = new Set<number>(selectedIndices);
+
+	// Per-section update accumulator (same shape as the single-section op).
+	const updates = new Map<number, AISection>();
+
+	// Pass 1 — rigid-translate every selected section. This is the "inside
+	// the Selection moves as one block" pass; outside cascade lands in pass 2.
+	for (const idx of selectedSet) {
+		const src = model.sections[idx];
+		const srcTranslated: AISection = {
+			...src,
+			corners: src.corners.map((c) => ({ x: c.x + dx, y: c.y + dz })),
+			portals: src.portals.map((p) => ({
+				...p,
+				position: { x: p.position.x + dx, y: p.position.y, z: p.position.z + dz },
+				boundaryLines: p.boundaryLines.map((bl) => ({
+					verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+				})),
+			})),
+			noGoLines: src.noGoLines.map((bl) => ({
+				verts: { x: bl.verts.x + dx, y: bl.verts.y + dz, z: bl.verts.z + dx, w: bl.verts.w + dz },
+			})),
+		};
+		updates.set(idx, srcTranslated);
+	}
+
+	// Pass 2 — cascade into outside neighbours. We walk every Selection
+	// member's ORIGINAL portals (not the post-translate ones — `oldSrcPortal`
+	// in `applyLinkFixUp` references pre-translate positions for the lookup
+	// of coincident reverse portals + shared corners).
+	for (const idx of selectedSet) {
+		const src = model.sections[idx];
+		for (const oldPortal of src.portals) {
+			const targetIdx = oldPortal.linkSection;
+			if (targetIdx === idx) continue;
+			if (targetIdx < 0 || targetIdx >= model.sections.length) continue;
+			// Skip cascades INTO another Selection member — that member's
+			// rigid translate from pass 1 already covers the shared edge.
+			if (selectedSet.has(targetIdx)) continue;
+
+			const current = updates.get(targetIdx) ?? model.sections[targetIdx];
+			const fixed = applyLinkFixUp(current, idx, oldPortal, dx, dz);
+			if (fixed !== current) updates.set(targetIdx, fixed);
+		}
+	}
+
+	const sections = model.sections.map((s, i) => updates.get(i) ?? s);
+	return { ...model, sections };
+}
+
+/**
+ * Cascade-on yaw rotate of a multi-section **Selection** by `theta` radians
+ * around `pivot` (the Selection's median XZ, per CONTEXT.md / "Pivot"). The
+ * yaw-axis sibling of {@link translateSelectionWithLinks}: every selected
+ * section rotates as a rigid body around the shared pivot, and for any
+ * portal on a Selection member pointing OUTSIDE the Selection, the reverse
+ * portal + shared corners on the outside neighbour rotate around the same
+ * pivot. Selection-internal portals are covered by the rigid-pass on both
+ * member sides — they move together so their shared edge stays coincident.
+ *
+ * Returns the original `model` reference when `theta === 0` so byte-for-byte
+ * BND2 writeback is preserved on a no-op gesture.
+ *
+ * @throws RangeError if any index in `selectedIndices` is out of range.
+ */
+export function rotateSelectionWithLinksYaw(
+	model: ParsedAISectionsV12,
+	selectedIndices: readonly number[],
+	pivot: { x: number; z: number },
+	theta: number,
+): ParsedAISectionsV12 {
+	if (selectedIndices.length === 0) return model;
+	for (const idx of selectedIndices) {
+		if (idx < 0 || idx >= model.sections.length) {
+			throw new RangeError(`section index ${idx} out of range [0, ${model.sections.length})`);
+		}
+	}
+	if (theta === 0) return model;
+
+	const cx = pivot.x;
+	const cz = pivot.z;
+	const cosT = Math.cos(theta);
+	const sinT = Math.sin(theta);
+	const rotXZ = (x: number, z: number): { x: number; z: number } => {
+		const ox = x - cx;
+		const oz = z - cz;
+		return {
+			x: ox * cosT - oz * sinT + cx,
+			z: ox * sinT + oz * cosT + cz,
+		};
+	};
+
+	const selectedSet = new Set<number>(selectedIndices);
+	const updates = new Map<number, AISection>();
+
+	// Pass 1 — rigid yaw rotate of every Selection member around the
+	// shared pivot. All members spin lockstep so their relative geometry
+	// is preserved.
+	for (const idx of selectedSet) {
+		const src = model.sections[idx];
+		updates.set(idx, {
+			...src,
+			corners: src.corners.map((c) => {
+				const r = rotXZ(c.x, c.y);
+				return { x: r.x, y: r.z };
+			}),
+			portals: src.portals.map((p) => {
+				const rPos = rotXZ(p.position.x, p.position.z);
+				return {
+					...p,
+					position: { x: rPos.x, y: p.position.y, z: rPos.z },
+					boundaryLines: p.boundaryLines.map((bl) => {
+						const rStart = rotXZ(bl.verts.x, bl.verts.y);
+						const rEnd = rotXZ(bl.verts.z, bl.verts.w);
+						return { verts: { x: rStart.x, y: rStart.z, z: rEnd.x, w: rEnd.z } };
+					}),
+				};
+			}),
+			noGoLines: src.noGoLines.map((bl) => {
+				const rStart = rotXZ(bl.verts.x, bl.verts.y);
+				const rEnd = rotXZ(bl.verts.z, bl.verts.w);
+				return { verts: { x: rStart.x, y: rStart.z, z: rEnd.x, w: rEnd.z } };
+			}),
+		});
+	}
+
+	// Pass 2 — cascade into outside neighbours via per-member portals
+	// pointing OUTSIDE the Selection. Same shape as the single-section
+	// rotate cascade, just iterated over the Selection.
+	for (const idx of selectedSet) {
+		const src = model.sections[idx];
+		for (const oldPortal of src.portals) {
+			const targetIdx = oldPortal.linkSection;
+			if (targetIdx === idx) continue;
+			if (targetIdx < 0 || targetIdx >= model.sections.length) continue;
+			if (selectedSet.has(targetIdx)) continue;
+
+			const current = updates.get(targetIdx) ?? model.sections[targetIdx];
+			const fixed = applyRotateLinkFixUp(current, idx, oldPortal, rotXZ);
+			if (fixed !== current) updates.set(targetIdx, fixed);
+		}
+	}
+
+	const sections = model.sections.map((s, i) => updates.get(i) ?? s);
+	return { ...model, sections };
+}
