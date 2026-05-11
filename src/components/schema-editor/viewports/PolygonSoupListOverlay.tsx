@@ -24,6 +24,7 @@ import { useLineSegmentsGeometry } from '@/lib/three/scene/useLineSegmentsGeomet
 import { useCachedColorAttribute } from '@/hooks/useCachedColorAttribute';
 import { useApplyPolygonSoupHighlight } from '@/hooks/useApplyPolygonSoupHighlight';
 import { useDisposeOnUnmount } from '@/hooks/useDisposeOnUnmount';
+import { useWorkspaceAISectionsBulk } from '@/components/workspace/AISectionsBulkProvider';
 import type { Edge } from '@/components/common/three/SelectionOutline';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayProps } from './WorldViewport.types';
@@ -365,13 +366,26 @@ function pickPolysInFrustum(
 	return out;
 }
 
-function applyHighlight(
+// Amber (regular bulk paint) → red-tinted dim (Selection contains 1+
+// transformable entities, so these soup-polys are SKIPPED by the bulk
+// transform per CONTEXT.md / "Pivot" and issue #82). The two RGB triples
+// are kept side-by-side as constants so a future palette change (theme
+// override, accessibility pass) touches one place. Distinct hue + lowered
+// luma so the user reads "different state", not "different selection".
+//
+// Exported so the per-overlay test suite can pin the paint a user actually
+// sees in each Selection regime without re-creating a full WebGL harness.
+export const SOUP_PAINT_AMBER: readonly [number, number, number] = [1.0, 0.72, 0.2];
+export const SOUP_PAINT_SKIPPED: readonly [number, number, number] = [0.85, 0.32, 0.32];
+
+export function applyHighlight(
 	geometry: THREE.BufferGeometry,
 	ranges: { start: number; count: number }[],
 	baseColors: Float32Array,
 	faceToLocation: Int32Array,
 	selectedModelIndex: number,
 	selectedPolysInCurrentModel: ReadonlySet<number>,
+	skippedByBulkTransform: boolean = false,
 ): void {
 	const attr = geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
 	if (!attr) return;
@@ -386,6 +400,7 @@ function applyHighlight(
 		}
 	}
 	if (selectedPolysInCurrentModel.size > 0 && sel && sel.count > 0) {
+		const paint = skippedByBulkTransform ? SOUP_PAINT_SKIPPED : SOUP_PAINT_AMBER;
 		const from = sel.start;
 		const to = from + sel.count;
 		for (let tri = from; tri < to; tri++) {
@@ -393,15 +408,15 @@ function applyHighlight(
 			const p = faceToLocation[tri * 3 + 2];
 			if (!selectedPolysInCurrentModel.has(encodeSoupPoly(s, p))) continue;
 			const base = tri * 9;
-			colors[base + 0] = 1.0;
-			colors[base + 1] = 0.72;
-			colors[base + 2] = 0.2;
-			colors[base + 3] = 1.0;
-			colors[base + 4] = 0.72;
-			colors[base + 5] = 0.2;
-			colors[base + 6] = 1.0;
-			colors[base + 7] = 0.72;
-			colors[base + 8] = 0.2;
+			colors[base + 0] = paint[0];
+			colors[base + 1] = paint[1];
+			colors[base + 2] = paint[2];
+			colors[base + 3] = paint[0];
+			colors[base + 4] = paint[1];
+			colors[base + 5] = paint[2];
+			colors[base + 6] = paint[0];
+			colors[base + 7] = paint[1];
+			colors[base + 8] = paint[2];
 		}
 	}
 	attr.needsUpdate = true;
@@ -517,6 +532,27 @@ export const PolygonSoupListOverlay = ({
 	const baseColorsRef = useRef<Float32Array | null>(null);
 	useCachedColorAttribute(batched.geometry, baseColorsRef);
 
+	// Cross-resource mixed-Selection detector (issue #82). If any workspace
+	// AI-section bulk has entries we know the user is curating a mixed
+	// Selection — the AI-sections side is what the Bulk transform gizmo
+	// will act on, and the PSL polys here are the SKIPPED side. Swap the
+	// amber bulk paint for a red-tinted dim variant so the user can see
+	// which polys are being skipped at a glance.
+	//
+	// Reading from `useWorkspaceAISectionsBulk()` (not `useAISectionsBulk()`)
+	// because the overlay-side bulk is per-(bundleId, index) while the
+	// workspace-side surface gives us the global "any AI bulk has entries?"
+	// signal we need. Returns null when no provider is mounted (legacy page
+	// route) — fall through to "not skipped" so the existing UX is unchanged.
+	const aiBulkWorkspace = useWorkspaceAISectionsBulk();
+	const isMixedWithTransformables = useMemo(() => {
+		if (!aiBulkWorkspace) return false;
+		for (const s of aiBulkWorkspace.summaries) {
+			if (s.count > 0) return true;
+		}
+		return false;
+	}, [aiBulkWorkspace]);
+
 	useApplyPolygonSoupHighlight(
 		applyHighlight,
 		batched.geometry,
@@ -525,6 +561,7 @@ export const PolygonSoupListOverlay = ({
 		batched.faceToLocation,
 		selectedModelIndex,
 		selectedPolysInCurrentModel,
+		isMixedWithTransformables,
 	);
 
 	// Dispose GPU memory when the geometry changes or the overlay unmounts.
