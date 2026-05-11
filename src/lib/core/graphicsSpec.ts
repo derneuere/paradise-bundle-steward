@@ -20,7 +20,7 @@ import { BundleError } from './errors';
 import { getImportIds } from './bundle';
 
 export const GRAPHICS_SPEC_TYPE_ID = 0x10006;
-export const MODEL_TYPE_ID = 0x2A;
+const MODEL_TYPE_ID = 0x2A;
 
 // =============================================================================
 // Types
@@ -52,7 +52,7 @@ export type RawLocator = Float32Array; // length 16
 const LOCATOR_STRIDE = 64; // bytes
 const LOCATOR_FLOATS = 16;
 
-export type GraphicsSpecPart = {
+type GraphicsSpecPart = {
 	/** Index of the Model in the GraphicsSpec's import table (the resourceId
 	 *  for that Model is `imports[modelImportIndex].id`). */
 	modelImportIndex: number;
@@ -267,7 +267,7 @@ export function parseGraphicsSpec(
  * so we just iterate the inline imports for type 0xC entries and use them in
  * order. mpu8StateRenderableIndices then maps state→renderable index.
  */
-export type ParsedModel = {
+type ParsedModel = {
 	numRenderables: number;
 	numStates: number;
 	flags: number;
@@ -278,7 +278,7 @@ export type ParsedModel = {
 	stateToRenderable: number[];
 };
 
-export function getModelHeader(
+function getModelHeader(
 	buffer: ArrayBuffer,
 	bundle: ParsedBundle,
 	resource: ResourceEntry,
@@ -295,7 +295,7 @@ export function getModelHeader(
 	return bytes;
 }
 
-export function parseModel(header: Uint8Array, renderableIds: bigint[]): ParsedModel {
+function parseModel(header: Uint8Array, renderableIds: bigint[]): ParsedModel {
 	if (header.byteLength < 0x14) {
 		throw new BundleError(
 			`Model header too small (${header.byteLength} bytes)`,
@@ -329,7 +329,7 @@ export function parseModel(header: Uint8Array, renderableIds: bigint[]): ParsedM
  * Pick the LOD0 Renderable id from a Model. Falls back to renderableIds[0] if
  * the state map didn't load or is malformed.
  */
-export function lod0RenderableId(model: ParsedModel): bigint | null {
+function lod0RenderableId(model: ParsedModel): bigint | null {
 	if (model.renderableIds.length === 0) return null;
 	const idx = model.stateToRenderable[0] ?? 0;
 	return model.renderableIds[idx] ?? model.renderableIds[0] ?? null;
