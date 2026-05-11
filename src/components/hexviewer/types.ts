@@ -1,4 +1,3 @@
-export type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
 import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
 import type React from 'react';
 
