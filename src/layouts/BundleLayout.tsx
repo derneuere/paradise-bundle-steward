@@ -28,7 +28,7 @@ import {
 const WORLD_LOGIC_KEYS = ['streetData', 'trafficData', 'aiSections', 'triggerData'] as const;
 type WorldLogicKey = (typeof WORLD_LOGIC_KEYS)[number];
 
-export const BundleLayout = () => {
+const BundleLayout = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const gltfInputRef = useRef<HTMLInputElement>(null);
   const [showExportWarning, setShowExportWarning] = useState(false);
