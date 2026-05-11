@@ -16,7 +16,7 @@
 // vertex colors for one zone at a time so a hover hop only touches the
 // vertices that actually changed state.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import {
@@ -24,6 +24,19 @@ import {
 	type Zone,
 	NEIGHBOUR_FLAGS,
 } from '@/lib/core/zoneList';
+import {
+	ZONE_POINT_AXES,
+	bulkRotateZoneEntitiesYaw,
+	bulkTranslateZoneEntities,
+	translateZoneRigid,
+	zoneListSelectionPivot,
+	type ZoneListEntityRef,
+} from '@/lib/core/zoneListOps';
+import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
+import {
+	type BulkTransformDelta,
+	isIdentityDelta,
+} from '@/hooks/useBulkTransformDrag';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import {
@@ -247,10 +260,13 @@ type Props = {
 	/** When true (default), draw lines from each selected zone to its safe +
 	 *  unsafe neighbours so the streaming graph is visible at a glance. */
 	showNeighbourGraph?: boolean;
+	/** Present when the parent route can apply edits — the Bulk-transform
+	 *  gizmo emits the next root through this callback on commit. */
+	onChange?: (next: ParsedZoneList) => void;
 };
 
 export const ZoneListOverlay: WorldOverlayComponent<ParsedZoneList> = ({
-	data, selectedPath, onSelect, showNeighbourGraph = true,
+	data, selectedPath, onSelect, showNeighbourGraph = true, onChange,
 }: Props) => {
 	const scene = useMemo(() => buildBatchedZones(data.zones), [data.zones]);
 	const [hovered, setHovered] = useState<Selection | null>(null);
@@ -305,6 +321,86 @@ export const ZoneListOverlay: WorldOverlayComponent<ParsedZoneList> = ({
 		return pts;
 	}, [selectedZone]);
 
+	// =========================================================================
+	// Bulk-transform gizmo (issue #79)
+	//
+	// Single-zone selection only in this slice — multi-zone bulk-select would
+	// flow through the workspace bulk Set (mirrors AISections' pattern). The
+	// gizmo anchors at the selected zone's median XZ; on commit we drop the
+	// delta.y because zone points are `Vec2Padded` (XZ-only, ADR-0011).
+	// =========================================================================
+	const bulkRefs = useMemo<readonly ZoneListEntityRef[]>(
+		() => (selectedZone ? [{ kind: 'zone', zoneIdx: selectedZoneIndex }] : []),
+		[selectedZone, selectedZoneIndex],
+	);
+	// Snapshot the pivot at gesture start so it doesn't drift mid-rotate — see
+	// the AISectionsOverlay comment for the rationale (re-deriving the median
+	// against moving positions every frame produces a spiral instead of a
+	// rigid rotate).
+	const bulkPivotRef = useRef<{ x: number; y: number; z: number } | null>(null);
+	const bulkPivotLive = useMemo(
+		() => (bulkRefs.length > 0 ? zoneListSelectionPivot(data, bulkRefs) : null),
+		[data, bulkRefs],
+	);
+	const [dragDelta, setDragDelta] = useState<BulkTransformDelta | null>(null);
+
+	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
+		const pivot = bulkPivotRef.current ?? bulkPivotLive;
+		if (!pivot) return null;
+		const dx = dragDelta?.translate.x ?? 0;
+		const dz = dragDelta?.translate.z ?? 0;
+		// Lift slightly above the fill mesh so the gizmo is grabbable.
+		return [pivot.x + dx, pivot.y + 1.5, pivot.z + dz];
+	}, [bulkPivotLive, dragDelta]);
+
+	const handleGizmoTransform = useCallback((delta: BulkTransformDelta) => {
+		if (!bulkPivotRef.current && bulkPivotLive) {
+			bulkPivotRef.current = bulkPivotLive;
+		}
+		setDragDelta(delta);
+	}, [bulkPivotLive]);
+
+	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
+		setDragDelta(null);
+		const pivot = bulkPivotRef.current;
+		bulkPivotRef.current = null;
+		if (!onChange) return;
+		if (bulkRefs.length === 0) return;
+		if (isIdentityDelta(delta)) return;
+		let next = data;
+		// Translate first, then yaw rotate around the post-translate pivot —
+		// mirrors the AI sections gizmo's compose order so preview and commit
+		// agree frame-for-frame. translate.y is discarded for the zone points
+		// (XZ-packed per ADR-0011) — the gizmo's Y arrow still renders but
+		// the model has no slot to receive it.
+		if (delta.translate.x !== 0 || delta.translate.z !== 0) {
+			// Whole-zone refs only in this slice — use the bulk op so the same
+			// code path is hot when multi-zone bulk-select lands later.
+			next = bulkTranslateZoneEntities(next, bulkRefs, {
+				x: delta.translate.x,
+				z: delta.translate.z,
+			});
+		}
+		if (delta.rotate.y !== 0 && pivot) {
+			next = bulkRotateZoneEntitiesYaw(
+				next,
+				bulkRefs,
+				{ x: pivot.x + delta.translate.x, z: pivot.z + delta.translate.z },
+				delta.rotate.y,
+			);
+		}
+		if (next !== data) onChange(next);
+	}, [data, onChange, bulkRefs]);
+
+	const handleGizmoCancel = useCallback(() => {
+		setDragDelta(null);
+		bulkPivotRef.current = null;
+	}, []);
+
+	// Suppress unused warning — single-zone translate helper available for
+	// future per-point selections; the bulk op covers today's whole-zone path.
+	void translateZoneRigid;
+
 	return (
 		<>
 			<mesh
@@ -319,6 +415,15 @@ export const ZoneListOverlay: WorldOverlayComponent<ParsedZoneList> = ({
 			{selectedZone && <ZoneLabel zone={selectedZone} index={selectedZoneIndex} color={SELECTED_COLOR} />}
 			{showNeighbourGraph && selectedZoneIndex >= 0 && (
 				<NeighbourGraph data={data} zoneIndex={selectedZoneIndex} centroids={scene.centroids} />
+			)}
+			{onChange && gizmoPosition && (
+				<BulkTransformGizmo
+					position={gizmoPosition}
+					axes={ZONE_POINT_AXES}
+					onTransform={handleGizmoTransform}
+					onCommit={handleGizmoCommit}
+					onCancel={handleGizmoCancel}
+				/>
 			)}
 		</>
 	);

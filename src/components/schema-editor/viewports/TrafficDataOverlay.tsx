@@ -27,6 +27,19 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 import {
+	TRAFFIC_LANE_RUNG_AXES,
+	TRAFFIC_YAW_PACKED_AXES,
+	bulkRotateTrafficEntitiesYaw,
+	bulkTranslateTrafficEntities,
+	trafficDataSelectionPivot,
+	type TrafficDataEntityRef,
+} from '@/lib/core/trafficDataOps';
+import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
+import {
+	type BulkTransformDelta,
+	isIdentityDelta,
+} from '@/hooks/useBulkTransformDrag';
+import {
 	AllJunctionInstances,
 	AllLaneConnections,
 	AllLightTriggerInstances,
@@ -183,7 +196,7 @@ type Props = {
 };
 
 export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> = ({
-	data, selectedPath, onSelect, isActive = true,
+	data, selectedPath, onSelect, onChange, isActive = true,
 }: Props) => {
 	const hulls = data.hulls;
 
@@ -246,6 +259,98 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 		selected && !isPvsCellSelection(selected) && selected.sub?.type === 'section'
 			? selected.sub.index
 			: -1;
+
+	// =========================================================================
+	// Bulk-transform gizmo (issue #79)
+	//
+	// Maps the schema-Selection (junction / lightTrigger / rung) to a single
+	// `TrafficDataEntityRef`, anchors the gizmo at the entity's pivot, and on
+	// commit applies the bulk op (rigid translate + yaw rotate). The yaw rotate
+	// of a yaw-packed box composes BOTH the position orbit AND the .w slot —
+	// the gesture's yaw delta is added to the box's stored yaw (rigid-body
+	// composition per issue #79). Lane rungs orbit both endpoints around the
+	// pivot so the rung remains a single segment.
+	// =========================================================================
+	const bulkRefs = useMemo<readonly TrafficDataEntityRef[]>(() => {
+		if (!selected || isPvsCellSelection(selected)) return [];
+		if (!selected.sub) return [];
+		const hullIdx = selected.hullIndex;
+		switch (selected.sub.type) {
+			case 'junction':
+				return [{ kind: 'junction', hullIdx, junctionIdx: selected.sub.index }];
+			case 'lightTrigger':
+				return [{ kind: 'lightTrigger', hullIdx, triggerIdx: selected.sub.index }];
+			case 'rung':
+				return [{ kind: 'laneRung', hullIdx, rungIdx: selected.sub.index }];
+			default:
+				// Section / staticVehicle picks fall through — sections are
+				// region-only (no transform target yet), static vehicles are
+				// Matrix44 and live in issue #78.
+				return [];
+		}
+	}, [selected]);
+
+	// Snapshot the pivot at gesture start so it doesn't drift mid-rotate — see
+	// the AISectionsOverlay comment for the rationale.
+	const bulkPivotRef = useRef<{ x: number; y: number; z: number } | null>(null);
+	const bulkPivotLive = useMemo(
+		() => (bulkRefs.length > 0 ? trafficDataSelectionPivot(data, bulkRefs) : null),
+		[data, bulkRefs],
+	);
+	const [dragDelta, setDragDelta] = useState<BulkTransformDelta | null>(null);
+
+	const gizmoAxes = useMemo(() => {
+		if (bulkRefs.length === 0) return TRAFFIC_YAW_PACKED_AXES;
+		// Lane rung vs yaw-packed share the same axis profile today, but we
+		// dispatch through the canonical constant for each so a future
+		// differentiation lands without re-wiring.
+		return bulkRefs[0].kind === 'laneRung'
+			? TRAFFIC_LANE_RUNG_AXES
+			: TRAFFIC_YAW_PACKED_AXES;
+	}, [bulkRefs]);
+
+	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
+		const pivot = bulkPivotRef.current ?? bulkPivotLive;
+		if (!pivot) return null;
+		const dx = dragDelta?.translate.x ?? 0;
+		const dy = dragDelta?.translate.y ?? 0;
+		const dz = dragDelta?.translate.z ?? 0;
+		return [pivot.x + dx, pivot.y + dy, pivot.z + dz];
+	}, [bulkPivotLive, dragDelta]);
+
+	const handleGizmoTransform = useCallback((delta: BulkTransformDelta) => {
+		if (!bulkPivotRef.current && bulkPivotLive) {
+			bulkPivotRef.current = bulkPivotLive;
+		}
+		setDragDelta(delta);
+	}, [bulkPivotLive]);
+
+	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
+		setDragDelta(null);
+		const pivot = bulkPivotRef.current;
+		bulkPivotRef.current = null;
+		if (!onChange) return;
+		if (bulkRefs.length === 0) return;
+		if (isIdentityDelta(delta)) return;
+		let next = data;
+		if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
+			next = bulkTranslateTrafficEntities(next, bulkRefs, delta.translate);
+		}
+		if (delta.rotate.y !== 0 && pivot) {
+			next = bulkRotateTrafficEntitiesYaw(
+				next,
+				bulkRefs,
+				{ x: pivot.x + delta.translate.x, z: pivot.z + delta.translate.z },
+				delta.rotate.y,
+			);
+		}
+		if (next !== data) onChange(next);
+	}, [data, onChange, bulkRefs]);
+
+	const handleGizmoCancel = useCallback(() => {
+		setDragDelta(null);
+		bulkPivotRef.current = null;
+	}, []);
 
 	// HTML siblings — registered into the chrome's slot.
 	const htmlNode = useMemo(
@@ -346,6 +451,16 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 			)}
 
 			<SelectionLabel hulls={hulls} selected={selected} />
+
+			{onChange && gizmoPosition && (
+				<BulkTransformGizmo
+					position={gizmoPosition}
+					axes={gizmoAxes}
+					onTransform={handleGizmoTransform}
+					onCommit={handleGizmoCommit}
+					onCancel={handleGizmoCancel}
+				/>
+			)}
 
 			<CameraBridge bridge={cameraBridge} />
 		</>
