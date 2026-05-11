@@ -160,18 +160,6 @@ export function pickProfileByKey(key: string, model: unknown): EditorProfile | u
 	return entry ? pickProfileFromList(entry.profiles, model) : undefined;
 }
 
-/** Every profile registered for a given typeId, in the order they were
- *  declared (variant-specific first). Used by the conversion menu and
- *  any future "switch this resource to a different variant" UI. */
-export function profilesFor(typeId: number): EditorProfile[] {
-	return byTypeId.get(typeId)?.profiles ?? [];
-}
-
-/** Same, addressed by handler key. */
-export function profilesForKey(key: string): EditorProfile[] {
-	return byKey.get(key)?.profiles ?? [];
-}
-
 /** Convenience for the Workspace tree-row label: surfaces a
  *  `displayName` suffix when a typeId has more than one variant
  *  registered. Single-profile types return undefined so the tree
