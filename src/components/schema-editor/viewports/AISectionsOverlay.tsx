@@ -26,7 +26,7 @@
 // land in both at once. See issue #35.
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Magnet } from 'lucide-react';
+import { Magnet, Link2 } from 'lucide-react';
 import { Copy } from 'lucide-react';
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
@@ -255,6 +255,15 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	>(null);
 	const [drag, setDrag] = useState<ActiveDrag | null>(null);
 	const [snapEnabled, setSnapEnabled] = useState(false);
+	// Sticky cascade toggle (mirror of `snapEnabled`). When ON, every gizmo
+	// gesture defaults to cascade-with-links — outside neighbour reverse-
+	// portal anchors and shared corners drag along (the legacy
+	// `translateSectionWithLinks` semantics from CONTEXT.md / ADR-0009).
+	// The Shift modifier (`drag.delta.cascade`) still works as a per-gesture
+	// **inverter**: toggle ON + Shift held → cascade OFF for that one
+	// gesture (Blender-style "snap on by default, hold Shift for precision"
+	// idiom). Effective cascade = `cascadeEnabled XOR drag.delta.cascade`.
+	const [cascadeEnabled, setCascadeEnabled] = useState(false);
 	// Pivot-override state is declared a few lines below alongside
 	// `bulkPivotDragging` (issue #76 — the pivot-drag handle introduced it).
 	// Issue #81's numeric panel reuses the same `bulkPivotOverride` slot, so
@@ -520,6 +529,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// muscle memory survives, but the value isn't consulted anywhere in the
 	// commit path. Issue #75 reconsiders snap once cascade is opt-in.
 	useToggleHotkey('s', setSnapEnabled);
+	useToggleHotkey('c', setCascadeEnabled);
 
 	const scene = useMemo(
 		() => buildBatchedSections(data.sections, v12Accessor, sectionYs),
@@ -860,6 +870,16 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// Without onChange these are no-ops.
 	const handleGizmoTransform = useCallback((delta: BulkTransformDelta) => {
 		if (!gizmoTarget) return;
+		// Fold the sticky cascade toggle into the per-gesture delta.cascade
+		// (which carries the raw Shift modifier state from the gizmo). The
+		// downstream consumers (`applyDragToModel`, the cascade visual hint,
+		// the cross-Bundle path) all read `drag.delta.cascade` as the
+		// **effective** cascade for the gesture, so the XOR lives here once
+		// rather than at every consumer site.
+		const resolvedDelta = {
+			...delta,
+			cascade: cascadeEnabled !== !!delta.cascade,
+		};
 		// Bulk gesture: snapshot the Pivot on the first frame so it doesn't
 		// drift as we drag (re-deriving the median against moving positions
 		// every frame produces a spiral instead of a rigid rotate). The
@@ -870,12 +890,12 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			if (!bulkPivotRef.current) bulkPivotRef.current = gizmoTarget.pivot;
 			setDrag({
 				target: { ...gizmoTarget, pivot: bulkPivotRef.current },
-				delta,
+				delta: resolvedDelta,
 			});
 			return;
 		}
-		setDrag({ target: gizmoTarget, delta });
-	}, [gizmoTarget]);
+		setDrag({ target: gizmoTarget, delta: resolvedDelta });
+	}, [gizmoTarget, cascadeEnabled]);
 
 	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
 		setDrag(null);
@@ -883,6 +903,13 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		bulkPivotRef.current = null;
 		if (!gizmoTarget) return;
 		if (isIdentityDelta(delta)) return;
+		// Fold the sticky toggle into the gesture-time delta.cascade (same
+		// XOR as in handleGizmoTransform — kept symmetric so commit dispatch
+		// agrees with the preview frames).
+		const effectiveDelta = {
+			...delta,
+			cascade: cascadeEnabled !== !!delta.cascade,
+		};
 		// Cross-Bundle bulk gesture (issue #80): route through the
 		// workspace-level controller so every affected Bundle is
 		// independently dirtied and one multi-Bundle HistoryCommit covers
@@ -899,8 +926,8 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			const written = crossBundle.commitDelta(
 				{ x: snapshotPivot.x, z: snapshotPivot.z },
 				{
-					translate: delta.translate,
-					rotateY: delta.rotate.y,
+					translate: effectiveDelta.translate,
+					rotateY: effectiveDelta.rotate.y,
 				},
 			);
 			// `written === 0` means every slice resolved to a no-op (the
@@ -922,7 +949,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				: gizmoTarget;
 		let next: ParsedAISectionsV12;
 		try {
-			next = applyDragToModel(data, { target: committedTarget, delta });
+			next = applyDragToModel(data, { target: committedTarget, delta: effectiveDelta });
 		} catch {
 			return;
 		}
@@ -935,7 +962,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		// ops mutate more sections per gesture, they still produce ONE
 		// resulting model committed via ONE onChange call.
 		onChange(next);
-	}, [data, gizmoTarget, onChange, useCrossBundlePath, crossBundle]);
+	}, [data, gizmoTarget, onChange, useCrossBundlePath, crossBundle, cascadeEnabled]);
 
 	const handleGizmoCancel = useCallback(() => {
 		setDrag(null);
@@ -1360,12 +1387,25 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				isActive={isActive}
 				snapEnabled={snapEnabled}
 				toggleSnap={() => setSnapEnabled((v) => !v)}
+				cascadeEnabled={cascadeEnabled}
+				toggleCascade={() => setCascadeEnabled((v) => !v)}
 				cameraBridge={cameraBridge}
 				onMarquee={handleMarquee}
 				edgeMenu={edgeMenu}
 				onDuplicateThroughEdge={handleDuplicateThroughEdge}
 				onCloseEdgeMenu={() => setEdgeMenu(null)}
-				cascadeActive={drag?.kind === 'section' && drag.delta.cascade}
+				// Cascade hint is renderable for in-flight gestures whose
+				// effective cascade is ON — section-scope and bulk only
+				// (sub-entity gizmo paths don't dispatch cascade-on ops
+				// yet, so the hint would lie). Reads `drag.target.kind`
+				// (the discriminator lives on the target, not on `drag`
+				// itself — earlier code shipped with `drag?.kind` which
+				// silently never matched).
+				cascadeActive={
+					drag != null &&
+					drag.delta.cascade === true &&
+					(drag.target.kind === 'section' || drag.target.kind === 'bulk')
+				}
 				skippedSoupCount={skippedSoupCount}
 				showSkippedSoupHint={gizmoPosition != null && skippedSoupCount > 0}
 			/>
@@ -1381,6 +1421,8 @@ function HtmlSiblings({
 	isActive,
 	snapEnabled,
 	toggleSnap,
+	cascadeEnabled,
+	toggleCascade,
 	cameraBridge,
 	onMarquee,
 	edgeMenu,
@@ -1393,6 +1435,13 @@ function HtmlSiblings({
 	isActive: boolean;
 	snapEnabled: boolean;
 	toggleSnap: () => void;
+	/** Sticky cascade toggle (CONTEXT.md / "Cascade"). When ON, gizmo
+	 *  gestures default to cascade-with-links (outside reverse-portal
+	 *  anchors + shared corners drag along). Shift inverts for one
+	 *  gesture (toggle=on + Shift = cascade off; toggle=off + Shift =
+	 *  cascade on). */
+	cascadeEnabled: boolean;
+	toggleCascade: () => void;
 	cameraBridge: React.MutableRefObject<CameraBridgeData | null>;
 	onMarquee: (frustum: THREE.Frustum, mode: 'add' | 'remove') => void;
 	edgeMenu: { x: number; y: number; sectionIndex: number; edgeIdx: number } | null;
@@ -1449,6 +1498,47 @@ function HtmlSiblings({
 					<Magnet size={14} />
 					<span>Snap{snapEnabled ? ' · on' : ' · off'}</span>
 					<span style={{ opacity: 0.5, fontSize: 10 }}>S</span>
+				</button>
+
+				<button
+					type="button"
+					onClick={toggleCascade}
+					title={cascadeEnabled
+						? 'Keep connections (cascade): ON — hold Shift on a gesture for non-cascading (C to toggle)'
+						: 'Keep connections (cascade): OFF — hold Shift on a gesture for cascading (C to toggle)'}
+					aria-pressed={cascadeEnabled}
+					style={{
+						position: 'absolute',
+						top: 8,
+						// Sits to the right of the Snap button so both toggles
+						// live in a single visual row. Width of the Snap
+						// button is variable; using a generous left offset
+						// matches the codebase's existing inspector affordance
+						// spacing.
+						left: 110,
+						display: 'flex',
+						alignItems: 'center',
+						gap: 6,
+						padding: '4px 8px',
+						borderRadius: 6,
+						fontSize: 11,
+						fontFamily: 'monospace',
+						border: '1px solid rgba(255,255,255,0.15)',
+						// Magenta tint when ON — matches the in-flight cascade
+						// hint halo / status badge below, so the user can
+						// associate the toggle with what they'll see when a
+						// gesture fires.
+						background: cascadeEnabled ? 'rgba(200, 80, 180, 0.85)' : 'rgba(20, 22, 28, 0.85)',
+						color: cascadeEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
+						cursor: 'pointer',
+						userSelect: 'none',
+						boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+						pointerEvents: 'auto',
+					}}
+				>
+					<Link2 size={14} />
+					<span>Cascade{cascadeEnabled ? ' · on' : ' · off'}</span>
+					<span style={{ opacity: 0.5, fontSize: 10 }}>C</span>
 				</button>
 
 				{edgeMenu && (
@@ -1536,7 +1626,7 @@ function HtmlSiblings({
 				)}
 			</>
 		),
-		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu, cascadeActive, showSkippedSoupHint, skippedSoupCount],
+		[snapEnabled, toggleSnap, cascadeEnabled, toggleCascade, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu, cascadeActive, showSkippedSoupHint, skippedSoupCount],
 	);
 	// Pass `null` when this overlay isn't the active resource so the chrome
 	// drops our marquee / snap / context menu — see ADR-0007 / issue #24.
