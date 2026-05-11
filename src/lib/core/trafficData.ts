@@ -78,14 +78,14 @@ export type TrafficLaneRung = {
   maPoints: [Vec4, Vec4];
 };
 
-export type TrafficNeighbour = {
+type TrafficNeighbour = {
   muSection: number;
   muSharedLength: number;
   muOurStartRung: number;
   muTheirStartRung: number;
 };
 
-export type TrafficSectionSpan = {
+type TrafficSectionSpan = {
   muMaxVehicles: number;
   _pad02: number[];
   mfMaxVehicleRecip: number;
@@ -99,12 +99,12 @@ export type TrafficStaticVehicle = {
   _pad43: number[]; // 12 bytes
 };
 
-export type TrafficSectionFlow = {
+type TrafficSectionFlow = {
   muFlowTypeId: number;
   muVehiclesPerMinute: number;
 };
 
-export type TrafficLightController = {
+type TrafficLightController = {
   mauTrafficLightIds: number[]; // u16[2]
   mauStopLineIds: number[];     // u8[6]
   mauStopLineHulls: number[];   // u16[6]
@@ -130,7 +130,7 @@ export type TrafficJunctionLogicBox = {
   mPosition: Vec4;
 };
 
-export type TrafficStopLine = {
+type TrafficStopLine = {
   muParamFixed: number;
 };
 
@@ -139,7 +139,7 @@ export type TrafficLightTrigger = {
   mPosPlusYRot: Vec4;
 };
 
-export type TrafficLightTriggerStartData = {
+type TrafficLightTriggerStartData = {
   maStartingPositions: Vec4[];  // [8]
   maStartingDirections: Vec4[]; // [8]
   maDestinationIDs: bigint[];   // CgsID[16]
@@ -232,7 +232,7 @@ export type TrafficVehicleTraits = {
   _pad0D: number[]; // 3 bytes
 };
 
-export type TrafficLightType = {
+type TrafficLightType = {
   muCoronaOffset: number;
   muNumCoronas: number;
 };
@@ -274,7 +274,7 @@ export type TrafficLightCollection = {
 // `model.kind` first; the editor registry's `pickProfile` call is the
 // canonical place to do that.
 
-export type TrafficPvsV22 = {
+type TrafficPvsV22 = {
   // Same Vec4 grid origin convention as retail (x and z populated, y/w 0).
   mGridMin: Vec4;
   // v22 only stores the reciprocal cell size; the forward `mCellSize` Vec4
