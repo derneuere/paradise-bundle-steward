@@ -48,7 +48,7 @@ const SOUPS_PER_AABB4_ROW = 4;
 // Types
 // =============================================================================
 
-export type Vec3 = { x: number; y: number; z: number };
+type Vec3 = { x: number; y: number; z: number };
 
 /** Packed u16 vertex — three coordinates in local soup space. */
 export type PolygonSoupVertex = { x: number; y: number; z: number };
@@ -474,7 +474,7 @@ function hasLayoutConflict(model: ParsedPolygonSoupList): boolean {
  * re-parse+re-write stays idempotent regardless of which convention the
  * original BurnoutParadise fixtures used.
  */
-export function normalizePolygonSoupListLayout(
+function normalizePolygonSoupListLayout(
 	model: ParsedPolygonSoupList,
 ): ParsedPolygonSoupList {
 	const numSoups = model.soups.length;
