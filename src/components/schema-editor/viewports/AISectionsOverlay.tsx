@@ -456,7 +456,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			// override wins if set (issue #81 numeric pivot edit), otherwise
 			// the live-derived bulk median. Pivot edits between gestures
 			// thereby move the rotation centre for the next gesture.
-			const pivot = bulkPivotRef.current ?? pivotOverride ?? bulkPivotLive;
+			const pivot = bulkPivotRef.current ?? bulkPivotOverride ?? bulkPivotLive;
 			if (!pivot) return null;
 			return { kind: 'bulk', entities: bulkRefs, pivot };
 		}
@@ -498,7 +498,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			default:
 				return null;
 		}
-	}, [isBulkActive, bulkRefs, bulkPivotLive, marker, pivotOverride]);
+	}, [isBulkActive, bulkRefs, bulkPivotLive, marker, bulkPivotOverride]);
 
 	// Snap is intentionally not applied to any bulk-transform path (CONTEXT.md
 	// / ADR-0009): cascade-off makes snap incoherent (snapping the source to
