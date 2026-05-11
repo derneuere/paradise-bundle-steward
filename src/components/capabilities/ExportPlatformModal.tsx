@@ -20,7 +20,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { AlertTriangle } from 'lucide-react';
 import { getPlatformName } from '@/lib/core/bundle';
 
-export type ExportContainerInfo = {
+type ExportContainerInfo = {
 	/** 'bnd2' for retail Bundle 2 ('bnd2' magic) sources, 'bnd1' for the
 	 *  Bundle V1 ('bndl' magic) prototype container used in pre-release
 	 *  Burnout 5 dev builds. */
