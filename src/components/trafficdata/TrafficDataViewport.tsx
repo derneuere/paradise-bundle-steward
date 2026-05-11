@@ -342,9 +342,9 @@ export function AllLaneConnections({ hulls, activeHullIndex }: { hulls: TrafficH
 
 export function SectionHighlight({ hull, sectionIndex }: { hull: TrafficHull; sectionIndex: number }) {
 	const sec = hull.sections[sectionIndex];
-	if (!sec) return null;
 
 	const geo = useMemo(() => {
+		if (!sec) return null;
 		const count = sec.muNumRungs;
 		const positions = new Float32Array(count * 2 * 3);
 		for (let r = 0; r < count; r++) {
@@ -360,6 +360,8 @@ export function SectionHighlight({ hull, sectionIndex }: { hull: TrafficHull; se
 		g.computeBoundingSphere();
 		return g;
 	}, [hull, sec, sectionIndex]);
+
+	if (!sec || !geo) return null;
 
 	return (
 		<lineSegments geometry={geo}>
