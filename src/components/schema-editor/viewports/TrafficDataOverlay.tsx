@@ -28,8 +28,11 @@ import * as THREE from 'three';
 import type { ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 import {
 	TRAFFIC_LANE_RUNG_AXES,
+	TRAFFIC_STATIC_VEHICLE_AXES,
 	TRAFFIC_YAW_PACKED_AXES,
+	bulkRotateTrafficEntitiesMatrix44,
 	bulkRotateTrafficEntitiesYaw,
+	bulkTrafficDataAxes,
 	bulkTranslateTrafficEntities,
 	trafficDataSelectionPivot,
 	type TrafficDataEntityRef,
@@ -261,34 +264,75 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 			: -1;
 
 	// =========================================================================
-	// Bulk-transform gizmo (issue #79)
+	// Bulk-transform gizmo (issues #78 + #79)
 	//
-	// Maps the schema-Selection (junction / lightTrigger / rung) to a single
-	// `TrafficDataEntityRef`, anchors the gizmo at the entity's pivot, and on
-	// commit applies the bulk op (rigid translate + yaw rotate). The yaw rotate
-	// of a yaw-packed box composes BOTH the position orbit AND the .w slot —
-	// the gesture's yaw delta is added to the box's stored yaw (rigid-body
-	// composition per issue #79). Lane rungs orbit both endpoints around the
-	// pivot so the rung remains a single segment.
+	// Maps the schema-Selection (junction / lightTrigger / rung / static
+	// vehicle) to a `TrafficDataEntityRef` list and folds in any
+	// marquee-selected static vehicles from the schema bulk context, then
+	// anchors the gizmo at the median pivot. On commit:
+	//
+	//   - Translate: every entity's position shifts by the same delta —
+	//     yaw-packed boxes shift the XYZ slots of their Vec4, lane rungs
+	//     shift both endpoints, static vehicles shift the translation
+	//     column of their `mTransform`.
+	//   - Rotate: composition depends on the Selection's axis profile.
+	//     A pure-static-vehicle Selection (issue #78) rotates with the
+	//     full-3D Matrix44 path — pre-multiplying each vehicle's
+	//     `mTransform` by `T(P) · R(delta) · T(-P)`. Any Selection
+	//     containing a yaw-packed sibling collapses to yaw-only (ADR-0011)
+	//     and runs the legacy yaw rotate (`bulkRotateTrafficEntitiesYaw`),
+	//     which orbits positions in XZ AND adds the yaw delta to each
+	//     box's stored `.w` (or pre-multiplies the static vehicle's matrix
+	//     by a Y-axis rotation, if a vehicle happens to be in the mix).
 	// =========================================================================
 	const bulkRefs = useMemo<readonly TrafficDataEntityRef[]>(() => {
-		if (!selected || isPvsCellSelection(selected)) return [];
-		if (!selected.sub) return [];
-		const hullIdx = selected.hullIndex;
-		switch (selected.sub.type) {
-			case 'junction':
-				return [{ kind: 'junction', hullIdx, junctionIdx: selected.sub.index }];
-			case 'lightTrigger':
-				return [{ kind: 'lightTrigger', hullIdx, triggerIdx: selected.sub.index }];
-			case 'rung':
-				return [{ kind: 'laneRung', hullIdx, rungIdx: selected.sub.index }];
-			default:
-				// Section / staticVehicle picks fall through — sections are
-				// region-only (no transform target yet), static vehicles are
-				// Matrix44 and live in issue #78.
-				return [];
+		const out: TrafficDataEntityRef[] = [];
+		const seen = new Set<string>();
+
+		const addStaticVehicle = (hullIdx: number, vehicleIdx: number) => {
+			if (hullIdx < 0 || hullIdx >= hulls.length) return;
+			const hull = hulls[hullIdx];
+			if (vehicleIdx < 0 || vehicleIdx >= hull.staticTrafficVehicles.length) return;
+			const key = `sv:${hullIdx}:${vehicleIdx}`;
+			if (seen.has(key)) return;
+			seen.add(key);
+			out.push({ kind: 'staticVehicle', hullIdx, vehicleIdx });
+		};
+
+		// Marquee-selected static vehicles. Paths look like
+		// `['hulls', h, 'staticTrafficVehicles', s]` (see the marquee
+		// handler that emits them above).
+		if (bulk?.bulkPathKeys) {
+			for (const key of bulk.bulkPathKeys) {
+				const parts = key.split('/');
+				if (parts.length !== 4 || parts[0] !== 'hulls' || parts[2] !== 'staticTrafficVehicles') continue;
+				const h = Number(parts[1]);
+				const s = Number(parts[3]);
+				if (Number.isFinite(h) && Number.isFinite(s)) addStaticVehicle(h, s);
+			}
 		}
-	}, [selected]);
+
+		// Inspector pick (single-select).
+		if (selected && !isPvsCellSelection(selected) && selected.sub) {
+			const hullIdx = selected.hullIndex;
+			switch (selected.sub.type) {
+				case 'junction':
+					out.push({ kind: 'junction', hullIdx, junctionIdx: selected.sub.index });
+					break;
+				case 'lightTrigger':
+					out.push({ kind: 'lightTrigger', hullIdx, triggerIdx: selected.sub.index });
+					break;
+				case 'rung':
+					out.push({ kind: 'laneRung', hullIdx, rungIdx: selected.sub.index });
+					break;
+				case 'staticVehicle':
+					addStaticVehicle(hullIdx, selected.sub.index);
+					break;
+				// Section picks have no transform target — pass-through.
+			}
+		}
+		return out;
+	}, [selected, bulk, hulls]);
 
 	// Snapshot the pivot at gesture start so it doesn't drift mid-rotate — see
 	// the AISectionsOverlay comment for the rationale.
@@ -301,13 +345,37 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 
 	const gizmoAxes = useMemo(() => {
 		if (bulkRefs.length === 0) return TRAFFIC_YAW_PACKED_AXES;
+		// Pure-static-vehicle Selection → full 3-axis (Matrix44). Anything
+		// else falls into the AND-intersection — a yaw-packed sibling
+		// vetoes pitch/roll per ADR-0011. The single-entity static-vehicle
+		// case is a one-element list of kind 'staticVehicle' so it short-
+		// circuits to the full-3D constant.
+		if (bulkRefs.every((r) => r.kind === 'staticVehicle')) {
+			return TRAFFIC_STATIC_VEHICLE_AXES;
+		}
 		// Lane rung vs yaw-packed share the same axis profile today, but we
 		// dispatch through the canonical constant for each so a future
-		// differentiation lands without re-wiring.
+		// differentiation lands without re-wiring. When a static vehicle is
+		// mixed with a yaw-only sibling, the AND-intersection in
+		// `bulkTrafficDataAxes` collapses to yaw-only.
+		const mixed = bulkTrafficDataAxes(bulkRefs);
+		if (mixed) return mixed;
 		return bulkRefs[0].kind === 'laneRung'
 			? TRAFFIC_LANE_RUNG_AXES
 			: TRAFFIC_YAW_PACKED_AXES;
 	}, [bulkRefs]);
+
+	// Selections containing a static vehicle take the full-3D Matrix44
+	// rotate path on commit, because that's the only op that knows how to
+	// pre-multiply a `mTransform`. For mixed Selections the gizmo's
+	// rotation rings will already be greyed down to yaw-only by
+	// `gizmoAxes` above, so the matrix-44 path just composes a yaw delta
+	// (`{x: 0, y: theta, z: 0}`) — same result as the legacy yaw rotate,
+	// but it covers the static-vehicle case too.
+	const usesMatrix44Rotate = useMemo(
+		() => bulkRefs.some((r) => r.kind === 'staticVehicle'),
+		[bulkRefs],
+	);
 
 	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
 		const pivot = bulkPivotRef.current ?? bulkPivotLive;
@@ -336,16 +404,33 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 		if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
 			next = bulkTranslateTrafficEntities(next, bulkRefs, delta.translate);
 		}
-		if (delta.rotate.y !== 0 && pivot) {
-			next = bulkRotateTrafficEntitiesYaw(
-				next,
-				bulkRefs,
-				{ x: pivot.x + delta.translate.x, z: pivot.z + delta.translate.z },
-				delta.rotate.y,
-			);
+		const hasRotate = delta.rotate.x !== 0 || delta.rotate.y !== 0 || delta.rotate.z !== 0;
+		if (hasRotate && pivot) {
+			// The translated pivot — bulk rotate is applied AFTER translate, so
+			// the pivot has to move with the gesture's translate delta.
+			const rotatedPivot = {
+				x: pivot.x + delta.translate.x,
+				y: pivot.y + delta.translate.y,
+				z: pivot.z + delta.translate.z,
+			};
+			if (usesMatrix44Rotate) {
+				next = bulkRotateTrafficEntitiesMatrix44(
+					next,
+					bulkRefs,
+					rotatedPivot,
+					delta.rotate,
+				);
+			} else if (delta.rotate.y !== 0) {
+				next = bulkRotateTrafficEntitiesYaw(
+					next,
+					bulkRefs,
+					{ x: rotatedPivot.x, z: rotatedPivot.z },
+					delta.rotate.y,
+				);
+			}
 		}
 		if (next !== data) onChange(next);
-	}, [data, onChange, bulkRefs]);
+	}, [data, onChange, bulkRefs, usesMatrix44Rotate]);
 
 	const handleGizmoCancel = useCallback(() => {
 		setDragDelta(null);
