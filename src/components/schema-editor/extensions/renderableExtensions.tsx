@@ -356,7 +356,7 @@ function NotDecodedHint() {
 // Narrow: reads `path` to look up its renderable in the decoded-renderable
 // React context, which is separate from the schema editor's `data`. No
 // cross-tree access needed.
-export const RenderableCardExtension: React.FC<SchemaExtensionProps> = ({ path }) => {
+const RenderableCardExtension: React.FC<SchemaExtensionProps> = ({ path }) => {
 	const ctx = useRenderableDecoded();
 	const wi = path[0] === 'renderables' && typeof path[1] === 'number' ? (path[1] as number) : null;
 	if (wi == null) {
@@ -390,7 +390,7 @@ export const RenderableCardExtension: React.FC<SchemaExtensionProps> = ({ path }
 
 // Single-mesh view — like the full card but scoped to one mesh row. Narrow
 // for the same reason as RenderableCardExtension above.
-export const RenderableMeshCardExtension: React.FC<SchemaExtensionProps> = ({ path }) => {
+const RenderableMeshCardExtension: React.FC<SchemaExtensionProps> = ({ path }) => {
 	const ctx = useRenderableDecoded();
 	const wi = path[0] === 'renderables' && typeof path[1] === 'number' ? (path[1] as number) : null;
 	const mi = path[2] === 'meshes' && typeof path[3] === 'number' ? (path[3] as number) : null;
