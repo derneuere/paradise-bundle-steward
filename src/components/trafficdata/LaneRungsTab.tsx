@@ -50,18 +50,18 @@ export const LaneRungsTab: React.FC<Props> = ({ data, hullIndex, onChange, scrol
 	const [search, setSearch] = useState('');
 	const parentRef = useRef<HTMLDivElement>(null);
 	const hull = data.hulls[hullIndex];
-	if (!hull) return null;
 
-	const rungToSection = useMemo(() => buildRungToSectionMap(hull), [hull]);
+	const rungToSection = useMemo(() => hull ? buildRungToSectionMap(hull) : new Int32Array(), [hull]);
 
 	const filtered = useMemo(() => {
+		if (!hull) return [];
 		let list = hull.rungs.map((r, i) => ({ r, i }));
 		if (search) {
 			const q = search.toLowerCase();
 			list = list.filter(({ i }) => i.toString().includes(q));
 		}
 		return list;
-	}, [hull.rungs, search]);
+	}, [hull?.rungs, search]);
 
 	const rowVirtualizer = useVirtualizer({
 		count: filtered.length,
@@ -69,6 +69,8 @@ export const LaneRungsTab: React.FC<Props> = ({ data, hullIndex, onChange, scrol
 		estimateSize: () => 44,
 		overscan: 12,
 	});
+
+	if (!hull) return null;
 
 	scrollToIndexRef.current = (originalIndex: number) => {
 		const filteredIdx = filtered.findIndex(({ i }) => i === originalIndex);
