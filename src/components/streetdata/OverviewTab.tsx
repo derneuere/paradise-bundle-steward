@@ -40,5 +40,3 @@ export const OverviewTab: React.FC<Props> = ({ data }) => {
 		</Card>
 	);
 };
-
-export default OverviewTab;
