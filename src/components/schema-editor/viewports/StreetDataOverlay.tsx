@@ -36,9 +36,6 @@ import {
 // Path ↔ Selection codec (exported for tests)
 // ---------------------------------------------------------------------------
 
-/** Selection kinds this overlay paints. */
-export type StreetMarkerKind = 'street' | 'junction' | 'road';
-
 /**
  * Codec for the three top-level StreetData lists. Sub-paths inside an entity
  * (e.g. drilling into `['streets', 5, 'mAiInfo', ...]`) collapse to "this
@@ -334,5 +331,3 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 		</>
 	);
 };
-
-export default StreetDataOverlay;
