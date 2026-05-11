@@ -23,11 +23,9 @@
 // the bundle writer, and cross-platform export keep using the core registry
 // directly so they never pull React or any JSX into pure-Node land.
 
-import type { ReactNode } from 'react';
 import type { ResourceSchema } from '@/lib/schema/types';
 import type { ExtensionRegistry } from '@/components/schema-editor/context';
 import type { WorldOverlayComponent } from '@/components/schema-editor/viewports/WorldViewport.types';
-import type { NodePath } from '@/lib/schema/walk';
 
 /** Result of converting a model from one EditorProfile's `kind` to another. */
 export type ConversionResult<TTarget = unknown> = {
@@ -47,7 +45,7 @@ export type ConversionResult<TTarget = unknown> = {
 
 /** A single conversion entry on `EditorProfile.conversions` keyed by the
  *  target profile's `kind`. */
-export type ConversionEntry<M, TTarget = unknown> = {
+type ConversionEntry<M, TTarget = unknown> = {
 	/** Human label for the conversion menu — e.g. "Convert to v12 retail". */
 	label: string;
 	/** Pure transform from this profile's model type to the target's. */
@@ -109,10 +107,6 @@ export type ProfileRenderBinding<M = unknown> = {
 	extensions?: ExtensionRegistry;
 };
 
-/** Re-exported for callers building extensions or overlays. */
-export type { ExtensionRegistry, NodePath };
-export type { WorldOverlayComponent } from '@/components/schema-editor/viewports/WorldViewport.types';
-
 /** Identity helper that lets a resource module assert the model type its
  *  profile expects. The runtime value is the profile itself; the cast just
  *  pins the generic so callers writing `aiSectionsV12Profile` get a typed
@@ -121,8 +115,3 @@ export type { WorldOverlayComponent } from '@/components/schema-editor/viewports
 export function defineProfile<M>(profile: EditorProfile<M>): EditorProfile<M> {
 	return profile;
 }
-
-/** Render-time hint passed to overlays that aren't fully migrated to the
- *  ADR-0001 schema-NodePath contract. Most overlays accept this directly via
- *  their props; this alias keeps the EditorProfile module self-documenting. */
-export type OverlayChildren = ReactNode;
