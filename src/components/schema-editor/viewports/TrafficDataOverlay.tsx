@@ -351,5 +351,3 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 		</>
 	);
 };
-
-export default TrafficDataOverlay;
