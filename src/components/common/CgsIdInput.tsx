@@ -95,7 +95,3 @@ export const CgsIdInput: React.FC<CgsIdInputProps> = ({ label, value, onChange, 
     </div>
   );
 };
-
-export default CgsIdInput;
-
-
