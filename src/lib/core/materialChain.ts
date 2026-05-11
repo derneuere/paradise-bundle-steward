@@ -38,7 +38,7 @@ const MATERIAL_STATE_TYPE_ID = 0xF;
 // =============================================================================
 
 /** Parsed blend/cull/alpha properties from the first MaterialState import. */
-export type MaterialProperties = {
+type MaterialProperties = {
 	/** Alpha blending enabled (glass, decals). */
 	alphaBlendEnable: boolean;
 	/** Alpha test enabled (cutout foliage etc.). */
