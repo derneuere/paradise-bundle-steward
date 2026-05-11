@@ -323,5 +323,3 @@ export const ZoneListOverlay: WorldOverlayComponent<ParsedZoneList> = ({
 		</>
 	);
 };
-
-export default ZoneListOverlay;
