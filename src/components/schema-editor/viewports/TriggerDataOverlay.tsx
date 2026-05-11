@@ -55,7 +55,7 @@ import {
 // Path ↔ Selection codec (exported for tests)
 // ---------------------------------------------------------------------------
 
-export type TriggerMarkerKind =
+type TriggerMarkerKind =
 	| 'landmark' | 'generic' | 'blackspot' | 'vfx'
 	| 'spawn' | 'roaming' | 'playerStart';
 
@@ -592,5 +592,3 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 		</>
 	);
 };
-
-export default TriggerDataOverlay;
