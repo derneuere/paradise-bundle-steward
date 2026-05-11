@@ -1468,13 +1468,12 @@ function HtmlSiblings({
 					hintIdle="press B to box-select AI sections"
 				/>
 
-				<button
-					type="button"
-					onClick={toggleSnap}
-					title={snapEnabled
-						? 'Snap to edges: ON (S to toggle)'
-						: 'Snap to edges: OFF (S to toggle)'}
-					aria-pressed={snapEnabled}
+				{/* Snap + Cascade toggle row. Wrapped in a flex container so the
+				    two buttons layout side-by-side without per-button absolute
+				    positioning — the Snap label's width varies with on/off, so
+				    a guessed `left: NNpx` on the Cascade button overlapped at
+				    some labels. */}
+				<div
 					style={{
 						position: 'absolute',
 						top: 8,
@@ -1482,64 +1481,71 @@ function HtmlSiblings({
 						display: 'flex',
 						alignItems: 'center',
 						gap: 6,
-						padding: '4px 8px',
-						borderRadius: 6,
-						fontSize: 11,
-						fontFamily: 'monospace',
-						border: '1px solid rgba(255,255,255,0.15)',
-						background: snapEnabled ? 'rgba(80, 170, 110, 0.85)' : 'rgba(20, 22, 28, 0.85)',
-						color: snapEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
-						cursor: 'pointer',
-						userSelect: 'none',
-						boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-						pointerEvents: 'auto',
+						pointerEvents: 'none', // children opt back in
 					}}
 				>
-					<Magnet size={14} />
-					<span>Snap{snapEnabled ? ' · on' : ' · off'}</span>
-					<span style={{ opacity: 0.5, fontSize: 10 }}>S</span>
-				</button>
+					<button
+						type="button"
+						onClick={toggleSnap}
+						title={snapEnabled
+							? 'Snap to edges: ON (S to toggle)'
+							: 'Snap to edges: OFF (S to toggle)'}
+						aria-pressed={snapEnabled}
+						style={{
+							display: 'flex',
+							alignItems: 'center',
+							gap: 6,
+							padding: '4px 8px',
+							borderRadius: 6,
+							fontSize: 11,
+							fontFamily: 'monospace',
+							border: '1px solid rgba(255,255,255,0.15)',
+							background: snapEnabled ? 'rgba(80, 170, 110, 0.85)' : 'rgba(20, 22, 28, 0.85)',
+							color: snapEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
+							cursor: 'pointer',
+							userSelect: 'none',
+							boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+							pointerEvents: 'auto',
+						}}
+					>
+						<Magnet size={14} />
+						<span>Snap{snapEnabled ? ' · on' : ' · off'}</span>
+						<span style={{ opacity: 0.5, fontSize: 10 }}>S</span>
+					</button>
 
-				<button
-					type="button"
-					onClick={toggleCascade}
-					title={cascadeEnabled
-						? 'Keep connections (cascade): ON — hold Shift on a gesture for non-cascading (C to toggle)'
-						: 'Keep connections (cascade): OFF — hold Shift on a gesture for cascading (C to toggle)'}
-					aria-pressed={cascadeEnabled}
-					style={{
-						position: 'absolute',
-						top: 8,
-						// Sits to the right of the Snap button so both toggles
-						// live in a single visual row. Width of the Snap
-						// button is variable; using a generous left offset
-						// matches the codebase's existing inspector affordance
-						// spacing.
-						left: 110,
-						display: 'flex',
-						alignItems: 'center',
-						gap: 6,
-						padding: '4px 8px',
-						borderRadius: 6,
-						fontSize: 11,
-						fontFamily: 'monospace',
-						border: '1px solid rgba(255,255,255,0.15)',
-						// Magenta tint when ON — matches the in-flight cascade
-						// hint halo / status badge below, so the user can
-						// associate the toggle with what they'll see when a
-						// gesture fires.
-						background: cascadeEnabled ? 'rgba(200, 80, 180, 0.85)' : 'rgba(20, 22, 28, 0.85)',
-						color: cascadeEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
-						cursor: 'pointer',
-						userSelect: 'none',
-						boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-						pointerEvents: 'auto',
-					}}
-				>
-					<Link2 size={14} />
-					<span>Cascade{cascadeEnabled ? ' · on' : ' · off'}</span>
-					<span style={{ opacity: 0.5, fontSize: 10 }}>C</span>
-				</button>
+					<button
+						type="button"
+						onClick={toggleCascade}
+						title={cascadeEnabled
+							? 'Keep connections (cascade): ON — hold Shift on a gesture for non-cascading (C to toggle)'
+							: 'Keep connections (cascade): OFF — hold Shift on a gesture for cascading (C to toggle)'}
+						aria-pressed={cascadeEnabled}
+						style={{
+							display: 'flex',
+							alignItems: 'center',
+							gap: 6,
+							padding: '4px 8px',
+							borderRadius: 6,
+							fontSize: 11,
+							fontFamily: 'monospace',
+							border: '1px solid rgba(255,255,255,0.15)',
+							// Magenta tint when ON — matches the in-flight cascade
+							// hint halo / status badge below, so the user can
+							// associate the toggle with what they'll see when a
+							// gesture fires.
+							background: cascadeEnabled ? 'rgba(200, 80, 180, 0.85)' : 'rgba(20, 22, 28, 0.85)',
+							color: cascadeEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
+							cursor: 'pointer',
+							userSelect: 'none',
+							boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+							pointerEvents: 'auto',
+						}}
+					>
+						<Link2 size={14} />
+						<span>Cascade{cascadeEnabled ? ' · on' : ' · off'}</span>
+						<span style={{ opacity: 0.5, fontSize: 10 }}>C</span>
+					</button>
+				</div>
 
 				{edgeMenu && (
 					<EdgeContextMenu
