@@ -320,6 +320,17 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 
 	const isBulkActive = bulkEntityCount >= 2;
 
+	// Per-section ground Y (issue #27). Derived once per data change from
+	// portal Ys plus a BFS through the section graph for portal-less sections.
+	// Memoised here so the renderer doesn't re-walk all 8.7k V12 sections on
+	// every frame — the hot path is `previewModel`-driven re-renders during a
+	// drag, which never change `data.sections`.
+	// Declared ahead of `bulkPivotLive` because that useMemo references
+	// `sectionYs` in both its callback and its deps array — keeping the
+	// declaration below would TDZ-throw on mount during any render where
+	// `bulkPivotLive` is reached.
+	const sectionYs = useMemo(() => resolveSectionYs(data), [data]);
+
 	// Bulk Pivot — median of every selected entity position, computed
 	// against the live data (NOT the preview model). Snapshotted at gesture
 	// start in `bulkPivotRef` so it doesn't drift mid-rotate (re-deriving
@@ -390,13 +401,6 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// muscle memory survives, but the value isn't consulted anywhere in the
 	// commit path. Issue #75 reconsiders snap once cascade is opt-in.
 	useToggleHotkey('s', setSnapEnabled);
-
-	// Per-section ground Y (issue #27). Derived once per data change from
-	// portal Ys plus a BFS through the section graph for portal-less sections.
-	// Memoised here so the renderer doesn't re-walk all 8.7k V12 sections on
-	// every frame — the hot path is `previewModel`-driven re-renders during a
-	// drag, which never change `data.sections`.
-	const sectionYs = useMemo(() => resolveSectionYs(data), [data]);
 
 	const scene = useMemo(
 		() => buildBatchedSections(data.sections, v12Accessor, sectionYs),
