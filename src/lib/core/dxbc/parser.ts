@@ -20,12 +20,12 @@
 // Types
 // ---------------------------------------------------------------------------
 
-export type DxbcProgramType = 'pixel' | 'vertex' | 'geometry' | 'hull' | 'domain' | 'compute';
+type DxbcProgramType = 'pixel' | 'vertex' | 'geometry' | 'hull' | 'domain' | 'compute';
 
-export type DxbcChunkKind = 'RDEF' | 'ISGN' | 'OSGN' | 'SHEX' | 'SHDR' | 'STAT' | 'PCSG' | 'SFI0' | 'ICFE' | string;
+type DxbcChunkKind = 'RDEF' | 'ISGN' | 'OSGN' | 'SHEX' | 'SHDR' | 'STAT' | 'PCSG' | 'SFI0' | 'ICFE' | string;
 
 /** A single chunk record as it lives in the DXBC file. */
-export type DxbcChunk = {
+type DxbcChunk = {
 	kind: DxbcChunkKind;
 	/** Absolute offset of the chunk tag in the DXBC buffer. */
 	offset: number;
@@ -34,7 +34,7 @@ export type DxbcChunk = {
 };
 
 /** A single input or output signature element (ISGN/OSGN). */
-export type DxbcSignatureElement = {
+type DxbcSignatureElement = {
 	/** Semantic name, e.g. "POSITION", "TEXCOORD". */
 	semanticName: string;
 	/** Semantic index, e.g. 0 for TEXCOORD0. */
@@ -52,7 +52,7 @@ export type DxbcSignatureElement = {
 };
 
 /** A constant-buffer variable (RDEF). */
-export type DxbcCbVariable = {
+type DxbcCbVariable = {
 	name: string;
 	/** Offset into the containing cbuffer, in bytes. */
 	startOffset: number;
@@ -62,7 +62,7 @@ export type DxbcCbVariable = {
 	type: DxbcTypeDesc;
 };
 
-export type DxbcTypeDesc = {
+type DxbcTypeDesc = {
 	/** SHADER_VARIABLE_CLASS: 0=scalar, 1=vector, 2=matrix_rows, 3=matrix_columns,
 	 *  4=object, 5=struct, 6=interface, 7=interface_pointer. */
 	class: number;
@@ -73,7 +73,7 @@ export type DxbcTypeDesc = {
 	elements: number;
 };
 
-export type DxbcConstantBuffer = {
+type DxbcConstantBuffer = {
 	name: string;
 	/** Size in bytes. */
 	size: number;
@@ -82,7 +82,7 @@ export type DxbcConstantBuffer = {
 	variables: DxbcCbVariable[];
 };
 
-export type DxbcResourceBinding = {
+type DxbcResourceBinding = {
 	name: string;
 	/** D3D_SHADER_INPUT_TYPE: 0=cbuffer, 1=tbuffer, 2=texture, 3=sampler,
 	 *  4=uav_rwtyped, 5=structured, 6=uav_rwstructured, ... */
@@ -98,7 +98,7 @@ export type DxbcResourceBinding = {
 	flags: number;
 };
 
-export type DxbcReflection = {
+type DxbcReflection = {
 	constantBuffers: DxbcConstantBuffer[];
 	resourceBindings: DxbcResourceBinding[];
 };
@@ -392,16 +392,3 @@ function parseRdef(bytes: Uint8Array, chunk: DxbcChunk): DxbcReflection {
 	return { constantBuffers, resourceBindings };
 }
 
-// ---------------------------------------------------------------------------
-// Small helpers used by the instruction decoder
-// ---------------------------------------------------------------------------
-
-export function programVersionLabel(p: ParsedDxbc): string {
-	const stage = p.programType === 'vertex' ? 'vs'
-		: p.programType === 'pixel' ? 'ps'
-		: p.programType === 'geometry' ? 'gs'
-		: p.programType === 'hull' ? 'hs'
-		: p.programType === 'domain' ? 'ds'
-		: 'cs';
-	return `${stage}_${p.programMajor}_${p.programMinor}`;
-}
