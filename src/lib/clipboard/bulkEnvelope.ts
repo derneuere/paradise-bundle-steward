@@ -29,12 +29,12 @@ export type BulkEnvelope<TItem = unknown> = {
 // Discriminated union — both branches carry distinct fields so narrowing
 // works under `strict: false` (the project's tsconfig flips it off; see
 // CLAUDE.md / type-debt entry). Callers use the `ok` field to switch.
-export type ParsedBulkEnvelopeOk<TItem = unknown> = {
+type ParsedBulkEnvelopeOk<TItem = unknown> = {
 	ok: true;
 	envelope: BulkEnvelope<TItem>;
 	reason?: undefined;
 };
-export type ParsedBulkEnvelopeErr = {
+type ParsedBulkEnvelopeErr = {
 	ok: false;
 	reason: string;
 	envelope?: undefined;
