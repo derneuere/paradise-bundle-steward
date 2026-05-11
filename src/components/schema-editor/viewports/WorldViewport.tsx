@@ -143,5 +143,3 @@ export const WorldViewport: WorldViewportComponent = ({ children }) => {
 		</div>
 	);
 };
-
-export default WorldViewport;
