@@ -119,12 +119,7 @@ export function getExportablePlatforms(bundle: { header: { platform: number }, r
 
 export {
 	type ResourceHandler,
-	type ResourceFixture,
-	type HandlerCaps,
-	type HandlerCapabilityOverrides,
-	type ResourceCtx,
 	type ResourceCategory,
-	type StressScenario,
 	type HandlerPlatform,
 	resourceCtxFromBundle,
 } from './handler';
