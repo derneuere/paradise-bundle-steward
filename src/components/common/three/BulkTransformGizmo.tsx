@@ -91,10 +91,17 @@ const COLOR = {
 	z: '#3070ff',
 	zHot: '#90b0ff',
 	disabled: '#555555',
+	// **Cascade** visual cue: a magenta-ish accent that tints the handles
+	// when Shift is held at gesture start. Distinct from the per-axis hues
+	// so it reads as "different mode", not "different axis" (issue #75 +
+	// CONTEXT.md / "Cascade").
+	cascade: '#ff66cc',
+	cascadeHot: '#ffaadd',
 } as const;
 
 const RING_OPACITY_ENABLED = 0.75;
 const RING_OPACITY_DISABLED = 0.25;
+const CASCADE_HALO_OPACITY = 0.35;
 
 // =============================================================================
 // Component
@@ -125,7 +132,15 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 		// the camera looks at it from the opposite side, so dragging right
 		// always rotates clockwise from the user's perspective.
 		rotationAxisWorld?: THREE.Vector3;
+		// **Cascade** opt-in captured at pointer-down. See `BulkTransformDelta.cascade`
+		// and CONTEXT.md / "Cascade" for the semantics: Shift held at gesture
+		// start enables cascade for the lifetime of that gesture; pressing or
+		// releasing Shift mid-drag does NOT switch modes.
+		cascade?: boolean;
 	} | null>(null);
+	// Tracks the cascade flag for the active gesture so the visual tint stays
+	// stable across re-renders (the ref above is mutable). Pure render state.
+	const [activeCascade, setActiveCascade] = useState(false);
 
 	const pivotVec = useMemo(
 		() => new THREE.Vector3(position[0], position[1], position[2]),
@@ -147,6 +162,14 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 		group.scale.setScalar(targetWorldSize / DESIGN_SIZE);
 	});
 
+	// Wrap setActive so clearing the active gesture also clears the local
+	// cascade-tint state — keeps the gizmo colour back at the no-cascade
+	// default between gestures.
+	const setActiveAndCascade = (a: { kind: GizmoHandleKind; axis: GizmoHandleAxis } | null) => {
+		setActive(a);
+		if (a === null) setActiveCascade(false);
+	};
+
 	useBulkTransformDrag({
 		active,
 		camera,
@@ -157,11 +180,14 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 		onTransform,
 		onCommit,
 		onCancel,
-		setActive,
+		setActive: setActiveAndCascade,
 	});
 
 	// Begin a drag — capture the pointer-down world position (translate) or
 	// screen-space angle (rotate) so the per-frame mover can derive a delta.
+	// Also captures the cascade modifier (Shift) at gesture start; the value
+	// is pinned for the lifetime of the gesture so users don't accidentally
+	// flip modes by tapping Shift mid-drag (per ADR-0009 + issue #75).
 	const beginTranslate = (axis: GizmoHandleAxis) => (e: ThreeEvent<PointerEvent>) => {
 		if (!isAxisInteractive('translate', axis, axes)) return;
 		e.stopPropagation();
@@ -176,12 +202,15 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 			planeNormal,
 		);
 		if (!world) return;
+		const cascade = e.nativeEvent.shiftKey === true;
 		dragStartRef.current = {
 			kind: 'translate',
 			axis,
 			pivot: pivotVec.clone(),
 			anchorWorld: world.clone(),
+			cascade,
 		};
+		setActiveCascade(cascade);
 		setActive({ kind: 'translate', axis });
 		document.body.style.cursor = 'grabbing';
 	};
@@ -196,13 +225,16 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 		const dy = e.nativeEvent.clientY - pivotScreen.y;
 		const anchorAngle = Math.atan2(dy, dx);
 		const rotationAxisWorld = rotationAxisVector(axis);
+		const cascade = e.nativeEvent.shiftKey === true;
 		dragStartRef.current = {
 			kind: 'rotate',
 			axis,
 			pivot: pivotVec.clone(),
 			anchorAngle,
 			rotationAxisWorld,
+			cascade,
 		};
+		setActiveCascade(cascade);
 		setActive({ kind: 'rotate', axis });
 		document.body.style.cursor = 'grabbing';
 	};
@@ -230,6 +262,35 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 
 	return (
 		<group ref={groupRef} position={position}>
+			{/* Cascade visual cue — a translucent magenta halo encircling the
+			    gizmo when Shift was held at gesture start. Reads as "the
+			    transform will drag connected outside geometry along" per
+			    CONTEXT.md / "Cascade" + ADR-0009. Renders on top of the
+			    gizmo's normal handles, no depth test, so it's visible from
+			    any camera angle. */}
+			{activeCascade && (
+				<>
+					<mesh rotation={[Math.PI / 2, 0, 0]}>
+						<torusGeometry args={[DESIGN_SIZE * 0.95, DESIGN_SIZE * 0.025, 8, 64]} />
+						<meshBasicMaterial
+							color={COLOR.cascade}
+							transparent
+							opacity={CASCADE_HALO_OPACITY}
+							depthTest={false}
+						/>
+					</mesh>
+					<mesh>
+						<sphereGeometry args={[DESIGN_SIZE * 0.06, 12, 12]} />
+						<meshBasicMaterial
+							color={COLOR.cascade}
+							transparent
+							opacity={CASCADE_HALO_OPACITY * 1.5}
+							depthTest={false}
+						/>
+					</mesh>
+				</>
+			)}
+
 			{/* Translate arrows */}
 			<TranslateArrow
 				axis="x"

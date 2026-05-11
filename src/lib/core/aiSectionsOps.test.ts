@@ -9,6 +9,8 @@ import {
 	duplicateLegacySectionThroughEdge,
 	duplicateSectionThroughEdge,
 	rotateSectionAroundCentroidYaw,
+	rotateSectionWithLinksYaw,
+	rotateSelectionWithLinksYaw,
 	snapCornerOffset,
 	snapLegacyCornerOffset,
 	snapLegacySectionOffset,
@@ -16,8 +18,10 @@ import {
 	translateCornerWithShared,
 	translateLegacyCornerWithShared,
 	translateLegacySectionWithLinks,
+	translatePortalAnchorWithMirror,
 	translateSectionRigid,
 	translateSectionWithLinks,
+	translateSelectionWithLinks,
 } from './aiSectionsOps';
 import {
 	AI_SECTIONS_VERSION,
@@ -2302,5 +2306,398 @@ describe('translateSectionRigid + rotateSectionAroundCentroidYaw composition', (
 		// offset (-5, -5) → π/2 → (5, -5) → (110, 200).
 		expect(r.sections[0].corners[0].x).toBeCloseTo(110, 6);
 		expect(r.sections[0].corners[0].y).toBeCloseTo(200, 6);
+	});
+});
+
+// =============================================================================
+// Cascade-modifier ops (issue #75): rotateSectionWithLinksYaw,
+// translatePortalAnchorWithMirror, translateSelectionWithLinks,
+// rotateSelectionWithLinksYaw
+// =============================================================================
+//
+// These exercise the cascade-on path the gizmo routes through when Shift is
+// held at gesture start. Cascade-off is exercised by the existing
+// translateSectionRigid + rotateSectionAroundCentroidYaw suite above; this
+// suite pins the "outside neighbours follow" semantics.
+
+describe('rotateSectionWithLinksYaw', () => {
+	// Same makePair shape as translateSectionWithLinks: two adjacent quads
+	// sharing the right edge of section 0 / left edge of section 1, with
+	// mirrored portals at the edge midpoint.
+	function makePair(): ParsedAISectionsV12 {
+		const portal0to1: Portal = {
+			position: { x: 10, y: 0, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: Portal = {
+			position: { x: 10, y: 0, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const s0 = makeSection({
+			id: 0xA,
+			corners: [
+				{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 },
+			],
+			portals: [portal0to1],
+		});
+		const s1 = makeSection({
+			id: 0xB,
+			corners: [
+				{ x: 10, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10, y: 10 },
+			],
+			portals: [portal1to0],
+		});
+		return makeModel([s0, s1]);
+	}
+
+	it('rotates the source section around its centroid like the rigid op', () => {
+		const model = makePair();
+		// Source centroid is (5, 5); π/2 rotates (0, 0) → centroid offset
+		// (-5, -5) → (5, -5) → (10, 0).
+		const next = rotateSectionWithLinksYaw(model, 0, Math.PI / 2);
+		expect(next.sections[0].corners[0].x).toBeCloseTo(10, 6);
+		expect(next.sections[0].corners[0].y).toBeCloseTo(0, 6);
+	});
+
+	it("rotates the neighbour's reverse portal around the source centroid", () => {
+		const model = makePair();
+		// Pre-rotate portal anchor is at (10, 5). Source centroid is (5, 5).
+		// π/2 rotation: offset (5, 0) → (0, 5) → world (5, 10).
+		const next = rotateSectionWithLinksYaw(model, 0, Math.PI / 2);
+		expect(next.sections[1].portals[0].position.x).toBeCloseTo(5, 6);
+		expect(next.sections[1].portals[0].position.y).toBe(0); // y unchanged
+		expect(next.sections[1].portals[0].position.z).toBeCloseTo(10, 6);
+	});
+
+	it('keeps source and neighbour portal positions equal after the rotate (lockstep)', () => {
+		const model = makePair();
+		const next = rotateSectionWithLinksYaw(model, 0, 0.7);
+		const sp = next.sections[0].portals[0].position;
+		const np = next.sections[1].portals[0].position;
+		expect(sp.x).toBeCloseTo(np.x, 6);
+		expect(sp.y).toBeCloseTo(np.y, 6);
+		expect(sp.z).toBeCloseTo(np.z, 6);
+	});
+
+	it('orbits the shared corners on the neighbour around the source centroid', () => {
+		const model = makePair();
+		// Shared corners are (10, 0) and (10, 10) — they were on the source's
+		// right edge and ARE the neighbour's left edge. After π/2 around
+		// (5, 5): (10, 0) → (5, -5)+(5,5) → (10, 0)? wait. Let's compute:
+		// offset (5, -5) → π/2 → (5, 5) → world (10, 10). And (10, 10) →
+		// offset (5, 5) → π/2 → (-5, 5) → world (0, 10).
+		const next = rotateSectionWithLinksYaw(model, 0, Math.PI / 2);
+		const s1 = next.sections[1];
+		// Pre-rotate s1 corners were [(10,0),(20,0),(20,10),(10,10)]. The
+		// shared corners at indexes 0 and 3 spin; the non-shared ones at
+		// indexes 1 and 2 stay put.
+		expect(s1.corners[0].x).toBeCloseTo(10, 6);
+		expect(s1.corners[0].y).toBeCloseTo(10, 6);
+		expect(s1.corners[3].x).toBeCloseTo(0, 6);
+		expect(s1.corners[3].y).toBeCloseTo(10, 6);
+		// Non-shared corners unchanged.
+		expect(s1.corners[1]).toEqual({ x: 20, y: 0 });
+		expect(s1.corners[2]).toEqual({ x: 20, y: 10 });
+	});
+
+	it('is a no-op for theta === 0', () => {
+		const model = makePair();
+		expect(rotateSectionWithLinksYaw(model, 0, 0)).toBe(model);
+	});
+
+	it('throws on out-of-range srcIdx', () => {
+		const model = makePair();
+		expect(() => rotateSectionWithLinksYaw(model, 5, 0.1)).toThrow(RangeError);
+		expect(() => rotateSectionWithLinksYaw(model, -1, 0.1)).toThrow(RangeError);
+	});
+
+	it('a full revolution (2π) returns a near-identity result', () => {
+		const model = makePair();
+		const next = rotateSectionWithLinksYaw(model, 0, 2 * Math.PI);
+		// Floats won't be exactly equal but should be machine-close.
+		expect(next.sections[0].corners[0].x).toBeCloseTo(0, 5);
+		expect(next.sections[0].corners[0].y).toBeCloseTo(0, 5);
+		expect(next.sections[1].portals[0].position.x).toBeCloseTo(10, 5);
+		expect(next.sections[1].portals[0].position.z).toBeCloseTo(5, 5);
+	});
+});
+
+describe('translatePortalAnchorWithMirror', () => {
+	function makePair(): ParsedAISectionsV12 {
+		const portal0to1: Portal = {
+			position: { x: 10, y: 3, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: Portal = {
+			position: { x: 10, y: 3, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const s0 = makeSection({ id: 0xA, portals: [portal0to1] });
+		const s1 = makeSection({
+			id: 0xB,
+			corners: [
+				{ x: 10, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10, y: 10 },
+			],
+			portals: [portal1to0],
+		});
+		return makeModel([s0, s1]);
+	}
+
+	it('translates the source portal and the mirror portal by the same delta', () => {
+		const model = makePair();
+		const next = translatePortalAnchorWithMirror(model, 0, 0, { x: 4, y: 0.5, z: -2 });
+		expect(next.sections[0].portals[0].position).toEqual({ x: 14, y: 3.5, z: 3 });
+		expect(next.sections[1].portals[0].position).toEqual({ x: 14, y: 3.5, z: 3 });
+	});
+
+	it('does NOT touch corners on either section', () => {
+		const model = makePair();
+		const next = translatePortalAnchorWithMirror(model, 0, 0, { x: 4, y: 0, z: -2 });
+		expect(next.sections[0].corners).toEqual(model.sections[0].corners);
+		expect(next.sections[1].corners).toEqual(model.sections[1].corners);
+	});
+
+	it('does NOT touch portal boundary lines on either section', () => {
+		const model = makePair();
+		const next = translatePortalAnchorWithMirror(model, 0, 0, { x: 4, y: 0, z: -2 });
+		expect(next.sections[0].portals[0].boundaryLines).toEqual(
+			model.sections[0].portals[0].boundaryLines,
+		);
+		expect(next.sections[1].portals[0].boundaryLines).toEqual(
+			model.sections[1].portals[0].boundaryLines,
+		);
+	});
+
+	it('is a no-op for a zero offset', () => {
+		const model = makePair();
+		expect(translatePortalAnchorWithMirror(model, 0, 0, { x: 0, y: 0, z: 0 })).toBe(model);
+	});
+
+	it('throws on out-of-range sectionIdx or portalIdx', () => {
+		const model = makePair();
+		expect(() => translatePortalAnchorWithMirror(model, 5, 0, { x: 1, y: 0, z: 0 })).toThrow(RangeError);
+		expect(() => translatePortalAnchorWithMirror(model, 0, 5, { x: 1, y: 0, z: 0 })).toThrow(RangeError);
+	});
+
+	it('still moves the source portal even when the mirror is missing (orphan link)', () => {
+		const orphan: AISection = makeSection({
+			id: 0xC,
+			portals: [{
+				position: { x: 1, y: 0, z: 2 },
+				boundaryLines: [],
+				linkSection: 999, // out of range
+			}],
+		});
+		const model = makeModel([orphan]);
+		const next = translatePortalAnchorWithMirror(model, 0, 0, { x: 5, y: 0, z: 0 });
+		expect(next.sections[0].portals[0].position).toEqual({ x: 6, y: 0, z: 2 });
+	});
+});
+
+describe('translateSelectionWithLinks', () => {
+	// Build a row of 3 sections so we can pick the middle two as a Selection
+	// and verify outside neighbours cascade while inside Selection members
+	// translate rigid-bodily.
+	function makeTrio(): ParsedAISectionsV12 {
+		// s0 — leftmost (outside Selection). Its right edge is (10, 0)–(10, 10)
+		// shared with s1.
+		const s0 = makeSection({
+			id: 0xA,
+			corners: [
+				{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 },
+			],
+			portals: [{
+				position: { x: 10, y: 0, z: 5 },
+				boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+				linkSection: 1,
+			}],
+		});
+		// s1 — middle. Has a portal to s0 on its left edge AND a portal to
+		// s2 on its right edge.
+		const s1 = makeSection({
+			id: 0xB,
+			corners: [
+				{ x: 10, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10, y: 10 },
+			],
+			portals: [
+				{
+					position: { x: 10, y: 0, z: 5 },
+					boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+					linkSection: 0,
+				},
+				{
+					position: { x: 20, y: 0, z: 5 },
+					boundaryLines: [{ verts: { x: 20, y: 0, z: 20, w: 10 } }],
+					linkSection: 2,
+				},
+			],
+		});
+		// s2 — rightmost (outside Selection). Its left edge (20, 0)–(20, 10)
+		// is shared with s1.
+		const s2 = makeSection({
+			id: 0xC,
+			corners: [
+				{ x: 20, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 10 }, { x: 20, y: 10 },
+			],
+			portals: [{
+				position: { x: 20, y: 0, z: 5 },
+				boundaryLines: [{ verts: { x: 20, y: 10, z: 20, w: 0 } }],
+				linkSection: 1,
+			}],
+		});
+		return makeModel([s0, s1, s2]);
+	}
+
+	it('with a single-section Selection, matches translateSectionWithLinks byte-for-byte', () => {
+		// Regression: cascade-on single-section translate must produce the
+		// exact same model as the legacy `translateSectionWithLinks` op.
+		const model = makeTrio();
+		const a = translateSelectionWithLinks(model, [1], { x: 3, z: -2 });
+		const b = translateSectionWithLinks(model, 1, { x: 3, z: -2 });
+		expect(a).toEqual(b);
+	});
+
+	it('cascades to outside neighbours but not to inside-Selection members', () => {
+		const model = makeTrio();
+		// Select s1 alone: cascade should reach s0 AND s2 (both outside).
+		const single = translateSelectionWithLinks(model, [1], { x: 5, z: 0 });
+		// s0's reverse portal (at 10, 0, 5) should track to (15, 0, 5).
+		expect(single.sections[0].portals[0].position).toEqual({ x: 15, y: 0, z: 5 });
+		// s2's reverse portal (at 20, 0, 5) should track to (25, 0, 5).
+		expect(single.sections[2].portals[0].position).toEqual({ x: 25, y: 0, z: 5 });
+	});
+
+	it('a Selection of two adjacent sections moves both inside-rigidly and cascades only to outside neighbours', () => {
+		const model = makeTrio();
+		// Select s1 and s2: s0 is the only outside neighbour.
+		const next = translateSelectionWithLinks(model, [1, 2], { x: 7, z: 0 });
+		// s0 (outside): reverse portal cascades — was (10, 0, 5), becomes (17, 0, 5).
+		expect(next.sections[0].portals[0].position).toEqual({ x: 17, y: 0, z: 5 });
+		// s0 corners that lie on the s0/s1 shared edge (10, 0) and (10, 10)
+		// follow the cascade.
+		expect(next.sections[0].corners[1]).toEqual({ x: 17, y: 0 });
+		expect(next.sections[0].corners[2]).toEqual({ x: 17, y: 10 });
+		// s1 (inside): all corners translate by (7, 0).
+		expect(next.sections[1].corners[0]).toEqual({ x: 17, y: 0 });
+		expect(next.sections[1].corners[1]).toEqual({ x: 27, y: 0 });
+		// s2 (inside): all corners translate by (7, 0) — NO double-shift
+		// from a cascade into s2 (s1's right-portal points at s2 which is
+		// inside-Selection, so cascade is skipped per `selectedSet.has(targetIdx)`).
+		expect(next.sections[2].corners[0]).toEqual({ x: 27, y: 0 });
+		expect(next.sections[2].corners[1]).toEqual({ x: 37, y: 0 });
+	});
+
+	it('cascade-off bulk leaves outside neighbours put (regression vs cascade-on)', () => {
+		// Sanity: contrast the cascade-on result with what a rigid bulk would
+		// produce. We simulate cascade-off bulk by translating each member
+		// rigidly with `translateSectionRigid` and checking outside neighbours
+		// are stale.
+		const model = makeTrio();
+		let off = model;
+		off = translateSectionRigid(off, 1, { x: 7, y: 0, z: 0 });
+		off = translateSectionRigid(off, 2, { x: 7, y: 0, z: 0 });
+		// Cascade-off: s0's reverse portal is now stale at (10, 0, 5) — it
+		// still points at the (now-moved) s1 but at the OLD world position.
+		expect(off.sections[0].portals[0].position).toEqual({ x: 10, y: 0, z: 5 });
+
+		// Cascade-on: same delta, different outcome — s0's reverse portal
+		// follows.
+		const on = translateSelectionWithLinks(model, [1, 2], { x: 7, z: 0 });
+		expect(on.sections[0].portals[0].position).toEqual({ x: 17, y: 0, z: 5 });
+	});
+
+	it('is a no-op for an empty Selection or zero offset', () => {
+		const model = makeTrio();
+		expect(translateSelectionWithLinks(model, [], { x: 5, z: 5 })).toBe(model);
+		expect(translateSelectionWithLinks(model, [0, 1], { x: 0, z: 0 })).toBe(model);
+	});
+
+	it('throws on out-of-range index in Selection', () => {
+		const model = makeTrio();
+		expect(() => translateSelectionWithLinks(model, [0, 99], { x: 1, z: 0 })).toThrow(RangeError);
+	});
+});
+
+describe('rotateSelectionWithLinksYaw', () => {
+	function makePair(): ParsedAISectionsV12 {
+		// Same as the rotateSectionWithLinksYaw fixture.
+		const portal0to1: Portal = {
+			position: { x: 10, y: 0, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: Portal = {
+			position: { x: 10, y: 0, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const s0 = makeSection({
+			id: 0xA,
+			corners: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+			portals: [portal0to1],
+		});
+		const s1 = makeSection({
+			id: 0xB,
+			corners: [{ x: 10, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10, y: 10 }],
+			portals: [portal1to0],
+		});
+		return makeModel([s0, s1]);
+	}
+
+	it('orbits every selected section around the supplied pivot', () => {
+		const model = makePair();
+		// Pivot at the s0/s1 shared edge midpoint (10, 5). Rotate π/2.
+		const next = rotateSelectionWithLinksYaw(model, [0, 1], { x: 10, z: 5 }, Math.PI / 2);
+		// s0 corner (0, 0): offset (-10, -5) → π/2 → (5, -10) → world (15, -5).
+		expect(next.sections[0].corners[0].x).toBeCloseTo(15, 6);
+		expect(next.sections[0].corners[0].y).toBeCloseTo(-5, 6);
+		// s1 corner (20, 0): offset (10, -5) → π/2 → (5, 10) → world (15, 15).
+		expect(next.sections[1].corners[1].x).toBeCloseTo(15, 6);
+		expect(next.sections[1].corners[1].y).toBeCloseTo(15, 6);
+	});
+
+	it('cascades to outside neighbours but not to inside-Selection members', () => {
+		// Build a 3-section row, select the middle one, rotate, verify only
+		// outside neighbours' reverse portals cascade.
+		const s0 = makeSection({
+			id: 0xA,
+			corners: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+			portals: [{
+				position: { x: 10, y: 0, z: 5 },
+				boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+				linkSection: 1,
+			}],
+		});
+		const s1 = makeSection({
+			id: 0xB,
+			corners: [{ x: 10, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10, y: 10 }],
+			portals: [{
+				position: { x: 10, y: 0, z: 5 },
+				boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+				linkSection: 0,
+			}],
+		});
+		const model = makeModel([s0, s1]);
+		// Select s1 alone; rotate around its centroid (15, 5).
+		const next = rotateSelectionWithLinksYaw(model, [1], { x: 15, z: 5 }, Math.PI);
+		// s0 (outside): reverse portal at (10, 0, 5). Pivot (15, 5), π:
+		// offset (-5, 0) → (5, 0) → world (20, 5).
+		expect(next.sections[0].portals[0].position.x).toBeCloseTo(20, 6);
+		expect(next.sections[0].portals[0].position.z).toBeCloseTo(5, 6);
+	});
+
+	it('is a no-op for theta === 0 or an empty Selection', () => {
+		const model = makePair();
+		expect(rotateSelectionWithLinksYaw(model, [0, 1], { x: 0, z: 0 }, 0)).toBe(model);
+		expect(rotateSelectionWithLinksYaw(model, [], { x: 0, z: 0 }, 0.5)).toBe(model);
+	});
+
+	it('throws on out-of-range Selection index', () => {
+		const model = makePair();
+		expect(() => rotateSelectionWithLinksYaw(model, [99], { x: 0, z: 0 }, 0.5)).toThrow(RangeError);
 	});
 });

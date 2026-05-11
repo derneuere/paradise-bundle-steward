@@ -26,7 +26,9 @@ import {
 } from '@/lib/history';
 import {
 	rotateSectionAroundCentroidYaw,
+	rotateSectionWithLinksYaw,
 	translateSectionRigid,
+	translateSectionWithLinks,
 } from '@/lib/core/aiSectionsOps';
 import type {
 	EditableBundle,
@@ -219,5 +221,73 @@ describe('Bulk transform gesture → Workspace undo stack', () => {
 		// the outer section object is a fresh ref, but its contents match
 		// the pre-edit model exactly.
 		expect(getAI(afterUndo, 'AI.DAT').sections[0].corners).toEqual(beforeCorners);
+	});
+
+	// ---------------------------------------------------------------------------
+	// Cascade-on path (issue #75): ONE undo entry per gesture, regardless of
+	// modifier state. The cascade-on op mutates more sections per call (the
+	// neighbour cascade), but the gizmo's commit still funnels through a
+	// single onChange → setResource call, so the Workspace-undo stack grows
+	// by exactly one entry per gesture.
+	// ---------------------------------------------------------------------------
+
+	it('cascade-on translate gesture pushes exactly one HistoryCommit (per ADR-0009 + issue #75)', () => {
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+		const next = translateSectionWithLinks(ai, 0, { x: 5, z: -3 });
+		const after = setResource(initial, 'AI.DAT', 'aiSections', next);
+		expect(after.history.past.length).toBe(1);
+		expect(after.bundles[0].isModified).toBe(true);
+	});
+
+	it('cascade-on combined translate+yaw gesture also pushes exactly one HistoryCommit', () => {
+		// The gizmo composes translate-with-links then rotate-with-links
+		// inside its commit callback before calling onChange exactly once —
+		// so even though both ops cascade into neighbours, only ONE
+		// setResource fires and only ONE undo entry lands.
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+		const t = translateSectionWithLinks(ai, 0, { x: 5, z: -3 });
+		const r = rotateSectionWithLinksYaw(t, 0, 0.3);
+		const after = setResource(initial, 'AI.DAT', 'aiSections', r);
+		expect(after.history.past.length).toBe(1);
+	});
+
+	it('cascade-on round-trip: undo restores neighbour sections too (not just the source)', () => {
+		// The cascade-on path mutates outside neighbours' reverse portals +
+		// shared corners. Undo's `previous` snapshot is the WHOLE ParsedAI
+		// model, so neighbour sections snap back deep-equal as well.
+		const initial = makeInitialState();
+		const ai = getAI(initial, 'AI.DAT');
+
+		// Pick a section that actually has at least one portal pointing
+		// somewhere else — AI.DAT has thousands; section 0 is a reasonable
+		// bet but we filter for a portal-having one to be safe.
+		const srcIdx = ai.sections.findIndex(
+			(s) => s.portals.length > 0 && s.portals[0].linkSection >= 0 && s.portals[0].linkSection < ai.sections.length && s.portals[0].linkSection !== ai.sections.indexOf(s),
+		);
+		if (srcIdx === -1) {
+			// Defensive guard — every fixture has at least one connected pair.
+			throw new Error('no cascading source in fixture');
+		}
+		const neighbourIdx = ai.sections[srcIdx].portals[0].linkSection;
+
+		const beforeNeighbourPortals = ai.sections[neighbourIdx].portals.map((p) => ({
+			...p,
+			position: { ...p.position },
+		}));
+
+		const next = translateSectionWithLinks(ai, srcIdx, { x: 7, z: -4 });
+		const afterEdit = setResource(initial, 'AI.DAT', 'aiSections', next);
+		// Confirm cascade took effect: the neighbour's reverse portal moved.
+		const editedNeighbour = getAI(afterEdit, 'AI.DAT').sections[neighbourIdx];
+		expect(editedNeighbour.portals).not.toEqual(beforeNeighbourPortals);
+
+		const afterUndo = undo(afterEdit);
+		const undoneNeighbour = getAI(afterUndo, 'AI.DAT').sections[neighbourIdx];
+		// Neighbour restored deep-equal to its pre-edit state.
+		expect(undoneNeighbour.portals.map((p) => p.position)).toEqual(
+			beforeNeighbourPortals.map((p) => p.position),
+		);
 	});
 });
