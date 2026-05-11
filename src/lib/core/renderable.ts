@@ -27,14 +27,13 @@ import { BundleError } from './errors';
 
 export const RENDERABLE_TYPE_ID = 0xC;
 export const VERTEX_DESCRIPTOR_TYPE_ID = 0xA;
-export const MATERIAL_TYPE_ID = 0x1;
 
 // =============================================================================
 // VertexDescriptor
 // =============================================================================
 
 // Matches BundleFormat/VertexDesc.cs VertexAttributeType enum.
-export enum VertexAttributeType {
+enum VertexAttributeType {
 	Invalid = 0,
 	Positions = 1,
 	Normals = 3,
@@ -59,7 +58,7 @@ const ATTR_DEFAULT_BYTES: Partial<Record<VertexAttributeType, number>> = {
 	[VertexAttributeType.BoneWeights]: 4,  // u8 × 4
 };
 
-export type VertexAttribute = {
+type VertexAttribute = {
 	type: VertexAttributeType;
 	offset: number;  // byte offset within one vertex record
 	stride: number;  // total vertex stride (BPR format stores this per-attribute, redundantly)
@@ -144,7 +143,7 @@ export function parseVertexDescriptor(bytes: Uint8Array): ParsedVertexDescriptor
 // Renderable
 // =============================================================================
 
-export type RenderableHeader = {
+type RenderableHeader = {
 	boundingSphere: [number, number, number, number]; // [cx, cy, cz, radius]
 	version: number;        // = 11 for PC BP
 	meshCount: number;
@@ -248,34 +247,6 @@ export function findResourceById(bundle: ParsedBundle, id: bigint): ResourceEntr
 		if (u64ToBigInt(r.resourceId) === id) return r;
 	}
 	return null;
-}
-
-/**
- * Read the inline import table from a resource's header block.
- * Each entry is 16 bytes: { u64 resourceId, u32 ptrOffset, u32 padding }.
- * Returns a Map<ptrOffset, resourceId (bigint)>.
- */
-export function readInlineImportTable(
-	header: Uint8Array,
-	resource: ResourceEntry,
-): Map<number, bigint> {
-	const map = new Map<number, bigint>();
-	if (resource.importCount === 0) return map;
-	const importOff = resource.importOffset >>> 0;
-	if (importOff + resource.importCount * 16 > header.byteLength) {
-		console.warn('readInlineImportTable: import table runs past header block');
-		return map;
-	}
-	const dv = new DataView(header.buffer, header.byteOffset, header.byteLength);
-	for (let i = 0; i < resource.importCount; i++) {
-		const p = importOff + i * 16;
-		const lo = dv.getUint32(p + 0, true) >>> 0;
-		const hi = dv.getUint32(p + 4, true) >>> 0;
-		const ptrOffset = dv.getUint32(p + 8, true);
-		const id = (BigInt(hi) << 32n) | BigInt(lo);
-		map.set(ptrOffset, id);
-	}
-	return map;
 }
 
 // -----------------------------------------------------------------------------
@@ -565,17 +536,3 @@ export function pickPrimaryVertexDescriptor(
 	return best;
 }
 
-// -----------------------------------------------------------------------------
-// Self-test hook (kept near the parser so the fixtures stay obvious)
-// -----------------------------------------------------------------------------
-
-/**
- * Run a sanity check on a fully-parsed Renderable against the body block.
- * Returns a short human-readable summary on success; throws on inconsistency.
- * Called from tests and from the probe script to double-check a file before
- * we trust it.
- */
-export function describeRenderable(r: ParsedRenderable): string {
-	const [cx, cy, cz, radius] = r.header.boundingSphere;
-	return `v${r.header.version}, ${r.header.meshCount} meshes, bound(${cx.toFixed(2)},${cy.toFixed(2)},${cz.toFixed(2)} r=${radius.toFixed(2)}), IB=${r.indexBuffer.byteLength}B@body+${r.indexBuffer.bodyOffset.toString(16)}, VB=${r.vertexBuffer.byteLength}B@body+${r.vertexBuffer.bodyOffset.toString(16)}`;
-}
