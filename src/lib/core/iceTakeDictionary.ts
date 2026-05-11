@@ -26,7 +26,7 @@ import { ResourceNotFoundError, BundleError } from './errors';
 // Schemas (header-only; payload after header is variable and not parsed yet)
 // ============================================================================
 
-export const ICEElementCountSchema = object({
+const ICEElementCountSchema = object({
 	mu16Intervals: u16,
 	mu16Keys: u16
 });
@@ -61,24 +61,9 @@ export const ICETakeHeader64Schema = object({
 // Types
 // ============================================================================
 
-export enum ICEChannels {
-	eICE_CHANNEL_MAIN = 0,
-	eICE_CHANNEL_BLEND = 1,
-	eICE_CHANNEL_RAWFOCUS = 2,
-	eICE_CHANNEL_SHAKE = 3,
-	eICE_CHANNEL_TIME = 4,
-	eICE_CHANNEL_TAG = 5,
-	eICE_CHANNEL_OVERLAY = 6,
-	eICE_CHANNEL_LETTERBOX = 7,
-	eICE_CHANNEL_FADE = 8,
-	eICE_CHANNEL_POSTFX = 9,
-	eICE_CHANNEL_ASSEMBLY = 10,
-	eICE_CHANNEL_SHAKE_DATA = 11
-}
+type ICEElementCount = Parsed<typeof ICEElementCountSchema>;
 
-export type ICEElementCount = Parsed<typeof ICEElementCountSchema>;
-
-export type ICETakeHeader = {
+type ICETakeHeader = {
 	guid: number;
 	name: string;
 	lengthSeconds: number;
