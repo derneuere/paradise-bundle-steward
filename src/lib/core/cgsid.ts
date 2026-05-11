@@ -74,28 +74,3 @@ export function decodeCgsId(id: CgsId): string {
   return String.fromCharCode(...chars);
 }
 
-// Helpers to convert between bigint and UI strings
-export function parseCgsIdInput(text: string): CgsId {
-  // Accept either decimal bigint string or CGSID text prefixed with 'c:' or auto-detect non-digit
-  const trimmed = text.trim();
-  if (trimmed === '') return 0n;
-
-  const isAllDigits = /^\d+$/.test(trimmed);
-  if (isAllDigits) {
-    try {
-      return BigInt(trimmed);
-    } catch {
-      return 0n;
-    }
-  }
-  // Treat as CGSID text and encode
-  return encodeCgsId(trimmed);
-}
-
-export function formatCgsIdForDisplay(id: CgsId, mode: 'text' | 'decimal' = 'text'): string {
-  if (mode === 'decimal') return id.toString();
-  const decoded = decodeCgsId(id);
-  return decoded;
-}
-
-
