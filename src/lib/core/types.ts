@@ -23,12 +23,6 @@ export const BUNDLE_FLAGS = {
   HAS_DEBUG_DATA: 0x8,
 } as const;
 
-export const MEMORY_TYPES = {
-  [PLATFORMS.PC]: ['Main Memory', 'Disposable', 'Dummy'],
-  [PLATFORMS.XBOX360]: ['Main Memory', 'Physical', 'Dummy'],
-  [PLATFORMS.PS3]: ['Main Memory', 'Graphics System', 'Graphics Local'],
-} as const;
-
 // ============================================================================
 // Resource Type Constants
 // ============================================================================
