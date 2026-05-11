@@ -24,6 +24,17 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ParsedStreetData } from '@/lib/core/streetData';
+import {
+	STREET_REF_POSITION_AXES,
+	bulkTranslateRoadRefs,
+	streetDataSelectionPivot,
+	type StreetDataEntityRef,
+} from '@/lib/core/streetDataOps';
+import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
+import {
+	type BulkTransformDelta,
+	isIdentityDelta,
+} from '@/hooks/useBulkTransformDrag';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import {
@@ -295,9 +306,7 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 	data,
 	selectedPath,
 	onSelect,
-	// onChange — accepted to satisfy the WorldOverlayProps contract; unused
-	// today because StreetData has no in-scene drag handles. Future drag work
-	// will call it with the next root.
+	onChange,
 }: Props) => {
 	const [hovered, setHovered] = useState<Selection | null>(null);
 	const { center, radius } = useMemo(() => computeBounds(data), [data]);
@@ -311,6 +320,52 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 		(sel: Selection) => onSelect(streetSelectionCodec.selectionToPath(sel)),
 		[onSelect],
 	);
+
+	// =========================================================================
+	// Bulk-transform gizmo (issue #79)
+	//
+	// Single-road selection only in this slice — the gizmo's translate arrows
+	// move `Road.mReferencePosition` (Vector3, full 3D). Rotation is disabled
+	// for a single point (orbit around itself is a no-op); multi-road bulks
+	// will re-enable yaw rings via the workspace bulk Set in a later slice.
+	// =========================================================================
+	const bulkRefs = useMemo<readonly StreetDataEntityRef[]>(() => {
+		if (primary?.kind !== 'road') return [];
+		const idx = primary.indices[0];
+		if (idx < 0 || idx >= data.roads.length) return [];
+		return [{ kind: 'road', roadIdx: idx }];
+	}, [primary, data.roads.length]);
+
+	const bulkPivotLive = useMemo(
+		() => (bulkRefs.length > 0 ? streetDataSelectionPivot(data, bulkRefs) : null),
+		[data, bulkRefs],
+	);
+	const [dragDelta, setDragDelta] = useState<BulkTransformDelta | null>(null);
+
+	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
+		if (!bulkPivotLive) return null;
+		const dx = dragDelta?.translate.x ?? 0;
+		const dy = dragDelta?.translate.y ?? 0;
+		const dz = dragDelta?.translate.z ?? 0;
+		return [bulkPivotLive.x + dx, bulkPivotLive.y + dy, bulkPivotLive.z + dz];
+	}, [bulkPivotLive, dragDelta]);
+
+	const handleGizmoTransform = useCallback((delta: BulkTransformDelta) => {
+		setDragDelta(delta);
+	}, []);
+
+	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
+		setDragDelta(null);
+		if (!onChange) return;
+		if (bulkRefs.length === 0) return;
+		if (isIdentityDelta(delta)) return;
+		const next = bulkTranslateRoadRefs(data, bulkRefs, delta.translate);
+		if (next !== data) onChange(next);
+	}, [data, onChange, bulkRefs]);
+
+	const handleGizmoCancel = useCallback(() => {
+		setDragDelta(null);
+	}, []);
 
 	return (
 		<>
@@ -328,6 +383,15 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 			<StreetInstances data={data} primary={primary} hovered={hovered} onPick={handlePick} onHover={setHovered} />
 			<JunctionInstances data={data} primary={primary} hovered={hovered} onPick={handlePick} onHover={setHovered} />
 			<SelectedLabel data={data} primary={primary} hovered={hovered} />
+			{onChange && gizmoPosition && (
+				<BulkTransformGizmo
+					position={gizmoPosition}
+					axes={STREET_REF_POSITION_AXES}
+					onTransform={handleGizmoTransform}
+					onCommit={handleGizmoCommit}
+					onCancel={handleGizmoCancel}
+				/>
+			)}
 		</>
 	);
 };
