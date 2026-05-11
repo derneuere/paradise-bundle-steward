@@ -693,7 +693,3 @@ export const ResourceInspectorView: React.FC<ResourceInspectorViewProps> = ({ in
     </div>
   );
 };
-
-export default ResourceInspectorView;
-
-
