@@ -103,15 +103,17 @@ export function SectionDetail<TSection, TRoot>({
 	onPickPortal,
 	onPickBoundaryLine,
 	onPickNoGoLine,
+	onPickBoundaryLineEndpoint,
+	onPickNoGoLineEndpoint,
 }: {
 	section: TSection;
 	root: TRoot;
 	accessor: SectionDetailAccessor<TSection, TRoot>;
 	/** Inspector-selected marker, used to highlight the picked sub-entity
-	 *  (portal / boundary line / no-go line). Pass `null` for bulk-only
-	 *  rendering — bulk members get the full structural geometry but no
-	 *  selected-sub-entity highlights, so the user knows which one is the
-	 *  inspector pick. */
+	 *  (portal / boundary line / no-go line / corner / endpoint). Pass `null`
+	 *  for bulk-only rendering — bulk members get the full structural
+	 *  geometry but no selected-sub-entity highlights, so the user knows
+	 *  which one is the inspector pick. */
 	marker: AISectionMarker;
 	/** Y of the section's resolved ground. Used to lift no-go lines onto
 	 *  the section's ground plane. Portal anchors and portal boundary lines
@@ -121,6 +123,12 @@ export function SectionDetail<TSection, TRoot>({
 	onPickPortal?: (portalIndex: number) => void;
 	onPickBoundaryLine?: (portalIndex: number, lineIndex: number) => void;
 	onPickNoGoLine?: (lineIndex: number) => void;
+	/** Issue #73 — endpoint pickers for the bulk-transform gizmo. `endIndex`
+	 *  is 0 (verts.x/y, the start) or 1 (verts.z/w, the end). The handlers
+	 *  are optional so the V4/V6 read-only overlay can render without
+	 *  wiring them; the V12 overlay supplies both for sub-entity editing. */
+	onPickBoundaryLineEndpoint?: (portalIndex: number, lineIndex: number, endIndex: number) => void;
+	onPickNoGoLineEndpoint?: (lineIndex: number, endIndex: number) => void;
 }) {
 	const portals = useMemo(() => accessor.portals(section), [section, accessor]);
 	const noGoLines = useMemo(() => accessor.noGoLines(section), [section, accessor]);
@@ -154,9 +162,20 @@ export function SectionDetail<TSection, TRoot>({
 					const start: [number, number, number] = [bl.verts.x, portal.position.y + 0.5, bl.verts.y];
 					const end: [number, number, number] = [bl.verts.z, portal.position.y + 0.5, bl.verts.w];
 					const isSel = marker?.kind === 'boundaryLine' && marker.portalIndex === pi && marker.lineIndex === li;
+					const isStartSel =
+						marker?.kind === 'boundaryLineEndpoint'
+						&& marker.portalIndex === pi
+						&& marker.lineIndex === li
+						&& marker.endIndex === 0;
+					const isEndSel =
+						marker?.kind === 'boundaryLineEndpoint'
+						&& marker.portalIndex === pi
+						&& marker.lineIndex === li
+						&& marker.endIndex === 1;
+					const isWholeLineHighlighted = isSel || isStartSel || isEndSel;
 					return (
 						<group key={`bl-${pi}-${li}`}>
-							<Line points={[start, end]} color={isSel ? '#ffaa33' : '#cc3333'} lineWidth={isSel ? 3 : 2} />
+							<Line points={[start, end]} color={isWholeLineHighlighted ? '#ffaa33' : '#cc3333'} lineWidth={isWholeLineHighlighted ? 3 : 2} />
 							<mesh
 								position={[(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2]}
 								onClick={onPickBoundaryLine ? (e) => { e.stopPropagation(); onPickBoundaryLine(pi, li); } : undefined}
@@ -164,16 +183,35 @@ export function SectionDetail<TSection, TRoot>({
 								<sphereGeometry args={[2, 6, 4]} />
 								<meshBasicMaterial transparent opacity={0} />
 							</mesh>
+							{/* Endpoint pickers — small spheres at each end of the
+							    line that can be selected for the sub-entity gizmo
+							    (issue #73). The start/end spheres always render
+							    when the whole line is selected (mirrors the
+							    pre-#73 "show endpoints when line is selected"
+							    affordance) and they also act as pick targets so
+							    the user can drill from line → endpoint. */}
+							{(isWholeLineHighlighted || onPickBoundaryLineEndpoint) && (
+								<>
+									<EndpointPicker
+										position={start}
+										color={isStartSel ? '#ffffff' : '#ff4444'}
+										emissive={isStartSel ? '#666633' : '#441111'}
+										onClick={onPickBoundaryLineEndpoint
+											? () => onPickBoundaryLineEndpoint(pi, li, 0)
+											: undefined}
+									/>
+									<EndpointPicker
+										position={end}
+										color={isEndSel ? '#ffffff' : '#4444ff'}
+										emissive={isEndSel ? '#666633' : '#111144'}
+										onClick={onPickBoundaryLineEndpoint
+											? () => onPickBoundaryLineEndpoint(pi, li, 1)
+											: undefined}
+									/>
+								</>
+							)}
 							{isSel && (
 								<>
-									<mesh position={start}>
-										<sphereGeometry args={[1.5, 8, 6]} />
-										<meshStandardMaterial color="#ff4444" emissive="#441111" emissiveIntensity={0.5} />
-									</mesh>
-									<mesh position={end}>
-										<sphereGeometry args={[1.5, 8, 6]} />
-										<meshStandardMaterial color="#4444ff" emissive="#111144" emissiveIntensity={0.5} />
-									</mesh>
 									<Html position={start} center distanceFactor={120} style={{ pointerEvents: 'none' }}>
 										<div style={{ background: 'rgba(0,0,0,0.8)', color: '#ff6666', padding: '1px 4px', borderRadius: 3, fontSize: 9, fontFamily: 'monospace' }}>
 											X={bl.verts.x.toFixed(1)} Y={bl.verts.y.toFixed(1)}
@@ -196,9 +234,14 @@ export function SectionDetail<TSection, TRoot>({
 				const start: [number, number, number] = [bl.verts.x, lineY, bl.verts.y];
 				const end: [number, number, number] = [bl.verts.z, lineY, bl.verts.w];
 				const isSel = marker?.kind === 'noGoLine' && marker.lineIndex === li;
+				const isStartSel =
+					marker?.kind === 'noGoLineEndpoint' && marker.lineIndex === li && marker.endIndex === 0;
+				const isEndSel =
+					marker?.kind === 'noGoLineEndpoint' && marker.lineIndex === li && marker.endIndex === 1;
+				const isWholeLineHighlighted = isSel || isStartSel || isEndSel;
 				return (
 					<group key={`ng-${li}`}>
-						<Line points={[start, end]} color={isSel ? '#ffaa33' : '#cc8833'} lineWidth={isSel ? 3 : 2} />
+						<Line points={[start, end]} color={isWholeLineHighlighted ? '#ffaa33' : '#cc8833'} lineWidth={isWholeLineHighlighted ? 3 : 2} />
 						<mesh
 							position={[(start[0] + end[0]) / 2, lineY, (start[2] + end[2]) / 2]}
 							onClick={onPickNoGoLine ? (e) => { e.stopPropagation(); onPickNoGoLine(li); } : undefined}
@@ -206,6 +249,26 @@ export function SectionDetail<TSection, TRoot>({
 							<sphereGeometry args={[2, 6, 4]} />
 							<meshBasicMaterial transparent opacity={0} />
 						</mesh>
+						{(isWholeLineHighlighted || onPickNoGoLineEndpoint) && (
+							<>
+								<EndpointPicker
+									position={start}
+									color={isStartSel ? '#ffffff' : '#ff8844'}
+									emissive={isStartSel ? '#666633' : '#442211'}
+									onClick={onPickNoGoLineEndpoint
+										? () => onPickNoGoLineEndpoint(li, 0)
+										: undefined}
+								/>
+								<EndpointPicker
+									position={end}
+									color={isEndSel ? '#ffffff' : '#4488ff'}
+									emissive={isEndSel ? '#666633' : '#112244'}
+									onClick={onPickNoGoLineEndpoint
+										? () => onPickNoGoLineEndpoint(li, 1)
+										: undefined}
+								/>
+							</>
+						)}
 					</group>
 				);
 			})}
@@ -222,5 +285,51 @@ export function SectionDetail<TSection, TRoot>({
 				);
 			})}
 		</>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// EndpointPicker — small clickable sphere at a line endpoint.
+//
+// Issue #73 adds endpoint-level selection so the bulk-transform gizmo can
+// anchor at one end of a boundary or no-go line. The visual sphere doubles
+// as a pick target via a slightly larger invisible hit volume — the same
+// pattern CornerPickers uses. When no `onClick` is supplied (legacy V4/V6
+// overlay, or bulk-only render), the sphere renders as a passive marker.
+// ---------------------------------------------------------------------------
+function EndpointPicker({
+	position,
+	color,
+	emissive,
+	onClick,
+}: {
+	position: [number, number, number];
+	color: string;
+	emissive: string;
+	onClick?: () => void;
+}) {
+	return (
+		<group position={position}>
+			<mesh>
+				<sphereGeometry args={[1.5, 8, 6]} />
+				<meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.5} />
+			</mesh>
+			{onClick && (
+				<mesh
+					onClick={(e) => { e.stopPropagation(); onClick(); }}
+					onPointerOver={(e) => {
+						e.stopPropagation();
+						document.body.style.cursor = 'pointer';
+					}}
+					onPointerOut={(e) => {
+						e.stopPropagation();
+						document.body.style.cursor = 'auto';
+					}}
+				>
+					<sphereGeometry args={[2.4, 6, 4]} />
+					<meshBasicMaterial transparent opacity={0} />
+				</mesh>
+			)}
+		</group>
 	);
 }

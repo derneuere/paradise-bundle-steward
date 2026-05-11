@@ -1399,6 +1399,221 @@ export function translateSectionRigid(
 	return { ...model, sections };
 }
 
+// =============================================================================
+// Bulk-transform: no-cascade sub-entity translates (issue #73)
+// =============================================================================
+//
+// Single-sub-entity siblings of `translateSectionRigid` for the unified gizmo
+// when the **Selection** is a sub-path (one corner, one portal anchor, one
+// boundary-line endpoint, one no-go-line endpoint). Default-off cascade per
+// ADR-0009 — these ops touch ONLY the named sub-entity. The shared-corner
+// cascade (`translateCornerWithShared`) stays in this module as the
+// modifier-on path for issue #75.
+
+/**
+ * Translate one polygon corner by an XZ offset — no cascade.
+ *
+ * Only `model.sections[srcIdx].corners[cornerIdx]` moves. Coincident corners
+ * on neighbour sections, boundary-line endpoints elsewhere in the model that
+ * happen to share the dragged point, and the section's own portal anchors
+ * all stay put — the source corner is "torn off" any shared join it
+ * participates in. The cascade-on path that drags coincident corners +
+ * boundary-line endpoints together is `translateCornerWithShared`, retained
+ * for the modifier-on slice (#75).
+ *
+ * Y is intentionally absent from the offset — corners are `Vector2` (XZ-only;
+ * see ADR-0011), so a Y translate would have nowhere to land. The gizmo's
+ * Y arrow is still rendered (the XZ-packed axes profile leaves translate.y
+ * on) but the wire-up in `AISectionsOverlay` discards a sub-entity gizmo's
+ * Y delta for corners. See ADR-0011 / CONTEXT.md / "Pivot".
+ *
+ * Returns the original `model` reference when `(dx, dz) === (0, 0)` so
+ * byte-for-byte BND2 writeback is preserved on a no-op gesture.
+ *
+ * @throws RangeError if `srcIdx` or `cornerIdx` is out of range.
+ */
+export function translateCornerRigid(
+	model: ParsedAISectionsV12,
+	srcIdx: number,
+	cornerIdx: number,
+	offset: { x: number; z: number },
+): ParsedAISectionsV12 {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	const src = model.sections[srcIdx];
+	if (cornerIdx < 0 || cornerIdx >= src.corners.length) {
+		throw new RangeError(`cornerIdx ${cornerIdx} out of range [0, ${src.corners.length})`);
+	}
+	const dx = offset.x;
+	const dz = offset.z;
+	if (dx === 0 && dz === 0) return model;
+
+	const next: AISection = {
+		...src,
+		corners: src.corners.map((c, i) => (i === cornerIdx ? { x: c.x + dx, y: c.y + dz } : c)),
+	};
+	const sections = model.sections.map((s, i) => (i === srcIdx ? next : s));
+	return { ...model, sections };
+}
+
+/**
+ * Translate one portal anchor by a 3D offset — no cascade.
+ *
+ * Only `model.sections[srcIdx].portals[portalIdx].position` moves. The
+ * portal's boundary lines, the section's corners, and the linked section's
+ * reverse portal all stay put — the anchor is "torn off" its mirror twin,
+ * leaving the stale-mirror state ADR-0009 accepts as a v1 trade-off.
+ * Portal anchor is a `Vector3`, so full 3D motion is permitted.
+ *
+ * Returns the original `model` reference when the offset is identity so
+ * byte-for-byte BND2 writeback is preserved on a no-op gesture.
+ *
+ * @throws RangeError if `srcIdx` or `portalIdx` is out of range.
+ */
+export function translatePortalAnchorRigid(
+	model: ParsedAISectionsV12,
+	srcIdx: number,
+	portalIdx: number,
+	offset: { x: number; y: number; z: number },
+): ParsedAISectionsV12 {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	const src = model.sections[srcIdx];
+	if (portalIdx < 0 || portalIdx >= src.portals.length) {
+		throw new RangeError(`portalIdx ${portalIdx} out of range [0, ${src.portals.length})`);
+	}
+	const dx = offset.x;
+	const dy = offset.y;
+	const dz = offset.z;
+	if (dx === 0 && dy === 0 && dz === 0) return model;
+
+	const srcPortal = src.portals[portalIdx];
+	const updatedPortal: Portal = {
+		...srcPortal,
+		position: {
+			x: srcPortal.position.x + dx,
+			y: srcPortal.position.y + dy,
+			z: srcPortal.position.z + dz,
+		},
+	};
+	const next: AISection = {
+		...src,
+		portals: src.portals.map((p, i) => (i === portalIdx ? updatedPortal : p)),
+	};
+	const sections = model.sections.map((s, i) => (i === srcIdx ? next : s));
+	return { ...model, sections };
+}
+
+/**
+ * Translate one endpoint of one portal-boundary-line by an XZ offset — no
+ * cascade.
+ *
+ * The boundary line's `verts` is a packed `Vector4`: `(x, y)` is the start
+ * XZ pair, `(z, w)` is the end XZ pair. `endIdx === 0` moves the start;
+ * `endIdx === 1` moves the end. The other endpoint stays put — the line
+ * deforms (stretches or rotates around the fixed endpoint) rather than
+ * translating wholesale. Neither the portal's anchor nor any section corners
+ * follow along.
+ *
+ * Returns the original `model` reference when `(dx, dz) === (0, 0)` so
+ * byte-for-byte BND2 writeback is preserved on a no-op gesture.
+ *
+ * @throws RangeError if any index is out of range, or if `endIdx` is not 0 or 1.
+ */
+export function translateBoundaryLineEndpointRigid(
+	model: ParsedAISectionsV12,
+	srcIdx: number,
+	portalIdx: number,
+	lineIdx: number,
+	endIdx: number,
+	offset: { x: number; z: number },
+): ParsedAISectionsV12 {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	const src = model.sections[srcIdx];
+	if (portalIdx < 0 || portalIdx >= src.portals.length) {
+		throw new RangeError(`portalIdx ${portalIdx} out of range [0, ${src.portals.length})`);
+	}
+	const srcPortal = src.portals[portalIdx];
+	if (lineIdx < 0 || lineIdx >= srcPortal.boundaryLines.length) {
+		throw new RangeError(`lineIdx ${lineIdx} out of range [0, ${srcPortal.boundaryLines.length})`);
+	}
+	if (endIdx !== 0 && endIdx !== 1) {
+		throw new RangeError(`endIdx ${endIdx} must be 0 (start) or 1 (end)`);
+	}
+	const dx = offset.x;
+	const dz = offset.z;
+	if (dx === 0 && dz === 0) return model;
+
+	const srcLine = srcPortal.boundaryLines[lineIdx];
+	const v = srcLine.verts;
+	const updatedLine: BoundaryLine = {
+		verts: endIdx === 0
+			? { x: v.x + dx, y: v.y + dz, z: v.z, w: v.w }
+			: { x: v.x, y: v.y, z: v.z + dx, w: v.w + dz },
+	};
+	const updatedPortal: Portal = {
+		...srcPortal,
+		boundaryLines: srcPortal.boundaryLines.map((bl, i) => (i === lineIdx ? updatedLine : bl)),
+	};
+	const next: AISection = {
+		...src,
+		portals: src.portals.map((p, i) => (i === portalIdx ? updatedPortal : p)),
+	};
+	const sections = model.sections.map((s, i) => (i === srcIdx ? next : s));
+	return { ...model, sections };
+}
+
+/**
+ * Translate one endpoint of one no-go-line by an XZ offset — no cascade.
+ *
+ * Same shape as {@link translateBoundaryLineEndpointRigid} but operates on
+ * `section.noGoLines[lineIdx]` instead of `portal.boundaryLines[lineIdx]`.
+ *
+ * Returns the original `model` reference when `(dx, dz) === (0, 0)` so
+ * byte-for-byte BND2 writeback is preserved on a no-op gesture.
+ *
+ * @throws RangeError if any index is out of range, or if `endIdx` is not 0 or 1.
+ */
+export function translateNoGoLineEndpointRigid(
+	model: ParsedAISectionsV12,
+	srcIdx: number,
+	lineIdx: number,
+	endIdx: number,
+	offset: { x: number; z: number },
+): ParsedAISectionsV12 {
+	if (srcIdx < 0 || srcIdx >= model.sections.length) {
+		throw new RangeError(`srcIdx ${srcIdx} out of range [0, ${model.sections.length})`);
+	}
+	const src = model.sections[srcIdx];
+	if (lineIdx < 0 || lineIdx >= src.noGoLines.length) {
+		throw new RangeError(`lineIdx ${lineIdx} out of range [0, ${src.noGoLines.length})`);
+	}
+	if (endIdx !== 0 && endIdx !== 1) {
+		throw new RangeError(`endIdx ${endIdx} must be 0 (start) or 1 (end)`);
+	}
+	const dx = offset.x;
+	const dz = offset.z;
+	if (dx === 0 && dz === 0) return model;
+
+	const srcLine = src.noGoLines[lineIdx];
+	const v = srcLine.verts;
+	const updatedLine: BoundaryLine = {
+		verts: endIdx === 0
+			? { x: v.x + dx, y: v.y + dz, z: v.z, w: v.w }
+			: { x: v.x, y: v.y, z: v.z + dx, w: v.w + dz },
+	};
+	const next: AISection = {
+		...src,
+		noGoLines: src.noGoLines.map((bl, i) => (i === lineIdx ? updatedLine : bl)),
+	};
+	const sections = model.sections.map((s, i) => (i === srcIdx ? next : s));
+	return { ...model, sections };
+}
+
 /**
  * Rotate one AI section as a rigid body around its own centroid by `theta`
  * radians of yaw (rotation about world +Y). No cascade into neighbours.
