@@ -124,7 +124,7 @@ function computeStats(data: ParsedChallengeList): OverviewStats {
 // WholeResource: this is a root-level overview that aggregates stats across
 // every challenge in the resource — the narrow per-node view doesn't reach
 // siblings.
-export const ChallengeOverviewExtension: React.FC<WholeResourceExtensionProps> = ({ data }) => {
+const ChallengeOverviewExtension: React.FC<WholeResourceExtensionProps> = ({ data }) => {
 	const typed = data as ParsedChallengeList;
 	const stats = useMemo(() => computeStats(typed), [typed]);
 	return <ChallengeOverview data={typed} stats={stats} />;
@@ -179,8 +179,8 @@ function makeActionExtension(
 	return Component;
 }
 
-export const ChallengeAction1Extension = makeActionExtension({ actionIndex: 0 });
-export const ChallengeAction2Extension = makeActionExtension({ actionIndex: 1 });
+const ChallengeAction1Extension = makeActionExtension({ actionIndex: 0 });
+const ChallengeAction2Extension = makeActionExtension({ actionIndex: 1 });
 
 // ---------------------------------------------------------------------------
 // Registry bundle — hand this map to SchemaEditorProvider.

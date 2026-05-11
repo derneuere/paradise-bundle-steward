@@ -89,14 +89,14 @@ function useTabSelectionBridge() {
 // past one path.
 // ---------------------------------------------------------------------------
 
-export const FlowTypesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const FlowTypesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<FlowTypesTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
-export const PaintColoursExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const PaintColoursExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<PaintColoursTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
@@ -107,7 +107,7 @@ export const PaintColoursExtension: React.FC<WholeResourceExtensionProps> = ({ d
 // clicking a hull in the summary jumps to that hull node. `selectChild`
 // from the root resolves to the absolute path because the extension's
 // `path` is `[]` (it's a root-level property group).
-export const OverviewExtension: React.FC<WholeResourceExtensionProps> = ({
+const OverviewExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 	selectChild,
@@ -119,14 +119,14 @@ export const OverviewExtension: React.FC<WholeResourceExtensionProps> = ({
 	/>
 );
 
-export const KillZonesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const KillZonesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<KillZonesTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}
 	/>
 );
 
-export const VehiclesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
+const VehiclesExtension: React.FC<WholeResourceExtensionProps> = ({ data, setData }) => (
 	<VehiclesTab
 		data={data as ParsedTrafficDataRetail}
 		onChange={setData as (next: ParsedTrafficDataRetail) => void}

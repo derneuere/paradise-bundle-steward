@@ -43,6 +43,4 @@ export function translateDxbc(bytes: Uint8Array): TranslatedShader {
 	return { parsed, decoded, source, unsupported, programLabel, summary };
 }
 
-export { parseDxbc, isDxbc, decodeShex, emitGlsl };
 export type { ParsedDxbc } from './parser';
-export type { DecodedShader, DxbcInstruction } from './ops';

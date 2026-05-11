@@ -45,7 +45,6 @@ import { extractResourceSize, extractAlignment, packSizeAndAlignment, isCompress
 import { parseChallengeList, type ParsedChallengeList } from '../challengeList';
 import { parseStreetData, type ParsedStreetData } from '../streetData';
 import { registry, getHandlerByTypeId, resourceCtxFromBundle } from '../registry';
-import { parseBundleResourcesViaRegistry } from '../registry/bundleOps';
 import { u64ToBigInt } from '../u64';
 
 // ============================================================================
@@ -704,35 +703,6 @@ export type ParsedResources = {
   challengeList?: ParsedChallengeList;
   streetData?: ParsedStreetData;
 };
-
-/**
- * Parses all known resource types from a bundle and returns the legacy
- * ParsedResources shape. Internally delegates to the registry-driven
- * parseBundleResourcesViaRegistry — this function exists only as a thin
- * compatibility shim for callers that still expect the named fields. Step 6
- * of the CLI refactor migrates BundleContext to the generic map form and
- * removes this shim.
- */
-export function parseBundleResources(
-  buffer: ArrayBuffer,
-  bundle: ParsedBundle
-): ParsedResources {
-  const map = parseBundleResourcesViaRegistry(buffer, bundle);
-  const out: ParsedResources = {};
-  const vehicleList = map.get('vehicleList') as ParsedVehicleList | undefined;
-  if (vehicleList) out.vehicleList = vehicleList;
-  const playerCarColours = map.get('playerCarColours') as PlayerCarColours | undefined;
-  if (playerCarColours) out.playerCarColours = playerCarColours;
-  const iceTakeDictionary = map.get('iceTakeDictionary') as ParsedIceTakeDictionary | undefined;
-  if (iceTakeDictionary) out.iceTakeDictionary = iceTakeDictionary;
-  const triggerData = map.get('triggerData') as ParsedTriggerData | undefined;
-  if (triggerData) out.triggerData = triggerData;
-  const challengeList = map.get('challengeList') as ParsedChallengeList | undefined;
-  if (challengeList) out.challengeList = challengeList;
-  const streetData = map.get('streetData') as ParsedStreetData | undefined;
-  if (streetData) out.streetData = streetData;
-  return out;
-}
 
 // ============================================================================
 // Import helpers are re-exported from bundleEntry.ts at the top of this file:

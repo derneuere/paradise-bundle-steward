@@ -126,7 +126,6 @@ export {
 	type ResourceCategory,
 	type StressScenario,
 	type HandlerPlatform,
-	HANDLER_PLATFORM,
 	resourceCtxFromBundle,
 } from './handler';
 export { extractResourceRaw } from './extract';

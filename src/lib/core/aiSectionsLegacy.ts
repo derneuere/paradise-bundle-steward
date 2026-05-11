@@ -28,10 +28,10 @@ import { BinReader, BinWriter } from './binTools';
 // =============================================================================
 
 /** Versions this module knows how to parse and write. */
-export const LEGACY_AI_SECTION_VERSIONS = [4, 6] as const;
+const LEGACY_AI_SECTION_VERSIONS = [4, 6] as const;
 export type LegacyAISectionsVersion = typeof LEGACY_AI_SECTION_VERSIONS[number];
 
-export const CORNERS_PER_LEGACY_SECTION = 4;
+const CORNERS_PER_LEGACY_SECTION = 4;
 
 const LEGACY_HEADER_SIZE = 0x10;
 const PORTAL_SIZE = 0x20;

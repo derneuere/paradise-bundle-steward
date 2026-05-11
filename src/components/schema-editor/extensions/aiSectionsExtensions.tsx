@@ -28,7 +28,7 @@ import { EdgesList } from '@/components/aisections/EdgesList';
 // ---------------------------------------------------------------------------
 
 // WholeResource: legacy overview tab that operates on the full root.
-export const AISectionsOverviewExtension: React.FC<WholeResourceExtensionProps> = ({
+const AISectionsOverviewExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 }) => (
@@ -50,7 +50,7 @@ export const AISectionsOverviewExtension: React.FC<WholeResourceExtensionProps> 
 // WholeResource: list tab needs the full sections array; selectChild is
 // relative to the extension's path (which is the root for a property-group
 // tab) so `['sections', i]` lands on the right section.
-export const AISectionsListExtension: React.FC<WholeResourceExtensionProps> = ({
+const AISectionsListExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 	selectChild,
@@ -89,7 +89,7 @@ export const AISectionsListExtension: React.FC<WholeResourceExtensionProps> = ({
 // ---------------------------------------------------------------------------
 
 // WholeResource: legacy reset-pairs tab operates on the full root.
-export const AISectionsResetPairsExtension: React.FC<WholeResourceExtensionProps> = ({
+const AISectionsResetPairsExtension: React.FC<WholeResourceExtensionProps> = ({
 	data,
 	setData,
 }) => (
@@ -115,7 +115,7 @@ export const AISectionsResetPairsExtension: React.FC<WholeResourceExtensionProps
 //
 // WholeResource: the EdgesList resolves duplicate-edge targets across
 // other sections, so the full `ParsedAISectionsV12` model is required.
-export const AISectionEdgesExtension: React.FC<
+const AISectionEdgesExtension: React.FC<
 	WholeResourceExtensionProps<AISection | undefined>
 > = ({ path, value, data }) => {
 	if (path.length < 2 || path[0] !== 'sections' || typeof path[1] !== 'number') {

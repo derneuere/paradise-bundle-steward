@@ -203,7 +203,7 @@ export function FlagCheckbox({ label, value, onChange, disabled }: FlagCheckboxP
 // Main extension — decoded inspector for a single polygon's collisionTag
 // ---------------------------------------------------------------------------
 
-export const CollisionTagExtension: React.FC<SchemaExtensionProps<number>> = ({
+const CollisionTagExtension: React.FC<SchemaExtensionProps<number>> = ({
 	value,
 	setValue,
 }) => {
