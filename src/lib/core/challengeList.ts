@@ -22,30 +22,13 @@ export type LocationData = {
     roadID: bigint;
 }
 
-export const LocationDataSchema = object({
+const LocationDataSchema = object({
     district: u8,
     county: u8,
     triggerID: u64,
     roadID: u64,
 })
 
-
-// Offset	Length	Type	Name	Description	Comments
-// 0x0	0x4	uint32_t	muNumChallenges		
-// 0x4	0x4	ChallengeListEntry*	mpEntries		
-// 0x8	0x8	uint64_t	mu16BytePad		
-
-export type ChallengeList = {
-    numChallenges: number;
-    challenges: ChallengeListEntry[];
-    bytePad: bigint;
-}
-
-export const ChallengeListSchema = object({
-    numChallenges: u32,
-    challengesOffset: u32,
-    bytePad: u64,
-})
 
 // Offset	Length	Type	Name	Description	Comments
 // 0x0	0xA0	ChallengeListEntryAction[2]	maAction	Challenge parts	
@@ -137,14 +120,6 @@ export const ChallengeListEntryActionSchema = object({
     padding4: arrayOf(u8, 4),
 })
 
-
-export enum CarRestrictionType {
-    NONE = 0,
-    DANGER = 1,
-    AGGRESSION = 2,
-    STUNT = 3,
-    COUNT = 4,
-}
 
 export enum ChallengeDifficulty {
     EASY = 0,
@@ -323,7 +298,7 @@ export enum ChallengeDataType {
 // UI option registry for enums
 // =============================================================================
 
-export type EnumOption<T extends number> = { value: T; label: string };
+type EnumOption<T extends number> = { value: T; label: string };
 
 export type ChallengeOptionRegistry = {
     actionType: EnumOption<ChallengeActionType>[];
@@ -334,7 +309,7 @@ export type ChallengeOptionRegistry = {
     dataType: EnumOption<ChallengeDataType>[];
 }
 
-export const challengeOptionRegistry: ChallengeOptionRegistry = {
+const challengeOptionRegistry: ChallengeOptionRegistry = {
     actionType: [
         { value: ChallengeActionType.MINIMUM_SPEED, label: 'Minimum Speed' },
         { value: ChallengeActionType.IN_AIR, label: 'In Air' },
@@ -481,18 +456,13 @@ export function getOptions<K extends keyof ChallengeOptionRegistry>(key: K): Rea
     return challengeOptionRegistry[key];
 }
 
-export function getLabel<K extends keyof ChallengeOptionRegistry>(key: K, value: number): string | undefined {
-    const arr = challengeOptionRegistry[key] as ReadonlyArray<{ value: number; label: string }>;
-    return arr.find(o => o.value === value)?.label;
-}
-
 export type ParsedChallengeList = {
     numChallenges: number;
     challenges: ChallengeListEntry[];
     bytePad: bigint;
 }
 
-export function readChallengeListEntryAction(reader: BinReader): ChallengeListEntryAction {
+function readChallengeListEntryAction(reader: BinReader): ChallengeListEntryAction {
     const actionType = reader.readU8();
     const coopType = reader.readU8();
     const modifier = reader.readU8();
@@ -888,13 +858,3 @@ export function writeChallengeListData(challengeList: ParsedChallengeList, littl
     return writer.bytes;
 }
 
-// =============================================================================
-// High-level wrapper with progress (optional)
-// =============================================================================
-
-export function writeChallengeList(td: ParsedChallengeList, options: { littleEndian?: boolean } = {}, progress?: ProgressCallback): Uint8Array {
-	progress?.({ type: 'write', stage: 'write', progress: 0.0, message: 'Serializing ChallengeList' });
-	const out = writeChallengeListData(td, options.littleEndian !== false);
-	progress?.({ type: 'write', stage: 'write', progress: 1.0, message: 'Done' });
-	return out;
-}
