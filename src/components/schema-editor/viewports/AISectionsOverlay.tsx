@@ -337,11 +337,64 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// from moving positions every frame would let the median precess and
 	// produce a spiral instead of a rigid rotate).
 	const bulkPivotRef = useRef<{ x: number; y: number; z: number } | null>(null);
-	const bulkPivotLive = useMemo<{ x: number; y: number; z: number } | null>(() => {
+	const bulkPivotMedian = useMemo<{ x: number; y: number; z: number } | null>(() => {
 		if (!isBulkActive) return null;
 		const yResolver = (idx: number) => (idx < sectionYs.length ? sectionYs[idx] : 0);
 		return bulkSelectionPivot(data, bulkRefs, yResolver);
 	}, [isBulkActive, bulkRefs, data, sectionYs]);
+
+	// **Pivot drag-reposition** (issue #76 / CONTEXT.md / "Pivot"). The user
+	// can grab the dedicated pivot handle on the gizmo and drop it anywhere
+	// in world space. The new position is stored here as an override on top
+	// of the median. Pure UI state — NOT a Workspace-undo step.
+	//
+	// Lifecycle:
+	//   - `bulkPivotOverride` holds the user-set position (null = use median).
+	//   - `bulkPivotDragging` holds the live position during a pivot-drag
+	//     gesture so the gizmo rides the cursor without committing yet. On
+	//     pointer release the live position is committed into the override.
+	//   - Both reset to null on Selection change (the `bulkRefs`-keyed
+	//     useEffect below). "Selection change resets the pivot to the new
+	//     median" — manual reposition is intentionally lost (issue #76's
+	//     "simplest model"; preserving across Selection changes is a
+	//     future-feature call per CONTEXT.md).
+	const [bulkPivotOverride, setBulkPivotOverride] = useState<
+		{ x: number; y: number; z: number } | null
+	>(null);
+	const [bulkPivotDragging, setBulkPivotDragging] = useState<
+		{ x: number; y: number; z: number } | null
+	>(null);
+
+	// Selection-change reset. Keyed by the membership of `bulkRefs` (kind +
+	// indices) so adding or removing an entity from the bulk drops the
+	// manual override. Re-derived as a string key to keep the deps array
+	// shallow-stable across renders that don't actually change membership.
+	const bulkMembershipKey = useMemo(() => {
+		return bulkRefs.map((r) => {
+			switch (r.kind) {
+				case 'section': return `s:${r.sectionIdx}`;
+				case 'portal': return `p:${r.sectionIdx}:${r.portalIdx}`;
+				case 'boundaryLineEndpoint':
+					return `bl:${r.sectionIdx}:${r.portalIdx}:${r.lineIdx}:${r.end}`;
+				case 'noGoLineEndpoint':
+					return `ng:${r.sectionIdx}:${r.lineIdx}:${r.end}`;
+			}
+		}).sort().join('|');
+	}, [bulkRefs]);
+	useResetOnChange(bulkMembershipKey, () => {
+		setBulkPivotOverride(null);
+		setBulkPivotDragging(null);
+	});
+
+	// Resolve the effective pivot. Dragging wins over committed override
+	// wins over median — that order keeps the live drag preview visible
+	// without permanently committing it, and lets a previously-committed
+	// override survive a selection-internal data change (e.g. another
+	// transform on the same Selection).
+	const bulkPivotLive = useMemo<{ x: number; y: number; z: number } | null>(() => {
+		if (!isBulkActive) return null;
+		return bulkPivotDragging ?? bulkPivotOverride ?? bulkPivotMedian;
+	}, [isBulkActive, bulkPivotDragging, bulkPivotOverride, bulkPivotMedian]);
 
 	// Identify the gizmo's target. Bulk wins over single-entity when 2+
 	// entities are selected (per ADR-0010 — exactly one gizmo on screen).
@@ -768,6 +821,43 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		bulkPivotRef.current = null;
 	}, []);
 
+	// **Pivot drag-reposition** wiring (issue #76). The gizmo emits the new
+	// absolute world position on every frame of a pivot-drag gesture; we
+	// stash it in `bulkPivotDragging` so the gizmo rides the cursor without
+	// committing. On release we commit to `bulkPivotOverride` (subsequent
+	// gestures will use this as the new pivot). Neither path runs
+	// `onChange` — pivot reposition is pure UI state and NOT a Workspace-
+	// undo step (CONTEXT.md / "Pivot"). Sub-entity selections route the
+	// pivot drag through the same channel, but the gizmoPosition memo
+	// for those targets currently anchors at the entity itself; until
+	// per-target overrides are wired, pivot drag is a no-op for them.
+	// Gizmo Y-offset used by `gizmoPosition` for bulk to lift the handle
+	// above the section visualization. The pivot we store must be in the
+	// underlying-data coordinates (not the visualised gizmo position), so
+	// we subtract the offset on incoming pivot positions from the gizmo and
+	// re-add it when rendering. Keeps the stored pivot bit-identical to
+	// the median computed by `bulkSelectionPivot`.
+	const BULK_GIZMO_Y_OFFSET = 1.5;
+
+	const handlePivotMove = useCallback(
+		(world: { x: number; y: number; z: number }) => {
+			if (!isBulkActive) return;
+			setBulkPivotDragging({ x: world.x, y: world.y - BULK_GIZMO_Y_OFFSET, z: world.z });
+		},
+		[isBulkActive],
+	);
+	const handlePivotCommit = useCallback(
+		(world: { x: number; y: number; z: number }) => {
+			setBulkPivotDragging(null);
+			if (!isBulkActive) return;
+			setBulkPivotOverride({ x: world.x, y: world.y - BULK_GIZMO_Y_OFFSET, z: world.z });
+		},
+		[isBulkActive],
+	);
+	const handlePivotCancel = useCallback(() => {
+		setBulkPivotDragging(null);
+	}, []);
+
 	// Reset transient edge / drag UI when the selected section changes.
 	useResetOnChange(selectedSectionIndex, () => {
 		setHoveredEdge(null);
@@ -969,6 +1059,15 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 					onTransform={handleGizmoTransform}
 					onCommit={handleGizmoCommit}
 					onCancel={handleGizmoCancel}
+					// Pivot drag-reposition is bulk-only for now (issue #76).
+					// Wire the callbacks only when the bulk gizmo is up; the
+					// gizmo renders the pivot handle iff `onPivotMove` is
+					// provided. Sub-entity gizmos keep the legacy fixed-pivot
+					// behaviour (their pivot IS the entity position, so there's
+					// nothing meaningful to drag-reposition).
+					onPivotMove={isBulkActive ? handlePivotMove : undefined}
+					onPivotCommit={isBulkActive ? handlePivotCommit : undefined}
+					onPivotCancel={isBulkActive ? handlePivotCancel : undefined}
 				/>
 			)}
 

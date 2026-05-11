@@ -27,8 +27,17 @@ import { projectToScreen, unprojectToPlane } from '@/lib/three/projection';
 // Types
 // =============================================================================
 
-export type GizmoHandleKind = 'translate' | 'rotate';
+export type GizmoHandleKind = 'translate' | 'rotate' | 'pivot';
 export type GizmoHandleAxis = 'x' | 'y' | 'z';
+
+/**
+ * Pseudo-axis used by the **Pivot** drag handle (issue #76). The pivot
+ * handle is not axis-locked — it drags freely on a screen-aligned plane
+ * through the pivot — so we collapse "no axis lock" onto the 'y' tag for
+ * the `GizmoHandleAxis` discriminator. Callers check `kind === 'pivot'`
+ * before reading axis.
+ */
+export const PIVOT_AXIS: GizmoHandleAxis = 'y';
 
 /**
  * One gesture's accumulated delta. Translate is a `(dx, dy, dz)` offset in
@@ -73,11 +82,37 @@ export type BulkTransformDragOptions = {
 		 *  the lifetime of the gesture — pressing or releasing the modifier
 		 *  mid-drag does NOT switch modes. See `BulkTransformDelta.cascade`. */
 		cascade?: boolean;
+		/** Pivot-drag-specific: screen-aligned plane normal captured at pointer-
+		 *  down so the per-frame mover unprojects to the same plane the user
+		 *  started on (issue #76). */
+		pivotPlaneNormal?: THREE.Vector3;
 	} | null>;
 	onTransform: (delta: BulkTransformDelta) => void;
 	onCommit: (delta: BulkTransformDelta) => void;
 	onCancel?: () => void;
 	setActive: (a: { kind: GizmoHandleKind; axis: GizmoHandleAxis } | null) => void;
+	/**
+	 * Pivot drag-reposition (issue #76). When the user drags the dedicated
+	 * pivot handle, this fires continuously with the new absolute pivot
+	 * world position — NOT a delta of the Selection. The handler must NOT
+	 * mutate the Selection; it only updates UI state for where the gizmo
+	 * lives. Optional so existing consumers that don't ship the pivot
+	 * handle keep compiling.
+	 */
+	onPivotMove?: (worldPos: { x: number; y: number; z: number }) => void;
+	/**
+	 * Pivot drag-reposition committed (issue #76). Fires once on pointer
+	 * release with the final pivot position. Consumers persist the new
+	 * pivot here so subsequent transforms anchor at it. This is NOT a
+	 * Workspace-undo step — pivot is pure UI state (CONTEXT.md / "Pivot").
+	 */
+	onPivotCommit?: (worldPos: { x: number; y: number; z: number }) => void;
+	/**
+	 * Pivot drag cancelled mid-gesture (Escape). Fires once with the
+	 * pivot's pre-gesture position. Consumers should restore the
+	 * gizmo to that location. Optional.
+	 */
+	onPivotCancel?: (worldPos: { x: number; y: number; z: number }) => void;
 };
 
 // =============================================================================
@@ -95,6 +130,9 @@ export function useBulkTransformDrag({
 	onCommit,
 	onCancel,
 	setActive,
+	onPivotMove,
+	onPivotCommit,
+	onPivotCancel,
 }: BulkTransformDragOptions): void {
 	useEffect(() => {
 		if (!active) return;
@@ -108,17 +146,57 @@ export function useBulkTransformDrag({
 			if (start.kind === 'translate') {
 				return computeTranslateDelta(start, clientX, clientY, camera, canvas);
 			}
-			return computeRotateDelta(start, clientX, clientY, camera, canvas);
+			if (start.kind === 'rotate') {
+				return computeRotateDelta(start, clientX, clientY, camera, canvas);
+			}
+			// Pivot drags don't produce a Selection-affecting delta; they
+			// emit through `onPivotMove` / `onPivotCommit` instead. Returning
+			// null here keeps `onTransform` / `onCommit` from firing during
+			// a pivot gesture (the central correctness contract — pivot
+			// reposition must NOT mutate the Selection).
+			return null;
+		};
+
+		// Compute the new absolute world pivot for a pivot-drag gesture.
+		// Returns null if the start state isn't a pivot drag, or if the
+		// cursor unprojects outside the start plane.
+		const computePivotPosition = (
+			clientX: number,
+			clientY: number,
+		): { x: number; y: number; z: number } | null => {
+			const start = dragStart.current;
+			if (!start || start.kind !== 'pivot') return null;
+			const planeNormal = start.pivotPlaneNormal;
+			const anchor = start.anchorWorld;
+			if (!planeNormal || !anchor) return null;
+			const current = unprojectToPlane(clientX, clientY, camera, canvas, anchor, planeNormal);
+			if (!current) return null;
+			return { x: current.x, y: current.y, z: current.z };
 		};
 
 		const handleMove = (e: PointerEvent) => {
+			const start = dragStart.current;
+			if (start?.kind === 'pivot') {
+				const next = computePivotPosition(e.clientX, e.clientY);
+				if (next) onPivotMove?.(next);
+				return;
+			}
 			const delta = computeDelta(e.clientX, e.clientY);
 			if (!delta) return;
 			onTransform(delta);
 		};
 
 		const handleUp = (e: PointerEvent) => {
-			const cascade = dragStart.current?.cascade === true;
+			const start = dragStart.current;
+			if (start?.kind === 'pivot') {
+				const next = computePivotPosition(e.clientX, e.clientY)
+					?? { x: start.pivot.x, y: start.pivot.y, z: start.pivot.z };
+				dragStart.current = null;
+				setActive(null);
+				onPivotCommit?.(next);
+				return;
+			}
+			const cascade = start?.cascade === true;
 			const delta = computeDelta(e.clientX, e.clientY) ?? identityDelta(cascade);
 			dragStart.current = null;
 			setActive(null);
@@ -127,7 +205,16 @@ export function useBulkTransformDrag({
 
 		const handleKey = (e: KeyboardEvent) => {
 			if (e.key !== 'Escape') return;
-			const cascade = dragStart.current?.cascade === true;
+			const start = dragStart.current;
+			if (start?.kind === 'pivot') {
+				const restore = { x: start.pivot.x, y: start.pivot.y, z: start.pivot.z };
+				dragStart.current = null;
+				setActive(null);
+				onPivotMove?.(restore);
+				onPivotCancel?.(restore);
+				return;
+			}
+			const cascade = start?.cascade === true;
 			dragStart.current = null;
 			setActive(null);
 			onTransform(identityDelta(cascade));
@@ -144,7 +231,11 @@ export function useBulkTransformDrag({
 			if (controls) controls.enabled = prevEnabled;
 			document.body.style.cursor = 'auto';
 		};
-	}, [active, camera, canvas, controls, dragStart, onTransform, onCommit, onCancel, setActive]);
+	}, [
+		active, camera, canvas, controls, dragStart,
+		onTransform, onCommit, onCancel, setActive,
+		onPivotMove, onPivotCommit, onPivotCancel,
+	]);
 }
 
 // =============================================================================

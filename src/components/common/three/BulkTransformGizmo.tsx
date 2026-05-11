@@ -73,6 +73,30 @@ export type BulkTransformGizmoProps = {
 	 * TranslateGizmo's per-frame pixel-size scaling. Defaults to 90 px.
 	 */
 	pixelSize?: number;
+
+	/**
+	 * Pivot drag-reposition handle (issue #76). Renders a small distinct
+	 * sphere at the pivot point that the user can grab to move the gizmo
+	 * in world space — **without** affecting the Selection.
+	 *
+	 * - `onPivotMove(world)` — continuous live position during the drag.
+	 *   Consumer updates the gizmo `position` (it's a controlled prop) so
+	 *   the handle rides the cursor. Must NOT mutate the Selection or push
+	 *   to undo history.
+	 * - `onPivotCommit(world)` — fired once on pointer release. Consumer
+	 *   stores the new pivot so subsequent translate/rotate gestures anchor
+	 *   there. Pivot reposition is **not** a Workspace-undo step
+	 *   (CONTEXT.md / "Pivot": pure UI state, no data mutation).
+	 * - `onPivotCancel?(world)` — Escape pressed mid-pivot-drag. Restores
+	 *   the pre-gesture pivot. Optional.
+	 *
+	 * The handle is only rendered when `onPivotMove` is provided — overlays
+	 * that don't yet support pivot reposition keep the old "fixed pivot"
+	 * behaviour with zero visual change.
+	 */
+	onPivotMove?: (worldPos: { x: number; y: number; z: number }) => void;
+	onPivotCommit?: (worldPos: { x: number; y: number; z: number }) => void;
+	onPivotCancel?: (worldPos: { x: number; y: number; z: number }) => void;
 };
 
 // World-space "design size" the geometry is built at. The per-frame scale
@@ -97,6 +121,11 @@ const COLOR = {
 	// CONTEXT.md / "Cascade").
 	cascade: '#ff66cc',
 	cascadeHot: '#ffaadd',
+	// **Pivot** drag-reposition handle (issue #76). Neutral white-ish so it
+	// reads as "axis-less" — translate arrows are coloured per-axis, the
+	// pivot handle is everything-at-once. Hot tint when hovered or active.
+	pivot: '#f5f5f5',
+	pivotHot: '#fff7a0',
 } as const;
 
 const RING_OPACITY_ENABLED = 0.75;
@@ -114,6 +143,9 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 	onCommit,
 	onCancel,
 	pixelSize = 90,
+	onPivotMove,
+	onPivotCommit,
+	onPivotCancel,
 }) => {
 	const { camera, gl, controls } = useThree();
 	const groupRef = useRef<THREE.Group>(null);
@@ -137,6 +169,12 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 		// start enables cascade for the lifetime of that gesture; pressing or
 		// releasing Shift mid-drag does NOT switch modes.
 		cascade?: boolean;
+		// Pivot-drag-specific (issue #76): screen-aligned plane normal at
+		// gesture start. The per-frame mover unprojects every cursor sample
+		// to this plane so the handle stays on the camera-facing slab the
+		// user grabbed it on — same trick as the legacy `unprojectToPlane`
+		// for axis-less gizmos.
+		pivotPlaneNormal?: THREE.Vector3;
 	} | null>(null);
 	// Tracks the cascade flag for the active gesture so the visual tint stays
 	// stable across re-renders (the ref above is mutable). Pure render state.
@@ -181,6 +219,9 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 		onCommit,
 		onCancel,
 		setActive: setActiveAndCascade,
+		onPivotMove,
+		onPivotCommit,
+		onPivotCancel,
 	});
 
 	// Begin a drag — capture the pointer-down world position (translate) or
@@ -212,6 +253,43 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 		};
 		setActiveCascade(cascade);
 		setActive({ kind: 'translate', axis });
+		document.body.style.cursor = 'grabbing';
+	};
+
+	// Begin a **Pivot** drag (issue #76). The handle isn't axis-locked — the
+	// user drags it freely on a screen-aligned plane through the pivot. The
+	// per-frame mover unprojects every cursor sample back to that plane and
+	// reports the new world position as the absolute pivot — NOT a Selection-
+	// affecting delta. Consumer wires `onPivotMove` / `onPivotCommit`, with
+	// `onPivotCommit` storing the new pivot for subsequent gestures.
+	const beginPivot = (e: ThreeEvent<PointerEvent>) => {
+		// Only respond when the consumer opted in. Without `onPivotMove`
+		// there's nowhere for the new pivot to land, so we silently no-op.
+		if (!onPivotMove) return;
+		e.stopPropagation();
+		// Screen-aligned plane normal — points back at the camera so the
+		// drag plane is whatever slab the user sees the handle on. Mirrors
+		// Blender's "free transform" gizmo behaviour.
+		const planeNormal = new THREE.Vector3();
+		camera.getWorldDirection(planeNormal);
+		planeNormal.multiplyScalar(-1).normalize();
+		const world = unprojectToPlane(
+			e.nativeEvent.clientX,
+			e.nativeEvent.clientY,
+			camera,
+			gl.domElement,
+			pivotVec,
+			planeNormal,
+		);
+		if (!world) return;
+		dragStartRef.current = {
+			kind: 'pivot',
+			axis: 'y',
+			pivot: pivotVec.clone(),
+			anchorWorld: world.clone(),
+			pivotPlaneNormal: planeNormal.clone(),
+		};
+		setActive({ kind: 'pivot', axis: 'y' });
 		document.body.style.cursor = 'grabbing';
 	};
 
@@ -342,6 +420,29 @@ export const BulkTransformGizmo: React.FC<BulkTransformGizmoProps> = ({
 				onPointerOver={() => setHover({ kind: 'rotate', axis: 'z' })}
 				onPointerOut={() => setHover((h) => (h?.kind === 'rotate' && h.axis === 'z' ? null : h))}
 			/>
+
+			{/* **Pivot** drag-reposition handle (issue #76).
+			    Only rendered when the consumer wires `onPivotMove` — overlays
+			    that don't yet support pivot reposition keep the old "fixed
+			    pivot" behaviour. The handle sits dead-centre at the gizmo's
+			    origin, visually distinct from the per-axis translate arrows
+			    (neutral white sphere with a yellow hot tint vs. the per-axis
+			    red/green/blue), and is rendered after the rotate rings so it
+			    paints on top of the central hub. Per CONTEXT.md / "Pivot":
+			    dragging this handle moves the gizmo only — the Selection is
+			    untouched and no Workspace-undo entry is pushed. */}
+			{onPivotMove && (
+				<PivotHandle
+					color={
+						isHover('pivot', 'y') || isActiveHandle('pivot', 'y')
+							? COLOR.pivotHot
+							: COLOR.pivot
+					}
+					onPointerDown={beginPivot}
+					onPointerOver={() => setHover({ kind: 'pivot', axis: 'y' })}
+					onPointerOut={() => setHover((h) => (h?.kind === 'pivot' ? null : h))}
+				/>
+			)}
 		</group>
 	);
 };
@@ -488,6 +589,64 @@ const RotateRing: React.FC<HandlerProps> = ({ axis, color, enabled, onPointerDow
 					<meshBasicMaterial transparent opacity={0} depthTest={false} />
 				</mesh>
 			)}
+		</group>
+	);
+};
+
+// =============================================================================
+// Pivot handle (issue #76)
+// =============================================================================
+
+type PivotHandleProps = {
+	color: string;
+	onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
+	onPointerOver: () => void;
+	onPointerOut: () => void;
+};
+
+// Small distinct sphere at the gizmo's origin. Visually it reads as a
+// "handle" (slightly bigger than the cascade halo's centre dot, with a
+// dark outline so it pops against any underlying scene) without competing
+// with the per-axis translate arrows for screen real estate.
+//
+// Hit volume is a larger invisible sphere — same trick the corner pickers
+// in AISectionsOverlay use — so picking remains forgiving at far camera
+// distances.
+const PivotHandle: React.FC<PivotHandleProps> = ({ color, onPointerDown, onPointerOver, onPointerOut }) => {
+	const radius = DESIGN_SIZE * 0.08;
+	const hitRadius = DESIGN_SIZE * 0.16;
+	const outlineRadius = DESIGN_SIZE * 0.095;
+
+	const handleOver = (e: ThreeEvent<PointerEvent>) => {
+		e.stopPropagation();
+		onPointerOver();
+		document.body.style.cursor = 'grab';
+	};
+	const handleOut = (e: ThreeEvent<PointerEvent>) => {
+		e.stopPropagation();
+		onPointerOut();
+		document.body.style.cursor = 'auto';
+	};
+
+	return (
+		<group onPointerDown={onPointerDown} onPointerOver={handleOver} onPointerOut={handleOut}>
+			{/* Dark outline ring — gives the handle a clear silhouette against
+			    pale scene backgrounds. Slightly larger than the fill sphere
+			    so it shows through as a thin border. */}
+			<mesh>
+				<sphereGeometry args={[outlineRadius, 16, 12]} />
+				<meshBasicMaterial color="#1a1a1a" transparent opacity={0.85} depthTest={false} />
+			</mesh>
+			{/* Fill sphere */}
+			<mesh>
+				<sphereGeometry args={[radius, 16, 12]} />
+				<meshBasicMaterial color={color} depthTest={false} />
+			</mesh>
+			{/* Invisible larger hit volume */}
+			<mesh>
+				<sphereGeometry args={[hitRadius, 12, 10]} />
+				<meshBasicMaterial transparent opacity={0} depthTest={false} />
+			</mesh>
 		</group>
 	);
 };
