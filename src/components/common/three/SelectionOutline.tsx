@@ -18,7 +18,7 @@
 
 import * as THREE from 'three';
 
-export type Vec3Tuple = [number, number, number];
+type Vec3Tuple = [number, number, number];
 export type Edge = readonly [Vec3Tuple, Vec3Tuple];
 
 /**
