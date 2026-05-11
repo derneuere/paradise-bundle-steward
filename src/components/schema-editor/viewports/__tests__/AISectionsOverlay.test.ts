@@ -55,13 +55,49 @@ describe('AISectionsOverlay', () => {
 		expect(aiSectionPathMarker(['sections', 1, 'portals', 0, 'position', 'x']))
 			.toEqual({ kind: 'portal', sectionIndex: 1, portalIndex: 0 });
 
-		// Drilling into a section's `corners` array should keep the section highlighted.
+		// Drilling into a corner's `x`/`y` field (post-#73) collapses to the
+		// corner sub-entity selection — the bulk-transform gizmo anchors there.
+		// Before #73 this collapsed to the parent section because no corner-
+		// level Selection kind existed.
 		expect(aiSectionPathMarker(['sections', 1, 'corners', 2, 'x']))
-			.toEqual({ kind: 'section', sectionIndex: 1 });
+			.toEqual({ kind: 'corner', sectionIndex: 1, cornerIndex: 2 });
 
 		// Drilling into a boundary-line's verts should keep the boundary line highlighted.
 		expect(aiSectionPathMarker(['sections', 1, 'portals', 0, 'boundaryLines', 0, 'verts', 'x']))
 			.toEqual({ kind: 'boundaryLine', sectionIndex: 1, portalIndex: 0, lineIndex: 0 });
+	});
+
+	it('addresses sub-entities for the bulk-transform gizmo (corner / endpoint, issue #73)', () => {
+		// Corner: path → marker round-trip.
+		expect(aiSectionPathMarker(['sections', 123, 'corners', 2]))
+			.toEqual({ kind: 'corner', sectionIndex: 123, cornerIndex: 2 });
+		expect(aiSectionMarkerPath({ kind: 'corner', sectionIndex: 123, cornerIndex: 2 }))
+			.toEqual(['sections', 123, 'corners', 2]);
+
+		// Boundary-line endpoint: path → marker round-trip.
+		expect(aiSectionPathMarker(
+			['sections', 7, 'portals', 0, 'boundaryLines', 1, 'endpoints', 1],
+		)).toEqual({
+			kind: 'boundaryLineEndpoint',
+			sectionIndex: 7,
+			portalIndex: 0,
+			lineIndex: 1,
+			endIndex: 1,
+		});
+		expect(aiSectionMarkerPath({
+			kind: 'boundaryLineEndpoint',
+			sectionIndex: 7,
+			portalIndex: 0,
+			lineIndex: 1,
+			endIndex: 1,
+		})).toEqual(['sections', 7, 'portals', 0, 'boundaryLines', 1, 'endpoints', 1]);
+
+		// No-go-line endpoint: path → marker round-trip.
+		expect(aiSectionPathMarker(['sections', 7, 'noGoLines', 3, 'endpoints', 0]))
+			.toEqual({ kind: 'noGoLineEndpoint', sectionIndex: 7, lineIndex: 3, endIndex: 0 });
+		expect(aiSectionMarkerPath({
+			kind: 'noGoLineEndpoint', sectionIndex: 7, lineIndex: 3, endIndex: 0,
+		})).toEqual(['sections', 7, 'noGoLines', 3, 'endpoints', 0]);
 	});
 
 	it('returns null for paths outside the AI sections resource', () => {
@@ -83,6 +119,16 @@ describe('AISectionsOverlay', () => {
 			.toEqual({ kind: 'noGoLine', indices: [42, 7] });
 		expect(aiSectionSelectionCodec.selectionToPath({ kind: 'portal', indices: [42, 3] }))
 			.toEqual(['sections', 42, 'portals', 3]);
+
+		// Sub-entity Selection kinds added in #73.
+		expect(aiSectionSelectionCodec.pathToSelection(['sections', 42, 'corners', 3]))
+			.toEqual({ kind: 'corner', indices: [42, 3] });
+		expect(aiSectionSelectionCodec.pathToSelection(
+			['sections', 42, 'portals', 3, 'boundaryLines', 1, 'endpoints', 0],
+		)).toEqual({ kind: 'boundaryLineEndpoint', indices: [42, 3, 1, 0] });
+		expect(aiSectionSelectionCodec.pathToSelection(
+			['sections', 42, 'noGoLines', 7, 'endpoints', 1],
+		)).toEqual({ kind: 'noGoLineEndpoint', indices: [42, 7, 1] });
 	});
 
 	// The menu rides the WorldViewport's HTML slot, whose wrapper sets

@@ -15,9 +15,13 @@ import {
 	snapLegacyCornerOffset,
 	snapLegacySectionOffset,
 	snapSectionOffset,
+	translateBoundaryLineEndpointRigid,
+	translateCornerRigid,
 	translateCornerWithShared,
 	translateLegacyCornerWithShared,
 	translateLegacySectionWithLinks,
+	translateNoGoLineEndpointRigid,
+	translatePortalAnchorRigid,
 	translatePortalAnchorWithMirror,
 	translateSectionRigid,
 	translateSectionWithLinks,
@@ -2699,5 +2703,302 @@ describe('rotateSelectionWithLinksYaw', () => {
 	it('throws on out-of-range Selection index', () => {
 		const model = makePair();
 		expect(() => rotateSelectionWithLinksYaw(model, [99], { x: 0, z: 0 }, 0.5)).toThrow(RangeError);
+	});
+});
+
+// =============================================================================
+// Bulk-transform sub-entity ops (issue #73) — no-cascade translate of one
+// corner, portal anchor, or line endpoint. The cascade-on path stays in
+// `translateCornerWithShared` for the modifier-on slice (#75).
+// =============================================================================
+
+describe('translateCornerRigid', () => {
+	function makeNeighbourPair(): ParsedAISectionsV12 {
+		// Two adjacent unit squares sharing the edge at x=10.
+		// Section 0: corners (0,0)→(10,0)→(10,10)→(0,10), corner #1 = (10, 0).
+		// Section 1: corners (10,0)→(20,0)→(20,10)→(10,10), corner #0 = (10, 0)
+		// — that's the SHARED corner with section 0's corner #1.
+		const s0 = makeSection({
+			id: 0xA,
+			corners: [
+				{ x: 0, y: 0 },
+				{ x: 10, y: 0 },
+				{ x: 10, y: 10 },
+				{ x: 0, y: 10 },
+			],
+			portals: [{
+				position: { x: 10, y: 0, z: 5 },
+				boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+				linkSection: 1,
+			}],
+		});
+		const s1 = makeSection({
+			id: 0xB,
+			corners: [
+				{ x: 10, y: 0 },
+				{ x: 20, y: 0 },
+				{ x: 20, y: 10 },
+				{ x: 10, y: 10 },
+			],
+		});
+		return makeModel([s0, s1]);
+	}
+
+	it('moves only the named corner; coincident neighbour corners stay put (no cascade)', () => {
+		const model = makeNeighbourPair();
+		// Move section 0's corner #1 (at (10, 0)) by (+1, +2). Section 1's
+		// corner #0 also lives at (10, 0) (shared corner) but must stay put
+		// because the no-cascade op is "tear off" by design (ADR-0009).
+		const next = translateCornerRigid(model, 0, 1, { x: 1, z: 2 });
+		expect(next.sections[0].corners[1]).toEqual({ x: 11, y: 2 });
+		// Other corners on section 0 are untouched.
+		expect(next.sections[0].corners[0]).toEqual({ x: 0, y: 0 });
+		expect(next.sections[0].corners[2]).toEqual({ x: 10, y: 10 });
+		expect(next.sections[0].corners[3]).toEqual({ x: 0, y: 10 });
+		// Neighbour section 1 is bit-for-bit unchanged (===-identical).
+		expect(next.sections[1]).toBe(model.sections[1]);
+	});
+
+	it('does not touch the section\'s portal anchors or boundary lines', () => {
+		const model = makeNeighbourPair();
+		const next = translateCornerRigid(model, 0, 1, { x: 1, z: 2 });
+		expect(next.sections[0].portals[0].position).toEqual({ x: 10, y: 0, z: 5 });
+		expect(next.sections[0].portals[0].boundaryLines[0].verts).toEqual({
+			x: 10, y: 0, z: 10, w: 10,
+		});
+	});
+
+	it('returns the original model reference for a (0, 0) offset (no-op — byte-for-byte safe)', () => {
+		const model = makeNeighbourPair();
+		const next = translateCornerRigid(model, 0, 1, { x: 0, z: 0 });
+		expect(next).toBe(model);
+	});
+
+	it('throws on out-of-range srcIdx or cornerIdx', () => {
+		const model = makeNeighbourPair();
+		expect(() => translateCornerRigid(model, 5, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateCornerRigid(model, -1, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateCornerRigid(model, 0, 4, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateCornerRigid(model, 0, -1, { x: 1, z: 0 })).toThrow(RangeError);
+	});
+
+	it('does not mutate the input', () => {
+		const model = makeNeighbourPair();
+		const before = JSON.stringify(model);
+		translateCornerRigid(model, 0, 1, { x: 5, z: 7 });
+		expect(JSON.stringify(model)).toEqual(before);
+	});
+
+	it('undo round-trip: applying the inverse offset restores the original corner', () => {
+		const model = makeNeighbourPair();
+		const forward = translateCornerRigid(model, 0, 1, { x: 3, z: 5 });
+		const back = translateCornerRigid(forward, 0, 1, { x: -3, z: -5 });
+		// Deep-equal on the corner — we don't get ===-identity back because the
+		// section is rebuilt; but every Vector2 lands exactly where it started.
+		expect(back.sections[0].corners).toEqual(model.sections[0].corners);
+	});
+});
+
+describe('translatePortalAnchorRigid', () => {
+	function makeLinkedPair(): ParsedAISectionsV12 {
+		// Two sections that share a portal anchor at the same world position
+		// (typical state after duplicateSectionThroughEdge). The reverse
+		// portal on section 1 has linkSection = 0 and matching position.
+		const portal0to1: Portal = {
+			position: { x: 10, y: 5, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 0, z: 10, w: 10 } }],
+			linkSection: 1,
+		};
+		const portal1to0: Portal = {
+			position: { x: 10, y: 5, z: 5 },
+			boundaryLines: [{ verts: { x: 10, y: 10, z: 10, w: 0 } }],
+			linkSection: 0,
+		};
+		const s0 = makeSection({ id: 0xA, portals: [portal0to1] });
+		const s1 = makeSection({ id: 0xB, portals: [portal1to0] });
+		return makeModel([s0, s1]);
+	}
+
+	it('moves only the named portal anchor; the mirror anchor stays put (stale by design — ADR-0009)', () => {
+		const model = makeLinkedPair();
+		const next = translatePortalAnchorRigid(model, 0, 0, { x: 3, y: 2, z: -4 });
+		// Source portal anchor moved by full XYZ delta.
+		expect(next.sections[0].portals[0].position).toEqual({ x: 13, y: 7, z: 1 });
+		// Mirror portal on the neighbour stays at the old position — this is
+		// the "stale mirror" state ADR-0009 accepts as the v1 default.
+		expect(next.sections[1].portals[0].position).toEqual({ x: 10, y: 5, z: 5 });
+		// Neighbour section is ===-identical.
+		expect(next.sections[1]).toBe(model.sections[1]);
+	});
+
+	it('does not touch the portal\'s boundary lines or the source section\'s corners', () => {
+		const model = makeLinkedPair();
+		const next = translatePortalAnchorRigid(model, 0, 0, { x: 3, y: 2, z: -4 });
+		// Boundary lines unchanged — only `position` shifted.
+		expect(next.sections[0].portals[0].boundaryLines[0].verts).toEqual({
+			x: 10, y: 0, z: 10, w: 10,
+		});
+		expect(next.sections[0].corners).toEqual(model.sections[0].corners);
+	});
+
+	it('returns the original model reference for an identity offset (no-op)', () => {
+		const model = makeLinkedPair();
+		expect(translatePortalAnchorRigid(model, 0, 0, { x: 0, y: 0, z: 0 })).toBe(model);
+	});
+
+	it('throws on out-of-range srcIdx or portalIdx', () => {
+		const model = makeLinkedPair();
+		expect(() => translatePortalAnchorRigid(model, 5, 0, { x: 1, y: 0, z: 0 })).toThrow(RangeError);
+		expect(() => translatePortalAnchorRigid(model, -1, 0, { x: 1, y: 0, z: 0 })).toThrow(RangeError);
+		expect(() => translatePortalAnchorRigid(model, 0, 5, { x: 1, y: 0, z: 0 })).toThrow(RangeError);
+		expect(() => translatePortalAnchorRigid(model, 0, -1, { x: 1, y: 0, z: 0 })).toThrow(RangeError);
+	});
+
+	it('does not mutate the input', () => {
+		const model = makeLinkedPair();
+		const before = JSON.stringify(model);
+		translatePortalAnchorRigid(model, 0, 0, { x: 7, y: 3, z: 2 });
+		expect(JSON.stringify(model)).toEqual(before);
+	});
+
+	it('undo round-trip: inverse offset restores the original anchor', () => {
+		const model = makeLinkedPair();
+		const forward = translatePortalAnchorRigid(model, 0, 0, { x: 3, y: 2, z: -4 });
+		const back = translatePortalAnchorRigid(forward, 0, 0, { x: -3, y: -2, z: 4 });
+		expect(back.sections[0].portals[0].position).toEqual(
+			model.sections[0].portals[0].position,
+		);
+	});
+});
+
+describe('translateBoundaryLineEndpointRigid', () => {
+	function makeWithBoundary(): ParsedAISectionsV12 {
+		const portal: Portal = {
+			position: { x: 5, y: 3, z: 5 },
+			boundaryLines: [{ verts: { x: 0, y: 0, z: 10, w: 0 } }], // start (0,0), end (10,0)
+			linkSection: 0,
+		};
+		const sec = makeSection({ id: 0xA, portals: [portal] });
+		return makeModel([sec]);
+	}
+
+	it('moves only the start endpoint (endIdx=0); end stays put', () => {
+		const model = makeWithBoundary();
+		const next = translateBoundaryLineEndpointRigid(model, 0, 0, 0, 0, { x: 1, z: 2 });
+		// Start (verts.x, verts.y) moved by (+1, +2); end (verts.z, verts.w) unchanged.
+		expect(next.sections[0].portals[0].boundaryLines[0].verts).toEqual({
+			x: 1, y: 2, z: 10, w: 0,
+		});
+	});
+
+	it('moves only the end endpoint (endIdx=1); start stays put', () => {
+		const model = makeWithBoundary();
+		const next = translateBoundaryLineEndpointRigid(model, 0, 0, 0, 1, { x: 3, z: -1 });
+		expect(next.sections[0].portals[0].boundaryLines[0].verts).toEqual({
+			x: 0, y: 0, z: 13, w: -1,
+		});
+	});
+
+	it('does not touch the portal anchor or section corners', () => {
+		const model = makeWithBoundary();
+		const next = translateBoundaryLineEndpointRigid(model, 0, 0, 0, 0, { x: 1, z: 2 });
+		expect(next.sections[0].portals[0].position).toEqual(
+			model.sections[0].portals[0].position,
+		);
+		expect(next.sections[0].corners).toEqual(model.sections[0].corners);
+	});
+
+	it('returns the original model reference for a (0, 0) offset (no-op)', () => {
+		const model = makeWithBoundary();
+		expect(translateBoundaryLineEndpointRigid(model, 0, 0, 0, 0, { x: 0, z: 0 })).toBe(model);
+	});
+
+	it('throws on out-of-range indices or endIdx not in {0, 1}', () => {
+		const model = makeWithBoundary();
+		expect(() => translateBoundaryLineEndpointRigid(model, 5, 0, 0, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateBoundaryLineEndpointRigid(model, 0, 5, 0, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateBoundaryLineEndpointRigid(model, 0, 0, 5, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateBoundaryLineEndpointRigid(model, 0, 0, 0, 2, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateBoundaryLineEndpointRigid(model, 0, 0, 0, -1, { x: 1, z: 0 })).toThrow(RangeError);
+	});
+
+	it('does not mutate the input', () => {
+		const model = makeWithBoundary();
+		const before = JSON.stringify(model);
+		translateBoundaryLineEndpointRigid(model, 0, 0, 0, 0, { x: 5, z: 7 });
+		expect(JSON.stringify(model)).toEqual(before);
+	});
+
+	it('undo round-trip: inverse offset restores the original endpoint', () => {
+		const model = makeWithBoundary();
+		const forward = translateBoundaryLineEndpointRigid(model, 0, 0, 0, 1, { x: 3, z: -4 });
+		const back = translateBoundaryLineEndpointRigid(forward, 0, 0, 0, 1, { x: -3, z: 4 });
+		expect(back.sections[0].portals[0].boundaryLines[0].verts).toEqual(
+			model.sections[0].portals[0].boundaryLines[0].verts,
+		);
+	});
+});
+
+describe('translateNoGoLineEndpointRigid', () => {
+	function makeWithNoGo(): ParsedAISectionsV12 {
+		const sec = makeSection({ id: 0xA });
+		sec.noGoLines = [{ verts: { x: 0, y: 0, z: 5, w: 5 } }];
+		return makeModel([sec]);
+	}
+
+	it('moves only the start endpoint (endIdx=0); end stays put', () => {
+		const model = makeWithNoGo();
+		const next = translateNoGoLineEndpointRigid(model, 0, 0, 0, { x: 2, z: 3 });
+		expect(next.sections[0].noGoLines[0].verts).toEqual({ x: 2, y: 3, z: 5, w: 5 });
+	});
+
+	it('moves only the end endpoint (endIdx=1); start stays put', () => {
+		const model = makeWithNoGo();
+		const next = translateNoGoLineEndpointRigid(model, 0, 0, 1, { x: -1, z: -2 });
+		expect(next.sections[0].noGoLines[0].verts).toEqual({ x: 0, y: 0, z: 4, w: 3 });
+	});
+
+	it('does not touch corners or portals', () => {
+		const portal: Portal = {
+			position: { x: 1, y: 0, z: 1 },
+			boundaryLines: [{ verts: { x: 1, y: 1, z: 2, w: 2 } }],
+			linkSection: 0,
+		};
+		const sec = makeSection({ id: 0xA, portals: [portal] });
+		sec.noGoLines = [{ verts: { x: 0, y: 0, z: 5, w: 5 } }];
+		const model = makeModel([sec]);
+		const next = translateNoGoLineEndpointRigid(model, 0, 0, 0, { x: 2, z: 3 });
+		expect(next.sections[0].corners).toEqual(model.sections[0].corners);
+		expect(next.sections[0].portals).toEqual(model.sections[0].portals);
+	});
+
+	it('returns the original model reference for a (0, 0) offset (no-op)', () => {
+		const model = makeWithNoGo();
+		expect(translateNoGoLineEndpointRigid(model, 0, 0, 0, { x: 0, z: 0 })).toBe(model);
+	});
+
+	it('throws on out-of-range indices or endIdx not in {0, 1}', () => {
+		const model = makeWithNoGo();
+		expect(() => translateNoGoLineEndpointRigid(model, 5, 0, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateNoGoLineEndpointRigid(model, -1, 0, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateNoGoLineEndpointRigid(model, 0, 5, 0, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateNoGoLineEndpointRigid(model, 0, 0, 2, { x: 1, z: 0 })).toThrow(RangeError);
+		expect(() => translateNoGoLineEndpointRigid(model, 0, 0, -1, { x: 1, z: 0 })).toThrow(RangeError);
+	});
+
+	it('does not mutate the input', () => {
+		const model = makeWithNoGo();
+		const before = JSON.stringify(model);
+		translateNoGoLineEndpointRigid(model, 0, 0, 0, { x: 5, z: 7 });
+		expect(JSON.stringify(model)).toEqual(before);
+	});
+
+	it('undo round-trip: inverse offset restores the original endpoint', () => {
+		const model = makeWithNoGo();
+		const forward = translateNoGoLineEndpointRigid(model, 0, 0, 0, { x: 4, z: -2 });
+		const back = translateNoGoLineEndpointRigid(forward, 0, 0, 0, { x: -4, z: 2 });
+		expect(back.sections[0].noGoLines[0].verts).toEqual(
+			model.sections[0].noGoLines[0].verts,
+		);
 	});
 });
