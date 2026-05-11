@@ -48,7 +48,7 @@ import { resourceCtxFromBundle } from '../registry/handler';
 const BND1_MAGIC_BYTES = new Uint8Array([0x62, 0x6E, 0x64, 0x6C]);
 
 const SUPPORTED_BND1_VERSIONS = [5] as const;
-export type Bnd1Version = typeof SUPPORTED_BND1_VERSIONS[number];
+type Bnd1Version = typeof SUPPORTED_BND1_VERSIONS[number];
 
 // ============================================================================
 // Per-platform layout (X360 / PS3 are big-endian; PC is little-endian)
@@ -121,12 +121,12 @@ const isLittleEndianForPlatform = (platform: number): boolean => platform === 1;
 // Each chunk descriptor holds the raw u32s the writer needs to re-emit;
 // the parser also splits them into size+align via the standard packing
 // scheme so callers can read either form.
-export type Bundle1ChunkDescriptor = {
+type Bundle1ChunkDescriptor = {
   size: number;       // bytes
   alignmentPow2: number; // raw u32 alignment value (NOT log2)
 };
 
-export type Bundle1ResourceExtras = {
+type Bundle1ResourceExtras = {
   // 5-chunk size descriptors (BND2 entry only carries chunks 0..2 in the
   // packed sizeAndAlignmentOnDisk[]; we keep the rest here so the writer
   // can re-emit them. For X360 the array length is 5; for PC 4; for PS3 6.)
