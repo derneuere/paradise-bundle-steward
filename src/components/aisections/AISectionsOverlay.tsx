@@ -26,8 +26,6 @@
 // land in both at once. See issue #35.
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Magnet, Link2 } from 'lucide-react';
-import { Copy } from 'lucide-react';
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';
@@ -50,21 +48,19 @@ import {
 	type GizmoSession,
 } from '@/components/workspace/BulkTransformGizmoSession';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
-import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import {
 	aiSectionsV12SelectionCodec,
 	BatchedSections,
 	buildBatchedSections,
-	EdgeContextMenu,
-	EdgeHandles,
+	BulkSectionLayer,
+	CascadeNeighbourLayer,
+	HoverSectionLayer,
 	markerToSelection,
-	SectionDetail,
-	SectionLabel,
-	SelectionOverlay,
+	OverlayHtmlSiblings,
+	SelectedSectionLayer,
 	selectionToMarker,
 	edgeContextMenuRootStyle as sharedEdgeContextMenuRootStyle,
 	type AISectionMarker,
-	type Corner,
 	type DisplayPortal,
 	type DisplayBoundaryLine,
 	type SectionAccessor,
@@ -80,7 +76,6 @@ import {
 import type { ThreeEvent } from '@react-three/fiber';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from '@/components/schema-editor/viewports/WorldViewport.types';
-import { useWorldViewportHtmlSlot } from '@/components/schema-editor/viewports/WorldViewport';
 import type { ActiveDrag, DragTarget } from './aiSectionsDrag.types';
 import { applyDragToModel } from './applyDragToModel';
 import {
@@ -1041,113 +1036,68 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				onPointerOut={handlers.onPointerOut}
 			/>
 
-			{previewCorners && (
-				<SelectionOverlay corners={previewCorners} color="#ffaa33" baseY={selectedSectionY} />
-			)}
-			{hovCorners && hoverSectionIndex !== selectedSectionIndex && (
-				<SelectionOverlay corners={hovCorners} color="#66aaff" baseY={hoverSectionY} />
-			)}
-
-			{/* Yellow outline for every bulk member that ISN'T the inspector
-			    pick. The inspector pick already wears the orange overlay
-			    above; promoting it to yellow as well would hide the
-			    "currently editing" cue. While a bulk gesture is in flight
-			    we draw against the live previewModel so every member is
-			    seen translating / rotating in lockstep. */}
-			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
-				const parts = key.split(':');
-				if (parts[0] !== 'section') return null;
-				const idx = Number(parts[1]);
-				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
-				const liveSec = (drag?.target.kind === 'bulk' && previewModel)
-					? previewModel.sections[idx]
-					: data.sections[idx];
-				if (!liveSec) return null;
-				const corners = v12Corners(liveSec);
-				const y = idx < sectionYs.length ? sectionYs[idx] : 0;
-				return (
-					<SelectionOverlay
-						key={`bulk-${idx}`}
-						corners={corners}
-						color="#ffd633"
-						baseY={y}
-					/>
-				);
-			})}
-
-			{drag && affectedNeighbours.map(({ idx, corners }) => (
-				<SelectionOverlay
-					key={`cascade-${idx}`}
-					corners={corners}
-					color="#ddaa66"
-					baseY={idx < sectionYs.length ? sectionYs[idx] : 0}
-				/>
-			))}
-
-			{previewCorners && previewSection && selectedSectionIndex != null && (
-				<SectionLabel corners={previewCorners} color="#ffaa33" baseY={selectedSectionY}>
-					Sec {selectedSectionIndex} | 0x{(previewSection.id >>> 0).toString(16).toUpperCase()} | {SPEED_LABEL[previewSection.speed] ?? previewSection.speed}
-				</SectionLabel>
-			)}
+			{/* Hover blue outline + grey label. Caller gates "hover != selected"
+			    so HoverSectionLayer doesn't need to know about the inspector
+			    pick — cheaper than threading another prop through. */}
 			{hovCorners && hovSection && hoverSectionIndex != null && hoverSectionIndex !== selectedSectionIndex && (
-				<SectionLabel corners={hovCorners} color="#aaaaaa" baseY={hoverSectionY}>
-					Sec {hoverSectionIndex} | 0x{(hovSection.id >>> 0).toString(16).toUpperCase()} | {SPEED_LABEL[hovSection.speed] ?? hovSection.speed}
-				</SectionLabel>
+				<HoverSectionLayer
+					corners={hovCorners}
+					baseY={hoverSectionY}
+					labelText={`Sec ${hoverSectionIndex} | 0x${(hovSection.id >>> 0).toString(16).toUpperCase()} | ${SPEED_LABEL[hovSection.speed] ?? hovSection.speed}`}
+				/>
 			)}
 
-			{/* Edge handles + sub-entity highlights for the inspector pick only.
-			    Bulk members get the structural detail layer below but no edge
-			    edit affordances — those are an inspector-only edit gesture. */}
+			{/* Yellow outline + structural detail for every bulk member that
+			    isn't the inspector pick. The "leave portals on screen" fix:
+			    bulk members render with `marker={null}` so structural geometry
+			    shows but no sub-entity highlights — keeping the inspector
+			    isolated to the one section the user is editing. */}
+			{sectionBulk && (
+				<BulkSectionLayer
+					bulkSet={sectionBulk.bulkSet}
+					selectedSectionIndex={selectedSectionIndex}
+					data={data}
+					previewModel={previewModel}
+					dragKind={drag?.target.kind ?? null}
+					sections={data.sections}
+					cornersOf={v12Corners}
+					accessor={detailAccessor}
+					root={data}
+					sectionYs={sectionYs}
+				/>
+			)}
+
+			{/* Cascade-affected outside neighbours during a drag (orange).
+			    Bulk members are pre-filtered out of `affectedNeighbours` so
+			    they're not double-painted on top of the yellow bulk outline. */}
+			<CascadeNeighbourLayer
+				drag={drag}
+				affectedNeighbours={affectedNeighbours}
+				sectionYs={sectionYs}
+			/>
+
+			{/* Inspector pick — orange outline, label, edge handles, and
+			    SectionDetail with the marker so the picked portal / line /
+			    endpoint gets its highlight. */}
 			{selectedSectionIndex != null && previewSection && previewCorners && (
-				<>
-					<EdgeHandles
-						corners={previewCorners}
-						hoveredEdge={hoveredEdge}
-						onHoverEdge={setHoveredEdge}
-						onContextMenu={handleEdgeContextMenu}
-						baseY={selectedSectionY}
-					/>
-					<SectionDetail
-						section={previewSection}
-						root={data}
-						accessor={detailAccessor}
-						marker={marker}
-						baseY={selectedSectionY}
-						onPickPortal={handlePickPortal}
-						onPickBoundaryLine={handlePickBoundaryLine}
-						onPickNoGoLine={handlePickNoGoLine}
-						onPickBoundaryLineEndpoint={handlePickBoundaryLineEndpoint}
-						onPickNoGoLineEndpoint={handlePickNoGoLineEndpoint}
-					/>
-				</>
+				<SelectedSectionLayer
+					corners={previewCorners}
+					section={previewSection}
+					baseY={selectedSectionY}
+					marker={marker}
+					root={data}
+					accessor={detailAccessor}
+					labelText={`Sec ${selectedSectionIndex} | 0x${(previewSection.id >>> 0).toString(16).toUpperCase()} | ${SPEED_LABEL[previewSection.speed] ?? previewSection.speed}`}
+					hoveredEdge={hoveredEdge}
+					onHoverEdge={setHoveredEdge}
+					onContextMenu={handleEdgeContextMenu}
+					onPickPortal={handlePickPortal}
+					onPickBoundaryLine={handlePickBoundaryLine}
+					onPickNoGoLine={handlePickNoGoLine}
+					onPickBoundaryLineEndpoint={handlePickBoundaryLineEndpoint}
+					onPickNoGoLineEndpoint={handlePickNoGoLineEndpoint}
+				/>
 			)}
-
-			{/* Detail layer for every bulk member that isn't the inspector
-			    pick. This is the "leave portals on screen at all times" fix
-			    (the central reason for Slice 1). Bulk members render with
-			    `marker={null}` so only structural geometry shows — no
-			    portal-orange / boundary-line endpoint labels — keeping the
-			    inspector's editing cues isolated to the one section the user
-			    is actually editing. */}
-			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
-				const parts = key.split(':');
-				if (parts[0] !== 'section') return null;
-				const idx = Number(parts[1]);
-				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
-				const sec = data.sections[idx];
-				if (!sec) return null;
-				const y = idx < sectionYs.length ? sectionYs[idx] : 0;
-				return (
-					<SectionDetail
-						key={`bulk-detail-${idx}`}
-						section={sec}
-						root={data}
-						accessor={detailAccessor}
-						marker={null}
-						baseY={y}
-					/>
-				);
-			})}
 
 			{/* Corner picker spheres — click-to-select; the gizmo handles
 			    the drag once a corner is selected (per ADR-0010 / issue #73).
@@ -1166,10 +1116,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			{/* Gizmo gates on `isActive` so cross-Bundle gestures show
 			    exactly one gizmo on screen (per ADR-0010): the overlay
 			    matching the current selection renders it, every other
-			    overlay's gizmoPosition is suppressed. When no selection
-			    is in any AI Sections instance, no gizmo renders — the
-			    user clicks any section first to anchor the affordance,
-			    even for a cross-Bundle marquee. */}
+			    overlay's gizmoPosition is suppressed. */}
 			{isActive && gizmoPosition && (
 				<BulkTransformGizmo
 					position={gizmoPosition}
@@ -1179,11 +1126,8 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 					onCommit={handleGizmoCommit}
 					onCancel={handleGizmoCancel}
 					// Pivot drag-reposition is bulk-only for now (issue #76).
-					// Wire the callbacks only when the bulk gizmo is up; the
-					// gizmo renders the pivot handle iff `onPivotMove` is
-					// provided. Sub-entity gizmos keep the legacy fixed-pivot
-					// behaviour (their pivot IS the entity position, so there's
-					// nothing meaningful to drag-reposition).
+					// Sub-entity gizmos keep the legacy fixed-pivot behaviour
+					// (their pivot IS the entity position).
 					onPivotMove={isBulkActive ? handlePivotMove : undefined}
 					onPivotCommit={isBulkActive ? handlePivotCommit : undefined}
 					onPivotCancel={isBulkActive ? handlePivotCancel : undefined}
@@ -1195,11 +1139,9 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			    read three-fiber's per-frame state. */}
 			<CameraBridge bridge={cameraBridge} />
 
-			{/* DOM siblings — snap toggle, marquee rectangle, edge context
-			    menu, cascade-on hint — registered into the chrome's HTML
-			    slot. The slot renders these outside the Canvas in React-
-			    DOM-land, avoiding cross-reconciler portal quirks. */}
-			<HtmlSiblings
+			{/* DOM siblings — registered into the WorldViewport chrome's HTML
+			    slot, outside Canvas to avoid cross-reconciler portal quirks. */}
+			<OverlayHtmlSiblings
 				isActive={isActive}
 				snapEnabled={snapEnabled}
 				toggleSnap={() => setSnapEnabled((v) => !v)}
@@ -1210,13 +1152,12 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				edgeMenu={edgeMenu}
 				onDuplicateThroughEdge={handleDuplicateThroughEdge}
 				onCloseEdgeMenu={() => setEdgeMenu(null)}
-				// Cascade hint is renderable for in-flight gestures whose
-				// effective cascade is ON — section-scope and bulk only
-				// (sub-entity gizmo paths don't dispatch cascade-on ops
-				// yet, so the hint would lie). Reads `drag.target.kind`
-				// (the discriminator lives on the target, not on `drag`
-				// itself — earlier code shipped with `drag?.kind` which
-				// silently never matched).
+				// Cascade hint renders for in-flight gestures whose effective
+				// cascade is ON — section-scope and bulk only (sub-entity
+				// gizmo paths don't dispatch cascade-on ops yet). Reads
+				// `drag.target.kind` (the discriminator lives on the target,
+				// not on `drag` — earlier code shipped with `drag?.kind`
+				// which silently never matched).
 				cascadeActive={
 					drag != null &&
 					drag.delta.cascade === true &&
@@ -1228,231 +1169,4 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 		</>
 	);
 };
-
-// HtmlSiblings ─ encapsulates the DOM-overlay JSX so the registration deps
-// can be tracked precisely. The body is one big memoised JSX node passed to
-// the chrome's slot; re-registers only when the snapshot of overlay state
-// it captures actually changes.
-function HtmlSiblings({
-	isActive,
-	snapEnabled,
-	toggleSnap,
-	cascadeEnabled,
-	toggleCascade,
-	cameraBridge,
-	onMarquee,
-	edgeMenu,
-	onDuplicateThroughEdge,
-	onCloseEdgeMenu,
-	cascadeActive,
-	skippedSoupCount,
-	showSkippedSoupHint,
-}: {
-	isActive: boolean;
-	snapEnabled: boolean;
-	toggleSnap: () => void;
-	/** Sticky cascade toggle (CONTEXT.md / "Cascade"). When ON, gizmo
-	 *  gestures default to cascade-with-links (outside reverse-portal
-	 *  anchors + shared corners drag along). Shift inverts for one
-	 *  gesture (toggle=on + Shift = cascade off; toggle=off + Shift =
-	 *  cascade on). */
-	cascadeEnabled: boolean;
-	toggleCascade: () => void;
-	cameraBridge: React.MutableRefObject<CameraBridgeData | null>;
-	onMarquee: (frustum: THREE.Frustum, mode: 'add' | 'remove') => void;
-	edgeMenu: { x: number; y: number; sectionIndex: number; edgeIdx: number } | null;
-	onDuplicateThroughEdge: () => void;
-	onCloseEdgeMenu: () => void;
-	cascadeActive: boolean;
-	/** Distinct polygon-soup count across the workspace's active PSL bulk.
-	 *  Surfaces in the gizmo's "N polygon soups not transformed" hint when
-	 *  the Selection is mixed (issue #82). */
-	skippedSoupCount: number;
-	/** True when the hint is renderable — the AI-sections side has a gizmo
-	 *  (`gizmoPosition != null`) AND the PSL side has polygon-soup polys
-	 *  to skip (`skippedSoupCount > 0`). Soup-only Selections fall through
-	 *  to no-gizmo + no-hint because there's no AI section to anchor on. */
-	showSkippedSoupHint: boolean;
-}) {
-	const node = useMemo(
-		() => (
-			<>
-				<MarqueeSelector
-					bridge={cameraBridge}
-					far={50000}
-					onMarquee={onMarquee}
-					hintIdle="press B to box-select AI sections"
-				/>
-
-				{/* Snap + Cascade toggle row. Wrapped in a flex container so the
-				    two buttons layout side-by-side without per-button absolute
-				    positioning — the Snap label's width varies with on/off, so
-				    a guessed `left: NNpx` on the Cascade button overlapped at
-				    some labels. */}
-				<div
-					style={{
-						position: 'absolute',
-						top: 8,
-						left: 8,
-						display: 'flex',
-						alignItems: 'center',
-						gap: 6,
-						pointerEvents: 'none', // children opt back in
-					}}
-				>
-					<button
-						type="button"
-						onClick={toggleSnap}
-						title={snapEnabled
-							? 'Snap to edges: ON (S to toggle)'
-							: 'Snap to edges: OFF (S to toggle)'}
-						aria-pressed={snapEnabled}
-						style={{
-							display: 'flex',
-							alignItems: 'center',
-							gap: 6,
-							padding: '4px 8px',
-							borderRadius: 6,
-							fontSize: 11,
-							fontFamily: 'monospace',
-							border: '1px solid rgba(255,255,255,0.15)',
-							background: snapEnabled ? 'rgba(80, 170, 110, 0.85)' : 'rgba(20, 22, 28, 0.85)',
-							color: snapEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
-							cursor: 'pointer',
-							userSelect: 'none',
-							boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-							pointerEvents: 'auto',
-						}}
-					>
-						<Magnet size={14} />
-						<span>Snap{snapEnabled ? ' · on' : ' · off'}</span>
-						<span style={{ opacity: 0.5, fontSize: 10 }}>S</span>
-					</button>
-
-					<button
-						type="button"
-						onClick={toggleCascade}
-						title={cascadeEnabled
-							? 'Keep connections (cascade): ON — hold Shift on a gesture for non-cascading (C to toggle)'
-							: 'Keep connections (cascade): OFF — hold Shift on a gesture for cascading (C to toggle)'}
-						aria-pressed={cascadeEnabled}
-						style={{
-							display: 'flex',
-							alignItems: 'center',
-							gap: 6,
-							padding: '4px 8px',
-							borderRadius: 6,
-							fontSize: 11,
-							fontFamily: 'monospace',
-							border: '1px solid rgba(255,255,255,0.15)',
-							// Magenta tint when ON — matches the in-flight cascade
-							// hint halo / status badge below, so the user can
-							// associate the toggle with what they'll see when a
-							// gesture fires.
-							background: cascadeEnabled ? 'rgba(200, 80, 180, 0.85)' : 'rgba(20, 22, 28, 0.85)',
-							color: cascadeEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
-							cursor: 'pointer',
-							userSelect: 'none',
-							boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-							pointerEvents: 'auto',
-						}}
-					>
-						<Link2 size={14} />
-						<span>Cascade{cascadeEnabled ? ' · on' : ' · off'}</span>
-						<span style={{ opacity: 0.5, fontSize: 10 }}>C</span>
-					</button>
-				</div>
-
-				{edgeMenu && (
-					<EdgeContextMenu
-						x={edgeMenu.x}
-						y={edgeMenu.y}
-						edgeIdx={edgeMenu.edgeIdx}
-						onClose={onCloseEdgeMenu}
-					>
-						<button
-							type="button"
-							className="w-full text-left flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
-							onClick={onDuplicateThroughEdge}
-						>
-							<Copy className="h-3.5 w-3.5" />
-							Duplicate section through this edge
-						</button>
-					</EdgeContextMenu>
-				)}
-
-				{/* Cascade status hint — appears top-centre during a Shift-
-				    held bulk-transform gesture (CONTEXT.md / "Cascade",
-				    ADR-0009, issue #75). Magenta tint matches the gizmo's
-				    cascade halo so the two cues read as one mode. */}
-				{cascadeActive && (
-					<div
-						role="status"
-						aria-live="polite"
-						style={{
-							position: 'absolute',
-							top: 8,
-							left: '50%',
-							transform: 'translateX(-50%)',
-							padding: '4px 10px',
-							borderRadius: 6,
-							fontSize: 11,
-							fontFamily: 'monospace',
-							border: '1px solid #ff66cc',
-							background: 'rgba(255, 102, 204, 0.18)',
-							color: '#ffaadd',
-							pointerEvents: 'none',
-							userSelect: 'none',
-							boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-							whiteSpace: 'nowrap',
-						}}
-					>
-						Cascade ON · outside neighbours follow
-					</div>
-				)}
-
-				{/* Polygon-soup skip hint — appears top-centre (offset down
-				    if the cascade hint is also on so they stack cleanly)
-				    when the Selection contains transformable entities AND
-				    1+ polygon soups (issue #82). Polygon soups have no
-				    world-space placement field (vertices u16-packed into
-				    local soup-space — CONTEXT.md / "Pivot"), so the
-				    transform delta is applied to the non-soup entities
-				    only. Amber tint distinguishes it from the cascade
-				    magenta — the two cues represent unrelated states. */}
-				{showSkippedSoupHint && (
-					<div
-						role="status"
-						aria-live="polite"
-						data-testid="bulk-transform-soup-skip-hint"
-						style={{
-							position: 'absolute',
-							top: cascadeActive ? 36 : 8,
-							left: '50%',
-							transform: 'translateX(-50%)',
-							padding: '4px 10px',
-							borderRadius: 6,
-							fontSize: 11,
-							fontFamily: 'monospace',
-							border: '1px solid #f59e0b',
-							background: 'rgba(245, 158, 11, 0.18)',
-							color: '#fbbf24',
-							pointerEvents: 'none',
-							userSelect: 'none',
-							boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-							whiteSpace: 'nowrap',
-						}}
-					>
-						{skippedSoupCount} polygon soup{skippedSoupCount === 1 ? '' : 's'} not transformed
-					</div>
-				)}
-			</>
-		),
-		[snapEnabled, toggleSnap, cascadeEnabled, toggleCascade, cameraBridge, onMarquee, edgeMenu, onDuplicateThroughEdge, onCloseEdgeMenu, cascadeActive, showSkippedSoupHint, skippedSoupCount],
-	);
-	// Pass `null` when this overlay isn't the active resource so the chrome
-	// drops our marquee / snap / context menu — see ADR-0007 / issue #24.
-	useWorldViewportHtmlSlot(isActive ? node : null);
-	return null;
-}
 
