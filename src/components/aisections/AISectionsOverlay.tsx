@@ -34,28 +34,12 @@ import * as THREE from 'three';
 import type { ParsedAISectionsV12, AISection } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
-	bulkAISectionsAxes,
-	bulkRotateEntitiesYaw,
 	bulkSelectionPivot,
-	bulkTranslateEntities,
 	duplicateSectionThroughEdge,
-	rotateSectionAroundCentroidYaw,
-	rotateSectionWithLinksYaw,
-	translateBoundaryLineEndpointRigid,
-	translateCornerRigid,
-	translateNoGoLineEndpointRigid,
-	translatePortalAnchorRigid,
-	translateSectionRigid,
-	translateSectionWithLinks,
 	type AISectionEntityRef,
 } from '@/lib/core/aiSectionsOps';
 import { resolveSectionYs } from '@/lib/core/aiSectionY';
 import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
-import {
-	TRANSFORM_AXES_FULL_3D,
-	TRANSFORM_AXES_XZ_PACKED,
-	type TransformAxes,
-} from '@/lib/core/transformAxes';
 import {
 	type BulkTransformDelta,
 	identityDelta,
@@ -91,13 +75,27 @@ import { useCrossBundleBulkController } from '@/components/workspace/useCrossBun
 import { useWorkspacePSLBulk } from '@/components/workspace/PSLBulkProvider';
 import {
 	useBatchedSelection,
-	selectionKey,
 	type Selection,
 } from '@/components/schema-editor/viewports/selection';
 import type { ThreeEvent } from '@react-three/fiber';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from '@/components/schema-editor/viewports/WorldViewport.types';
 import { useWorldViewportHtmlSlot } from '@/components/schema-editor/viewports/WorldViewport';
+import type { ActiveDrag, DragTarget } from './aiSectionsDrag.types';
+import { applyDragToModel } from './applyDragToModel';
+import {
+	deriveAffectedNeighbours,
+	derivePreviewCorners,
+	derivePreviewModel,
+	derivePreviewSection,
+	v12Corners,
+} from './aiSectionsPreview';
+import {
+	BULK_GIZMO_Y_OFFSET,
+	deriveGizmoAxes,
+	deriveGizmoPosition,
+} from './aiSectionsGizmoGeometry';
+import { CornerPickers } from './CornerPickers';
 
 // ---------------------------------------------------------------------------
 // Path ↔ Selection codec — re-exported from the shared module so V12 and V4/V6
@@ -147,10 +145,6 @@ const v12Accessor: SectionAccessor<AISection> = {
 	cornerZ: (s, i) => s.corners[i].y,
 	color: (s) => SPEED_COLORS_RGB[s.speed] ?? FALLBACK_RGB,
 };
-
-function v12Corners(section: AISection): Corner[] {
-	return section.corners.map((c) => ({ x: c.x, z: c.y }));
-}
 
 const SPEED_LABEL = ['VSLOW', 'SLOW', 'NORM', 'FAST', 'VFAST'];
 
@@ -204,32 +198,10 @@ function makeV12Accessor(sectionYs: ArrayLike<number>): SectionDetailAccessor<AI
 // Overlay
 // ---------------------------------------------------------------------------
 
-// While a drag is in flight we keep the live delta in local state so the
-// underlying model isn't touched until release — one gesture commits as
-// one Workspace-undo entry (CONTEXT.md / "Bulk transform"). The drag is
-// keyed by the gizmo target — whole section, single corner, single portal
-// anchor, single boundary-line endpoint, single no-go-line endpoint, or
-// a multi-Selection bulk (issue #74). All flow through the same
-// `BulkTransformGizmo` per ADR-0010; the target kind decides which
-// no-cascade op runs on commit. The bulk variant carries the flattened
-// `AISectionEntityRef[]` and the Pivot captured at gesture start (snapshot
-// prevents drift mid-rotate). Per ADR-0009 none of these cascade.
-type DragTarget =
-	| { kind: 'section'; sectionIdx: number }
-	| {
-			kind: 'bulk';
-			entities: readonly AISectionEntityRef[];
-			pivot: { x: number; y: number; z: number };
-		}
-	| { kind: 'corner'; sectionIdx: number; cornerIdx: number }
-	| { kind: 'portalAnchor'; sectionIdx: number; portalIdx: number }
-	| { kind: 'boundaryLineEndpoint'; sectionIdx: number; portalIdx: number; lineIdx: number; endIdx: number }
-	| { kind: 'noGoLineEndpoint'; sectionIdx: number; lineIdx: number; endIdx: number };
-
-type ActiveDrag = {
-	target: DragTarget;
-	delta: BulkTransformDelta;
-};
+// Drag state — see `./aiSectionsDrag.types.ts`. One gesture commits as
+// one Workspace-undo entry (CONTEXT.md / "Bulk transform"). All drag
+// flavours flow through the same `BulkTransformGizmo` per ADR-0010; per
+// ADR-0009 none of these cascade by default.
 
 type Props = {
 	data: ParsedAISectionsV12;
@@ -547,191 +519,39 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 			? sectionYs[hoverSectionIndex]
 			: 0;
 
-	// While a drag is in flight, run the relevant op on the live delta to
-	// derive a preview model. Used for the selection overlay on the source
-	// section so the user sees the gesture in real time. Section-scope drags
-	// pick between no-cascade ops (the ADR-0009 default) and cascade-on ops
-	// (`translateSectionWithLinks` / `rotateSectionWithLinksYaw`) based on
-	// `delta.cascade` — captured at gesture start from Shift, per issue #75.
-	// Sub-entity drags (corner, portal anchor, line endpoint) are always
-	// no-cascade in this slice; extending the cascade modifier to sub-
-	// entities is tracked as a follow-up.
-	const previewModel: ParsedAISectionsV12 | null = useMemo(() => {
-		if (!drag || isIdentityDelta(drag.delta)) return null;
-		try {
-			return applyDragToModel(data, drag);
-		} catch {
-			return null;
-		}
-	}, [data, drag]);
+	// Live-drag preview math — see `./aiSectionsPreview.ts`. Section-scope
+	// drags branch between cascade-off (ADR-0009 default) and cascade-on
+	// (`delta.cascade`, captured from Shift per issue #75); sub-entity
+	// drags are always cascade-off in this slice.
+	const previewModel = useMemo(() => derivePreviewModel(data, drag), [data, drag]);
 
-	const previewSection: AISection | null = useMemo(() => {
-		if (!selSection) return null;
-		if (!previewModel || selectedSectionIndex == null) return selSection;
-		return previewModel.sections[selectedSectionIndex] ?? selSection;
-	}, [selSection, previewModel, selectedSectionIndex]);
-
-	const previewCorners = useMemo(
-		() => (previewSection ? v12Corners(previewSection) : null),
-		[previewSection],
+	const previewSection = useMemo(
+		() => derivePreviewSection(selSection, previewModel, selectedSectionIndex),
+		[selSection, previewModel, selectedSectionIndex],
 	);
+
+	const previewCorners = useMemo(() => derivePreviewCorners(previewSection), [previewSection]);
 	const hovCorners = useMemo(
 		() => (hovSection ? v12Corners(hovSection) : null),
 		[hovSection],
 	);
 
-	const affectedNeighbours = useMemo(() => {
-		if (!previewModel || selectedSectionIndex == null) return [];
-		const out: { idx: number; corners: Corner[] }[] = [];
-		for (let i = 0; i < previewModel.sections.length; i++) {
-			if (i === selectedSectionIndex) continue;
-			// Skip bulk members — the yellow bulk-member render loop below
-			// already paints them with the live preview geometry. Without
-			// this filter, every bulk member gets a second SelectionOverlay
-			// (in the orange "cascade" colour) on top of its yellow outline,
-			// doubling the per-frame ShapeGeometry / Line allocation work for
-			// large bulks. Genuine cascade-touched outside neighbours
-			// (single-section + Shift drag) aren't in the bulk and still
-			// render here.
-			if (bulkSectionIndices.has(i)) continue;
-			if (previewModel.sections[i] !== data.sections[i]) {
-				out.push({ idx: i, corners: v12Corners(previewModel.sections[i]) });
-			}
-		}
-		return out;
-	}, [previewModel, selectedSectionIndex, data, bulkSectionIndices]);
+	const affectedNeighbours = useMemo(
+		() => deriveAffectedNeighbours(previewModel, selectedSectionIndex, bulkSectionIndices, data),
+		[previewModel, selectedSectionIndex, data, bulkSectionIndices],
+	);
 
-	// The gizmo anchors at a different point depending on the selection kind.
-	// `previewSection` is the live source section under any in-flight drag,
-	// so the anchor tracks the gesture frame-for-frame. Returns null when
-	// there is no selectable target or its data isn't resolvable.
-	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
-		if (!gizmoTarget) return null;
-		// Bulk gizmo anchors at the (snapshotted) Pivot, riding along with
-		// the live translate delta so it visually tracks the bulk during a
-		// translate gesture. Rotation doesn't move the pivot itself (the
-		// pivot IS the fixed point a rigid body rotates around). Pivot drag
-		// (issue #76) and numeric-panel pivot edit (issue #81) both write
-		// to `bulkPivotOverride` — `gizmoTarget.pivot` already incorporates
-		// it via the gizmoTarget memo, so we don't need to layer it here.
-		if (gizmoTarget.kind === 'bulk') {
-			const dxyz = drag?.target.kind === 'bulk' ? drag.delta.translate : { x: 0, y: 0, z: 0 };
-			return [
-				gizmoTarget.pivot.x + dxyz.x,
-				gizmoTarget.pivot.y + 1.5 + dxyz.y,
-				gizmoTarget.pivot.z + dxyz.z,
-			];
-		}
-		// Numeric-panel pivot override for sub-entity selections (issue #81).
-		// When the user types a pivot while a sub-entity is selected, the
-		// gizmo follows the typed coordinate verbatim. Translate preview
-		// still rides on top so a typed-Δ live update visually moves the
-		// gizmo along with the staged delta.
-		if (bulkPivotOverride) {
-			const dxyz = drag?.delta.translate ?? { x: 0, y: 0, z: 0 };
-			return [
-				bulkPivotOverride.x + dxyz.x,
-				bulkPivotOverride.y + dxyz.y,
-				bulkPivotOverride.z + dxyz.z,
-			];
-		}
-		// All sub-entity targets live in the same source section — read it
-		// off `previewSection` (which already accounts for the in-flight drag)
-		// when available, otherwise fall back to the unmodified data.
-		const liveSection = previewSection
-			?? data.sections[gizmoTarget.sectionIdx]
-			?? null;
-		if (!liveSection) return null;
-		switch (gizmoTarget.kind) {
-			case 'section': {
-				if (liveSection.corners.length === 0) return null;
-				let sx = 0, sz = 0;
-				for (const c of liveSection.corners) { sx += c.x; sz += c.y; }
-				const n = liveSection.corners.length;
-				return [sx / n, selectedSectionY + 1.5, sz / n];
-			}
-			case 'corner': {
-				const c = liveSection.corners[gizmoTarget.cornerIdx];
-				if (!c) return null;
-				// Corner is a Vector2 on XZ; lift the gizmo just above the
-				// section's resolved ground Y so it floats clear of the fill mesh.
-				return [c.x, selectedSectionY + 1.5, c.y];
-			}
-			case 'portalAnchor': {
-				const p = liveSection.portals[gizmoTarget.portalIdx];
-				if (!p) return null;
-				// Portal anchor is full Vector3 — anchor the gizmo at the
-				// stored Y verbatim (the inspector edits portal.position.y).
-				return [p.position.x, p.position.y, p.position.z];
-			}
-			case 'boundaryLineEndpoint': {
-				const p = liveSection.portals[gizmoTarget.portalIdx];
-				if (!p) return null;
-				const line = p.boundaryLines[gizmoTarget.lineIdx];
-				if (!line) return null;
-				// Y comes from the parent portal's anchor (matches
-				// SectionDetail's boundary-line rendering convention).
-				const v = line.verts;
-				const x = gizmoTarget.endIdx === 0 ? v.x : v.z;
-				const z = gizmoTarget.endIdx === 0 ? v.y : v.w;
-				return [x, p.position.y, z];
-			}
-			case 'noGoLineEndpoint': {
-				const line = liveSection.noGoLines[gizmoTarget.lineIdx];
-				if (!line) return null;
-				// No-go lines have no anchor Y; sit on the section's
-				// resolved baseY (matches SectionDetail's noGo rendering).
-				const v = line.verts;
-				const x = gizmoTarget.endIdx === 0 ? v.x : v.z;
-				const z = gizmoTarget.endIdx === 0 ? v.y : v.w;
-				return [x, selectedSectionY + 0.5, z];
-			}
-		}
-	}, [gizmoTarget, previewSection, data, selectedSectionY, bulkPivotOverride, drag]);
+	// Gizmo anchor — see `./aiSectionsGizmoGeometry.ts`. Tracks the live
+	// drag via `previewSection`, layers `bulkPivotOverride` (issue #81)
+	// for sub-entity targets.
+	const gizmoPosition = useMemo(
+		() => deriveGizmoPosition(gizmoTarget, previewSection, data, selectedSectionY, bulkPivotOverride, drag),
+		[gizmoTarget, previewSection, data, selectedSectionY, bulkPivotOverride, drag],
+	);
 
-	// The gizmo's axis profile depends on what's being moved:
-	//   - section / corner / line endpoint: XZ-packed (ADR-0011 — no Y component)
-	//   - portal anchor: full 3D (Vector3, free Y)
-	// Single-point sub-entities (corner, endpoint) also auto-disable rotate
-	// rings — rotating a single point around itself is a no-op, so we hide
-	// the affordance rather than let the user grab it. We achieve this by
-	// AND-ing a "no rotation" mask into the axes for those targets.
-	const gizmoAxes = useMemo<TransformAxes>(() => {
-		if (!gizmoTarget) return TRANSFORM_AXES_FULL_3D;
-		switch (gizmoTarget.kind) {
-			case 'section':
-				return TRANSFORM_AXES_XZ_PACKED;
-			case 'bulk':
-				// Every AI-section entity is XZ-packed in some way — pitch
-				// and roll auto-disable per ADR-0011. `bulkAISectionsAxes`
-				// returns the AND-intersection of every selected entity's
-				// axes profile so future bulks mixing full-3D resources
-				// (trigger boxes, Matrix44 vehicles in later issues) widen
-				// the rings accordingly.
-				return bulkAISectionsAxes(gizmoTarget.entities) ?? TRANSFORM_AXES_XZ_PACKED;
-			case 'corner':
-				// Vector2 corners — translate.y is rendered but discarded on
-				// commit (see handleGizmoCommit). Rotate disabled (single point).
-				return {
-					translate: { x: true, y: false, z: true },
-					rotate: { x: false, y: false, z: false },
-				};
-			case 'portalAnchor':
-				// Full Vector3, no rotation (single point has no orientation).
-				return {
-					translate: { x: true, y: true, z: true },
-					rotate: { x: false, y: false, z: false },
-				};
-			case 'boundaryLineEndpoint':
-			case 'noGoLineEndpoint':
-				// XZ-only packed Vector4 — translate.y discarded on commit.
-				// Rotate disabled (single point).
-				return {
-					translate: { x: true, y: false, z: true },
-					rotate: { x: false, y: false, z: false },
-				};
-		}
-	}, [gizmoTarget]);
+	// Axes profile per target kind (ADR-0011): section is XZ-packed,
+	// portalAnchor is full 3D, single-point sub-entities disable rotate.
+	const gizmoAxes = useMemo(() => deriveGizmoAxes(gizmoTarget), [gizmoTarget]);
 
 	const gizmoPixelSize = 90;
 
@@ -979,14 +799,10 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 	// pivot drag through the same channel, but the gizmoPosition memo
 	// for those targets currently anchors at the entity itself; until
 	// per-target overrides are wired, pivot drag is a no-op for them.
-	// Gizmo Y-offset used by `gizmoPosition` for bulk to lift the handle
-	// above the section visualization. The pivot we store must be in the
-	// underlying-data coordinates (not the visualised gizmo position), so
-	// we subtract the offset on incoming pivot positions from the gizmo and
-	// re-add it when rendering. Keeps the stored pivot bit-identical to
-	// the median computed by `bulkSelectionPivot`.
-	const BULK_GIZMO_Y_OFFSET = 1.5;
-
+	// The stored pivot uses underlying-data coordinates, NOT the visualised
+	// gizmo position — so we subtract `BULK_GIZMO_Y_OFFSET` on incoming
+	// gizmo-world positions and re-add it when rendering. Keeps the stored
+	// pivot bit-identical to the median computed by `bulkSelectionPivot`.
 	const handlePivotMove = useCallback(
 		(world: { x: number; y: number; z: number }) => {
 			if (!isBulkActive) return;
@@ -1640,164 +1456,3 @@ function HtmlSiblings({
 	return null;
 }
 
-// ---------------------------------------------------------------------------
-// applyDragToModel — single dispatcher from a gizmo gesture's (target, delta)
-// to the no-cascade op that mutates the model.
-//
-// Used twice in the overlay:
-//   - inside `previewModel` (live drag-frame derivation; no setResource)
-//   - inside `handleGizmoCommit` (one-shot on release; setResource pushes
-//     exactly one HistoryCommit — the one-undo-entry-per-gesture contract)
-//
-// Keeping the dispatch in one helper means preview and commit cannot drift —
-// what the user sees during the drag is bit-for-bit what lands in the model
-// on release. The corner / endpoint paths discard `delta.translate.y` because
-// the underlying storage (Vector2 corners, packed-Vector4 line segments) has
-// no Y component (ADR-0011). Section-scope drags also apply yaw rotation
-// after translate, around the *post-translate* centroid, so combined gestures
-// compose as a single rigid body (the same shape Blender's gizmo uses).
-// ---------------------------------------------------------------------------
-function applyDragToModel(
-	model: ParsedAISectionsV12,
-	drag: ActiveDrag,
-): ParsedAISectionsV12 {
-	const { target, delta } = drag;
-	switch (target.kind) {
-		case 'section': {
-			let next = model;
-			if (delta.cascade) {
-				// Cascade-on (Shift at gesture start, per issue #75 + ADR-0009):
-				// translate-with-links cascades neighbour reverse-portal anchors
-				// + shared corners; rotate-with-links does the same around the
-				// post-translate source centroid. translate.y is dropped because
-				// the cascade-on ops are XZ-only (the legacy auto-cascade path
-				// never moved on Y).
-				if (delta.translate.x !== 0 || delta.translate.z !== 0) {
-					next = translateSectionWithLinks(next, target.sectionIdx, {
-						x: delta.translate.x,
-						z: delta.translate.z,
-					});
-				}
-				if (delta.rotate.y !== 0) {
-					next = rotateSectionWithLinksYaw(next, target.sectionIdx, delta.rotate.y);
-				}
-				return next;
-			}
-			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
-				next = translateSectionRigid(next, target.sectionIdx, delta.translate);
-			}
-			if (delta.rotate.y !== 0) {
-				next = rotateSectionAroundCentroidYaw(next, target.sectionIdx, delta.rotate.y);
-			}
-			return next;
-		}
-		case 'bulk': {
-			// Multi-Selection rigid body (issue #74). Translate every entity
-			// by the same delta, then yaw-rotate around the post-translate
-			// pivot — same compose order as the single-section path so
-			// preview and commit agree frame-for-frame. The pivot is the
-			// snapshot from the gesture's first frame (drift-prevented).
-			let next = model;
-			if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
-				next = bulkTranslateEntities(next, target.entities, delta.translate);
-			}
-			if (delta.rotate.y !== 0) {
-				next = bulkRotateEntitiesYaw(
-					next,
-					target.entities,
-					{ x: target.pivot.x + delta.translate.x, z: target.pivot.z + delta.translate.z },
-					delta.rotate.y,
-				);
-			}
-			return next;
-		}
-		case 'corner':
-			// XZ-only — drop translate.y.
-			return translateCornerRigid(model, target.sectionIdx, target.cornerIdx, {
-				x: delta.translate.x,
-				z: delta.translate.z,
-			});
-		case 'portalAnchor':
-			// Vector3 anchor — full XYZ.
-			return translatePortalAnchorRigid(model, target.sectionIdx, target.portalIdx, delta.translate);
-		case 'boundaryLineEndpoint':
-			return translateBoundaryLineEndpointRigid(
-				model,
-				target.sectionIdx,
-				target.portalIdx,
-				target.lineIdx,
-				target.endIdx,
-				{ x: delta.translate.x, z: delta.translate.z },
-			);
-		case 'noGoLineEndpoint':
-			return translateNoGoLineEndpointRigid(
-				model,
-				target.sectionIdx,
-				target.lineIdx,
-				target.endIdx,
-				{ x: delta.translate.x, z: delta.translate.z },
-			);
-	}
-}
-
-// ---------------------------------------------------------------------------
-// CornerPickers — small click-to-select spheres at each corner of the
-// inspector-picked section.
-//
-// Pre-issue-73 the overlay rendered `CornerHandles` here, which combined
-// pick + drag. Per ADR-0010 the gizmo now owns the drag, so these are
-// click-only pickers: tap a sphere and the inspector deepens its selection
-// to `['sections', i, 'corners', c]`, which makes the gizmo anchor at the
-// corner (translate only that corner on the next drag).
-// ---------------------------------------------------------------------------
-const CORNER_PICKER_RADIUS = 0.8;
-const CORNER_PICKER_HIT = 1.6;
-
-function CornerPickers({
-	corners,
-	baseY,
-	selectedCornerIdx,
-	onPick,
-}: {
-	corners: readonly Corner[];
-	baseY: number;
-	selectedCornerIdx: number | null;
-	onPick: (cornerIdx: number) => void;
-}) {
-	const [hover, setHover] = useState<number | null>(null);
-	return (
-		<>
-			{corners.map((c, i) => {
-				const isSelected = selectedCornerIdx === i;
-				const isHover = hover === i;
-				const color = isSelected ? '#ffffff' : isHover ? '#ffd470' : '#ff8833';
-				return (
-					<group key={`corner-pick-${i}`} position={[c.x, baseY + 0.8, c.z]}>
-						<mesh>
-							<sphereGeometry args={[CORNER_PICKER_RADIUS, 12, 8]} />
-							<meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.25} />
-						</mesh>
-						{/* Invisible larger hit volume — keeps picking forgiving
-						    on small spheres at far camera distances. */}
-						<mesh
-							onClick={(e) => { e.stopPropagation(); onPick(i); }}
-							onPointerOver={(e) => {
-								e.stopPropagation();
-								setHover(i);
-								document.body.style.cursor = 'pointer';
-							}}
-							onPointerOut={(e) => {
-								e.stopPropagation();
-								setHover((h) => (h === i ? null : h));
-								document.body.style.cursor = 'auto';
-							}}
-						>
-							<sphereGeometry args={[CORNER_PICKER_HIT, 8, 6]} />
-							<meshBasicMaterial transparent opacity={0} />
-						</mesh>
-					</group>
-				);
-			})}
-		</>
-	);
-}
