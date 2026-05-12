@@ -409,6 +409,20 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 			: null),
 		[selectedSectionIndex],
 	);
+	// `applyColor` is intentionally a no-op: selection visuals for AI Sections
+	// flow through the sibling overlays (SelectedSectionLayer / HoverSectionLayer /
+	// BulkSectionLayer / CascadeNeighbourLayer) rather than per-vertex paint on
+	// the merged BatchedSections geometry.
+	//
+	// Why partial migration rather than the canonical ZoneListOverlay pattern:
+	// the in-flight drag preview, cascade-neighbour highlights, and bulk-drag
+	// previewModel layers all need their own sibling meshes regardless (they
+	// don't fit the hook's primary/hover/bulk/none state machine). Restamping
+	// per-section vertex slices on every selection change on ~8780 V12 sections
+	// would also trade an O(1) draw-call layer for an O(N) JS callback walk
+	// — same trade-off PolygonSoupListOverlay landed on (dc2b894).
+	//
+	// Tracked: #49.
 	const noopApplyColor = useCallback(() => {}, []);
 	const faceToEntity = useCallback(
 		(face: number) =>
