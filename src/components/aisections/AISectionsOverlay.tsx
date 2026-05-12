@@ -96,8 +96,8 @@ import {
 } from '@/components/schema-editor/viewports/selection';
 import type { ThreeEvent } from '@react-three/fiber';
 import type { NodePath } from '@/lib/schema/walk';
-import type { WorldOverlayComponent } from './WorldViewport.types';
-import { useWorldViewportHtmlSlot } from './WorldViewport';
+import type { WorldOverlayComponent } from '@/components/schema-editor/viewports/WorldViewport.types';
+import { useWorldViewportHtmlSlot } from '@/components/schema-editor/viewports/WorldViewport';
 
 // ---------------------------------------------------------------------------
 // Path ↔ Selection codec — re-exported from the shared module so V12 and V4/V6

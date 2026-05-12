@@ -24,7 +24,7 @@ import { SectionSpeed } from '@/lib/core/aiSections';
 import type { NodePath } from '@/lib/schema/walk';
 import { aiSectionSelectionCodec } from '../AISectionsOverlay';
 import { legacyAISectionSelectionCodec } from '../AISectionsLegacyOverlay';
-import { selectionKey } from '../selection';
+import { selectionKey } from '@/components/schema-editor/viewports/selection';
 
 describe('AISections overlay bulk wiring', () => {
 	it('V12 codec produces a `section` selection that round-trips to the bulk-Set key', () => {
