@@ -25,3 +25,8 @@ export {
 	selectionToMarker,
 	type AISectionMarker,
 } from './selection';
+export { SelectedSectionLayer } from './SelectedSectionLayer';
+export { HoverSectionLayer } from './HoverSectionLayer';
+export { BulkSectionLayer } from './BulkSectionLayer';
+export { CascadeNeighbourLayer } from './CascadeNeighbourLayer';
+export { OverlayHtmlSiblings } from './OverlayHtmlSiblings';

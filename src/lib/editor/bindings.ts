@@ -21,8 +21,8 @@ import { streetDataExtensions } from '@/components/schema-editor/extensions/stre
 import { trafficDataExtensions } from '@/components/schema-editor/extensions/trafficDataExtensions';
 import { triggerDataExtensions } from '@/components/schema-editor/extensions/triggerDataExtensions';
 import { vehicleListExtensions } from '@/components/schema-editor/extensions/vehicleListExtensions';
-import { AISectionsLegacyOverlay } from '@/components/schema-editor/viewports/AISectionsLegacyOverlay';
-import { AISectionsOverlay } from '@/components/schema-editor/viewports/AISectionsOverlay';
+import { AISectionsLegacyOverlay } from '@/components/aisections/AISectionsLegacyOverlay';
+import { AISectionsOverlay } from '@/components/aisections/AISectionsOverlay';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
 import { StreetDataOverlay } from '@/components/schema-editor/viewports/StreetDataOverlay';
 import { TrafficDataOverlay } from '@/components/schema-editor/viewports/TrafficDataOverlay';
