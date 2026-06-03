@@ -34,6 +34,7 @@ import { useMemo } from 'react';
 import { Html, Line } from '@react-three/drei';
 import { portalGeo, portalMat, portalSelMat } from './materials';
 import type { AISectionMarker } from './selection';
+import { isDragRelease } from '@/components/schema-editor/viewports/selection/dragGuard';
 
 // ---------------------------------------------------------------------------
 // Display shapes — what the accessors produce. These are intentionally
@@ -143,7 +144,7 @@ export function SectionDetail<TSection, TRoot>({
 						<mesh
 							geometry={portalGeo}
 							material={isSel ? portalSelMat : portalMat}
-							onClick={onPickPortal ? (e) => { e.stopPropagation(); onPickPortal(pi); } : undefined}
+							onClick={onPickPortal ? (e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onPickPortal(pi); } : undefined}
 						/>
 						<Html center distanceFactor={150} style={{ pointerEvents: 'none' }}>
 							<div style={{
@@ -178,7 +179,7 @@ export function SectionDetail<TSection, TRoot>({
 							<Line points={[start, end]} color={isWholeLineHighlighted ? '#ffaa33' : '#cc3333'} lineWidth={isWholeLineHighlighted ? 3 : 2} />
 							<mesh
 								position={[(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2]}
-								onClick={onPickBoundaryLine ? (e) => { e.stopPropagation(); onPickBoundaryLine(pi, li); } : undefined}
+								onClick={onPickBoundaryLine ? (e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onPickBoundaryLine(pi, li); } : undefined}
 							>
 								<sphereGeometry args={[2, 6, 4]} />
 								<meshBasicMaterial transparent opacity={0} />
@@ -244,7 +245,7 @@ export function SectionDetail<TSection, TRoot>({
 						<Line points={[start, end]} color={isWholeLineHighlighted ? '#ffaa33' : '#cc8833'} lineWidth={isWholeLineHighlighted ? 3 : 2} />
 						<mesh
 							position={[(start[0] + end[0]) / 2, lineY, (start[2] + end[2]) / 2]}
-							onClick={onPickNoGoLine ? (e) => { e.stopPropagation(); onPickNoGoLine(li); } : undefined}
+							onClick={onPickNoGoLine ? (e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onPickNoGoLine(li); } : undefined}
 						>
 							<sphereGeometry args={[2, 6, 4]} />
 							<meshBasicMaterial transparent opacity={0} />
@@ -316,7 +317,7 @@ function EndpointPicker({
 			</mesh>
 			{onClick && (
 				<mesh
-					onClick={(e) => { e.stopPropagation(); onClick(); }}
+					onClick={(e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onClick(); }}
 					onPointerOver={(e) => {
 						e.stopPropagation();
 						document.body.style.cursor = 'pointer';

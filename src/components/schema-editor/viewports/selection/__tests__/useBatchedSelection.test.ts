@@ -22,6 +22,7 @@ import {
 import type { InstancedSelectionState } from '../useInstancedSelection';
 import { selectionKey, type Selection } from '../selection';
 import { SELECTION_THEME } from '../theme';
+import { isDragRelease, recordPointerDown } from '../dragGuard';
 
 // ---------------------------------------------------------------------------
 // Re-exports as smoke checks — index wiring + the hook is callable.
@@ -206,6 +207,7 @@ type FakeMouseEvent = {
 	stopPropagation: () => void;
 	shiftKey?: boolean;
 	ctrlKey?: boolean;
+	nativeEvent?: { clientX: number; clientY: number };
 };
 
 function dispatchClick(
@@ -219,6 +221,9 @@ function dispatchClick(
 	e: FakeMouseEvent,
 ): void {
 	e.stopPropagation();
+	// Mirror the real hook: bail when the click ends a drag. Only exercised
+	// when the test supplies nativeEvent coords (existing cases pass none).
+	if (e.nativeEvent && isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return;
 	if (e.faceIndex == null) return;
 	const entity = opts.faceToEntity(e.faceIndex);
 	if (entity < 0 || entity >= opts.count) return;
@@ -312,6 +317,29 @@ describe('useBatchedSelection — click dispatch', () => {
 		expect(onPick).toHaveBeenCalledWith(
 			{ kind: 'polygon', indices: [3, 7] },
 			expect.anything(),
+		);
+	});
+
+	it('skips selection when the click ends a drag (gizmo move / orbit)', () => {
+		recordPointerDown({ clientX: 0, clientY: 0 });
+		const onPick = vi.fn();
+		dispatchClick(
+			{ kind: 'zone', count: 10, faceToEntity, onPick },
+			{ faceIndex: 4, stopPropagation: vi.fn(), nativeEvent: { clientX: 200, clientY: 200 } },
+		);
+		expect(onPick).not.toHaveBeenCalled();
+	});
+
+	it('still selects on a click that barely moved (within slack)', () => {
+		recordPointerDown({ clientX: 100, clientY: 100 });
+		const onPick = vi.fn();
+		dispatchClick(
+			{ kind: 'zone', count: 10, faceToEntity, onPick },
+			{ faceIndex: 4, stopPropagation: vi.fn(), nativeEvent: { clientX: 101, clientY: 101 } },
+		);
+		expect(onPick).toHaveBeenCalledWith(
+			{ kind: 'zone', indices: [4] },
+			expect.objectContaining({ faceIndex: 4 }),
 		);
 	});
 

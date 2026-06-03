@@ -13,3 +13,5 @@ export { SELECTION_THEME } from './theme';
 export { useInstancedSelection } from './useInstancedSelection';
 
 export { useBatchedSelection } from './useBatchedSelection';
+
+export { isDragRelease } from './dragGuard';

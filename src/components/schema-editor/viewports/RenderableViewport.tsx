@@ -56,6 +56,7 @@ import {
 	locatorToMatrix4,
 } from './renderableDecodedContext';
 import { useSchemaEditor } from '../context';
+import { isDragRelease } from './selection';
 
 // =============================================================================
 // Colour picker — uses PlayerCarColours from the loaded bundle if available,
@@ -729,6 +730,7 @@ function RenderableMeshes({
 							}}
 							onClick={(e) => {
 								e.stopPropagation();
+								if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return;
 								onSelect({ ri, mi });
 							}}
 							onPointerOver={(e) => {

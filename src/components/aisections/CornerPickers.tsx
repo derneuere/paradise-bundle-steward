@@ -12,6 +12,7 @@
 
 import { useState } from 'react';
 import type { Corner } from '@/components/aisections/shared';
+import { isDragRelease } from '@/components/schema-editor/viewports/selection/dragGuard';
 
 const CORNER_PICKER_RADIUS = 0.8;
 const CORNER_PICKER_HIT = 1.6;
@@ -43,7 +44,7 @@ export function CornerPickers({
 						{/* Invisible larger hit volume — keeps picking forgiving
 						    on small spheres at far camera distances. */}
 						<mesh
-							onClick={(e) => { e.stopPropagation(); onPick(i); }}
+							onClick={(e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onPick(i); }}
 							onPointerOver={(e) => {
 								e.stopPropagation();
 								setHover(i);
