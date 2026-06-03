@@ -49,12 +49,10 @@
 // at once. See issue #35.
 
 import { useMemo, useRef, useState, useCallback } from 'react';
-import { Copy, Magnet } from 'lucide-react';
 import * as THREE from 'three';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
-import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import type {
 	ParsedAISectionsV4,
 	ParsedAISectionsV6,
@@ -75,12 +73,12 @@ import {
 	aiSectionsLegacySelectionCodec,
 	BatchedSections,
 	buildBatchedSections,
-	EdgeContextMenu,
-	EdgeHandles,
+	BulkSectionLayer,
+	CascadeNeighbourLayer,
+	HoverSectionLayer,
 	markerToSelection,
-	SectionDetail,
-	SectionLabel,
-	SelectionOverlay,
+	OverlayHtmlSiblings,
+	SelectedSectionLayer,
 	selectionToMarker,
 	type AISectionMarker,
 	type BatchedSectionsScene,
@@ -97,8 +95,7 @@ import {
 } from '@/components/schema-editor/viewports/selection';
 import type { ThreeEvent } from '@react-three/fiber';
 import type { NodePath } from '@/lib/schema/walk';
-import type { WorldOverlayComponent } from './WorldViewport.types';
-import { useWorldViewportHtmlSlot } from './WorldViewport';
+import type { WorldOverlayComponent } from '@/components/schema-editor/viewports/WorldViewport.types';
 
 // ---------------------------------------------------------------------------
 // Path ↔ Selection codec — re-exported from the shared module so V12 and V4/V6
@@ -412,6 +409,20 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 			: null),
 		[selectedSectionIndex],
 	);
+	// `applyColor` is intentionally a no-op: selection visuals for AI Sections
+	// flow through the sibling overlays (SelectedSectionLayer / HoverSectionLayer /
+	// BulkSectionLayer / CascadeNeighbourLayer) rather than per-vertex paint on
+	// the merged BatchedSections geometry.
+	//
+	// Why partial migration rather than the canonical ZoneListOverlay pattern:
+	// the in-flight drag preview, cascade-neighbour highlights, and bulk-drag
+	// previewModel layers all need their own sibling meshes regardless (they
+	// don't fit the hook's primary/hover/bulk/none state machine). Restamping
+	// per-section vertex slices on every selection change on ~8780 V12 sections
+	// would also trade an O(1) draw-call layer for an O(N) JS callback walk
+	// — same trade-off PolygonSoupListOverlay landed on (dc2b894).
+	//
+	// Tracked: #49.
 	const noopApplyColor = useCallback(() => {}, []);
 	const faceToEntity = useCallback(
 		(face: number) =>
@@ -579,81 +590,56 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 				onPointerOut={handlers.onPointerOut}
 			/>
 
-			{selCorners && <SelectionOverlay corners={selCorners} color="#ffaa33" />}
-			{hovCorners && hoverSectionIndex !== selectedSectionIndex && (
-				<SelectionOverlay corners={hovCorners} color="#66aaff" />
-			)}
-
-			{/* Yellow outline for every bulk member that ISN'T the inspector
-			    pick. See V12 overlay for the rationale. */}
-			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
-				const parts = key.split(':');
-				if (parts[0] !== 'section') return null;
-				const idx = Number(parts[1]);
-				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
-				const sec = sections[idx];
-				if (!sec) return null;
-				const corners = legacyCorners(sec);
-				return <SelectionOverlay key={`bulk-${idx}`} corners={corners} color="#ffd633" />;
-			})}
-
-			{drag && affectedNeighbours.map(({ idx, corners }) => (
-				<SelectionOverlay key={`cascade-${idx}`} corners={corners} color="#ddaa66" />
-			))}
-
-			{selCorners && previewSection && selectedSectionIndex != null && (
-				<SectionLabel corners={selCorners} color="#ffaa33">
-					Sec {selectedSectionIndex} | {DANGER_SHORT[previewSection.dangerRating] ?? previewSection.dangerRating}
-				</SectionLabel>
-			)}
+			{/* Hover blue outline + grey label. */}
 			{hovCorners && hovSection && hoverSectionIndex != null && hoverSectionIndex !== selectedSectionIndex && (
-				<SectionLabel corners={hovCorners} color="#aaaaaa">
-					Sec {hoverSectionIndex} | {DANGER_SHORT[hovSection.dangerRating] ?? hovSection.dangerRating}
-				</SectionLabel>
+				<HoverSectionLayer
+					corners={hovCorners}
+					labelText={`Sec ${hoverSectionIndex} | ${DANGER_SHORT[hovSection.dangerRating] ?? hovSection.dangerRating}`}
+				/>
 			)}
 
+			{/* Yellow outline + detail for every bulk member that isn't
+			    the inspector pick. Legacy data has no resolved-Y map; the
+			    shared layer drops to baseY=0 when sectionYs is omitted. */}
+			{sectionBulk && (
+				<BulkSectionLayer
+					bulkSet={sectionBulk.bulkSet}
+					selectedSectionIndex={selectedSectionIndex}
+					data={legacy}
+					sections={sections}
+					cornersOf={legacyCorners}
+					accessor={legacyDetailAccessor}
+					root={legacy}
+				/>
+			)}
+
+			{/* Cascade-affected outside neighbours during a drag (orange). */}
+			<CascadeNeighbourLayer
+				drag={drag}
+				affectedNeighbours={affectedNeighbours}
+			/>
+
+			{/* Inspector pick — orange outline, label, edge handles,
+			    SectionDetail with marker. V4/V6 has no per-endpoint
+			    sub-entity selection, so the endpoint pickers are left
+			    undefined. */}
 			{selectedSectionIndex != null && previewSection && selCorners && (
-				<>
-					<EdgeHandles
-						corners={selCorners}
-						hoveredEdge={hoveredEdge}
-						onHoverEdge={setHoveredEdge}
-						onContextMenu={handleEdgeContextMenu}
-					/>
-					<SectionDetail
-						section={previewSection}
-						root={legacy}
-						accessor={legacyDetailAccessor}
-						marker={marker}
-						baseY={0}
-						onPickPortal={handlePickPortal}
-						onPickBoundaryLine={handlePickBoundaryLine}
-						onPickNoGoLine={handlePickNoGoLine}
-					/>
-				</>
+				<SelectedSectionLayer
+					corners={selCorners}
+					section={previewSection}
+					baseY={0}
+					marker={marker}
+					root={legacy}
+					accessor={legacyDetailAccessor}
+					labelText={`Sec ${selectedSectionIndex} | ${DANGER_SHORT[previewSection.dangerRating] ?? previewSection.dangerRating}`}
+					hoveredEdge={hoveredEdge}
+					onHoverEdge={setHoveredEdge}
+					onContextMenu={handleEdgeContextMenu}
+					onPickPortal={handlePickPortal}
+					onPickBoundaryLine={handlePickBoundaryLine}
+					onPickNoGoLine={handlePickNoGoLine}
+				/>
 			)}
-
-			{/* Detail layer for every bulk member — keeps portals + boundary
-			    lines visible even when the inspector navigates away from
-			    AI Sections (the central "leave portals on screen" fix). */}
-			{sectionBulk && [...sectionBulk.bulkSet].map((key) => {
-				const parts = key.split(':');
-				if (parts[0] !== 'section') return null;
-				const idx = Number(parts[1]);
-				if (!Number.isFinite(idx) || idx === selectedSectionIndex) return null;
-				const sec = sections[idx];
-				if (!sec) return null;
-				return (
-					<SectionDetail
-						key={`bulk-detail-${idx}`}
-						section={sec}
-						root={legacy}
-						accessor={legacyDetailAccessor}
-						marker={null}
-						baseY={0}
-					/>
-				);
-			})}
 
 			{gizmoPosition && onChange && drag?.kind !== 'corner' && (
 				<TranslateGizmo
@@ -680,7 +666,7 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 			    read three-fiber's per-frame state. Mirrors V12. */}
 			<CameraBridge bridge={cameraBridge} />
 
-			<HtmlSiblings
+			<OverlayHtmlSiblings
 				isActive={isActive}
 				snapEnabled={snapEnabled}
 				toggleSnap={() => setSnapEnabled((v) => !v)}
@@ -695,97 +681,3 @@ export const AISectionsLegacyOverlay: WorldOverlayComponent<ParsedAISectionsV4 |
 	);
 };
 
-// HtmlSiblings — DOM-overlay JSX (snap toggle + edge context menu),
-// registered into the WorldViewport chrome's HTML slot so it floats above
-// the WebGL surface. Kept as a separate component (mirroring the V12
-// overlay) so the slot re-registration deps can be tracked precisely
-// without dragging in the rest of the overlay's state.
-function HtmlSiblings({
-	isActive,
-	snapEnabled,
-	toggleSnap,
-	cameraBridge,
-	onMarquee,
-	edgeMenu,
-	canDuplicate,
-	onDuplicateThroughEdge,
-	onCloseEdgeMenu,
-}: {
-	isActive: boolean;
-	snapEnabled: boolean;
-	toggleSnap: () => void;
-	cameraBridge: React.MutableRefObject<CameraBridgeData | null>;
-	onMarquee: (frustum: THREE.Frustum, mode: 'add' | 'remove') => void;
-	edgeMenu: { x: number; y: number; sectionIndex: number; edgeIdx: number } | null;
-	canDuplicate: boolean;
-	onDuplicateThroughEdge: () => void;
-	onCloseEdgeMenu: () => void;
-}) {
-	const node = useMemo(
-		() => (
-			<>
-				<MarqueeSelector
-					bridge={cameraBridge}
-					far={50000}
-					onMarquee={onMarquee}
-					hintIdle="press B to box-select AI sections"
-				/>
-
-				<button
-					type="button"
-					onClick={toggleSnap}
-					title={snapEnabled
-						? 'Snap to edges: ON (S to toggle)'
-						: 'Snap to edges: OFF (S to toggle)'}
-					aria-pressed={snapEnabled}
-					style={{
-						position: 'absolute',
-						top: 8,
-						left: 8,
-						display: 'flex',
-						alignItems: 'center',
-						gap: 6,
-						padding: '4px 8px',
-						borderRadius: 6,
-						fontSize: 11,
-						fontFamily: 'monospace',
-						border: '1px solid rgba(255,255,255,0.15)',
-						background: snapEnabled ? 'rgba(80, 170, 110, 0.85)' : 'rgba(20, 22, 28, 0.85)',
-						color: snapEnabled ? '#fff' : 'rgba(255,255,255,0.7)',
-						cursor: 'pointer',
-						userSelect: 'none',
-						boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-						pointerEvents: 'auto',
-					}}
-				>
-					<Magnet size={14} />
-					<span>Snap{snapEnabled ? ' · on' : ' · off'}</span>
-					<span style={{ opacity: 0.5, fontSize: 10 }}>S</span>
-				</button>
-
-				{edgeMenu && (
-					<EdgeContextMenu
-						x={edgeMenu.x}
-						y={edgeMenu.y}
-						edgeIdx={edgeMenu.edgeIdx}
-						onClose={onCloseEdgeMenu}
-					>
-						<button
-							type="button"
-							className="w-full text-left flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-							onClick={onDuplicateThroughEdge}
-							disabled={!canDuplicate}
-							title={canDuplicate ? undefined : 'No edit handler wired — overlay is read-only here'}
-						>
-							<Copy className="h-3.5 w-3.5" />
-							Duplicate section through this edge
-						</button>
-					</EdgeContextMenu>
-				)}
-			</>
-		),
-		[snapEnabled, toggleSnap, cameraBridge, onMarquee, edgeMenu, canDuplicate, onDuplicateThroughEdge, onCloseEdgeMenu],
-	);
-	useWorldViewportHtmlSlot(isActive ? node : null);
-	return null;
-}
