@@ -23,6 +23,7 @@ import * as THREE from 'three';
 import type { ThreeEvent } from '@react-three/fiber';
 import type { Selection } from './selection';
 import { selectionEquals } from './selection';
+import { isDragRelease } from './dragGuard';
 import { SELECTION_THEME, type SelectionTheme } from './theme';
 import {
 	computeInstanceState,
@@ -152,6 +153,10 @@ export function useBatchedSelection(
 	const onClick = useCallback(
 		(e: ThreeEvent<MouseEvent>) => {
 			e.stopPropagation();
+			// A click that ends a drag (gizmo move / camera orbit) must not
+			// re-select whatever sits under the cursor at release — R3F has no
+			// travel guard of its own. See dragGuard.ts.
+			if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return;
 			if (e.faceIndex == null) return;
 			const entity = faceToEntity(e.faceIndex);
 			if (entity < 0 || entity >= count) return;

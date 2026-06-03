@@ -46,6 +46,7 @@ import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
 import {
 	defineSelectionCodec,
+	isDragRelease,
 	SELECTION_THEME,
 	useInstancedSelection,
 	type Selection,
@@ -267,6 +268,7 @@ function BatchedRegionBoxes({
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
+		if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return;
 		if (e.instanceId != null && e.instanceId < regions.length) {
 			const r = regions[e.instanceId];
 			onPick({ kind: r.kind, indices: [r.index] });
@@ -352,7 +354,7 @@ function SpawnArrows({
 							geometry={coneGeo}
 							material={isSel ? spawnSelMat : spawnMat}
 							position={pos}
-							onClick={(e) => { e.stopPropagation(); onPick({ kind: 'spawn', indices: [i] }); }}
+							onClick={(e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onPick({ kind: 'spawn', indices: [i] }); }}
 						/>
 						<Line points={[pos, arrowEnd]} color={isSel ? '#ffaa33' : '#ffffff'} lineWidth={2} />
 						{isSel && (
@@ -427,7 +429,7 @@ function PlayerStartMarker({
 				geometry={playerConeGeo}
 				material={isSel ? playerSelMat : playerMat}
 				position={pos}
-				onClick={(e) => { e.stopPropagation(); onPick({ kind: 'playerStart', indices: [0] }); }}
+				onClick={(e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onPick({ kind: 'playerStart', indices: [0] }); }}
 			/>
 			<Line points={[pos, arrowEnd]} color="#ffcc00" lineWidth={3} />
 			<Html position={[pos[0], pos[1] + 15, pos[2]]} center distanceFactor={200} style={{ pointerEvents: 'none' }}>

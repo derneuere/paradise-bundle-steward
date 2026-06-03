@@ -23,6 +23,7 @@ import { useUpdateInstancedMesh } from '@/lib/three/scene/useUpdateInstancedMesh
 import type { Selection } from './selection';
 import { selectionEquals, selectionKey } from './selection';
 import { SELECTION_THEME, type SelectionTheme } from './theme';
+import { isDragRelease } from './dragGuard';
 
 export type InstancedSelectionState = 'primary' | 'bulk' | 'hover' | 'none';
 
@@ -162,6 +163,10 @@ export function useInstancedSelection(
 	const onClick = useCallback(
 		(e: ThreeEvent<MouseEvent>) => {
 			e.stopPropagation();
+			// Skip selection when the click ends a drag (gizmo move / camera
+			// orbit) — R3F fires onClick for any object hit at pointer-down with
+			// no travel guard of its own. See dragGuard.ts.
+			if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return;
 			if (e.instanceId == null) return;
 			onPick?.({ kind, indices: [e.instanceId] });
 		},

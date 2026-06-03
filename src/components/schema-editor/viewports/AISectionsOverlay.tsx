@@ -94,6 +94,7 @@ import {
 	selectionKey,
 	type Selection,
 } from '@/components/schema-editor/viewports/selection';
+import { isDragRelease } from '@/components/schema-editor/viewports/selection/dragGuard';
 import type { ThreeEvent } from '@react-three/fiber';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
@@ -1780,7 +1781,7 @@ function CornerPickers({
 						{/* Invisible larger hit volume — keeps picking forgiving
 						    on small spheres at far camera distances. */}
 						<mesh
-							onClick={(e) => { e.stopPropagation(); onPick(i); }}
+							onClick={(e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onPick(i); }}
 							onPointerOver={(e) => {
 								e.stopPropagation();
 								setHover(i);
