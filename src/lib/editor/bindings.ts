@@ -24,6 +24,7 @@ import { vehicleListExtensions } from '@/components/schema-editor/extensions/veh
 import { AISectionsLegacyOverlay } from '@/components/aisections/AISectionsLegacyOverlay';
 import { AISectionsOverlay } from '@/components/aisections/AISectionsOverlay';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
+import { PropInstanceDataOverlay } from '@/components/schema-editor/viewports/PropInstanceDataOverlay';
 import { StreetDataOverlay } from '@/components/schema-editor/viewports/StreetDataOverlay';
 import { TrafficDataOverlay } from '@/components/schema-editor/viewports/TrafficDataOverlay';
 import { TriggerDataOverlay } from '@/components/schema-editor/viewports/TriggerDataOverlay';
@@ -91,6 +92,11 @@ const BINDINGS: Record<string, Record<string, ProfileRenderBinding<unknown>>> = 
 		default: {
 			overlay: PolygonSoupListOverlay as ProfileRenderBinding['overlay'],
 			extensions: polygonSoupListExtensions,
+		},
+	},
+	propInstanceData: {
+		default: {
+			overlay: PropInstanceDataOverlay as ProfileRenderBinding['overlay'],
 		},
 	},
 	challengeList: { default: { extensions: challengeListExtensions } },

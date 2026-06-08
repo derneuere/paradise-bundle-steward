@@ -18,6 +18,10 @@ const V4_FIXTURE = path.resolve(__dirname, '../../../../example/older builds/AI.
 const V6_FIXTURE = path.resolve(__dirname, '../../../../example/older builds/AI v6.DAT');
 const V12_PC_FIXTURE = path.resolve(__dirname, '../../../../example/AI.DAT');
 
+// The V6 prototype fixture is an untracked local binary; a checkout that lacks
+// it skips the V6 cases rather than failing (it runs fully when present).
+const V6_FIXTURE_PRESENT = fs.existsSync(V6_FIXTURE);
+
 function loadEditableBundle(fixturePath: string) {
 	const raw = fs.readFileSync(fixturePath);
 	const buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
@@ -40,7 +44,7 @@ describe('analyzeExport — V4 bundle against paradise-pc-retail', () => {
 	});
 });
 
-describe('analyzeExport — V6 bundle against paradise-pc-retail (issue #40)', () => {
+(V6_FIXTURE_PRESENT ? describe : describe.skip)('analyzeExport — V6 bundle against paradise-pc-retail (issue #40)', () => {
 	it('plans exactly one V6 → V12 AI Sections migration with no blockers', () => {
 		const bundle = loadEditableBundle(V6_FIXTURE);
 		const preset = getTargetPreset('paradise-pc-retail')!;

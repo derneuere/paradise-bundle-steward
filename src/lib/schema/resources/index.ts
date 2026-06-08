@@ -12,8 +12,10 @@ import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
+import { instanceListResourceSchema } from './instanceList';
 import { playerCarColoursResourceSchema } from './playerCarColours';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
+import { propInstanceDataResourceSchema } from './propInstanceData';
 import { renderableResourceSchema } from './renderable';
 import { streetDataResourceSchema } from './streetData';
 import { textureResourceSchema } from './texture';
@@ -26,8 +28,10 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,
+	instanceList: instanceListResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
 	polygonSoupList: polygonSoupListResourceSchema,
+	propInstanceData: propInstanceDataResourceSchema,
 	renderable: renderableResourceSchema,
 	streetData: streetDataResourceSchema,
 	texture: textureResourceSchema,

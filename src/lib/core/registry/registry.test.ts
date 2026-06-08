@@ -50,7 +50,19 @@ for (const handler of registry) {
 		}
 		for (const fixture of handler.fixtures) {
 			describe(fixture.bundle, () => {
-				const { buffer } = loadBundle(fixture.bundle);
+				// example/* fixtures are untracked local binaries — a checkout that
+				// lacks one must not abort collection for every other handler. Skip
+				// just this fixture when its file isn't present on disk.
+				let buffer: ArrayBuffer;
+				try {
+					buffer = loadBundle(fixture.bundle).buffer;
+				} catch (err) {
+					if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+						it.skip(`fixture file not present in this checkout: ${fixture.bundle}`, () => {});
+						return;
+					}
+					throw err;
+				}
 				const bundle = parseBundle(buffer);
 				const resource = bundle.resources.find((r) => r.resourceTypeId === handler.typeId);
 				if (!resource) {

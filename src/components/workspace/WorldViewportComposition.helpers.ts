@@ -39,6 +39,9 @@ export const WORLD_VIEWPORT_FAMILY_KEYS = [
 	'trafficData',
 	'triggerData',
 	'zoneList',
+	// Props sit on the track surface; render them last so the markers draw on
+	// top of any co-loaded geometry (collision soups, AI/traffic lines).
+	'propInstanceData',
 ] as const;
 
 export type WorldViewportFamilyKey = typeof WORLD_VIEWPORT_FAMILY_KEYS[number];

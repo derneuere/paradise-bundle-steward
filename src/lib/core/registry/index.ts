@@ -29,6 +29,8 @@ import { graphicsStubHandler } from './handlers/graphicsStub';
 import { graphicsSpecHandler } from './handlers/graphicsSpec';
 import { materialHandler } from './handlers/material';
 import { zoneListHandler } from './handlers/zoneList';
+import { propInstanceDataHandler } from './handlers/propInstanceData';
+import { instanceListHandler } from './handlers/instanceList';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -54,6 +56,8 @@ export const registry: ResourceHandler[] = [
 	graphicsSpecHandler,
 	materialHandler,
 	zoneListHandler,
+	propInstanceDataHandler,
+	instanceListHandler,
 	textFileHandler,
 ];
 
