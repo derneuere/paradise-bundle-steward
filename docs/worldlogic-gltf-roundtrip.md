@@ -1,6 +1,6 @@
 # World-logic glTF round-trip — design plan
 
-**Status:** design, pre-implementation. Authored 2026-04-20. Decisions locked 2026-04-20 after cloning `TriggersToGLTF` and auditing its output for losslessness.
+**Status:** implemented (exporter + importer + reconciliation for all four resources; CLI `export-gltf` / `import-gltf` / `roundtrip-gltf`). Original design authored 2026-04-20, after cloning `TriggersToGLTF` and auditing its output for losslessness.
 
 ## Locked decisions
 
@@ -55,7 +55,7 @@ Steward already has:
 
 - A full TS parser + writer for `StreetData` ([src/lib/core/streetData.ts](../src/lib/core/streetData.ts)) with byte-exact round-trip on `BTTSTREETDATA.DAT`, stress-tested across 18 mutation scenarios.
 - A full TS parser + writer for `TrafficData` ([src/lib/core/trafficData.ts](../src/lib/core/trafficData.ts)), `AISections` ([src/lib/core/aiSections.ts](../src/lib/core/aiSections.ts)), `TriggerData` ([src/lib/core/triggerData.ts](../src/lib/core/triggerData.ts)).
-- `three@^0.169.0`, `@react-three/fiber`, `@react-three/drei` already in `package.json` — glTF export is `THREE.GLTFExporter` plus a tiny transform layer, no new heavyweight deps.
+- `three@^0.169.0`, `@react-three/fiber`, `@react-three/drei` already in `package.json` for the 3D viewer. glTF export itself runs through `@gltf-transform/core` (see §6), not `THREE.GLTFExporter`, so the CLI path has no three.js runtime dependency.
 - A schema-driven editor framework ([docs/schema-editor-migration.md](schema-editor-migration.md)) already using a `swapYZ` tag on Vec3 fields — the Z-up/Y-up convention is already recognized across the codebase.
 - A CLI dispatcher (`npm run bundle -- <cmd>`, [scripts/bundle-cli.ts](../scripts/bundle-cli.ts)) where `bundle export-gltf` / `bundle import-gltf` slot in naturally next to `dump` / `pack` / `roundtrip`.
 
@@ -161,11 +161,11 @@ The matching rule, in order:
 
 ## 5. Coordinate system and units
 
-Paradise is **Z-up** (Burnout engine). glTF is **Y-up** by convention. Steward already tags vec3 fields with `swapYZ` in the schema layer ([src/components/schema-editor/fields/VectorField.tsx](../src/components/schema-editor/fields/VectorField.tsx)) because the editor already had to solve this.
+Paradise world-space is **Y-up** (`x=east, y=up, z=north`); glTF is also Y-up by convention, but uses the opposite handedness (`z=south`). The only conversion needed is a **Z negation** (north↔south), which keeps handedness correct — *not* a Y↔Z axis swap. (Steward separately tags vec3 fields with a `swapYZ` tag in the schema-editor layer ([src/components/schema-editor/fields/VectorField.tsx](../src/components/schema-editor/fields/VectorField.tsx)); that tag is about field display in the form editor and is unrelated to the gltf coordinate conversion.)
 
-**Export**: apply `swapYZ` (negate Z, swap Y↔Z) to every position/direction/rotation we emit. Consistent with the existing schema-editor behavior.
+**Export**: apply `paradiseToGltf` — negate Z on every position/direction/rotation we emit.
 
-**Import**: reverse the transformation. A dedicated module `src/lib/core/gltf/coords.ts` owns the transformation and is the only code that knows the conversion — do not duplicate.
+**Import**: apply `gltfToParadise` — negate Z back. A dedicated module `src/lib/core/gltf/coords.ts` owns both directions (they are exact inverses) and is the only code that knows the conversion — do not duplicate.
 
 **Units**: Paradise world-space unit = 1 meter (confirmed by the ~8km island fit and standard Criterion engine convention). glTF convention is also meters. No scale factor. If a user imports a glTF from Blender that was worked in feet/inches they'll see a 3.28× discrepancy on the first import — we document this prominently.
 
@@ -175,27 +175,21 @@ Paradise is **Z-up** (Burnout engine). glTF is **Y-up** by convention. Steward a
 
 ## 6. Architecture
 
+The module is a flat set of per-resource files, each holding **both** the export (subtree builder) and import (reader) for one resource, orchestrated by `worldLogicGltf.ts`. There is no `export/`+`import/` subtree split — reconciliation lives alongside each resource's reader and in the orchestrator.
+
 ```
 src/lib/core/gltf/
-  coords.ts               — swapYZ in both directions, matrix44 decomposition helpers
-  nodeConventions.ts      — name prefixes, extras key canonical names, node-key resolution
-  unitCube.ts             — the shared unit-cube mesh (buffer+accessor builder for export)
-  export/
-    streetData.ts         — ParsedStreetData → gltf-transform Document subtree
-    trafficData.ts        — ParsedTrafficData → Document subtree
-    aiSections.ts         — ParsedAISections → Document subtree
-    triggerData.ts        — ParsedTriggerData → Document subtree (matches TriggersToGLTF output)
-    worldLogic.ts         — combines all four, produces one Document, serializes
-  import/
-    reconcile.ts          — node→entry matching, new/delete/rename detection
-    streetData.ts         — Document → ParsedStreetData (given the original for reconciliation)
-    trafficData.ts        — Document → ParsedTrafficData
-    aiSections.ts         — Document → ParsedAISections
-    triggerData.ts        — Document → ParsedTriggerData
-    worldLogic.ts         — orchestrator, produces a diff report + updated models
+  coords.ts            — paradiseToGltf / gltfToParadise (Z-flip in both directions), matrix44 decomposition helpers
+  sharedGltf.ts        — shared conventions: name prefixes, extras keys, unit-cube mesh, scene-extras helpers, JSON-glTF read/write
+  streetDataGltf.ts    — addStreetDataSubtree (export) + readStreetDataFromDocument (import)
+  trafficDataGltf.ts   — addTrafficDataSubtree + readTrafficDataFromDocument
+  aiSectionsGltf.ts    — addAISectionsSubtree + readAISectionsFromDocument
+  triggerDataGltf.ts   — addTriggerDataSubtree + readTriggerDataFromDocument (matches TriggersToGLTF output)
+  worldLogicGltf.ts    — orchestrator: combines all four into one Document, serializes, and imports back (build/import/export entry points)
+  index.ts             — public re-exports
 
 src/pages/WorldLogicPage.tsx  — (stretch) embedded three.js viewer for the combined scene
-scripts/bundle-cli.ts          — add `export-gltf` / `import-gltf` subcommands
+scripts/bundle-cli.ts          — `export-gltf` / `import-gltf` / `roundtrip-gltf` subcommands
 ```
 
 **Library choice.** Use [`@gltf-transform/core`](https://gltf-transform.dev/) for both directions, not `THREE.GLTFExporter`. Reasons:
@@ -205,16 +199,19 @@ scripts/bundle-cli.ts          — add `export-gltf` / `import-gltf` subcommands
 - It's ~90 KB gzipped, no three.js dependency baggage on its own.
 - It's maintained by Don McCurdy (author of the VS Code gltf-viewer), the de facto reference implementation.
 
-Adding `@gltf-transform/core` is a single `npm i` — no peer-dep drama.
+`@gltf-transform/core` (`^4.3.0`) is installed ([package.json](../package.json)) and used for both directions via `NodeIO` (`writeBinary` / `readBinary` for `.glb`, plus a JSON path for `.gltf`) — see [worldLogicGltf.ts](../src/lib/core/gltf/worldLogicGltf.ts).
 
-**CLI UX** (once implemented):
+**CLI UX** (shipped — positional args, no flags yet):
 
 ```
-npm run bundle -- export-gltf <in-bundle.dat> [--out <out.gltf>] [--include streetData,trafficData,...]
-npm run bundle -- import-gltf <original-bundle.dat> <edited.gltf> [--out <new-bundle.dat>] [--dry-run]
+npm run bundle -- export-gltf <bundle> <out.gltf|out.glb>
+npm run bundle -- import-gltf <orig-bundle> <edited.gltf> <out-bundle>
+npm run bundle -- roundtrip-gltf <bundle>
 ```
 
-`--dry-run` prints the diff report (`+3 sections, -1 junction, 42 modifications`) without writing. `--include` scopes the export to a subset of resources.
+The output extension picks the container: `.gltf` writes JSON, `.glb` writes binary. Resource scoping is automatic — every worldlogic-compatible resource present in the bundle (StreetData / TrafficData / AISections / TriggerData) is exported.
+
+Not yet implemented: a `--dry-run` diff report (`+3 sections, -1 junction, 42 modifications`), an `--include` flag to scope a subset, and `--out` flag-style output paths.
 
 **UI** (eventually): on each resource's page, an "Export glTF" button that dumps just that one resource. A top-level "Export world-logic glTF" button on the bundle page that dumps everything. An "Import glTF" dropzone that diffs against the currently-loaded bundle and shows the reconciliation report before committing.
 
@@ -269,10 +266,11 @@ This drops the skill floor from "understand Paradise's format" to "edit boxes in
 
 ## 8. Registry integration
 
-Per [docs/schema-editor-migration.md](schema-editor-migration.md), adding or touching resources is mechanical. The glTF flow doesn't need new resource types — it's a *transformation* over existing ones. Integration points:
+Per [docs/schema-editor-migration.md](schema-editor-migration.md), adding or touching resources is mechanical. The glTF flow doesn't need new resource types — it's a *transformation* over existing ones.
 
-- **Handler.caps**: add an optional `caps.gltfExport: boolean` and `caps.gltfImport: boolean`. Defaults to `false`. When true, the resource handler exports a `toGltf(doc, model, ctx)` and `fromGltf(doc, original, ctx)` that the orchestrator dispatches to. This keeps the glTF code discoverable via the registry and parallel to the existing `caps.read`/`caps.write` pattern — no shotgun registration.
-- **No schema changes required.** Existing schemas already describe every field; extras keys derive from the schema field names via a deterministic canonicalizer (`muFoo` → `"Foo"`, `mfBar` → `"Bar"`, stripping Hungarian prefixes, mirroring the TriggersToGLTF style exactly).
+**What shipped (diverges from the original handler-caps plan).** The glTF logic is *not* wired into the registry as handler capabilities. Instead it lives as a self-contained module under `src/lib/core/gltf/` (one file per resource holding both export and import), with `worldLogicGltf.ts` as a centralized orchestrator that dispatches per-resource via `addStreetDataSubtree` / `readStreetDataFromDocument` and the equivalents for the other three resources. There are no `caps.gltfExport` / `caps.gltfImport` flags and no `toGltf` / `fromGltf` handler hooks; `handler.ts` carries only the pre-existing `byteRoundTrip` and `stableWriter` caps. The CLI (`scripts/bundle-cli.ts`) extracts the parsed models from the bundle and hands them to the orchestrator directly.
+
+- **No schema changes required.** Existing schemas already describe every field; extras keys mirror the format's field names (`muFoo` → `"Foo"`, `mfBar` → `"Bar"`, stripping Hungarian prefixes, mirroring the TriggersToGLTF style).
 
 ---
 
@@ -282,11 +280,18 @@ The byte-exact contract means the CLI test suite isn't a nice-to-have; it's the 
 
 ### Subcommands (one per layer)
 
+Shipped (positional args):
+
 ```
-npm run bundle -- export-gltf    <in.dat> [--out <f.gltf>] [--include ...]
-npm run bundle -- import-gltf    <orig.dat> <edited.gltf> [--out <new.dat>] [--dry-run]
-npm run bundle -- roundtrip-gltf <in.dat>   # export → import → compare. Fails on any byte diff.
-npm run bundle -- stress-gltf    <in.dat>   # runs the mutation matrix (see below), fails on any regression.
+npm run bundle -- export-gltf    <bundle> <out.gltf|out.glb>
+npm run bundle -- import-gltf    <orig-bundle> <edited.gltf> <out-bundle>
+npm run bundle -- roundtrip-gltf <bundle>   # export → import → compare. Fails on any byte diff.
+```
+
+Planned, not yet implemented:
+
+```
+npm run bundle -- stress-gltf    <bundle>   # runs the mutation matrix (see below), fails on any regression.
 npm run bundle -- diff-gltf      <a.gltf> <b.gltf>   # human-readable scene diff for debugging failures.
 ```
 

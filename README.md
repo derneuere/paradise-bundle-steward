@@ -8,7 +8,7 @@ Every editor in the app is powered by the same schema-driven framework (see [Sch
 
 ### Fully supported (read + write + schema editor)
 
-- **AI Sections** (0x10001) — editor for the AI navigation mesh: 8,780+ sections with portals, boundary lines, corners, speed tiers, flags, and section reset pairs. Includes a Unity-style 3D viewport with section selection, section-speed color coding, and instanced portal rendering. Writer round-trips **byte-exact** against the reference fixture. 7 stress scenarios, clean 200+ fuzz iterations.
+- **AI Sections** (0x10001) — editor for the AI navigation mesh: 8,780+ sections with portals, boundary lines, corners, speed tiers, flags, and section reset pairs. Includes a Unity-style 3D viewport with section selection, section-speed color coding, and instanced portal rendering. Writer round-trips **byte-exact** against the reference fixture. 9 stress scenarios, clean 200+ fuzz iterations.
 - **Traffic Data** (0x10002) — editor for the traffic simulation graph: 14 resource types (hulls, sections, rungs, junctions, section flows, flow types, kill zones, vehicle types/assets/traits, traffic lights, light triggers, static vehicles, paint colours). Was the first resource ported to the schema editor and is the reference implementation for `propertyGroups` + extension-preserved tabs.
 - **Trigger Data** (0x10003) — editor for world trigger regions: landmarks, generic regions, blackspots, VFX regions, killzones, roaming and spawn locations. 3D viewport with InstancedMesh-batched region gizmos for responsive pan/zoom on real data.
 - **Vehicle List** (0x10005) — editor for all 284+ vehicles with gameplay stats, audio config, flags, and unlock metadata. Selecting a vehicle in the tree drills into the full vehicle card (appearance / audio / gameplay / performance / technical sections) via an extension. Writer round-trips **byte-exact**.
@@ -16,18 +16,21 @@ Every editor in the app is powered by the same schema-driven framework (see [Sch
 - **Challenge List** (0x1001F) — editor for all 500 freeburn challenges, with difficulty, player requirements, two goal actions each, and up to 4 locations per action. Type-aware tree labels surface each challenge's primary action as a short label (`#0 · Near Miss · FBCT_599594`).
 - **Player Car Colours** (0x1001E) — editor for all color palettes (Gloss, Metallic, Pearlescent, Special, Party) with paint and pearl Vector4 color values. Writer round-trips **byte-exact**. 32-bit PC layout.
 - **PolygonSoup List** (0x43) — editor for world collision polygon soups (WORLDCOL.BIN: 850+ polygon soups, 1.5M triangles total). Dedicated batched 3D viewport, page-level resource picker for multi-resource bundles, `byResourceId` export support for bundles with hundreds of same-typed resources, and a decoded-bitfield inspector extension for `PolygonSoupPoly.collisionTag` (surface kind, sound bank, footstep / particle / decal slots) that clears only the bits it owns and pastes the decoded result back. Writer round-trips **byte-exact** across the entire fixture.
+- **Zone List** (0xB000) — editor for the PVS streaming graph: 428 polygonal zones, each tagged with a `zoneType` and an explicit safe / unsafe neighbour list that drives track-unit loading. A dedicated 3D overlay (`ZoneListOverlay`) renders the zones and their adjacency lines on the X-Z plane with click-to-select and a bulk-transform gizmo. Writer round-trips **byte-exact** on both retail PC and the Feb 2007 X360 prototype `PVS.BNDL`; the dev-only **Text File** (0x3) BundleImports XML carried by that older BND1 (`'bndl'`) container is parsed too, so BND1 → BND2 conversion stays lossless.
+- **Instance List** (0x23) — read+write handler for track-unit model placements: Models positioned in the world by a per-instance 4×4 transform, with backdrop-zone id and max-visible-distance. 6 stress scenarios; writer round-trips **byte-exact**. Parsed, written, and schema-covered, but not yet surfaced as a dedicated editor.
+- **Prop Instance Data** (0x10011) — editor for props (signs, lampposts, cones, collectibles) placed into a track unit and partitioned into spatial cells for streaming. 8 stress scenarios exercise the packed type-id / flags word, position edits, and partition-preserving add / remove; writer round-trips **byte-exact**, and the empty-prop-zone shape (~40% of track units, null pointers) is handled. Props render as Matrix44-placed boxes on the decoded track geometry.
 - **AttribSys Vault** — typed vehicle-attribute writer used by vehicle bundles. Has a dedicated editor page ([AttribSysVaultPage](src/pages/AttribSysVaultPage.tsx)) plus 9 stress scenarios covering top-speed, boost, torque, mass, FOV, drift params, full-tune, and zero-grip mutations.
-- **Material** (0x40) — read+write handler for the per-mesh Material resource that points at a Shader plus per-register sampler / cbuffer bindings. Drives both the schema-editor and the Renderable viewer's translated-shader path (the cross-bundle MaterialAssembly index is built from this handler).
+- **Material** (0x1) — read+write handler for the per-mesh Material resource that points at a Shader plus per-register sampler / cbuffer bindings. Drives both the schema-editor and the Renderable viewer's translated-shader path (the cross-bundle MaterialAssembly index is built from this handler).
 - **Model** (0x2A) — read+write handler for the LOD container that maps state indices to Renderable LODs. Stress scenarios cover LOD-distance bumps, state-mapping shuffles, and flag-bit flips.
-- **Shader** (0x12) + **ShaderProgramBuffer** — read+write handlers for vehicle / world shaders, with a dedicated [ShaderPage](src/pages/ShaderPage.tsx) for inspecting the DXBC bytecode, RDEF cbuffers, and named techniques. The Shader handler is the source of bytecode for the DXBC → GLSL translator that powers translated-shader rendering in the Renderable viewer.
-- **DeformationSpec** — read+write handler for the per-vehicle deformation spec (handling-body scale, wheel raise/drop, sensor radii, IK-part joint angles, transform-tag positions, driven-point distance sums). 9 stress scenarios.
+- **Shader** (0x32) + **ShaderProgramBuffer** (0x12) — read+write handlers for vehicle / world shaders, with a dedicated [ShaderPage](src/pages/ShaderPage.tsx) for inspecting the DXBC bytecode, RDEF cbuffers, and named techniques. The Shader handler is the source of bytecode for the DXBC → GLSL translator that powers translated-shader rendering in the Renderable viewer.
+- **DeformationSpec** — read+write handler for the per-vehicle deformation spec (handling-body scale, wheel raise/drop, sensor radii, IK-part joint angles, transform-tag positions, driven-point distance sums). 13 stress scenarios.
 - **WheelGraphicsSpec** + **GraphicsStub** — read+write handlers for the wheel/caliper Model lookup and the small per-bundle graphics stub. Both are byte-exact round-trip with a handful of structural mutation scenarios each.
 
 ### Read-only
 
 - **Renderable + GraphicsSpec viewer** — three.js-powered 3D viewer for vehicle bundles, now integrated as a schema-editor viewport. The left pane lists meshes, materials, and vertex descriptors via the schema tree; the center pane runs the r3f scene with click-to-select; the right pane inspects per-mesh draw parameters, resolved Material / VertexDescriptor imports, part locator status, and the per-mesh OBB matrix. Walks the GraphicsSpec → Model → Renderable chain, applies per-part `mpPartLocators` Matrix44 transforms, and decodes vertex/index data from each Renderable's secondary block. See [Renderable viewer](#renderable-viewer) for details.
 - **Texture** — schema editor with a dedicated 2D texture viewport showing the decoded pixel data alongside the header metadata (format, dimensions, mip count, flags). Pixel blobs are marked as opaque in the schema to keep them out of the walker.
-- **TextureState** (0x42) — sampler-state metadata that pairs with each Texture (filter, wrap, addressing mode). Parsed by the registry so the Renderable viewer's material-binding chain can surface samplers; no dedicated editor page yet.
+- **TextureState** (0xE) — sampler-state metadata that pairs with each Texture (filter, wrap, addressing mode). Parsed by the registry so the Renderable viewer's material-binding chain can surface samplers; no dedicated editor page yet.
 - **ICE Take Dictionary** — schema editor over the in-game camera editor take dictionary. Spec still incomplete on the Burnout Wiki; fields beyond the header are mirrored as-is from the parser.
 
 ### Tools
@@ -43,7 +46,7 @@ Every editor in the app is powered by the same schema-driven framework (see [Sch
 
 ### Prerequisites
 
-- **Node.js 22+** (the `lovable-tagger` devDep and Vite 5 require it)
+- **Node.js 20+** (declared in `package.json` engines)
 - Modern web browser with WebGL support
 
 ### Installation
@@ -128,15 +131,15 @@ npm run bundle -- roundtrip-gltf example/WORLDLOGIC.BUNDLE
 
 Today's coverage:
 
-- **AISections** (7): `baseline`, `edit-first-section-speed`, `toggle-first-section-flags`, `remove-last-section`, `remove-last-reset-pair`, `edit-first-section-id`, `swap-first-two-sections`
+- **AISections** (9): `baseline`, `edit-first-section-speed`, `toggle-first-section-flags`, `remove-last-section`, `remove-last-reset-pair`, `edit-first-section-id`, `add-section`, `add-reset-pair`, `swap-first-two-sections`
 - **StreetData** (5): `baseline`, `remove-last-street`, `remove-last-road-and-challenge`, `edit-road-debug-name`, `zero-all-challenge-scores`
 - **VehicleList** (7): `baseline`, `edit-first-name`, `toggle-first-flags`, `swap-first-two`, `bulk-zero-colors`, `add-vehicle`, `remove-last-vehicle`
 - **TriggerData** (8): `baseline`, `remove-last-landmark`, `remove-last-generic-region`, `remove-last-blackspot`, `remove-last-spawn-location`, `edit-first-landmark-id`, `zero-first-spawn-position`, `bulk-pop-every-array`
 - **ChallengeList** (6): `baseline`, `remove-last-challenge`, `edit-first-challenge-title`, `zero-first-challenge-difficulty`, `zero-first-action-time-limit`, `duplicate-last-challenge`
-- **TrafficData** (24): `baseline` plus per-array `remove-last-*` / `remove-first-*` / `duplicate-first-*` mutations across hulls, sections, rungs, neighbours, static vehicles, junctions, stop lines, light triggers, section spans, flow types, kill zones, vehicle types/assets/traits, paint colours, and traffic lights — exercises every count-derived pointer in the writer
+- **TrafficData** (31): `baseline` plus per-array `remove-last-*` / `remove-first-*` / `duplicate-first-*` mutations across hulls, sections, rungs, neighbours, static vehicles, junctions, stop lines, light triggers, section spans, flow types, kill zones, vehicle types/assets/traits, paint colours, and traffic lights, plus newer field-level scenarios (PVS cell-size edit, corona / light-type removals, junction-position / section-speed / first-rung edits, light-trigger start-data, kill-zone region, vehicle-trait edit, and add-flow-type) — exercises every count-derived pointer in the writer
 - **PolygonSoupList** (7): `baseline`, `pop-last-soup`, `pop-first-soup`, `swap-first-two-soups`, `duplicate-first-soup`, `insert-synthetic-at-middle`, `append-synthetic-soup`
 - **AttribSysVault** (9): `baseline`, `set-max-speed`, `set-boost-values`, `set-engine-torque`, `set-driving-mass`, `set-fov`, `set-drift-params`, `full-tune`, `zero-all-grip`
-- **DeformationSpec** (9): `baseline`, `scale-handling-body`, `raise-all-wheels`, `sensor-radii-x2`, `tag-point-initial-positions-zero`, `driven-point-distance-sum`, `identity-car-to-handling-transform`, `tweak-ikpart-joint-angles`, `shift-all-transform-tags`
+- **DeformationSpec** (13): `baseline`, `scale-handling-body`, `raise-all-wheels`, `sensor-radii-x2`, `tag-point-initial-positions-zero`, `driven-point-distance-sum`, `identity-car-to-handling-transform`, `tweak-ikpart-joint-angles`, `shift-all-transform-tags`, `swap-glass-pane-corners`, `rebind-ikpart-skin`, `append-tag-point`, `pop-glass-pane`
 - **Material** (3): `baseline`, `flip-shader-id-low-bit`, `reverse-material-states`
 - **Model** (4): `baseline`, `bump-lod-distances`, `shuffle-state-mapping`, `flip-flags-bit`
 - **Shader** (2) + **ShaderProgramBuffer** (1): `baseline`, `flip-flags-bit` / `baseline`
@@ -321,7 +324,7 @@ The editor UI lives at `src/components/schema-editor/`:
 - **`HierarchyTree.tsx`** — virtualized tree (for 5k+ list items without click latency) that walks the schema to build collapsible nodes and runs the per-record `label()` callback at render time.
 - **`InspectorPanel.tsx`** — renders the selected record as a form grouped by `propertyGroups`, with each group showing either raw fields or a `component:` extension.
 - **`ViewportPane.tsx`** — dispatches by `resource.key` to one of the viewport modules (PolygonSoupList, Renderable, Texture, …) or shows "no viewport available" for resources without spatial data.
-- **`fields/`** — 15 renderer components, one per field kind, dispatched by `FieldRenderer.tsx`. The default renderers cover every kind in `types.ts`; complex lists opt out via `customRenderer` and slot a Phase 1/2 tab back in unchanged.
+- **`fields/`** — one renderer component per field kind (Int / Float / BigInt / Bool / String / Enum / Flags / Vec2 / Vec3 / Vec4 / Matrix44 / Ref / PrimList / ListNav / RecordInline / Custom), dispatched by `FieldRenderer.tsx`. The default renderers cover every kind in `types.ts`; complex lists opt out via `customRenderer` and slot a Phase 1/2 tab back in unchanged.
 - **`extensions/<key>Extensions.tsx`** — adapters that wrap legacy tables as `SchemaExtensionProps` components (`{ path, value, setValue, setData, data, resource }`) so Phase 1/2 UI code survives the migration with no rewrite.
 
 **Why this exists**: the pre-schema pattern was one bespoke editor page per resource, each wiring its own tabs, lists, and mutation callbacks. Every new resource meant a full page rewrite and a fresh chance to forget something the parser cares about. The schema flips that: the coverage test enforces completeness, tree navigation and mutation come for free, and the only code a new resource needs is the schema declaration (plus extensions for any preserved legacy tables). The ChallengeList migration was 4 schema records + 3 extension wrappers + a 50-line page; the StreetData and TriggerData migrations reused their entire existing tab stacks via extensions.
@@ -377,7 +380,7 @@ src/components/schema-editor/
   InspectorPanel.tsx   # record form with propertyGroups + tabs + extension slots
   ViewportPane.tsx     # dispatches to per-key 3D / 2D viewports
   context.tsx          # SchemaEditorProvider + useSchemaEditor (selection + mutation)
-  fields/              # 15 FieldRenderer dispatches (Int, Vec3, Enum, Flags, Ref, …)
+  fields/              # one renderer per field kind (Int, Vec3, Enum, Flags, Ref, …)
   viewports/           # PolygonSoupListViewport, RenderableViewport, TextureViewport
   extensions/          # per-resource React adapters wrapping legacy tabs
 src/pages/

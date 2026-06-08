@@ -1,5 +1,11 @@
 # TrafficData v22 → v45 migration — investigation findings
 
+> **STATUS (implemented):** the V22 → V45 conversion described below is
+> shipped — see `src/lib/conversion/migrations/trafficDataV22toV45.ts`,
+> registered on the v22 EditorProfile and tested. The sections below are the
+> original 2026-05-02 investigation; remaining genuinely-open items are in
+> [Open questions / follow-ups](#open-questions--follow-ups).
+
 Investigation pass for the V22 → V45 conversion follow-up to issue #45.
 Performed 2026-05-02 against two fixtures:
 
@@ -194,14 +200,18 @@ has 8 pointers and no inline asset slots.
 | `ptr[4..6]`   |   0–16 B | empty / sentinel               | likely placeholder for sub-arrays absent in v22 |
 | `ptr[7]`      |      0 B | end-of-hull sentinel           | always equal to next hull's offset |
 
-The 8-pointer set vs retail's 12-pointer set leaves four retail sub-arrays
+The 8-pointer set vs retail's 12-pointer set leaves six retail sub-arrays
 without a v22 source: `staticTrafficVehicles`, `junctions`, `stopLines`,
 `lightTriggers`, `lightTriggerStartData`, `lightTriggerJunctionLookup`.
 The header counts confirm this: every v22 hull in our fixture has
 `muNumJunctions = 0` and `muNumStoplines = 0`. Junctions, stop lines, and
 all light/trigger features are retail additions.
 
-**Per-section record (48 B): VERIFIED IDENTICAL TO V45**.
+**Per-section record (48 B): layout matches v45 `TrafficSection`.**
+section[0] of every hull decodes to sensible values, but some later section
+slots decode out-of-range (likely sentinel/variant records), so the
+migration applies a sanity guard (`isSaneSection`) and skips those — see
+`trafficDataV22toV45.ts:192-198,317-334`.
 Decoding v22 hull[22].section[0] under v45's `TrafficSection` layout
 yields completely sensible values (see
 `scripts/investigate-traffic-v22-section.ts`):
@@ -235,8 +245,12 @@ rungs hypothesis above implies the v22 layout is identical.
 
 ## Concrete migration plan
 
-Implement `migrateV22toV45(model: ParsedTrafficDataV22): ConversionResult<ParsedTrafficDataV45>`
-in three tiers:
+The migration is implemented as
+`migrateV22toV45(v22: ParsedTrafficDataV22): ConversionResult<ParsedTrafficDataV45>`
+in `src/lib/conversion/migrations/trafficDataV22toV45.ts`, registered on the
+v22 EditorProfile (`conversions.v45.migrate`) in
+`src/lib/editor/profiles/trafficData.ts`, with round-trip tests in
+`__tests__/trafficDataV22toV45.test.ts`. It follows the three tiers below.
 
 ### Tier 1 — top-level tables (no semantic loss)
 
@@ -298,8 +312,11 @@ where the road graph and lane geometry are preserved — only the higher-
 level traffic-flow metadata (neighbours, spans, flow assignments) and
 retail-only features (junctions, light triggers) are lost.
 
-Field-by-field decoding of the remaining sub-arrays is its own follow-up
-issue; the MVP doesn't need it to ship.
+The shipped Tier 3 implementation decodes sections + rungs +
+cumRungLengths and synthesises empty arrays for everything else (see
+`trafficDataV22toV45.ts`). Field-by-field decoding of the remaining
+sub-arrays (neighbours, sectionSpans, staticTrafficVehicles, sectionFlows)
+is still an open follow-up.
 
 ## Test strategy
 
