@@ -43,6 +43,12 @@ import {
 	type ResourceTypeFlatNode,
 	type SchemaFlatNode,
 } from './WorkspaceHierarchy.helpers';
+import {
+	isSameReorderList,
+	listItemAddress,
+	reorderListInModel,
+	type ReorderDragSource,
+} from './WorkspaceHierarchy.reorder';
 
 // Return the path the bulk-range "from" anchor should use. We read the
 // inspector's current schema path; if the current selection isn't on a
@@ -134,7 +140,8 @@ export type WorkspaceHierarchyProps = {
 };
 
 export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
-	const { bundles, selection, select, saveBundle, closeBundle } = useWorkspace();
+	const { bundles, selection, select, saveBundle, closeBundle, getResources, setResourceAt } =
+		useWorkspace();
 	// PSL bulk handle — null when no PSL is active. Drives the schema-row
 	// Ctrl/Shift-click semantics + the amber-accent highlight on bulk rows.
 	const bulk = useWorkspacePSLBulk();
@@ -266,6 +273,74 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 		[select, bulk, aiBulk, triggerBulk, selection],
 	);
 
+	// ---------------------- Drag-to-reorder ----------------------
+	//
+	// HTML5 DnD on record-list instance rows (PropInstanceData props,
+	// TriggerData triggers, …). The active drag source + the current drop
+	// indicator (which row's pathKey + which edge) live here so the dragged
+	// row's identity is known across `onDragOver`/`onDrop` on a *different*
+	// row, and so we can paint a single top/bottom border on the hovered row.
+	const [dragSource, setDragSource] = useState<ReorderDragSource | null>(null);
+	const [dropTarget, setDropTarget] = useState<{
+		pathKey: string;
+		edge: 'top' | 'bottom';
+	} | null>(null);
+
+	const onReorderDragStart = useCallback((source: ReorderDragSource) => {
+		setDragSource(source);
+	}, []);
+
+	const onReorderDragEnd = useCallback(() => {
+		setDragSource(null);
+		setDropTarget(null);
+	}, []);
+
+	// Reorder commit: move the dragged item to its new slot within the SAME
+	// list and write the next instance model back through `setResourceAt`
+	// (one HistoryCommit, dirties the bundle). The drop index is computed in
+	// the post-removal coordinate space: dropping below a row that sits after
+	// the source means the gap shifts down by one once the source is pulled
+	// out. The same-list guard (bundle / resource / instance / listPath) runs
+	// before any of this — a mismatched drop is ignored upstream.
+	const onReorderDrop = useCallback(
+		(
+			target: Omit<ReorderDragSource, 'itemIndex'>,
+			targetItemIndex: number,
+			edge: 'top' | 'bottom',
+		) => {
+			const source = dragSource;
+			setDragSource(null);
+			setDropTarget(null);
+			if (!source) return;
+			if (!isSameReorderList(source, target)) return;
+
+			const from = source.itemIndex;
+			// Insertion slot in the original array, then adjust to the
+			// post-removal index space.
+			const insertBefore = edge === 'top' ? targetItemIndex : targetItemIndex + 1;
+			let to = insertBefore;
+			if (from < insertBefore) to -= 1;
+			if (to === from) return;
+
+			const model = getResources<unknown>(source.bundleId, source.resourceKey)[
+				source.instanceIndex
+			];
+			if (model == null) return;
+			const next = reorderListInModel(model, source.listPath, from, to);
+			if (next === model) return;
+			setResourceAt(source.bundleId, source.resourceKey, source.instanceIndex, next);
+			// Keep the selection on the moved item so the inspector follows it
+			// to its new slot (selection addresses by index, which just changed).
+			select({
+				bundleId: source.bundleId,
+				resourceKey: source.resourceKey,
+				index: source.instanceIndex,
+				path: [...source.listPath, to],
+			});
+		},
+		[dragSource, getResources, setResourceAt, select],
+	);
+
 	// ---------------------- Virtualizer ----------------------
 
 	const parentRef = useRef<HTMLDivElement>(null);
@@ -358,6 +433,12 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 									pslBulkPathKeys={bulk?.bulkPathKeys ?? null}
 									aiBulkGetPathKeys={aiBulk?.getPathKeys ?? null}
 									aiBulkGetCount={aiBulk?.getCount ?? null}
+									dragSource={dragSource}
+									dropTarget={dropTarget}
+									onReorderDragStart={onReorderDragStart}
+									onReorderDragOverRow={setDropTarget}
+									onReorderDrop={onReorderDrop}
+									onReorderDragEnd={onReorderDragEnd}
 								/>
 							</div>
 						);
@@ -415,6 +496,26 @@ type HierarchyRowProps = {
 	/** Cheap count lookup for the resource-type-row Badge. Same null-vs-fn
 	 *  contract as `aiBulkGetPathKeys`. */
 	aiBulkGetCount: ((bundleId: string, index: number) => number) | null;
+	// ---- Drag-to-reorder (record-list instance rows only) ----
+	/** The currently-dragged list item, or null when no drag is in flight.
+	 *  A row consults this to decide whether it's a valid drop target. */
+	dragSource: ReorderDragSource | null;
+	/** The row + edge the drop indicator currently paints, or null. */
+	dropTarget: { pathKey: string; edge: 'top' | 'bottom' } | null;
+	/** Begin a drag from a reorderable row. */
+	onReorderDragStart: (source: ReorderDragSource) => void;
+	/** Update the drop indicator as the pointer moves over a row. */
+	onReorderDragOverRow: (
+		next: { pathKey: string; edge: 'top' | 'bottom' } | null,
+	) => void;
+	/** Commit a drop onto a row's `(target, itemIndex, edge)`. */
+	onReorderDrop: (
+		target: Omit<ReorderDragSource, 'itemIndex'>,
+		targetItemIndex: number,
+		edge: 'top' | 'bottom',
+	) => void;
+	/** End the drag (clears source + indicator). */
+	onReorderDragEnd: () => void;
 };
 
 function HierarchyRow(props: HierarchyRowProps) {
@@ -667,7 +768,35 @@ function SchemaRow({
 	onSelectSchema,
 	pslBulkPathKeys,
 	aiBulkGetPathKeys,
+	dragSource,
+	dropTarget,
+	onReorderDragStart,
+	onReorderDragOverRow,
+	onReorderDrop,
+	onReorderDragEnd,
 }: HierarchyRowProps & { node: SchemaFlatNode }) {
+	// A schema row is reorderable iff it's a record-list item (its path ends
+	// in a numeric index). Top-level list fields and record sub-fields aren't
+	// — only the leaf items move. `address` is the (listPath, index) split.
+	const address = listItemAddress(node.schemaPath);
+	const isReorderable = address != null;
+	const rowTarget = address
+		? {
+			bundleId: node.bundleId,
+			resourceKey: node.resourceKey,
+			instanceIndex: node.index,
+			listPath: address.listPath,
+		}
+		: null;
+	// This row is a *valid* drop site only while a drag from the SAME list is
+	// in flight — same bundle / resource / instance / listPath. Cross-list (or
+	// no-drag) hovers don't preventDefault, so the browser shows "no drop."
+	const isDropEligible =
+		rowTarget != null &&
+		dragSource != null &&
+		isSameReorderList(dragSource, rowTarget);
+	const dropEdge =
+		dropTarget?.pathKey === node.pathKey ? dropTarget.edge : null;
 	// Resolve the right bulk-path-key set for THIS row's resource. PSL is a
 	// single global Set today (one bulk active at a time); AI sections is
 	// per-(bundleId, index) so the same row in two different bundles can be
@@ -705,8 +834,74 @@ function SchemaRow({
 				!node.isSelected && isInBulk && 'bg-amber-500/10',
 				!node.isSelected && !isInBulk && node.isOnPath && 'bg-muted/30',
 				!node.isSelected && 'hover:bg-muted/40',
+				// Drop indicator: a primary-coloured border on the edge the
+				// dragged row would land against. Inset (negative margin) so the
+				// 2px line doesn't nudge the row's layout.
+				dropEdge === 'top' && 'border-t-2 border-t-primary -mt-px',
+				dropEdge === 'bottom' && 'border-b-2 border-b-primary -mb-px',
+				// Faintly dim the row being dragged so the user can see it lift.
+				dragSource != null &&
+					address != null &&
+					dragSource.bundleId === node.bundleId &&
+					dragSource.resourceKey === node.resourceKey &&
+					dragSource.instanceIndex === node.index &&
+					dragSource.itemIndex === address.index &&
+					'opacity-40',
 			)}
 			style={{ paddingLeft: node.depth * 12 + 4 }}
+			draggable={isReorderable}
+			onDragStart={
+				isReorderable && address
+					? (e) => {
+						// Mark this as a move so the cursor reflects reorder, not
+						// copy. `setData` is required for Firefox to start a drag
+						// at all — the value is unused (drag identity is held in
+						// React state, which survives across rows; the DataTransfer
+						// string would only carry within one drop).
+						e.dataTransfer.effectAllowed = 'move';
+						try {
+							e.dataTransfer.setData('text/plain', node.pathKey);
+						} catch {
+							/* some browsers throw on programmatic setData; ignore */
+						}
+						onReorderDragStart({
+							bundleId: node.bundleId,
+							resourceKey: node.resourceKey,
+							instanceIndex: node.index,
+							listPath: address.listPath,
+							itemIndex: address.index,
+						});
+					}
+					: undefined
+			}
+			onDragOver={
+				isDropEligible && address
+					? (e) => {
+						// preventDefault is what tells the browser this is a valid
+						// drop target (without it `onDrop` never fires). Pick the
+						// edge from the pointer's position within the row so the
+						// indicator lands above or below.
+						e.preventDefault();
+						e.dataTransfer.dropEffect = 'move';
+						const rect = e.currentTarget.getBoundingClientRect();
+						const edge: 'top' | 'bottom' =
+							e.clientY - rect.top < rect.height / 2 ? 'top' : 'bottom';
+						onReorderDragOverRow({ pathKey: node.pathKey, edge });
+					}
+					: undefined
+			}
+			onDrop={
+				isDropEligible && rowTarget && address
+					? (e) => {
+						e.preventDefault();
+						const rect = e.currentTarget.getBoundingClientRect();
+						const edge: 'top' | 'bottom' =
+							e.clientY - rect.top < rect.height / 2 ? 'top' : 'bottom';
+						onReorderDrop(rowTarget, address.index, edge);
+					}
+					: undefined
+			}
+			onDragEnd={isReorderable ? () => onReorderDragEnd() : undefined}
 			onClick={(e) => {
 				e.stopPropagation();
 				onSelectSchema(
