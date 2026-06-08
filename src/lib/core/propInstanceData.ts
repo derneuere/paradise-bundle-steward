@@ -19,9 +19,12 @@
 //
 // Round-trip strategy:
 //  - The layout is rigid: header(32B) → instances(0x50 each, at 0x20) →
-//    cells(0x0C each) → all-zero tail. maInstances is always 0x20 and
-//    maCells = 0x20 + instances.length*0x50, so both pointers are recomputed on
-//    write rather than stored on the model. muNumberOfProps == instances.length.
+//    cells(0x0C each) → all-zero tail. maInstances/maCells are runtime pointers
+//    fixed up at load: maInstances = 0x20 and maCells = 0x20 + props*0x50 when
+//    those arrays are populated, but BOTH are null (0) for an empty prop zone
+//    (no props, no cells) — ~40% of track units ship that all-zero shape. So
+//    the pointers are recomputed from the array lengths on write (null when
+//    empty) rather than stored on the model. muNumberOfProps == instances.length.
 //  - muSizeInBytes does NOT track the buffer length (it is an internal stored
 //    field — gold fixture has len-32, others differ), and muNumberOfInstances is
 //    a larger logical count distinct from the stored record count. Both are
@@ -118,14 +121,16 @@ export function parsePropInstanceData(raw: Uint8Array, littleEndian = true): Par
 	r.readU16();                                  // 2 pad (0x1A)
 	r.readU32();                                  // 4 pad (0x1C) — header padded up to maInstances (0x20)
 
-	// The layout is rigid; bail loudly if a fixture violates it rather than
-	// silently producing a broken model that won't round-trip.
-	if (maInstances !== INSTANCES_OFFSET) {
+	// The layout is rigid; bail loudly if a populated fixture violates it rather
+	// than silently producing a broken model that won't round-trip. An empty
+	// prop zone is the exception — it stores null (0) pointers, so only validate
+	// each pointer when its array is actually present.
+	const instancesEnd = INSTANCES_OFFSET + muNumberOfProps * INSTANCE_RECORD_SIZE;
+	if (muNumberOfProps > 0 && maInstances !== INSTANCES_OFFSET) {
 		throw new Error(`PropInstanceData: maInstances is 0x${maInstances.toString(16)}, expected 0x20 (rigid layout)`);
 	}
-	const expectedMaCells = INSTANCES_OFFSET + muNumberOfProps * INSTANCE_RECORD_SIZE;
-	if (maCells !== expectedMaCells) {
-		throw new Error(`PropInstanceData: maCells is 0x${maCells.toString(16)}, expected 0x${expectedMaCells.toString(16)} for ${muNumberOfProps} props`);
+	if (muNumCells > 0 && maCells !== instancesEnd) {
+		throw new Error(`PropInstanceData: maCells is 0x${maCells.toString(16)}, expected 0x${instancesEnd.toString(16)} for ${muNumberOfProps} props`);
 	}
 
 	// --- Instances (80 bytes each, at 0x20) ---
@@ -157,8 +162,11 @@ export function parsePropInstanceData(raw: Uint8Array, littleEndian = true): Par
 	}
 
 	// --- Cells (12 bytes each, immediately after instances) ---
+	// Read from the layout offset, not the stored maCells pointer: the two are
+	// equal for populated zones (asserted above) but maCells is null (0) for an
+	// empty zone, so trusting it would mis-seek to offset 0.
 	const cells: PropCell[] = [];
-	r.position = maCells;
+	r.position = instancesEnd;
 	for (let i = 0; i < muNumCells; i++) {
 		const muX = r.readU16();
 		const muZ = r.readU16();
@@ -173,7 +181,7 @@ export function parsePropInstanceData(raw: Uint8Array, littleEndian = true): Par
 	}
 
 	// --- Trailing pad (all zero) — captured to reproduce the exact length. ---
-	const cellsEnd = maCells + muNumCells * CELL_RECORD_SIZE;
+	const cellsEnd = instancesEnd + muNumCells * CELL_RECORD_SIZE;
 	const _trailingPad = cellsEnd < raw.byteLength
 		? raw.slice(cellsEnd, raw.byteLength)
 		: new Uint8Array(0);
@@ -196,11 +204,16 @@ export function writePropInstanceData(model: ParsedPropInstanceData, littleEndia
 	const { instances, cells } = model;
 	const muNumberOfProps = instances.length;
 
-	// Recompute the rigid pointers from the layout (never trust stored values).
-	const maInstances = INSTANCES_OFFSET;
-	const maCells = INSTANCES_OFFSET + muNumberOfProps * INSTANCE_RECORD_SIZE;
-	const cellsEnd = maCells + cells.length * CELL_RECORD_SIZE;
+	// Layout offsets (where the arrays physically live) recomputed from the
+	// counts — never trust stored values.
+	const instancesEnd = INSTANCES_OFFSET + muNumberOfProps * INSTANCE_RECORD_SIZE;
+	const cellsEnd = instancesEnd + cells.length * CELL_RECORD_SIZE;
 	const totalSize = cellsEnd + model._trailingPad.byteLength;
+
+	// Stored pointers are null (0) when their array is empty — reproduces the
+	// all-zero header an empty prop zone ships, keeping the round-trip byte-exact.
+	const maInstances = muNumberOfProps > 0 ? INSTANCES_OFFSET : 0;
+	const maCells = cells.length > 0 ? instancesEnd : 0;
 
 	const w = new BinWriter(totalSize, littleEndian);
 
@@ -232,7 +245,7 @@ export function writePropInstanceData(model: ParsedPropInstanceData, littleEndia
 		w.writeU8(inst._pad4D[1]);
 		w.writeU8(inst._pad4D[2]);
 	}
-	if (w.offset !== maCells) throw new Error(`PropInstanceData writer: cells offset mismatch ${w.offset} vs ${maCells}`);
+	if (w.offset !== instancesEnd) throw new Error(`PropInstanceData writer: cells offset mismatch ${w.offset} vs ${instancesEnd}`);
 
 	// --- Cells (12 bytes each) — muStartIndex / muCount derived from the
 	// partition: each cell consumes the next muCount instances contiguously. We

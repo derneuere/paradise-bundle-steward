@@ -96,3 +96,41 @@ describe('PropInstanceData gold file (example/BE_9F_C7_93.dat)', () => {
 		expect(bytesEqual(write1, write2)).toBe(true);
 	});
 });
+
+// ~40% of track units (172/427 in example/) ship an *empty* prop zone: no
+// props, no cells, with maInstances and maCells stored as null (0) rather than
+// the populated-layout 0x20. The parser must accept this all-zero shape instead
+// of throwing — a throw leaves a null model in the workspace, and clicking it
+// used to tear down the whole editor (and the WebGL context). Synthesised here
+// (rather than relying on an untracked example/ binary) so the regression is
+// pinned on every machine.
+describe('PropInstanceData empty prop zone (null pointers)', () => {
+	function emptyZoneBytes(zoneId: number): Uint8Array {
+		// 32-byte header + 32 bytes trailing zero pad = 64 bytes, mirroring the
+		// real empty-zone resource (e.g. example/TRK_UNIT0_GR.BNDL).
+		const bytes = new Uint8Array(64);
+		const dv = new DataView(bytes.buffer);
+		dv.setUint32(12, 32, true); // muSizeInBytes (stored, == header size here)
+		dv.setUint16(24, zoneId, true); // muZoneId
+		// Everything else — maCells, maInstances, counts — stays zero.
+		return bytes;
+	}
+
+	it('parses with zero instances/cells and null pointers', () => {
+		const model = parsePropInstanceData(emptyZoneBytes(7));
+		expect(model.instances.length).toBe(0);
+		expect(model.cells.length).toBe(0);
+		expect(model.muZoneId).toBe(7);
+		expect(model.muSizeInBytes).toBe(32);
+		// Trailing pad (header end → buffer end) is preserved verbatim, not the
+		// whole buffer — guards against the null maCells mis-seeking to offset 0.
+		expect(model._trailingPad.byteLength).toBe(32);
+	});
+
+	it('round-trips byte-for-byte (re-emits null pointers, not 0x20)', () => {
+		const original = emptyZoneBytes(7);
+		const rewritten = writePropInstanceData(parsePropInstanceData(original));
+		expect(rewritten.byteLength).toBe(original.byteLength);
+		expect(bytesEqual(rewritten, original)).toBe(true);
+	});
+});

@@ -43,6 +43,11 @@ export const propInstanceDataHandler: ResourceHandler<ParsedPropInstanceData> = 
 	fixtures: [
 		{ bundle: 'example/TRK_UNIT9_GR.BNDL', expect: { parseOk: true, byteRoundTrip: true } },
 		{ bundle: 'example/TRK_UNIT10_GR.BNDL', expect: { parseOk: true, byteRoundTrip: true } },
+		// The empty-prop-zone shape (~40% of track units: no props, no cells,
+		// null pointers) is covered by a self-contained unit test in
+		// __tests__/propInstanceData.test.ts — it can't be a fixture here because
+		// the stress scenarios below edit instances[0] / the last cell, which an
+		// empty zone doesn't have.
 	],
 
 	stressScenarios: [
