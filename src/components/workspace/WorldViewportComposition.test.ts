@@ -74,6 +74,7 @@ describe('WORLD_VIEWPORT_FAMILY_KEYS', () => {
 		expect([...WORLD_VIEWPORT_FAMILY_KEYS].sort()).toEqual([
 			'aiSections',
 			'polygonSoupList',
+			'propInstanceData',
 			'streetData',
 			'trafficData',
 			'triggerData',
