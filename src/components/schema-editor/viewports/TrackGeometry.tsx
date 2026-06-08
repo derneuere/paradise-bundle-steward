@@ -17,6 +17,7 @@
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import type { ParsedBundle } from '@/lib/core/types';
+import { useDisposeTrackGeometry } from '@/hooks/useDisposeTrackGeometry';
 import { decodeTrackGeometry, TRACK_MATERIAL_COLOR } from './trackGeometryDecode';
 
 // Behind the editable overlays. The track is map-scale backdrop; props and
@@ -48,6 +49,11 @@ export function TrackGeometry({
 			}),
 		[],
 	);
+
+	// R3F does not auto-dispose geometry/material passed via props — free them
+	// when a new bundle re-decodes or the component unmounts, or the GPU buffers
+	// leak across load/close cycles until the context is lost.
+	useDisposeTrackGeometry(meshes, material);
 
 	if (meshes.length === 0) return null;
 
