@@ -117,8 +117,16 @@ import type { NodePath } from '@/lib/schema/walk';
 // selection change in the world-family.
 function SelectedSchemaEditorProvider({
 	children,
+	fallback,
 }: {
 	children: React.ReactNode;
+	/** Rendered in place of `children` when the editor context can't be built
+	 *  (e.g. the selected instance failed to parse, so its model is null). Every
+	 *  caller passes provider-consuming children — rendering them bare would
+	 *  throw `useSchemaEditor must be used within a SchemaEditorProvider`, and
+	 *  in the un-boundaried inspector that uncaught throw tears down the whole
+	 *  React root, taking the WorldViewport's WebGL context with it. */
+	fallback?: React.ReactNode;
 }) {
 	const { bundles, selection, select, setResourceAt } = useWorkspace();
 	const level = selectionLevel(selection);
@@ -172,7 +180,12 @@ function SelectedSchemaEditorProvider({
 	);
 
 	if (!isInstanceOrSchema || !schema || data === undefined || !selection?.resourceKey) {
-		return <>{children}</>;
+		// Can't build the editor context for this selection. `children` always
+		// consumes `useSchemaEditor`, so render the fallback instead of letting
+		// the hook throw (see the `fallback` prop doc). `data === undefined`
+		// happens when the selected instance failed to parse — e.g. a resource
+		// whose parser threw, leaving a null slot in parsedResourcesAll.
+		return <>{fallback ?? null}</>;
 	}
 
 	return (
@@ -267,7 +280,13 @@ function CenterViewport() {
 		<ViewportErrorBoundary
 			resetKey={`${selection.bundleId}/${selection.resourceKey}/${selection.index}`}
 		>
-			<SelectedSchemaEditorProvider>
+			<SelectedSchemaEditorProvider
+				fallback={
+					<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
+						This {selection.resourceKey} instance couldn't be parsed — no viewport to show.
+					</div>
+				}
+			>
 				<ViewportPane />
 			</SelectedSchemaEditorProvider>
 		</ViewportErrorBoundary>
@@ -391,18 +410,35 @@ function RightInspector() {
 		selection.index != null &&
 		inspectorBundle != null;
 
+	// The inspector gets its own error boundary (the centre viewport already has
+	// one). Without it, any throw while rendering the schema form propagates
+	// uncaught and React 18 unmounts the entire root — which destroys the
+	// WorldViewport's <Canvas> and loses the WebGL context. Containing the throw
+	// here keeps the scene alive while the inspector shows the error.
 	return wrapWithBulk(
-		<SelectedSchemaEditorProvider>
-			{showAIImport && inspectorBundle && selection.index != null ? (
-				<AIImportInspectorWrapper
-					bundle={inspectorBundle}
-					index={selection.index}
-					setResourceAt={setResourceAt as never}
-				/>
-			) : (
-				<InspectorPanel />
-			)}
-		</SelectedSchemaEditorProvider>,
+		<ViewportErrorBoundary
+			resetKey={`${selection.bundleId}/${selection.resourceKey}/${selection.index}`}
+			title="Inspector crashed"
+			description="Something threw while rendering the inspector form. Copy the details below and send them to the developer. Try Reset or selecting a different resource to keep working."
+		>
+			<SelectedSchemaEditorProvider
+				fallback={
+					<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
+						This {selection.resourceKey} instance couldn't be parsed — nothing to edit.
+					</div>
+				}
+			>
+				{showAIImport && inspectorBundle && selection.index != null ? (
+					<AIImportInspectorWrapper
+						bundle={inspectorBundle}
+						index={selection.index}
+						setResourceAt={setResourceAt as never}
+					/>
+				) : (
+					<InspectorPanel />
+				)}
+			</SelectedSchemaEditorProvider>
+		</ViewportErrorBoundary>,
 	);
 }
 

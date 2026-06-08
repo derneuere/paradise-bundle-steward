@@ -12,6 +12,12 @@ import { Button } from '@/components/ui/button';
 
 type Props = {
 	resetKey?: unknown;
+	/** Heading for the fallback card. Defaults to the 3D-viewport copy; the
+	 *  inspector pane overrides it so a caught inspector throw doesn't claim the
+	 *  viewport crashed. */
+	title?: string;
+	/** Body copy under the heading. Defaults to the 3D-viewport explanation. */
+	description?: string;
 	children: ReactNode;
 };
 
@@ -77,11 +83,12 @@ export class ViewportErrorBoundary extends Component<Props, State> {
 				<div className="max-w-3xl mx-auto rounded border border-destructive/40 bg-destructive/5 p-4 space-y-3">
 					<div className="flex items-start justify-between gap-3">
 						<div>
-							<h2 className="text-sm font-semibold text-destructive">3D viewport crashed</h2>
+							<h2 className="text-sm font-semibold text-destructive">
+								{this.props.title ?? '3D viewport crashed'}
+							</h2>
 							<p className="text-xs text-muted-foreground mt-1">
-								Something threw while rendering the 3D view. Please copy the details below and
-								send them to the developer — it helps pinpoint the bug. Try Reset or switching
-								to a different resource to keep working.
+								{this.props.description ??
+									'Something threw while rendering the 3D view. Please copy the details below and send them to the developer — it helps pinpoint the bug. Try Reset or switching to a different resource to keep working.'}
 							</p>
 						</div>
 						<div className="flex gap-1 shrink-0">
