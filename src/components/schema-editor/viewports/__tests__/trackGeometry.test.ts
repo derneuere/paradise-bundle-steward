@@ -7,13 +7,16 @@
 // props (inst0 sits near x≈-567, y≈371, z≈-2779 per the fixture findings in
 // docs/instance-list-spec.md).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as THREE from 'three';
 import { parseBundle } from '@/lib/core/bundle';
 import {
 	decodeTrackGeometry,
+	disposeTrackGeometries,
 	instanceTransformToMatrix4,
+	type PlacedTrackMesh,
 } from '../trackGeometryDecode';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
@@ -79,5 +82,38 @@ describe('decodeTrackGeometry (TRK_UNIT9_GR)', () => {
 		expect(e[12]).toBe(-567);
 		expect(e[13]).toBe(371);
 		expect(e[14]).toBe(-2779);
+	});
+});
+
+describe('disposeTrackGeometries', () => {
+	function placed(geometry: THREE.BufferGeometry): PlacedTrackMesh {
+		return { geometry, matrix: new THREE.Matrix4(), modelId: 0n, renderableId: 0n };
+	}
+
+	it('disposes each distinct geometry once', () => {
+		const a = new THREE.BufferGeometry();
+		const b = new THREE.BufferGeometry();
+		const spyA = vi.spyOn(a, 'dispose');
+		const spyB = vi.spyOn(b, 'dispose');
+
+		disposeTrackGeometries([placed(a), placed(b)]);
+
+		expect(spyA).toHaveBeenCalledTimes(1);
+		expect(spyB).toHaveBeenCalledTimes(1);
+	});
+
+	it('disposes a shared geometry exactly once across repeated placements', () => {
+		// The decode reuses one geometry for every placement of the same Model,
+		// so it appears in many PlacedTrackMesh entries — it must be freed once.
+		const shared = new THREE.BufferGeometry();
+		const spy = vi.spyOn(shared, 'dispose');
+
+		disposeTrackGeometries([placed(shared), placed(shared), placed(shared)]);
+
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+
+	it('is a no-op for an empty mesh list', () => {
+		expect(() => disposeTrackGeometries([])).not.toThrow();
 	});
 });

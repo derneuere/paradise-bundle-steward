@@ -252,6 +252,29 @@ export function decodeTrackGeometry(
 	return { meshes, instanceCount, resolvedModels };
 }
 
+/**
+ * Free the GPU buffers of every geometry in a decoded mesh list.
+ *
+ * The decode shares one BufferGeometry across all placements of a Model (see
+ * `geomCache` above — a track unit can place the same Model many times), so a
+ * single geometry object appears in many PlacedTrackMesh entries. Dedupe by
+ * identity so each is disposed exactly once.
+ *
+ * This exists because react-three-fiber only auto-disposes objects it builds
+ * declaratively from JSX args; geometry handed in via the `geometry` prop is
+ * the caller's to free. Without this, each load → close cycle of a large track
+ * (~440k verts for TRK9) leaks its buffers on the GPU until the context is
+ * lost. Pure (no React) so it can be unit-tested in node.
+ */
+export function disposeTrackGeometries(meshes: PlacedTrackMesh[]): void {
+	const seen = new Set<THREE.BufferGeometry>();
+	for (const m of meshes) {
+		if (seen.has(m.geometry)) continue;
+		seen.add(m.geometry);
+		m.geometry.dispose();
+	}
+}
+
 /** Shared grey material for the untextured track backdrop. */
 export const TRACK_MATERIAL_COLOR = 0x8a8f99;
 
