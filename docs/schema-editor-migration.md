@@ -1,50 +1,71 @@
-# Schema-editor migration prompts
+# Schema-editor architecture reference
 
-Prompts for migrating the remaining bundle resources to the schema-driven
-editor framework. Copy the relevant section into a fresh agent session —
-each per-resource prompt is self-contained and inherits the shared recipe
-at the top.
+How the schema-driven editor framework is wired, and how to add a new
+resource to it. This guide was originally a set of "migrate the remaining
+resource" prompts; that migration is now essentially complete, so it has
+been converted into a structural reference. The per-resource sections at
+the bottom are kept as historical notes on how each resource was wired.
 
-## Context
+## Status
 
-There's a schema-driven editor framework at
-`steward/src/components/schema-editor/` and `steward/src/lib/schema/`.
-Two resources are already migrated as reference implementations:
+The schema-driven editor framework lives at
+`steward/src/components/schema-editor/` and `steward/src/lib/schema/`,
+with per-resource wiring under `steward/src/lib/editor/`. Every
+world/data resource is migrated — each has a schema (under
+`src/lib/schema/resources/`) and an `EditorProfile` (under
+`src/lib/editor/profiles/`), and most have extensions and/or a 3D overlay:
 
-- **TrafficData** (type `0x10002`) — full migration with extensions wrapping
-  14 Phase 1/2 tabs, custom `propertyGroups`, and a 3D viewport shim.
-  Schema at `src/lib/schema/resources/trafficData.ts`, page at
-  `src/pages/TrafficDataPage.tsx`, extensions at
-  `src/components/schema-editor/extensions/trafficDataExtensions.tsx`.
+- **TrafficData** (type `0x10002`) — extensions wrapping 14 Phase 1/2
+  tabs, custom `propertyGroups`, and a 3D overlay. Schema at
+  `src/lib/schema/resources/trafficData.ts`, profile at
+  `src/lib/editor/profiles/trafficData.ts`, extensions at
+  `src/components/schema-editor/extensions/trafficDataExtensions.tsx`,
+  overlay at `src/components/schema-editor/viewports/TrafficDataOverlay.tsx`.
 - **PolygonSoupList** (type `0x43`) — schema-first migration with a
-  dedicated 3D viewport batching 1.5M triangles, a page-level resource
-  picker, and `byResourceId` export support for bundles with hundreds of
-  same-typed resources. Schema at `src/lib/schema/resources/polygonSoupList.ts`,
-  page at `src/pages/PolygonSoupListPage.tsx`, viewport at
-  `src/components/schema-editor/viewports/PolygonSoupListViewport.tsx`.
+  dedicated 3D overlay batching 1.5M triangles, a resource picker, and
+  `byResourceId` export support for bundles with hundreds of same-typed
+  resources. Schema at `src/lib/schema/resources/polygonSoupList.ts`,
+  page at `src/pages/PolygonSoupListPage.tsx`, overlay at
+  `src/components/schema-editor/viewports/PolygonSoupListOverlay.tsx`.
+- **AISections** (`0x10001`), **StreetData** (`0x10018`), **TriggerData**
+  (`0x10003`), **ChallengeList** (`0x1001F`), **VehicleList** (`0x10005`),
+  **PlayerCarColours** (`0x1001E`), **IceTakeDictionary** (`0x41`),
+  **Renderable**, and **Texture** — all migrated (schema + EditorProfile;
+  AISections, ChallengeList, Renderable, StreetData, TriggerData, and
+  VehicleList also ship extensions).
 
-Read these before starting. Both pages + both schemas + both tests are
-the ground truth for the patterns below.
+TrafficData and PolygonSoupList are still the best-documented reference
+implementations — read their schema + test before adding a new resource.
 
 ## Framework quick reference
 
 - `src/lib/schema/types.ts` — field/record types. Kinds: `u8`/`u16`/`u32`/
   `i8`/`i16`/`i32`/`f32`/`bigint`/`bool`/`string`/`enum`/`flags`/`vec2`/
-  `vec3`/`vec4`/`matrix44`/`ref`/`record`/`list`/`custom`.
+  `vec3`/`vec4`/`matrix44`/`ref`/`record`/`list`/`custom`. Also exports
+  `defineProfile` for the per-resource `EditorProfile`.
 - `src/lib/schema/walk.ts` — `getAtPath`, `updateAtPath`, `resolveSchemaAtPath`,
   `walkResource` (depth-first visitor). All immutable with structural sharing.
+- `src/lib/editor/profiles/` — one `EditorProfile` per resource (and per
+  layout variant, e.g. AISections v4/v6/v12). A profile binds a
+  `ResourceSchema` to the resource and declares its overlay/extensions via
+  the editor registry (`src/lib/editor/bindings.ts`, ADR-0008).
 - `src/components/schema-editor/SchemaEditor.tsx` — 3-pane layout that
   just needs a `SchemaEditorProvider` above it.
 - `src/components/schema-editor/context.tsx` — `SchemaEditorProvider` and
   `useSchemaEditor` hook. Holds selection + mutation + extension registry.
 - `src/components/schema-editor/fields/FieldRenderer.tsx` — dispatches by
   field kind. Existing renderers cover everything in `types.ts`.
-- `src/components/schema-editor/ViewportPane.tsx` — dispatches by
-  `resource.key`. Add new viewports here.
+- `src/components/schema-editor/ViewportPane.tsx` — mounts the overlay
+  resolved from the resource's `EditorProfile` (ADR-0008) via
+  `pickRenderBinding` (`@/lib/editor/bindings`) inside a shared
+  `<WorldViewport>`. `renderable` and `texture` are the only special-cased
+  surfaces; every other resource flows through its profile's overlay. New
+  viewports are registered as an overlay on the resource's `EditorProfile`
+  under `src/lib/editor/profiles/`, **not** by editing `ViewportPane`.
 
-## Shared recipe
+## Adding a resource — recipe
 
-Every migration follows these steps. Deviate only where the per-resource
+Every resource follows these steps. Deviate only where the per-resource
 notes below say so.
 
 ### 1. Schema declaration
@@ -110,59 +131,40 @@ version for single-resource bundles, PSL for multi-resource). It must:
 Run with `cd steward && eval "$(fnm env --shell=bash)" && fnm use 22 &&
 node ./node_modules/vitest/vitest.mjs run src/lib/schema/resources/<key>.test.ts`.
 
-### 3. Page wiring
+### 3. EditorProfile + Workspace wiring
 
-For a single-resource bundle (most types), replace the existing page:
+Generic schema-driven resources have **no** per-resource page and **no**
+`/{key}` route. They are edited inside the Workspace editor
+(`src/pages/WorkspacePage.tsx`, route `/workspace`) and surfaced by
+registering an `EditorProfile` for them.
 
-```tsx
-// src/pages/<Name>Page.tsx
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useBundle } from '@/context/BundleContext';
-import { SchemaEditor } from '@/components/schema-editor/SchemaEditor';
-import { SchemaEditorProvider } from '@/components/schema-editor/context';
-import { <key>ResourceSchema } from '@/lib/schema/resources/<key>';
-import { <key>Extensions } from '@/components/schema-editor/extensions/<key>Extensions';
+Create `src/lib/editor/profiles/<key>.ts` modeled after
+`streetData.ts` (the minimal case) — bind the schema to the resource:
+
+```ts
+// src/lib/editor/profiles/<key>.ts
+import { defineProfile } from '../types';
 import type { Parsed<Name> } from '@/lib/core/<key>';
+import { <key>ResourceSchema } from '@/lib/schema/resources/<key>';
 
-const <Name>Page = () => {
-  const { getResource, setResource } = useBundle();
-  const data = getResource<Parsed<Name>>('<key>');
-  if (!data) {
-    return (
-      <Card>
-        <CardHeader><CardTitle><Human Name></CardTitle></CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">
-            Load a bundle containing <key> to begin.
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-  return (
-    <div className="h-full min-h-0">
-      <SchemaEditorProvider
-        resource={<key>ResourceSchema}
-        data={data}
-        onChange={(next) => setResource('<key>', next as Parsed<Name>)}
-        extensions={<key>Extensions}
-      >
-        <SchemaEditor />
-      </SchemaEditorProvider>
-    </div>
-  );
-};
-
-export default <Name>Page;
+export const <key>Profile = defineProfile<Parsed<Name>>({
+  kind: 'default',
+  displayName: 'Human Name',
+  schema: <key>ResourceSchema,
+});
 ```
 
-For a multi-resource bundle (only relevant if a bundle can hold N of the
-same type, like PolygonSoupList), model after `PolygonSoupListPage.tsx`
-with a resource picker + `setResourceAt`.
+For resources with multiple on-disk layout variants, declare one profile
+per variant with a `matches` predicate (see `aiSections.ts`, which
+registers `v4` / `v6` / `v12` profiles and uses `freezeSchema` for the
+read-only prototype variants).
 
-**Don't** touch `src/App.tsx` — the registry-driven `/{key}` route is
-auto-generated from `src/lib/core/registry/editors.ts` which already
-points at `src/pages/<Name>Page.tsx`.
+**Don't** add a `<Name>Page` or touch `src/App.tsx`. The `/workspace`
+route already hosts every profile-registered resource. Only **bespoke**
+editors (the ones in `EDITOR_PAGES` in `src/lib/core/registry/editors.ts`
+— `attribSysVault`, `deformationSpec`, `renderable`, `texture`,
+`polygonSoupList`, `shader`) get a per-resource page and an
+auto-generated `/{key}` route in `App.tsx`.
 
 ### 4. Extension adapters (optional, for preserving existing tabs)
 
@@ -193,33 +195,36 @@ Then reference the extensions from the schema:
 
 ### 5. Viewport (optional, only if a 3D visualization exists)
 
-If the existing page has a 3D viewport that should be preserved or
-rebuilt:
+If the resource needs a 3D viewport, register it as an **overlay** on the
+resource's `EditorProfile`, not by branching in `ViewportPane.tsx` (only
+`renderable` and `texture` are special-cased there; everything else flows
+through `pickRenderBinding` + the profile overlay):
 
-- Add a new file at
-  `src/components/schema-editor/viewports/<Key>Viewport.tsx`.
-- Add a branch in `src/components/schema-editor/ViewportPane.tsx` that
-  checks `resource.key === '<key>'` and renders your viewport.
-- If the viewport needs access to something outside the schema-editor
+- Add the overlay component at
+  `src/components/schema-editor/viewports/<Key>Overlay.tsx`, modeled after
+  an existing overlay (`StreetDataOverlay.tsx`, `TriggerDataOverlay.tsx`,
+  `TrafficDataOverlay.tsx`, `PolygonSoupListOverlay.tsx`,
+  `ZoneListOverlay.tsx`, …). Overlays speak the shared `NodePath` contract
+  (`data`, `selectedPath`, `onSelect`, `onChange`) and mount inside
+  `<WorldViewport>`.
+- Wire the overlay to the resource through the editor binding
+  (`src/lib/editor/bindings.ts`) so `pickRenderBinding(resource.key, data)`
+  resolves it. `ViewportPane` then mounts it automatically.
+- If the overlay needs access to something outside the schema-editor
   context (multi-resource models, `loadedBundle`, selection callbacks),
   create a dedicated React context in the same viewports directory,
-  modeled after `polygonSoupListContext.ts`, and have the page wrap the
-  `SchemaEditorProvider` in the context provider.
-
-For simple cases that just visualize the currently-edited single resource,
-consume `useSchemaEditor()` directly inside the viewport — no extra
-context needed.
+  modeled after `polygonSoupListContext.ts`.
 
 ### 6. Cleanup
 
 Once the schema editor renders + round-trips + passes tests, delete the
-old files:
+old bespoke editor:
 
-- The old page is already pointed at by `editors.ts` — rename-in-place
-  (the file path stays, only the contents change).
+- Delete any old `<Name>Page.tsx` and its `EDITOR_PAGES` entry once the
+  resource is edited in the Workspace via its profile.
 - If the old page had a dedicated editor wrapper component
   (`<Name>Editor.tsx`) under `src/components/<key>/`, delete it after
-  the new page stops importing it.
+  nothing imports it.
 - Leave individual tab files if they're registered as extensions. Delete
   them only if the new schema-driven form fully replaces them.
 
@@ -246,7 +251,7 @@ Then verify in the browser:
   `dev`).
 - Load a fixture via `fetch('/@fs/...')` → `File` → dispatch `change` on
   the hidden file input.
-- Navigate to `/{key}` via `history.pushState` + `popstate`.
+- Navigate to `/workspace` via `history.pushState` + `popstate`.
 - Confirm the hierarchy tree renders, the inspector shows the root
   record with the expected property groups, and at least one
   tree-driven navigation (click a list item, verify the inspector
@@ -262,7 +267,7 @@ Don't submit until tsc is clean, the full suite passes, and at least the
 
 ## Common pitfalls
 
-Things I hit during the traffic + PSL migrations that will save future
+Things hit during the traffic + PSL migrations that will save future
 agents time:
 
 1. **Count fields aren't array lengths.** `Section.muNumRungs` looks
@@ -305,68 +310,52 @@ agents time:
 
 ---
 
-# Per-resource prompts
+# Per-resource notes (historical)
 
-Copy the full section into an agent session. Each is self-contained and
-references the shared recipe + context above by path.
+These sections describe how each resource was wired during the migration.
+They are kept for reference; all of the resources below are now migrated
+(schema + `EditorProfile`, most with extensions and/or a 3D overlay). Read
+them alongside the actual schema/profile files, which are the ground truth.
 
 ---
 
 ## AISections (type `0x10001`)
 
-Migrate the AISections resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` for the full migration recipe,
-the framework quick reference, and the two reference implementations
-(TrafficData + PolygonSoupList). Do not skip this — it has ~8 common
-pitfalls that will bite you.
-
 **Handler key:** `aiSections`
 **Type ID:** `0x10001`
-**Parser:** `steward/src/lib/core/aiSections.ts` (7 exported types)
-**Existing editor:**
-- `steward/src/pages/AISectionsPage.tsx`
-- `steward/src/components/aisections/AISectionsEditor.tsx` — tab bar with Overview / Sections / Reset Pairs
-- `steward/src/components/aisections/AISectionsViewport.tsx` — 3D viewport
-- `steward/src/components/aisections/SectionsList.tsx` — virtualized section table
-- `steward/src/components/aisections/SectionDetailDialog.tsx` — per-section detail editor with Portals / NoGo Lines / Corners sub-tabs
-- `steward/src/components/aisections/AddSectionDialog.tsx` — add modal
-- `steward/src/components/aisections/constants.ts` — `SPEED_LABELS`, `FLAG_NAMES`, `RESET_SPEED_LABELS`
+**Parser:** `steward/src/lib/core/aiSections.ts`. It exports 3 enums
+(`SectionSpeed`, `AISectionFlag`, `EResetSpeedType`), 9 local types, and
+re-exports 4 `Legacy*` types from `aiSectionsLegacy.ts`. The parsed model
+is a discriminated union over `kind`, with versioned roots
+`ParsedAISectionsV4` / `ParsedAISectionsV6` / `ParsedAISectionsV12` (union
+`ParsedAISections`). The schema is split into per-version files under
+`src/lib/schema/resources/aiSections/{v4,v6,v12}.ts`, and the profile
+(`src/lib/editor/profiles/aiSections.ts`) registers one variant per layout
+(v4/v6 are frozen read-only via `freezeSchema`).
 
 **Fixture:** `example/AI.DAT` (already committed).
 
 **Spec doc:** `docs/AISections.md` at the repo root — binary layout
 reference.
 
-**Record types the schema must cover:**
-- `ParsedAISections` (root) — `version`, `sectionMinSpeeds[5]`, `sectionMaxSpeeds[5]`, `sections[]`, `sectionResetPairs[]`.
-- `AISection` — `portals[]`, `noGoLines[]`, `corners[4]`, `id: u32`, `spanIndex: i16`, `speed: enum SectionSpeed`, `district: u8`, `flags: u8 (AISectionFlag)`.
-- `Portal` — `positionX/Y/Z: f32`, `boundaryLines[]`, `linkSection: u16`.
+**Record types the schema covers:**
+- `ParsedAISectionsV12` (retail root) — `version`, `sectionMinSpeeds[5]`,
+  `sectionMaxSpeeds[5]`, `sections[]`, `sectionResetPairs[]`.
+- `AISection` — `portals[]`, `noGoLines[]`, `corners[4]`, `id: u32`,
+  `spanIndex: i16`, `speed: enum SectionSpeed`, `district: u8`,
+  `flags: u8 (AISectionFlag)`.
+- `Portal` — `position: Vector3` (three contiguous floats grouped into a
+  swapped vec3), `boundaryLines[]`, `linkSection: u16`.
 - `BoundaryLine` — `verts: vec4` (stores start + end as xy,zw pairs).
-- `SectionResetPair` — `resetSpeed: enum EResetSpeedType`, `startSectionIndex: u16`, `resetSectionIndex: u16`.
-- `Vector2`, `Vector4` as structured primitives (kind: 'vec2' / 'vec4').
+- `SectionResetPair` — `resetSpeed: enum EResetSpeedType`,
+  `startSectionIndex: u16`, `resetSectionIndex: u16`.
+- `Vector2` (`kind: 'vec2'`) for corners. (`Vector4` is an internal,
+  non-exported alias — the vec4 lives inside `BoundaryLine.verts`.)
 
 **Enums and flags** are in `src/lib/core/aiSections.ts` — `SectionSpeed`,
-`AISectionFlag`, `EResetSpeedType`. Translate them into schema
-`enum` / `flags` fields with user-friendly labels pulled from
+`AISectionFlag`, `EResetSpeedType`. They map to schema `enum` / `flags`
+fields with user-friendly labels pulled from
 `components/aisections/constants.ts`.
-
-**Migration approach:** Extensions-first. Preserve the existing tabs as
-custom renderers:
-- `AISectionsOverview` → propertyGroup `component` on root (speed limits table + flag distribution)
-- `SectionsList` → `customRenderer` on the `sections` list field
-- `SectionDetailDialog` contents → `propertyGroups` on `AISection` with
-  titles "Identity", "Portals", "NoGo Lines", "Corners"
-- Reset pairs table → `customRenderer` on `sectionResetPairs`, OR a
-  simple `propertyGroups` tab on root (it's small enough that the
-  default schema form works)
-
-**3D viewport:** `AISectionsViewport` exists. Wire it into
-`ViewportPane.tsx` by adding a branch for `resource.key === 'aiSections'`.
-The existing viewport takes `data`, `selected`, `onChange`,
-`onSelect` — adapt the same way `TrafficDataViewportShim` does in
-`ViewportPane.tsx`.
 
 **Tree-label suggestions:**
 - `sections[i]` → `"#{i} · 0x{id:hex} · {speed-label}"`
@@ -383,142 +372,105 @@ The existing viewport takes `data`, `selected`, `onChange`,
 - `EResetSpeedType` has 21 values — use the `RESET_SPEED_LABELS` constant
   as the source of truth.
 
-**Verification:** per shared checklist. Additionally, the
-`example/AI.DAT` parse→write cycle must remain sha1-identical (the
-existing `src/lib/core/registry/registry.test.ts` already checks this
-via stress scenarios — your change should not break it).
+**Verification:** the `example/AI.DAT` parse→write cycle must remain
+sha1-identical (the existing `src/lib/core/registry/registry.test.ts`
+already checks this via stress scenarios).
 
 ---
 
 ## StreetData (type `0x10018`)
 
-Migrate the StreetData resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` first.
-
 **Handler key:** `streetData`
 **Type ID:** `0x10018`
 **Parser:** `steward/src/lib/core/streetData.ts` (9 exported types,
-~2000 LOC — this is one of the more complex parsers)
-**Existing editor:**
-- `steward/src/pages/StreetDataPage.tsx`
-- `steward/src/components/streetdata/` — full directory with editor,
-  viewport, and per-section tabs. Inspect what's there before planning.
+~2000 LOC — one of the more complex parsers)
+**Schema:** `src/lib/schema/resources/streetData.ts`
+(`streetDataResourceSchema`)
+**Profile:** `src/lib/editor/profiles/streetData.ts`
+**Extensions:** `src/components/schema-editor/extensions/streetDataExtensions.tsx`
+**Overlay:** `src/components/schema-editor/viewports/StreetDataOverlay.tsx`
 
 **Fixture:** `example/BTTSTREETDATA.DAT` (already committed).
 
 **Spec doc:** `docs/StreetData.md` at the repo root.
 
-**Context:** There's an in-flight PR on the upstream repo
-(BurnoutHints/Bundle-Manager#25) about StreetData round-trip bugs. Check
+**Context:** There's an upstream PR (BurnoutHints/Bundle-Manager#25) about
+StreetData round-trip bugs. Check
 `steward/src/lib/core/registry/handlers/streetData.ts` for stress
-scenarios that document the known-good mutations. Prefer keeping the
-existing editor components as extensions rather than rewriting — the
-domain logic around spans / intersections / landmarks is nontrivial.
+scenarios that document the known-good mutations. The domain logic around
+spans / intersections / landmarks is nontrivial, so the editor keeps the
+existing components as extensions rather than a clever schema-driven form.
 
-**Record types the schema must cover** (cross-reference `streetData.ts`):
-every `export type` in the parser file. Count: 9. Do not ship until
-`walkResource` coverage passes for a real bundle.
-
-**Migration approach:** Extensions-first. This is the migration with the
-highest risk of breaking user-facing behavior because the domain is
-complex and the user is actively working on it. Prefer minimal schema
-coverage + full-tab extensions over clever schema-driven forms.
-
-**3D viewport:** Exists. Keep it as-is via a `ViewportPane` branch.
+**Record types the schema covers** (cross-reference `streetData.ts`):
+every `export type` in the parser file. Count: 9. `walkResource`
+coverage passes for a real bundle.
 
 **Tree-label suggestions:**
-- List items in the tree should carry a computed summary
-  (`spans[i]`, `intersections[i]`, etc.). Spec out each list's label
-  format before coding — a 2-minute design pass here saves 10 minutes of
-  trial-and-error.
+- List items in the tree carry a computed summary (`spans[i]`,
+  `intersections[i]`, etc.).
 
 **Gotchas:**
-- **Round-trip fidelity is critical here.** The user cares about this
-  specifically. Every schema round-trip test MUST include a byte-exact
-  sha1 check against `example/BTTSTREETDATA.DAT`, and the stress
-  scenarios in `registry/handlers/streetData.ts` MUST still pass.
-- The user has a PR in flight — if you see `// TODO` comments or
-  missing fields in the parser, don't try to fix them. Mirror the
-  parser's exact shape.
+- **Round-trip fidelity is critical here.** The schema round-trip test
+  includes a byte-exact sha1 check against `example/BTTSTREETDATA.DAT`,
+  and the stress scenarios in `registry/handlers/streetData.ts` must
+  still pass.
 - Some fields are "opaque" (the C# reference tool doesn't know their
-  semantics either). Give them `description: 'Opaque — semantics TBD on
-  the wiki'` rather than inventing labels.
-
-**Verification:** per shared checklist. Plus: `example/BTTSTREETDATA.DAT`
-parse→walk→write must be sha1-identical after your changes.
+  semantics either) — they carry a `description: 'Opaque — semantics TBD
+  on the wiki'` rather than invented labels.
 
 ---
 
 ## TriggerData (type `0x10003`)
 
-Migrate the TriggerData resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` first.
-
 **Handler key:** `triggerData`
 **Type ID:** `0x10003`
-**Parser:** `steward/src/lib/core/triggerData.ts` (13 exported types —
-this has the LARGEST schema of any remaining resource)
-**Existing editor:**
-- `steward/src/pages/TriggerDataPage.tsx`
-- `steward/src/components/triggerdata/` — full directory including
-  viewport. Expect many per-category tabs (landmarks, triggers,
-  challenges, drive-thrus, generic regions, killzones, …).
+**Parser:** `steward/src/lib/core/triggerData.ts` — exports 12 `type`
+declarations (the base `TriggerRegion` is intentionally not exported),
+plus several enums and `const …Schema` validators. Triggers come in
+several shapes (box, sphere, …), handled via custom renderers /
+discriminated unions.
+**Schema:** `src/lib/schema/resources/triggerData.ts`
+**Profile:** `src/lib/editor/profiles/triggerData.ts`
+**Extensions:** `src/components/schema-editor/extensions/triggerDataExtensions.tsx`
+**Overlay:** `src/components/schema-editor/viewports/TriggerDataOverlay.tsx`
 
 **Fixture:** `example/TRIGGERS.DAT` (already committed).
 
 **Spec doc:** `docs/TriggerData.md` at the repo root.
 
-**Record types:** 13 — walk `triggerData.ts` and cover each. Triggers
-come in several shapes (box, sphere, …) so the schema may need
-discriminated unions handled via custom renderers.
-
 **Migration approach:** Extensions-first. The existing per-category tabs
-are the canonical UX — preserve them via `customRenderer`. The schema's
-main job is navigation (tree drill-down) + simple primitive editing in
-the inspector.
-
-**3D viewport:** Exists. Wire into `ViewportPane.tsx`.
+(landmarks, triggers, challenges, drive-thrus, generic regions,
+killzones, …) are the canonical UX, preserved via `customRenderer`. The
+schema's main job is navigation (tree drill-down) + simple primitive
+editing in the inspector.
 
 **Tree labels:**
 - `landmarks[i]` → `"#{i} · {name or id} · {position}"`
 - `triggers[i]` → `"#{i} · {kind} · {position}"`
-- Use the resource's naming convention — landmarks often have
-  game-script names worth surfacing.
 
 **Gotchas:**
 - The drive-thru list has a fixed-size reservation (46 in v1.0, 53 in
-  v1.9 / Remastered). Exceeding it crashes the game. Add this as a
-  `validate` callback on the drive-thru list that emits an error-
-  severity `ValidationResult` when the length exceeds the platform's
-  limit.
-- The docs at `docs/TriggerData.md` have TODOs on many fields. Same rule
-  as StreetData: mirror the parser, don't invent semantics.
+  v1.9 / Remastered). Exceeding it crashes the game. A `validate`
+  callback on the drive-thru list emits an error-severity
+  `ValidationResult` when the length exceeds the platform's limit.
+- The docs at `docs/TriggerData.md` have TODOs on many fields — the
+  schema mirrors the parser rather than inventing semantics.
 - `triggerData` tends to have the most bugs in round-trip — run the full
   stress-scenario suite frequently while iterating.
-
-**Verification:** per shared checklist.
 
 ---
 
 ## ChallengeList (type `0x1001F`)
 
-Migrate the ChallengeList resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` first.
-
 **Handler key:** `challengeList`
 **Type ID:** `0x1001F`
 **Parser:** `steward/src/lib/core/challengeList.ts` (7 exported types)
-**Existing editor:**
-- `steward/src/pages/ChallengeListPage.tsx`
-- `steward/src/components/challangelist/` — note the misspelled
-  directory name (`challangelist` not `challengelist`). Keep the
-  existing spelling.
+**Schema:** `src/lib/schema/resources/challengeList.ts`
+**Profile:** `src/lib/editor/profiles/challengeList.ts`
+**Extensions:** `src/components/schema-editor/extensions/challengeListExtensions.tsx`
+
+Note the existing component directory is misspelled
+(`src/components/challangelist/`, not `challengelist`). Keep the spelling.
 
 **Fixture:** `example/ONLINECHALLENGES.BNDL` (already committed).
 
@@ -526,47 +478,32 @@ Migrate the ChallengeList resource to the schema-driven editor framework.
 
 **Record types:** 7 — challenges come in multiple types (billboards,
 smashes, jumps, drive-thrus, super-jumps, …). Each has its own payload
-shape. This is a classic polymorphic-record case.
-
-**Migration approach:** Extensions-first. The challenge-type dropdown +
-per-type detail form in the existing editor is the right UX — preserve
-it via `customRenderer`. The schema describes the common header fields;
-the per-type details are handled by the custom renderer.
+shape. A classic polymorphic-record case, handled with a challenge-type
+discriminator + per-type detail form preserved via `customRenderer`.
 
 **Tree labels:**
 - `challenges[i]` → `"#{i} · {type-label} · {name or id}"` where
   `type-label` is `'Billboard' / 'Smash' / 'Drive-thru' / …`.
-- Define a type-code → label map at the top of the schema file.
 
-**No 3D viewport.** Don't add one.
+**No 3D viewport.**
 
 **Gotchas:**
 - Challenge IDs are hashes; display as hex.
-- The challenge type field is a discriminator — schema should mark it
-  `enum` with every known type code. Unknown types should not crash the
-  editor; the default renderer for `enum` handles unknown values.
-
-**Verification:** per shared checklist.
+- The challenge type field is a discriminator — `enum` with every known
+  type code. Unknown types don't crash the editor; the default `enum`
+  renderer handles unknown values.
 
 ---
 
 ## VehicleList (type `0x10005`)
 
-Migrate the VehicleList resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` first.
-
 **Handler key:** `vehicleList`
 **Type ID:** `0x10005`
 **Parser:** `steward/src/lib/core/vehicleList.ts` (4 exported types —
 small)
-**Existing editor:**
-- `steward/src/pages/VehiclesPage.tsx` — list view
-- `steward/src/pages/VehicleEditorPage.tsx` — per-vehicle detail view at
-  `/vehicleList/:id`
-- `steward/src/components/VehicleList.tsx`, `VehicleEditor.tsx`,
-  `VehicleCard/` — existing list + detail components
+**Schema:** `src/lib/schema/resources/vehicleList.ts`
+**Profile:** `src/lib/editor/profiles/vehicleList.ts`
+**Extensions:** `src/components/schema-editor/extensions/vehicleListExtensions.tsx`
 
 **Fixture:** `example/VEHICLELIST.BUNDLE` (already committed).
 
@@ -576,106 +513,65 @@ small)
 list. VehicleEntry is rich — ~40 fields covering GameDB IDs, vehicle
 class, handling parameters, boost flags, etc.
 
-**Migration approach:** **Schema-first with one extension**. The
-existing per-vehicle `VehicleEditor` is worth preserving as a custom
-renderer on the `vehicles` list, but the list page itself (`VehiclesPage`)
-can be replaced entirely by the tree navigation.
-
-**Routing wrinkle:** `App.tsx` currently has a hardcoded
-`/vehicleList/:id` nested route. After migration:
-- Delete `src/pages/VehicleEditorPage.tsx` and the `/vehicleList/:id`
-  route in `App.tsx`.
-- Delete `src/pages/VehiclesPage.tsx` (replaced by schema-driven tree).
-- The registry-generated `/vehicleList` route now points at a new page
-  wired like the recipe shows.
-- Selecting a vehicle in the tree drills into the per-vehicle detail
-  view in the inspector. The `VehicleEditor` component becomes a
-  `customRenderer` on... hmm, actually vehicles are records in a list,
-  so you'd register it as a `propertyGroups.component` on the
-  `VehicleEntry` record schema, or as a custom renderer for the entire
-  record.
-
-  See `TrafficDataExtensions` for the pattern.
+**Migration approach:** Schema-first with one extension. The per-vehicle
+detail UI is preserved as a custom renderer on the `vehicles` list; the
+old list page was dropped in favor of tree navigation. (The pre-migration
+`/vehicleList/:id` nested route, `VehicleEditorPage.tsx`, and
+`VehiclesPage.tsx` no longer exist — VehicleList is now edited in the
+Workspace via its profile.)
 
 **Tree labels:**
 - `vehicles[i]` → `"#{i} · {vehicle-id-hex} · {class-label}"` where
   `class-label` comes from the vehicle class enum.
 
-**No 3D viewport.** The existing 3D vehicle viewer (if any) lives in
-`VehicleCard/`; decide case-by-case whether to preserve it as an
-extension.
+**No 3D viewport.**
 
 **Gotchas:**
 - GameDB IDs are u64. Use `bigint` with `hex: true` for display.
 - Vehicle flags + boost flags are u32 bitmasks — use `flags` with bit
   labels pulled from the existing editor's constants.
 
-**Verification:** per shared checklist. Specifically: load
-`example/VEHICLELIST.BUNDLE`, navigate to `/vehicleList`, expand the
-vehicles list in the tree, click a vehicle, verify the per-vehicle
-form renders.
-
 ---
 
 ## PlayerCarColours (type `0x1001E`)
-
-Migrate the PlayerCarColours resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` first.
 
 **Handler key:** `playerCarColours`
 **Type ID:** `0x1001E`
 **Parser:** `steward/src/lib/core/playerCarColors.ts` (3 exported types —
 tiny)
-**Existing editor:**
-- `steward/src/pages/ColorsPage.tsx`
-- `steward/src/components/PlayerCarColours.tsx`
+**Schema:** `src/lib/schema/resources/playerCarColours.ts`
+**Profile:** `src/lib/editor/profiles/playerCarColours.ts`
 
-**Fixture:** there may not be a dedicated small fixture. Check
-`src/lib/core/registry/handlers/playerCarColors.ts` for `fixtures` and
-use what's listed.
+**Fixture:** check `src/lib/core/registry/handlers/playerCarColors.ts` for
+the `fixtures` array.
 
 **Record types:** 3 — root with a `colors: ColorEntry[]` list + maybe a
 header. Each entry is a color quad + some metadata.
 
-**Migration approach:** **Schema-first only**. This is a perfect
-candidate for pure schema-driven because the existing editor is
-small and the default field renderers (Vec4 + string) cover
-everything. No extensions needed unless you want a swatch-grid UI, in
-which case preserve `PlayerCarColours.tsx` as a `customRenderer` on the
-colors list.
+**Migration approach:** Schema-first only. The default field renderers
+(Vec4 + string) cover everything; no extensions needed unless a
+swatch-grid UI is wanted, in which case `PlayerCarColours.tsx` can be
+preserved as a `customRenderer` on the colors list.
 
 **Tree labels:**
-- `colors[i]` → `"#{i} · #{hex} · {name}"` where `hex` is the
-  RGB converted from the 0.0–1.0 float channels.
+- `colors[i]` → `"#{i} · #{hex} · {name}"` where `hex` is the RGB
+  converted from the 0.0–1.0 float channels.
 
 **No 3D viewport.**
 
 **Gotchas:**
 - Colors are stored as Vec4 (RGBA 0.0–1.0). The default `vec4` field
-  renderer shows 4 numeric inputs. If the existing editor has a color
-  swatch UI, preserving it as an extension is worthwhile.
-
-**Verification:** per shared checklist. The schema test can be trivial
-(the parser is small) but MUST include the coverage walk + sha1
-round-trip assertion.
+  renderer shows 4 numeric inputs.
 
 ---
 
 ## IceTakeDictionary (type `0x41`)
 
-Migrate the IceTakeDictionary resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` first.
-
 **Handler key:** `iceTakeDictionary`
 **Type ID:** `0x41`
 **Parser:** `steward/src/lib/core/iceTakeDictionary.ts` (3 exported types)
-**Existing editor:**
-- `steward/src/pages/IcePage.tsx`
-- `steward/src/components/IceTakeDictionary.tsx`
+**Schema:** `src/lib/schema/resources/iceTakeDictionary.ts`
+**Profile:** `src/lib/editor/profiles/iceTakeDictionary.ts`
 
 **Fixture:** `example/CAMERAS.BUNDLE` (already committed).
 
@@ -684,47 +580,40 @@ Migrate the IceTakeDictionary resource to the schema-driven editor framework.
 **Record types:** 3 — root with a list of camera "takes", each with a
 few fields (position, rotation, duration, target, etc.).
 
-**Migration approach:** **Schema-first only**. Same logic as
-PlayerCarColours — small, simple, default renderers do the job.
+**Migration approach:** Schema-first only — small, simple, default
+renderers do the job.
 
 **Tree labels:**
 - `takes[i]` → `"#{i} · {name or id} · {duration}s"`
 
-**No 3D viewport** (though one would be nice — cameras are spatial
-data. Skip for the first pass; add later if the user asks).
-
-**Verification:** per shared checklist.
+**No 3D viewport** (cameras are spatial data, so one would be nice — a
+later add if the user asks).
 
 ---
 
 ## Renderable (world geometry, complex)
 
-Migrate the Renderable resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` first.
-
 **Handler key:** `renderable`
 **Type ID:** `RENDERABLE_TYPE_ID` — check
 `src/lib/core/registry/handlers/renderable.ts` for the numeric value.
 **Parser:** `steward/src/lib/core/renderable.ts` (8 exported types)
-**Existing editor:**
-- `steward/src/pages/RenderablePage.tsx` — **this is the 3D model viewer
-  and is the main user-facing value of the resource**.
+**Page:** `src/pages/RenderablePage.tsx` — **the 3D model viewer is the
+main user-facing value of the resource.** Renderable is a bespoke editor
+(it has an `EDITOR_PAGES` entry and a `/renderable` route).
+**Extensions:** `src/components/schema-editor/extensions/renderableExtensions.tsx`
 
 **Spec doc:** `docs/Renderable.md` + `docs/Renderable_findings.md` +
 `docs/Renderable_PC.md` + `docs/VertexDescriptor.md`.
 
 **Record types:** 8 — mesh data, materials, vertex descriptors, etc.
 
-**Migration approach:** **Extensions-first with a preserved 3D viewer**.
-The existing RenderablePage's strength is the 3D visualization — treat
-that as the primary experience. The schema editor's job is to let users
-inspect mesh / material / vertex descriptor metadata in the right
-sidebar while the 3D viewer fills the center pane.
+**Migration approach:** Extensions-first with a preserved 3D viewer. The
+schema editor lets users inspect mesh / material / vertex descriptor
+metadata in the right sidebar while the 3D viewer fills the center pane.
 
-**3D viewport:** Exists. Keep it. Wire into `ViewportPane.tsx` as
-`resource.key === 'renderable'`.
+**3D viewport:** `RenderableViewport` is special-cased in `ViewportPane.tsx`
+(`resource.key === 'renderable'`) — it runs a full three.js scene driven
+by `RenderableDecodedProvider`.
 
 **Tree labels:**
 - `meshes[i]` → `"Mesh {i} · {material-name} · {N} tris"`
@@ -736,38 +625,31 @@ sidebar while the 3D viewer fills the center pane.
 - Materials reference textures via hash IDs — use `ref` targets when
   possible, or fall back to hex-display `bigint` fields.
 - Some bundles have BROKEN renderables that the parser tolerates with
-  warnings. The schema must tolerate them too — don't throw in label
+  warnings. The schema tolerates them too — don't throw in label
   callbacks on missing data.
-
-**Verification:** per shared checklist.
 
 ---
 
 ## Texture (type `TEXTURE_TYPE_ID`)
 
-Migrate the Texture resource to the schema-driven editor framework.
-
-**Background:** Read
-`steward/docs/schema-editor-migration.md` first.
-
 **Handler key:** `texture`
 **Type ID:** `TEXTURE_TYPE_ID` — check
 `src/lib/core/registry/handlers/texture.ts` for the numeric value.
 **Parser:** `steward/src/lib/core/texture.ts` (3 exported types)
-**Existing editor:**
-- `steward/src/pages/TexturePage.tsx` — 2D texture previewer
+**Page:** `src/pages/TexturePage.tsx` — 2D texture previewer. Texture is a
+bespoke editor (it has an `EDITOR_PAGES` entry and a `/texture` route).
 
 **Spec docs:** `docs/Texture_PC.md`, `docs/Texture_Remastered.md`.
 
 **Record types:** 3 — header metadata (format, width, height, mip
 count, flags) + the pixel data blob.
 
-**Migration approach:** **Schema-first with a 2D preview extension**.
-The header fields are trivially schema-driven (enums for format, u16
-for width/height, flags for texture flags). The pixel data must NOT be
-editable through the schema — mark it `hidden` and preserve the
-existing 2D preview as an extension that renders alongside the header
-form.
+**Migration approach:** Schema-first with a 2D preview. The header fields
+are trivially schema-driven (enums for format, u16 for width/height,
+flags for texture flags). The pixel data is NOT editable through the
+schema — it's `hidden`, and `TextureViewport` (special-cased in
+`ViewportPane.tsx` as `resource.key === 'texture'`) renders the 2D preview
+from `TextureContext`.
 
 **Tree labels:**
 - Texture is usually a single record per bundle, so the tree is
@@ -778,25 +660,3 @@ form.
   walker's default visiting — tag it with some "opaque blob" marker.
 - Texture format enum has many values (DXT1, DXT3, DXT5, ARGB8888, …)
   — grab the list from the existing decoder.
-
-**Verification:** per shared checklist.
-
----
-
-# Priority order
-
-If the agents tackle these in sequence, this is the recommended order
-(easiest → hardest, and highest-value first among the world resources):
-
-1. **PlayerCarColours** — tiny, schema-first only. Good warm-up to
-   validate the pattern works on a fresh resource.
-2. **IceTakeDictionary** — tiny, similar.
-3. **AISections** — medium, has a 3D viewport but small type set.
-4. **ChallengeList** — medium, polymorphic challenge records but
-   existing tabs preserve cleanly.
-5. **Texture** — medium, pixel-data handling is the only wrinkle.
-6. **VehicleList** — medium-large, routing wrinkle for the detail view.
-7. **Renderable** — large, 3D viewer must be preserved.
-8. **TriggerData** — largest, many polymorphic triggers.
-9. **StreetData** — largest + highest fidelity bar. Do this LAST.
-   The user is actively working on the parser; minimize churn here.
