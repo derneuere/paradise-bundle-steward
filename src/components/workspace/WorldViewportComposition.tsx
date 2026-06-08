@@ -48,7 +48,9 @@
 import { useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { WorldViewport } from '@/components/schema-editor/viewports/WorldViewport';
+import { TrackGeometry } from '@/components/schema-editor/viewports/TrackGeometry';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
+import { INSTANCE_LIST_TYPE_ID } from '@/lib/core/instanceList';
 import { pickRenderBinding } from '@/lib/editor/bindings';
 import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import type { NodePath } from '@/lib/schema/walk';
@@ -174,6 +176,26 @@ function WorldViewportCompositionInner({
 		[bundles, isVisible],
 	);
 
+	// Track-unit backdrop geometry: one <TrackGeometry> per loaded bundle that
+	// carries an InstanceList (0x23). Unlike overlays this needs the bundle's
+	// raw bytes + import table (not a parsed model), so it's mounted directly
+	// rather than going through the overlay-binding path (ADR-0002). Hidden
+	// when the bundle is toggled off; the heavy decode is memoized inside
+	// TrackGeometry on the bundle identity.
+	const trackChildren = useMemo(
+		() =>
+			bundles
+				.filter(
+					(b) =>
+						isVisible({ bundleId: b.id }) &&
+						b.parsed.resources.some((r) => r.resourceTypeId === INSTANCE_LIST_TYPE_ID),
+				)
+				.map((b) => (
+					<TrackGeometry key={`track::${b.id}`} bundle={b.parsed} buffer={b.originalArrayBuffer} />
+				)),
+		[bundles, isVisible],
+	);
+
 	// Stable per-(bundleId, key, index) callback factories. We can't memoise
 	// each one with useCallback (the descriptor list is dynamic), but a
 	// single useCallback over the closure-captured Workspace methods means
@@ -259,7 +281,12 @@ function WorldViewportCompositionInner({
 		[overlays, selection, select, makeOnSelect, makeOnChange],
 	);
 
-	return <WorldViewport>{children}</WorldViewport>;
+	return (
+		<WorldViewport>
+			{trackChildren}
+			{children}
+		</WorldViewport>
+	);
 }
 
 /**
