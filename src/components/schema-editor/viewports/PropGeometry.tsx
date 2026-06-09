@@ -196,6 +196,34 @@ export function PropGeometry({
 
 	const onPick = useCallback((i: number) => onSelect(['instances', i]), [onSelect]);
 
+	// When the selected prop draws as a real mesh, outline its actual bounding box
+	// (oriented by the instance transform) rather than the fixed marker box — so
+	// the selection box matches the prop's true shape (e.g. a wide flat fan, not a
+	// tall thin box). Falls back to undefined (→ marker box) for unresolved props.
+	const selOutline = useMemo<THREE.BufferGeometry | undefined>(() => {
+		if (selIdx < 0) return undefined;
+		const geoms = typeGeometry.get(pid.instances[selIdx].typeId);
+		if (!geoms || geoms.length === 0) return undefined;
+		const box = new THREE.Box3();
+		for (const g of geoms) {
+			g.computeBoundingBox();
+			if (g.boundingBox) box.union(g.boundingBox);
+		}
+		if (box.isEmpty()) return undefined;
+		const size = box.getSize(new THREE.Vector3());
+		const center = box.getCenter(new THREE.Vector3());
+		const bg = new THREE.BoxGeometry(
+			Math.max(size.x, 1e-3),
+			Math.max(size.y, 1e-3),
+			Math.max(size.z, 1e-3),
+		);
+		bg.translate(center.x, center.y, center.z); // the bbox may be off-origin in model space
+		const edges = new THREE.EdgesGeometry(bg);
+		bg.dispose();
+		return edges;
+	}, [selIdx, pid, typeGeometry]);
+	useDisposeOnDepsChange(() => selOutline?.dispose(), [selOutline]);
+
 	if (pid.instances.length === 0) return null;
 	const selInst = selIdx >= 0 ? pid.instances[selIdx] : null;
 
@@ -208,7 +236,7 @@ export function PropGeometry({
 			{unresolved.length > 0 && (
 				<PropFallbackBoxes pid={pid} indices={unresolved} selIdx={selIdx} onPick={onPick} />
 			)}
-			{selInst && <SelectedPropDecor inst={selInst} index={selIdx} />}
+			{selInst && <SelectedPropDecor inst={selInst} index={selIdx} outline={selOutline} />}
 		</>
 	);
 }

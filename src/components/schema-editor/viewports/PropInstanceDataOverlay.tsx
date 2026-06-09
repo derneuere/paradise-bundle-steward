@@ -103,12 +103,24 @@ const SELECTED_COLOR = '#' + SELECTION_THEME.primary.getHexString();
 // Selected-instance outline + label
 // ---------------------------------------------------------------------------
 
-export function SelectedPropDecor({ inst, index }: { inst: PropInstance; index: number }) {
+export function SelectedPropDecor({
+	inst,
+	index,
+	outline,
+}: {
+	inst: PropInstance;
+	index: number;
+	// Edges geometry to draw around the prop, in the prop's LOCAL frame (the
+	// instance transform is applied here). When a prop renders as a real mesh,
+	// PropGeometry passes the mesh's bounding-box edges so the outline matches the
+	// actual shape; omitted (the marker box) for the box-fallback / no-mesh case.
+	outline?: THREE.BufferGeometry;
+}) {
 	const matrix = useMemo(() => propInstanceMatrix(inst, new THREE.Matrix4()), [inst]);
 	const [x, y, z] = propInstancePosition(inst);
 	return (
 		<>
-			<lineSegments geometry={MARKER_EDGES_GEO} material={MARKER_EDGES_MAT} matrixAutoUpdate={false} matrix={matrix} />
+			<lineSegments geometry={outline ?? MARKER_EDGES_GEO} material={MARKER_EDGES_MAT} matrixAutoUpdate={false} matrix={matrix} />
 			{/* No distanceFactor: keep the label a constant screen size. With
 			    distanceFactor it scales by factor/cameraDistance, so flying the
 			    camera in close (FocusOnProp lands ~60 units away) ballooned it. */}
