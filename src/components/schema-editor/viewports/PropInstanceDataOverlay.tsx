@@ -84,11 +84,13 @@ export function propInstanceMatrix(inst: PropInstance, out: THREE.Matrix4): THRE
 // ---------------------------------------------------------------------------
 
 // A modest upright box: most props are signs / posts a few metres tall, and a
-// box driven by the instance matrix shows each prop's facing direction.
-const MARKER_GEO = new THREE.BoxGeometry(3, 4, 1.2);
+// box driven by the instance matrix shows each prop's facing direction. Exported
+// so the prop-mesh layer (<PropGeometry>) can reuse the exact same marker for
+// the props whose Model didn't resolve — the box is the fallback for those.
+export const MARKER_GEO = new THREE.BoxGeometry(3, 4, 1.2);
 // White base so per-instance setColorAt tints cleanly; Standard so the boxes
 // catch the WorldViewport lighting and read as solid 3D objects on the track.
-const MARKER_MAT = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.05 });
+export const MARKER_MAT = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.05 });
 
 // Selected-prop edge outline — depth-test off so it shows even when the box is
 // coincident with the road surface.
@@ -101,7 +103,7 @@ const SELECTED_COLOR = '#' + SELECTION_THEME.primary.getHexString();
 // Selected-instance outline + label
 // ---------------------------------------------------------------------------
 
-function SelectedPropDecor({ inst, index }: { inst: PropInstance; index: number }) {
+export function SelectedPropDecor({ inst, index }: { inst: PropInstance; index: number }) {
 	const matrix = useMemo(() => propInstanceMatrix(inst, new THREE.Matrix4()), [inst]);
 	const [x, y, z] = propInstancePosition(inst);
 	return (
@@ -133,7 +135,7 @@ function SelectedPropDecor({ inst, index }: { inst: PropInstance; index: number 
 // so the highlighted box is on-screen — same trick TrafficData's static
 // vehicles use (FocusOnVehicle). Only reacts to instance selections so browsing
 // other parts of the schema doesn't yank the camera.
-function FocusOnProp({ data, selectedPath }: { data: ParsedPropInstanceData; selectedPath: NodePath }) {
+export function FocusOnProp({ data, selectedPath }: { data: ParsedPropInstanceData; selectedPath: NodePath }) {
 	const { camera, controls } = useThree() as { camera: THREE.Camera; controls: { target: THREE.Vector3; update: () => void } | null };
 	const instances = data?.instances ?? [];
 	const target = useMemo<THREE.Vector3 | null>(() => {

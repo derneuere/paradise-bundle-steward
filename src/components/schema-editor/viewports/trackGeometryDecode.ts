@@ -168,6 +168,39 @@ function decodeRenderableGeometries(
 }
 
 /**
+ * Decode a Model (0x2A) resource — by its resourceId, within `bundle` — into
+ * grey geometries: Model → its Renderable (0xC) imports → BufferGeometry each.
+ * Returns [] when the Model isn't present in `bundle` (it may live in a
+ * companion bundle), isn't a Model, or yields no triangle-list geometry.
+ *
+ * Shared by the track decoder (each InstanceList entry's Model) and the prop
+ * decoder (each prop type's Model via PropGraphicsList). `bundle`/`buffer` are
+ * the Model's HOME bundle — for props that may differ from the bundle holding
+ * the PropGraphicsList, since prop Models live in GLOBALPROPS.BIN.
+ */
+export function decodeModelGeometries(
+	buffer: ArrayBuffer,
+	bundle: ParsedBundle,
+	modelId: bigint,
+	vdCache: Map<bigint, ParsedVertexDescriptor | null>,
+): { geometry: THREE.BufferGeometry; renderableId: bigint }[] {
+	const out: { geometry: THREE.BufferGeometry; renderableId: bigint }[] = [];
+	const modelEntry = findResourceById(bundle, modelId);
+	if (!modelEntry || modelEntry.resourceTypeId !== MODEL_TYPE_ID) return out;
+	const modelIndex = bundle.resources.indexOf(modelEntry);
+	const renderableIds = getImportIds(bundle.imports, bundle.resources, modelIndex);
+	for (const rid of renderableIds) {
+		const rEntry = findResourceById(bundle, rid);
+		if (!rEntry || rEntry.resourceTypeId !== RENDERABLE_TYPE_ID) continue;
+		const rIndex = bundle.resources.indexOf(rEntry);
+		for (const geometry of decodeRenderableGeometries(buffer, bundle, rEntry, rIndex, vdCache)) {
+			out.push({ geometry, renderableId: rid });
+		}
+	}
+	return out;
+}
+
+/**
  * Decode a track-unit bundle's InstanceList into world-placed grey geometries.
  *
  * Walks the first `muNumInstances` instances (the complete, renderable ones —

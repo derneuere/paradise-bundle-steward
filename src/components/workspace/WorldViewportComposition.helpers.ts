@@ -42,6 +42,12 @@ export const WORLD_VIEWPORT_FAMILY_KEYS = [
 	// Props sit on the track surface; render them last so the markers draw on
 	// top of any co-loaded geometry (collision soups, AI/traffic lines).
 	'propInstanceData',
+	// PropGraphicsList has no overlay of its own (it is a type→Model catalogue,
+	// not spatial data) — it joins with PropInstanceData to draw real prop meshes
+	// via the per-bundle <PropGeometry> layer. It is in the family purely so that
+	// SELECTING it routes through the shared world scene (the track + props stay
+	// visible) instead of the single-overlay ViewportPane dead-end.
+	'propGraphicsList',
 ] as const;
 
 export type WorldViewportFamilyKey = typeof WORLD_VIEWPORT_FAMILY_KEYS[number];
