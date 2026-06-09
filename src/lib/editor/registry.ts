@@ -19,6 +19,7 @@ import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
 import { propInstanceDataProfile } from './profiles/propInstanceData';
+import { propGraphicsListProfile } from './profiles/propGraphicsList';
 import { renderableProfile } from './profiles/renderable';
 import { streetDataProfile } from './profiles/streetData';
 import { textureProfile } from './profiles/texture';
@@ -96,6 +97,11 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x10011,
 		key: 'propInstanceData',
 		profiles: [propInstanceDataProfile],
+	},
+	{
+		typeId: 0x10010,
+		key: 'propGraphicsList',
+		profiles: [propGraphicsListProfile],
 	},
 	{
 		typeId: 0x110,

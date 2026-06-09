@@ -15,6 +15,7 @@ import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
 import { instanceListResourceSchema } from './instanceList';
 import { playerCarColoursResourceSchema } from './playerCarColours';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
+import { propGraphicsListResourceSchema } from './propGraphicsList';
 import { propInstanceDataResourceSchema } from './propInstanceData';
 import { renderableResourceSchema } from './renderable';
 import { streetDataResourceSchema } from './streetData';
@@ -31,6 +32,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	instanceList: instanceListResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
 	polygonSoupList: polygonSoupListResourceSchema,
+	propGraphicsList: propGraphicsListResourceSchema,
 	propInstanceData: propInstanceDataResourceSchema,
 	renderable: renderableResourceSchema,
 	streetData: streetDataResourceSchema,

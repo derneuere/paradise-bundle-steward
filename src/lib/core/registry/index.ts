@@ -30,6 +30,7 @@ import { graphicsSpecHandler } from './handlers/graphicsSpec';
 import { materialHandler } from './handlers/material';
 import { zoneListHandler } from './handlers/zoneList';
 import { propInstanceDataHandler } from './handlers/propInstanceData';
+import { propGraphicsListHandler } from './handlers/propGraphicsList';
 import { instanceListHandler } from './handlers/instanceList';
 import { textFileHandler } from './handlers/textFile';
 
@@ -57,6 +58,7 @@ export const registry: ResourceHandler[] = [
 	materialHandler,
 	zoneListHandler,
 	propInstanceDataHandler,
+	propGraphicsListHandler,
 	instanceListHandler,
 	textFileHandler,
 ];
