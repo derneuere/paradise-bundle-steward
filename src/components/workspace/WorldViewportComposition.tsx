@@ -49,11 +49,16 @@ import { useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { WorldViewport } from '@/components/schema-editor/viewports/WorldViewport';
 import { TrackGeometry } from '@/components/schema-editor/viewports/TrackGeometry';
+import { PropGeometry } from '@/components/schema-editor/viewports/PropGeometry';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
 import { INSTANCE_LIST_TYPE_ID } from '@/lib/core/instanceList';
+import { PROP_GRAPHICS_LIST_TYPE_ID } from '@/lib/core/propGraphicsList';
 import { pickRenderBinding } from '@/lib/editor/bindings';
 import type { ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
+import type { ParsedPropInstanceData } from '@/lib/core/propInstanceData';
 import type { NodePath } from '@/lib/schema/walk';
+
+const EMPTY_PATH: NodePath = [];
 import type { WorkspaceContextValue } from '@/context/WorkspaceContext.types';
 import {
 	dedupePolygonSoupOverlays,
@@ -171,10 +176,22 @@ function WorldViewportCompositionInner({
 	// per-instance hides still drop their indexes from the lead's
 	// bundleSoups (the dedupe step reads the surviving set out of the
 	// post-filter list).
-	const overlays = useMemo(
-		() => dedupePolygonSoupOverlays(filterOverlaysByVisibility(listWorldOverlays(bundles), isVisible)),
-		[bundles, isVisible],
-	);
+	const overlays = useMemo(() => {
+		// A bundle with a PropGraphicsList draws its props as real meshes via
+		// <PropGeometry> below, which also owns the marker-box fallback + picking.
+		// Drop the box-only PropInstanceData overlay for those bundles so props
+		// don't double-draw (mesh + box). Bundles with PropInstanceData but no
+		// catalogue keep the box overlay.
+		const pglBundleIds = new Set(
+			bundles
+				.filter((b) => b.parsed.resources.some((r) => r.resourceTypeId === PROP_GRAPHICS_LIST_TYPE_ID))
+				.map((b) => b.id),
+		);
+		const list = filterOverlaysByVisibility(listWorldOverlays(bundles), isVisible).filter(
+			(d) => !(d.resourceKey === 'propInstanceData' && pglBundleIds.has(d.bundleId)),
+		);
+		return dedupePolygonSoupOverlays(list);
+	}, [bundles, isVisible]);
 
 	// Track-unit backdrop geometry: one <TrackGeometry> per loaded bundle that
 	// carries an InstanceList (0x23). Unlike overlays this needs the bundle's
@@ -194,6 +211,54 @@ function WorldViewportCompositionInner({
 					<TrackGeometry key={`track::${b.id}`} bundle={b.parsed} buffer={b.originalArrayBuffer} />
 				)),
 		[bundles, isVisible],
+	);
+
+	// Every loaded bundle paired with its bytes — prop Models live in companion
+	// bundles (GLOBALPROPS.BIN), so each <PropGeometry> resolves across all of
+	// them. Memoised on the bundle list so it stays stable across selection.
+	const allSources = useMemo(
+		() => bundles.map((b) => ({ bundle: b.parsed, buffer: b.originalArrayBuffer })),
+		[bundles],
+	);
+
+	// Real prop meshes: one <PropGeometry> per bundle that carries BOTH a
+	// PropGraphicsList (the type→Model catalogue) and a PropInstanceData (the
+	// placements). It joins them and draws the actual prop geometry (with a
+	// marker-box fallback for Models that aren't loaded yet), so the props look
+	// real instead of grey boxes. Selection routes back to the PropInstanceData
+	// instance so clicking a prop still works exactly as before.
+	const propChildren = useMemo(
+		() =>
+			bundles
+				.filter(
+					(b) =>
+						isVisible({ bundleId: b.id }) &&
+						isVisible({ bundleId: b.id, resourceKey: 'propInstanceData', index: 0 }) &&
+						b.parsed.resources.some((r) => r.resourceTypeId === PROP_GRAPHICS_LIST_TYPE_ID) &&
+						(b.parsedResourcesAll.get('propInstanceData')?.[0] ?? null) != null,
+				)
+				.map((b) => {
+					const pid = b.parsedResourcesAll.get('propInstanceData')![0] as ParsedPropInstanceData;
+					const externals = allSources.filter((s) => s.bundle !== b.parsed);
+					const selectedPath =
+						selection?.bundleId === b.id && selection.resourceKey === 'propInstanceData'
+							? selection.path
+							: EMPTY_PATH;
+					return (
+						<PropGeometry
+							key={`prop::${b.id}`}
+							pid={pid}
+							bundle={b.parsed}
+							buffer={b.originalArrayBuffer}
+							externals={externals}
+							selectedPath={selectedPath}
+							onSelect={(path) =>
+								select({ bundleId: b.id, resourceKey: 'propInstanceData', index: 0, path })
+							}
+						/>
+					);
+				}),
+		[bundles, allSources, isVisible, selection, select],
 	);
 
 	// Stable per-(bundleId, key, index) callback factories. We can't memoise
@@ -284,6 +349,7 @@ function WorldViewportCompositionInner({
 	return (
 		<WorldViewport>
 			{trackChildren}
+			{propChildren}
 			{children}
 		</WorldViewport>
 	);

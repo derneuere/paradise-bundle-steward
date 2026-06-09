@@ -74,6 +74,10 @@ describe('WORLD_VIEWPORT_FAMILY_KEYS', () => {
 		expect([...WORLD_VIEWPORT_FAMILY_KEYS].sort()).toEqual([
 			'aiSections',
 			'polygonSoupList',
+			// PropGraphicsList has no overlay — it joins PropInstanceData to draw
+			// real prop meshes via <PropGeometry> — but is a family key so selecting
+			// it keeps the shared world scene mounted.
+			'propGraphicsList',
 			'propInstanceData',
 			'streetData',
 			'trafficData',
