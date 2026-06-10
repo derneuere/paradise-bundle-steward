@@ -27,6 +27,7 @@ import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequen
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
 import { languageProfile } from './profiles/language';
 import { massiveLookupTableProfile } from './profiles/massiveLookupTable';
+import { particleDescriptionProfile } from './profiles/particleDescription';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
 import { registryProfile } from './profiles/registry';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
@@ -198,6 +199,11 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0xa000,
 		key: 'registry',
 		profiles: [registryProfile],
+	},
+	{
+		typeId: 0x1001d,
+		key: 'particleDescription',
+		profiles: [particleDescriptionProfile],
 	},
 	{
 		typeId: 0x1001f,

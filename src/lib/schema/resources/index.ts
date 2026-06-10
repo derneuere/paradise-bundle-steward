@@ -24,6 +24,7 @@ import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
 import { instanceListResourceSchema } from './instanceList';
 import { languageResourceSchema } from './language';
 import { massiveLookupTableResourceSchema } from './massiveLookupTable';
+import { particleDescriptionResourceSchema } from './particleDescription';
 import { playerCarColoursResourceSchema } from './playerCarColours';
 import { registryResourceSchema } from './registry';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
@@ -56,6 +57,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	instanceList: instanceListResourceSchema,
 	language: languageResourceSchema,
 	massiveLookupTable: massiveLookupTableResourceSchema,
+	particleDescription: particleDescriptionResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
 	registry: registryResourceSchema,
 	polygonSoupList: polygonSoupListResourceSchema,
