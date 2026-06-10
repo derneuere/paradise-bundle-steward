@@ -1,11 +1,14 @@
 // Gold coverage for parseWorldPainter2D / writeWorldPainter2D.
 //
-// Fixture: example/DISTRICTS.DAT — a 2,560-byte bundle whose single 0x30
-// resource decompresses 42x to 98,336 bytes (the map is mostly long runs of
-// the same district). Pins hand-verified decoded values from a byte-level
-// probe: the BinaryFile wrapper offsets, the 384x256 grid dims, individual
-// cells located on the downsampled ASCII render, and the exact value
-// histogram (all 23 v1.9/Remastered districts in use + 41,449 0xFF cells).
+// Fixtures: example/DISTRICTS.DAT ("Districts") and example/SOUND/
+// AMBIENCES.DAT ("Ambiences") — both 0x30 resources decompress ~42x to the
+// SAME 98,336 bytes (the maps are mostly long runs of the same index) with
+// identical container shape; only the palette the cell bytes index differs.
+// Pins hand-verified decoded values from byte-level probes: the BinaryFile
+// wrapper offsets, the 384x256 grid dims, individual cells located on the
+// downsampled ASCII renders, the exact value histograms (Districts: all 23
+// v1.9/Remastered districts + 41,449 0xFF; Ambiences: ids 0..20 + 44,796
+// 0xFF), and the cross-fixture mainland-mirror relationship.
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -14,6 +17,8 @@ import * as path from 'node:path';
 import {
 	parseWorldPainter2D,
 	writeWorldPainter2D,
+	worldPainter2DVariantFromName,
+	AMBIENCE_INDEX_COUNT,
 	DISTRICT_NAMES,
 	INVALID_CELL,
 } from '../worldPainter2D';
@@ -48,6 +53,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 const maps = loadMaps('example/DISTRICTS.DAT');
+const ambMaps = loadMaps('example/SOUND/AMBIENCES.DAT');
 
 describe('WorldPainter2D gold values (example/DISTRICTS.DAT)', () => {
 	it('finds exactly one map, named Districts', () => {
@@ -109,23 +115,132 @@ describe('WorldPainter2D gold values (example/DISTRICTS.DAT)', () => {
 	});
 });
 
-describe('WorldPainter2D round-trip', () => {
-	it('round-trips byte-for-byte', () => {
-		const rewritten = writeWorldPainter2D(parseWorldPainter2D(maps[0].raw));
-		expect(rewritten.byteLength).toBe(maps[0].raw.byteLength);
-		expect(bytesEqual(rewritten, maps[0].raw)).toBe(true);
+describe('WorldPainter2D gold values (example/SOUND/AMBIENCES.DAT)', () => {
+	it('finds exactly one map, named Ambiences, in the same container shape as Districts', () => {
+		expect(ambMaps.length).toBe(1);
+		expect(ambMaps[0].name).toBe('Ambiences');
+		// Identical decompressed size — the two retail resources share the
+		// container byte-for-byte in shape; only the painted values differ.
+		expect(ambMaps[0].raw.byteLength).toBe(98336);
 	});
 
-	it('writer is idempotent', () => {
-		const write1 = writeWorldPainter2D(parseWorldPainter2D(maps[0].raw));
+	it('decodes the same wrapper, grid dims, and pads as Districts', () => {
+		const m = parseWorldPainter2D(ambMaps[0].raw);
+		expect(m.muWidth).toBe(384);
+		expect(m.muHeight).toBe(256);
+		expect(m.cells.length).toBe(384 * 256);
+		expect(m._wrapperPad.length).toBe(8);
+		expect(m._wrapperPad.every((b) => b === 0)).toBe(true);
+		expect(m._trailingPad.length).toBe(12);
+		expect(m._trailingPad.every((b) => b === 0)).toBe(true);
+	});
+
+	it('decodes hand-verified cells (mainland mirrors Districts; island does not)', () => {
+		const m = parseWorldPainter2D(ambMaps[0].raw);
+		const cell = (x: number, y: number) => m.cells[y * m.muWidth + x];
+		// Mainland cells carry the SAME byte as the district map (the mirror).
+		expect(cell(100, 100)).toBe(4); // district 4 Eastern Shore → ambience 4
+		expect(cell(200, 128)).toBe(14); // district 14 Downtown → ambience 14
+		expect(cell(50, 200)).toBe(12); // district 12 Lone Peaks → ambience 12
+		// Big Surf Island breaks the mirror: district 21 South Coast → ambience 20.
+		expect(cell(300, 60)).toBe(20);
+		// All four map corners are ocean / out of bounds, same as Districts.
+		expect(cell(0, 0)).toBe(INVALID_CELL);
+		expect(cell(383, 0)).toBe(INVALID_CELL);
+		expect(cell(0, 255)).toBe(INVALID_CELL);
+		expect(cell(383, 255)).toBe(INVALID_CELL);
+	});
+
+	it('uses exactly ambience ids 0..20 plus 0xFF — never 21, 22, or 23', () => {
+		const m = parseWorldPainter2D(ambMaps[0].raw);
+		const hist = new Map<number, number>();
+		for (const v of m.cells) hist.set(v, (hist.get(v) ?? 0) + 1);
+		expect(hist.size).toBe(AMBIENCE_INDEX_COUNT + 1);
+		for (let a = 0; a < AMBIENCE_INDEX_COUNT; a++) {
+			expect(hist.get(a) ?? 0, `ambience ${a}`).toBeGreaterThan(0);
+		}
+		expect(hist.get(21)).toBeUndefined();
+		expect(hist.get(22)).toBeUndefined();
+		expect(hist.get(23)).toBeUndefined();
+		// More unpainted cells than Districts (41,449): the island's ambience
+		// coverage is sparser than its district coverage.
+		expect(hist.get(INVALID_CELL)).toBe(44796);
+		// Largest and smallest painted ambiences, pinned from the probe.
+		expect(hist.get(12)).toBe(6170); // == district 12's count, the mirror at work
+		expect(hist.get(20)).toBe(496);
+	});
+
+	it('variant is recoverable from the debug name only', () => {
+		expect(worldPainter2DVariantFromName(ambMaps[0].name)).toBe('ambiences');
+		expect(worldPainter2DVariantFromName(maps[0].name)).toBe('districts');
+		expect(worldPainter2DVariantFromName('SomethingElse')).toBeNull();
+	});
+});
+
+describe('WorldPainter2D Districts↔Ambiences relationship', () => {
+	// The retail ambience map is NOT an independent painting. Pinning the
+	// relationship so a future painter overlay can lean on it.
+	const dist = parseWorldPainter2D(maps[0].raw);
+	const amb = parseWorldPainter2D(ambMaps[0].raw);
+
+	it('mainland ambience bytes mirror the district bytes cell-for-cell (11 exceptions)', () => {
+		let equal = 0;
+		let unequal = 0;
+		for (let i = 0; i < dist.cells.length; i++) {
+			const d = dist.cells[i];
+			if (d > 17) continue; // mainland districts only
+			if (amb.cells[i] === d) equal++;
+			else unequal++;
+		}
+		expect(equal).toBe(44523);
+		expect(unequal).toBe(11); // 6 cells bleed to ambience 19, 5 are unpainted
+	});
+
+	it('Big Surf Island districts (18..22) collapse into ambiences 18..20', () => {
+		const islandAmbiences = new Set<number>();
+		for (let i = 0; i < dist.cells.length; i++) {
+			if (dist.cells[i] >= 18 && dist.cells[i] !== INVALID_CELL && amb.cells[i] !== INVALID_CELL) {
+				islandAmbiences.add(amb.cells[i]);
+			}
+		}
+		expect([...islandAmbiences].sort((a, b) => a - b)).toEqual([18, 19, 20]);
+	});
+
+	it('ambiences spill past the district paint only as ambience 19 (76 cells)', () => {
+		// Cells painted in Ambiences but unpainted in Districts — all carry 19,
+		// the island's dominant ambience washing past the district shoreline.
+		const spill = new Map<number, number>();
+		for (let i = 0; i < dist.cells.length; i++) {
+			if (dist.cells[i] === INVALID_CELL && amb.cells[i] !== INVALID_CELL) {
+				spill.set(amb.cells[i], (spill.get(amb.cells[i]) ?? 0) + 1);
+			}
+		}
+		expect([...spill.entries()]).toEqual([[19, 76]]);
+	});
+});
+
+describe('WorldPainter2D round-trip', () => {
+	const fixtures = [
+		{ label: 'Districts', raw: () => maps[0].raw },
+		{ label: 'Ambiences', raw: () => ambMaps[0].raw },
+	];
+
+	it.each(fixtures)('$label round-trips byte-for-byte', ({ raw }) => {
+		const rewritten = writeWorldPainter2D(parseWorldPainter2D(raw()));
+		expect(rewritten.byteLength).toBe(raw().byteLength);
+		expect(bytesEqual(rewritten, raw())).toBe(true);
+	});
+
+	it.each(fixtures)('$label writer is idempotent', ({ raw }) => {
+		const write1 = writeWorldPainter2D(parseWorldPainter2D(raw()));
 		const write2 = writeWorldPainter2D(parseWorldPainter2D(write1));
 		expect(bytesEqual(write2, write1)).toBe(true);
 	});
 
-	it('edited cells survive a round-trip', () => {
-		const m = parseWorldPainter2D(maps[0].raw);
+	it.each(fixtures)('$label edited cells survive a round-trip', ({ raw }) => {
+		const m = parseWorldPainter2D(raw());
 		const cells = m.cells.slice();
-		cells[100 * m.muWidth + 100] = 16; // Eastern Shore cell → Motor City
+		cells[100 * m.muWidth + 100] = 16; // index 16 is valid in both palettes
 		const reparsed = parseWorldPainter2D(writeWorldPainter2D({ ...m, cells }));
 		expect(reparsed.cells[100 * m.muWidth + 100]).toBe(16);
 	});

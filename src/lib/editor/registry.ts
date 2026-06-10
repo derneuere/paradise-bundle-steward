@@ -19,6 +19,8 @@ import { aptDataProfile } from './profiles/aptData';
 import { challengeListProfile } from './profiles/challengeList';
 import { csisProfile } from './profiles/csis';
 import { colourCubeProfile } from './profiles/colourCube';
+import { commsToolListProfile } from './profiles/commsToolList';
+import { commsToolListDefinitionProfile } from './profiles/commsToolListDefinition';
 import { environmentDictionaryProfile } from './profiles/environmentDictionary';
 import { environmentKeyframeProfile } from './profiles/environmentKeyframe';
 import { environmentTimeLineProfile } from './profiles/environmentTimeLine';
@@ -288,6 +290,16 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x10020,
 		key: 'flaptFile',
 		profiles: [flaptFileProfile],
+	},
+	{
+		typeId: 0x45,
+		key: 'commsToolListDefinition',
+		profiles: [commsToolListDefinitionProfile],
+	},
+	{
+		typeId: 0x46,
+		key: 'commsToolList',
+		profiles: [commsToolListProfile],
 	},
 	{
 		typeId: 0x1001f,

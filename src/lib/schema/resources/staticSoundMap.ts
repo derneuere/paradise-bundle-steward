@@ -14,10 +14,12 @@
 //
 // Entities are bucketed into a coarse XZ grid (subRegions): each cell owns a
 // contiguous run of the entity array. The grid is an acceleration structure
-// the game trusts — steward doesn't rebucket yet, so entity add/remove is
-// disabled and the grid fields are read-only. Moving an entity within ~a cell
-// (50 m) is safe; dragging it across the map leaves it culled by the stale
-// cell until a rebucket op exists.
+// the game trusts, but it is fully DERIVED data: the write path runs
+// rebucketStaticSoundMap, which recomputes bounds, dims, entity order and
+// runs from entity positions (reproducing the retail convention byte-exactly
+// on all 854 retail resources). Entities are therefore freely addable,
+// removable and movable; the grid fields stay read-only because hand-editing
+// them is pointless — they are overwritten on save.
 
 import type {
 	FieldSchema,
@@ -49,6 +51,19 @@ const fixedRecordList = (
 	item: record(type),
 	addable: false,
 	removable: false,
+	itemLabel: itemLabel ? (item, index) => itemLabel(item, index) : undefined,
+});
+
+const editableRecordList = (
+	type: string,
+	makeEmpty: () => unknown,
+	itemLabel?: (item: unknown, index: number) => string,
+): FieldSchema => ({
+	kind: 'list',
+	item: record(type),
+	addable: true,
+	removable: true,
+	makeEmpty,
 	itemLabel: itemLabel ? (item, index) => itemLabel(item, index) : undefined,
 });
 
@@ -103,7 +118,7 @@ const StaticSoundEntity: RecordSchema = {
 	fieldMetadata: {
 		mPosition: {
 			label: 'Position',
-			description: 'World X/Y/Z where the sound lives. Safe to nudge; moving it more than a grid cell (~50 m) leaves it in a stale subregion until a rebucket op exists.',
+			description: 'World X/Y/Z where the sound lives. Safe to move anywhere — the culling grid is rebucketed from entity positions on save, so the sound always lands in the right subregion.',
 		},
 		muTypeOrDistance: {
 			label: 'Type / distance',
@@ -123,7 +138,7 @@ const StaticSoundEntity: RecordSchema = {
 
 const SubRegionDescriptor: RecordSchema = {
 	name: 'SubRegionDescriptor',
-	description: 'One cell of the coarse XZ culling grid. Owns a contiguous run [first, first+count) of the entity array; first is -1 for an empty cell. Derived bucketing the game trusts — read-only until steward grows a rebucket op.',
+	description: 'One cell of the coarse XZ culling grid. Owns a contiguous run [first, first+count) of the entity array; first is -1 for an empty cell. Fully derived: recomputed from entity positions on every save, so hand edits here are overwritten.',
 	fields: {
 		mi16First: i16(),
 		mi16Count: i16(),
@@ -131,12 +146,12 @@ const SubRegionDescriptor: RecordSchema = {
 	fieldMetadata: {
 		mi16First: {
 			label: 'First entity',
-			description: 'Start index of this cell\'s run into the entity array; -1 = empty cell.',
+			description: 'Start index of this cell\'s run into the entity array; -1 = empty cell. Recomputed by rebucketing on save.',
 			readOnly: true,
 		},
 		mi16Count: {
 			label: 'Count',
-			description: 'Number of entities in this cell\'s run.',
+			description: 'Number of entities in this cell\'s run. Recomputed by rebucketing on save.',
 			readOnly: true,
 		},
 	},
@@ -156,7 +171,11 @@ const ParsedStaticSoundMap: RecordSchema = {
 		mfSubRegionSize: f32(),
 		miNumSubRegionsX: i32(),
 		miNumSubRegionsZ: i32(),
-		entities: fixedRecordList('StaticSoundEntity', entityLabel),
+		entities: editableRecordList(
+			'StaticSoundEntity',
+			() => ({ mPosition: { x: 0, y: 0, z: 0 }, muTypeOrDistance: 0, muSoundIndex: 0 }),
+			entityLabel,
+		),
 		subRegions: fixedRecordList('SubRegionDescriptor', subRegionLabel),
 		meRootType: u32(),
 		_minLanes23: vec2(),
@@ -167,36 +186,36 @@ const ParsedStaticSoundMap: RecordSchema = {
 	fieldMetadata: {
 		mMin: {
 			label: 'Grid min (X, Z)',
-			description: 'Minimum world X/Z corner of the culling grid. Sounds only play when the player is inside the grid bounds.',
+			description: 'Minimum world X/Z corner of the culling grid. Sounds only play when the player is inside the grid bounds. Recomputed from entity positions on save (snapped down to a multiple of the cell size).',
 			readOnly: true,
 		},
 		mMax: {
 			label: 'Grid max (X, Z)',
-			description: 'Maximum world X/Z corner of the culling grid.',
+			description: 'Maximum world X/Z corner of the culling grid. Recomputed from entity positions on save (snapped up to a multiple of the cell size).',
 			readOnly: true,
 		},
 		mfSubRegionSize: {
 			label: 'Cell size',
-			description: 'Diameter of each grid cell in world units. Retail always uses 50.',
+			description: 'Diameter of each grid cell in world units. Retail always uses 50; rebucketing keeps whatever value is here.',
 			readOnly: true,
 		},
 		miNumSubRegionsX: {
 			label: 'Grid cells X',
-			description: 'Grid width in cells. Read-only: resizing the grid requires rebucketing every entity.',
+			description: 'Grid width in cells. Recomputed from the snapped bounds on save.',
 			readOnly: true,
 		},
 		miNumSubRegionsZ: {
 			label: 'Grid cells Z',
-			description: 'Grid depth in cells.',
+			description: 'Grid depth in cells. Recomputed from the snapped bounds on save.',
 			readOnly: true,
 		},
 		entities: {
 			label: 'Sounds',
-			description: 'Every placed sound, in disk order. The subregion grid indexes into this array by position, so order is load-bearing — adding/removing entities needs a rebucket op steward doesn\'t have yet.',
+			description: 'Every placed sound. Add, remove and move freely — saving rebuckets the culling grid from entity positions, re-sorting this array by grid cell (X varies fastest) so each cell\'s run stays contiguous.',
 		},
 		subRegions: {
 			label: 'Culling grid',
-			description: 'X-major flat grid of cells, each owning a contiguous entity run. Derived from entity positions at build time; preserved verbatim.',
+			description: 'Flat grid of cells (X varies fastest: index = cellZ * cellsX + cellX), each owning a contiguous entity run. Fully derived — rebucketing recomputes every run from entity positions on save.',
 		},
 		meRootType: {
 			label: 'Root type',

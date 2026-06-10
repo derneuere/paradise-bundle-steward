@@ -13,7 +13,10 @@
 // contiguous run [mi16First, mi16First + mi16Count) of the entity array;
 // mi16First is -1 for an empty cell. The runtime culls by cell, so entity
 // order and the grid must stay consistent — the parser preserves the array
-// as-is and the writer never reorders.
+// as-is and the writer never reorders. rebucketStaticSoundMap (below) is the
+// explicit op that recomputes bounds, dims, entity order and runs from entity
+// positions, exactly reproducing the retail convention; the registry handler
+// runs it on every write so entity edits can't desync the grid.
 //
 // Each entity is one Vector3Plus: world X/Y/Z plus two u16s packed into the
 // fourth float's bytes. In a passby map the first u16 is the passby type
@@ -266,4 +269,143 @@ export function writeStaticSoundMap(model: ParsedStaticSoundMap, littleEndian = 
 	if (model._trailingPad.byteLength > 0) w.writeBytes(model._trailingPad);
 
 	return w.bytes;
+}
+
+// =============================================================================
+// Rebucketing
+// =============================================================================
+
+// The retail bucketing convention, reverse-engineered by sweeping all 854
+// retail resources (2 per TRK_UNIT*_GR.BNDL): rebucket(parse(raw)) is
+// byte-identical to parse(raw) for every one of them. The rules:
+//
+//  - mMin = floor(entityMin / size) * size per axis (X and world-Z).
+//  - mMax = ceil(entityMax / size) * size — computed by ceil DIRECTLY, not as
+//    mMin + cells*size: when the entity max is a small negative (e.g. -8.05),
+//    ceilf yields IEEE -0.0 and three retail emitter maps (TRK_UNIT17/56/234)
+//    store that sign bit. JS Math.ceil preserves -0 the same way.
+//  - dims = (mMax - mMin) / size exactly; bounds are always multiples of size.
+//  - Flat grid index = cellZ * numX + cellX (X varies fastest).
+//  - Cell per axis = clamp(ceil(fround((p - min) / size)) - 1, 0, num-1): an
+//    entity EXACTLY on a cell boundary belongs to the LOWER cell. Plain floor
+//    gets 853/854 but misbuckets TRK_UNIT114_Passby, whose two z=0 entities
+//    sit on an interior boundary and live in the lower row on disk. The
+//    division is done in float32 to match the original tool's arithmetic.
+//  - Entities are stored sorted by flat cell index; relative order within a
+//    cell is preserved (stable). Each cell's SubRegionDescriptor covers its
+//    contiguous run; empty cells are [-1, 0].
+//  - Empty maps use the canonical shape: min (0,0), max (size,size), 1x1
+//    grid, single [-1, 0] cell (all 506 retail empty maps look like this).
+//  - The resource is zero-padded to 16-byte alignment (recomputed, since
+//    rebucketing can change the payload length).
+//
+// Not observed in retail (every non-empty map has dims >= 1 per axis): if all
+// entities share one exact multiple-of-size coordinate on an axis, floor and
+// ceil agree and the natural dims are 0. We extend with max = min + size so
+// the entities land in a single valid cell.
+//
+// Pure function of entity positions + mfSubRegionSize; meRootType, packed
+// sound fields and the verbatim _-fields pass through untouched. Idempotent,
+// and the identity on anything already bucketed by this convention — so
+// wiring it into the write path never changes the bytes of an unedited
+// retail resource.
+
+// Generous ceiling against absurd coordinates (a NaN-free typo like x=1e9
+// would otherwise allocate a multi-GB grid). Retail grids top out at 7x42;
+// the whole Paradise City world fits in ~200x200 cells of 50.
+const MAX_GRID_CELLS = 1 << 20;
+
+function cellOnAxis(p: number, min: number, size: number, num: number): number {
+	const cell = Math.ceil(Math.fround(Math.fround(p - min) / size)) - 1;
+	return cell < 0 ? 0 : cell >= num ? num - 1 : cell;
+}
+
+/** Flat subregion index (cellZ * numX + cellX) the grid assigns to a world
+ *  X/Z position — the same math rebucketing uses, against the model's stored
+ *  bounds. Exposed for grid-consistency checks in tests and stress verifies. */
+export function staticSoundMapCellIndex(
+	model: Pick<ParsedStaticSoundMap, 'mMin' | 'mfSubRegionSize' | 'miNumSubRegionsX' | 'miNumSubRegionsZ'>,
+	position: { x: number; z: number },
+): number {
+	const cx = cellOnAxis(position.x, model.mMin.x, model.mfSubRegionSize, model.miNumSubRegionsX);
+	const cz = cellOnAxis(position.z, model.mMin.y, model.mfSubRegionSize, model.miNumSubRegionsZ);
+	return cz * model.miNumSubRegionsX + cx;
+}
+
+export function rebucketStaticSoundMap(model: ParsedStaticSoundMap): ParsedStaticSoundMap {
+	const size = model.mfSubRegionSize;
+	if (!Number.isFinite(size) || size <= 0) {
+		throw new Error(`StaticSoundMap rebucket: mfSubRegionSize ${size} is not a positive cell size`);
+	}
+	// mi16First is an int16 — the grid can't index entities beyond 0x7FFF.
+	if (model.entities.length > 0x7fff) {
+		throw new Error(`StaticSoundMap rebucket: ${model.entities.length} entities overflow the int16 subregion indices`);
+	}
+
+	if (model.entities.length === 0) {
+		return withGrid(model, { x: 0, y: 0 }, { x: size, y: size }, 1, 1, [{ mi16First: -1, mi16Count: 0 }], []);
+	}
+
+	let eMinX = Infinity, eMaxX = -Infinity, eMinZ = Infinity, eMaxZ = -Infinity;
+	for (let i = 0; i < model.entities.length; i++) {
+		const { x, z } = model.entities[i].mPosition;
+		if (!Number.isFinite(x) || !Number.isFinite(z)) {
+			throw new Error(`StaticSoundMap rebucket: entity ${i} has non-finite position (${x}, ${z})`);
+		}
+		eMinX = Math.min(eMinX, x);
+		eMaxX = Math.max(eMaxX, x);
+		eMinZ = Math.min(eMinZ, z);
+		eMaxZ = Math.max(eMaxZ, z);
+	}
+	const minX = Math.floor(eMinX / size) * size;
+	const minZ = Math.floor(eMinZ / size) * size;
+	let maxX = Math.ceil(eMaxX / size) * size;
+	let maxZ = Math.ceil(eMaxZ / size) * size;
+	let numX = Math.round((maxX - minX) / size);
+	let numZ = Math.round((maxZ - minZ) / size);
+	if (numX === 0) { numX = 1; maxX = minX + size; }
+	if (numZ === 0) { numZ = 1; maxZ = minZ + size; }
+	if (numX * numZ > MAX_GRID_CELLS) {
+		throw new Error(`StaticSoundMap rebucket: ${numX}x${numZ} grid (entity extents x[${eMinX}, ${eMaxX}] z[${eMinZ}, ${eMaxZ}]) exceeds ${MAX_GRID_CELLS} cells — coordinates look corrupt`);
+	}
+
+	const indexed = model.entities.map((entity, i) => ({
+		entity,
+		i,
+		cell: cellOnAxis(entity.mPosition.z, minZ, size, numZ) * numX + cellOnAxis(entity.mPosition.x, minX, size, numX),
+	}));
+	indexed.sort((a, b) => (a.cell - b.cell) || (a.i - b.i));
+
+	const subRegions: SubRegionDescriptor[] = [];
+	for (let ci = 0; ci < numX * numZ; ci++) subRegions.push({ mi16First: -1, mi16Count: 0 });
+	indexed.forEach(({ cell }, pos) => {
+		const run = subRegions[cell];
+		if (run.mi16First === -1) run.mi16First = pos;
+		run.mi16Count++;
+	});
+
+	return withGrid(model, { x: minX, y: minZ }, { x: maxX, y: maxZ }, numX, numZ, subRegions, indexed.map(({ entity }) => entity));
+}
+
+function withGrid(
+	model: ParsedStaticSoundMap,
+	mMin: { x: number; y: number },
+	mMax: { x: number; y: number },
+	numX: number,
+	numZ: number,
+	subRegions: SubRegionDescriptor[],
+	entities: StaticSoundEntity[],
+): ParsedStaticSoundMap {
+	const end = HEADER_SIZE + entities.length * ENTITY_RECORD_SIZE + subRegions.length * SUBREGION_RECORD_SIZE;
+	const padLen = (16 - (end % 16)) % 16;
+	return {
+		...model,
+		mMin,
+		mMax,
+		miNumSubRegionsX: numX,
+		miNumSubRegionsZ: numZ,
+		subRegions,
+		entities,
+		_trailingPad: new Uint8Array(padLen),
+	};
 }

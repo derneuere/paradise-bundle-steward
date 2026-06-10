@@ -1,13 +1,18 @@
 // WorldPainter2D parser and writer (resource type 0x30).
 //
 // A WorldPainter2D resource is a dense 2D byte grid painted over the world
-// map: one byte per map cell naming which district (DISTRICTS.DAT, fixture
-// here) or ambience zone (AMBIENCES, same container with a different palette)
-// that cell belongs to. The runtime (CgsWorld::WorldMap2D) scales the grid
-// over the world using HARDCODED origin/size values — no world bounds are
-// stored in the resource. Row 0 is the map's north edge and x grows eastward:
-// in retail DISTRICTS the White Mountain districts (11–13) hug the west
-// columns and the Big Surf Island districts (18–22) the east columns.
+// map: one byte per map cell naming which district (DISTRICTS.DAT) or
+// ambience zone (SOUND/AMBIENCES.DAT — the ambient-audio palette) that cell
+// belongs to. Both retail fixtures share the container byte-for-byte in
+// shape: identical 98,336-byte decompressed size, wrapper, 384x256 grid, and
+// 12-byte trailing pad — only the palette the cell bytes index differs, and
+// which palette applies lives ONLY in the debug name (Districts / Ambiences),
+// exactly like StaticSoundMap's emitter/passby roles. The runtime
+// (CgsWorld::WorldMap2D) scales the grid over the world using HARDCODED
+// origin/size values — no world bounds are stored in the resource. Row 0 is
+// the map's north edge and x grows eastward: in retail DISTRICTS the White
+// Mountain districts (11–13) hug the west columns and the Big Surf Island
+// districts (18–22) the east columns.
 //
 // On-disk layout (32-bit PC, little-endian):
 //   0x00 u32 mu32DataSize    — bytes after mu32DataOffset, INCLUDING the
@@ -32,6 +37,17 @@
 // is E_DISTRICT_VALID_COUNT (23), but on disk invalid is always 0xFF (the
 // wiki documents this substitution). 42% of retail cells are 0xFF (ocean
 // and out-of-bounds margins).
+//
+// Cell values in AMBIENCES.DAT are ambience-zone indices 0..20 (every value
+// in that range is painted) plus the same 0xFF unpainted sentinel (46% of
+// cells). No name table exists for them — neither the wiki nor the resource
+// names ambiences; the ids presumably index ambient-audio zone definitions
+// in the sound data. The retail map is NOT an independent painting: on the
+// mainland (district cells 0..17) the ambience byte equals the district byte
+// in 44,523 of 44,534 cells — ambience zones 0..17 simply mirror the
+// mainland districts. Big Surf Island breaks the mirror: its five districts
+// (18–22) are repainted with only three ambiences (18–20), with sparser
+// coverage (3,418 island district cells are ambience-unpainted).
 //
 // Round-trip strategy: the layout is rigid — the parser THROWS when the
 // stored wrapper fields disagree with the derived ones instead of silently
@@ -75,8 +91,31 @@ export const DISTRICT_NAMES = [
 	"Perren's Point",
 ] as const;
 
-/** On-disk "no district here" — NOT the enum's E_DISTRICT_INVALID (23). */
+/** On-disk "nothing painted here" — NOT the enum's E_DISTRICT_INVALID (23). */
 export const INVALID_CELL = 0xff;
+
+/** Ambience-zone ids painted in retail AMBIENCES.DAT run 0..20, every value
+ *  used. No name table exists (wiki has none); ids 0..17 mirror the mainland
+ *  districts cell-for-cell, 18..20 cover Big Surf Island. */
+export const AMBIENCE_INDEX_COUNT = 21;
+
+// =============================================================================
+// Variant discrimination
+// =============================================================================
+
+/** Which palette the cell bytes index. Not stored in the resource — the two
+ *  retail containers are byte-identical in shape. */
+export type WorldPainter2DVariant = 'districts' | 'ambiences';
+
+/** Resolve the variant from the resource's debug name, the ONLY discriminator
+ *  (retail names the resources exactly "Districts" / "Ambiences"). Returns
+ *  null for unknown names so callers fall back to palette-neutral labels. */
+export function worldPainter2DVariantFromName(debugName: string): WorldPainter2DVariant | null {
+	const n = debugName.toLowerCase();
+	if (n === 'districts') return 'districts';
+	if (n === 'ambiences') return 'ambiences';
+	return null;
+}
 
 // =============================================================================
 // Types

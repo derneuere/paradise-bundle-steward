@@ -1,15 +1,15 @@
 // WorldPainter2D registry handler — thin wrapper around
 // parseWorldPainter2D / writeWorldPainter2D in src/lib/core/worldPainter2D.ts.
 //
-// One resource per bundle (DISTRICTS.DAT carries a single map named
-// "Districts"), so no picker. Whether the cells are district indices or
-// ambience indices is only recoverable from the debug name — the container
-// is identical.
+// One resource per bundle (DISTRICTS.DAT carries "Districts",
+// SOUND/AMBIENCES.DAT carries "Ambiences"), so no picker. Whether the cells
+// are district indices or ambience indices is only recoverable from the
+// debug name (worldPainter2DVariantFromName) — the container is identical.
 
 import {
 	parseWorldPainter2D,
 	writeWorldPainter2D,
-	DISTRICT_NAMES,
+	AMBIENCE_INDEX_COUNT,
 	INVALID_CELL,
 	type ParsedWorldPainter2D,
 } from '../../worldPainter2D';
@@ -41,7 +41,7 @@ export const worldPainter2DHandler: ResourceHandler<ParsedWorldPainter2D> = {
 	typeId: 0x30,
 	key: 'worldPainter2D',
 	name: 'World Painter 2D',
-	description: 'Dense 2D byte grid painted over the world map — one district (or ambience) index per map cell, 0xFF where nothing is painted. DISTRICTS.DAT maps every cell to a BrnWorld::EDistrict.',
+	description: 'Dense 2D byte grid painted over the world map — one district (or ambience) index per map cell, 0xFF where nothing is painted. DISTRICTS.DAT maps every cell to a BrnWorld::EDistrict; SOUND/AMBIENCES.DAT reuses the container with ambience-zone ids 0..20.',
 	category: 'Data',
 	caps: { read: true, write: true },
 	wikiUrl: 'https://burnout.wiki/wiki/World_Painter_2D',
@@ -66,6 +66,7 @@ export const worldPainter2DHandler: ResourceHandler<ParsedWorldPainter2D> = {
 
 	fixtures: [
 		{ bundle: 'example/DISTRICTS.DAT', expect: { parseOk: true, byteRoundTrip: true } },
+		{ bundle: 'example/SOUND/AMBIENCES.DAT', expect: { parseOk: true, byteRoundTrip: true } },
 	],
 
 	stressScenarios: [
@@ -83,18 +84,20 @@ export const worldPainter2DHandler: ResourceHandler<ParsedWorldPainter2D> = {
 		},
 		{
 			name: 'repaint-cell',
-			description: 'cycle the first painted cell to the next district index and verify it survives round-trip',
+			// Cycling modulo the SMALLER palette keeps the value valid for both
+			// variants the scenario runs on: ids 0..20 name districts AND ambiences.
+			description: 'cycle the first painted cell to the next palette index and verify it survives round-trip',
 			mutate: (m) => {
 				const cells = m.cells.slice();
 				const i = firstPaintedIndex(m);
-				cells[i] = (cells[i] + 1) % DISTRICT_NAMES.length;
+				cells[i] = (cells[i] + 1) % AMBIENCE_INDEX_COUNT;
 				return { ...m, cells };
 			},
 			verify: cellsMismatch,
 		},
 		{
 			name: 'erase-cell',
-			description: 'set the first painted cell to 0xFF (no district) and verify the sentinel survives',
+			description: 'set the first painted cell to 0xFF (unpainted) and verify the sentinel survives',
 			mutate: (m) => {
 				const cells = m.cells.slice();
 				cells[firstPaintedIndex(m)] = INVALID_CELL;
@@ -106,7 +109,7 @@ export const worldPainter2DHandler: ResourceHandler<ParsedWorldPainter2D> = {
 		},
 		{
 			name: 'paint-block',
-			description: 'flood an 8x8 block at the grid centre with Motor City (16) and verify every cell of the block',
+			description: 'flood an 8x8 block at the grid centre with index 16 (Motor City / ambience 16 — valid in both palettes) and verify every cell of the block',
 			mutate: (m) => {
 				const cells = m.cells.slice();
 				const cx = m.muWidth >> 1;
