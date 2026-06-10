@@ -31,6 +31,7 @@ import { materialHandler } from './handlers/material';
 import { zoneListHandler } from './handlers/zoneList';
 import { propInstanceDataHandler } from './handlers/propInstanceData';
 import { propGraphicsListHandler } from './handlers/propGraphicsList';
+import { propPhysicsHandler } from './handlers/propPhysics';
 import { instanceListHandler } from './handlers/instanceList';
 import { staticSoundMapHandler } from './handlers/staticSoundMap';
 import { textFileHandler } from './handlers/textFile';
@@ -60,6 +61,7 @@ export const registry: ResourceHandler[] = [
 	zoneListHandler,
 	propInstanceDataHandler,
 	propGraphicsListHandler,
+	propPhysicsHandler,
 	instanceListHandler,
 	staticSoundMapHandler,
 	textFileHandler,
