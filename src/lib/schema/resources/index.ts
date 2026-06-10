@@ -11,6 +11,11 @@
 import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
+import { colourCubeResourceSchema } from './colourCube';
+import { environmentDictionaryResourceSchema } from './environmentDictionary';
+import { environmentKeyframeResourceSchema } from './environmentKeyframe';
+import { environmentTimeLineResourceSchema } from './environmentTimeLine';
+import { fontResourceSchema } from './font';
 import { guiPopupResourceSchema } from './guiPopup';
 import { hudMessageResourceSchema } from './hudMessage';
 import { hudMessageSequenceResourceSchema } from './hudMessageSequence';
@@ -18,7 +23,9 @@ import { hudMessageSequenceDictionaryResourceSchema } from './hudMessageSequence
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
 import { instanceListResourceSchema } from './instanceList';
 import { languageResourceSchema } from './language';
+import { massiveLookupTableResourceSchema } from './massiveLookupTable';
 import { playerCarColoursResourceSchema } from './playerCarColours';
+import { registryResourceSchema } from './registry';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
 import { propGraphicsListResourceSchema } from './propGraphicsList';
 import { propInstanceDataResourceSchema } from './propInstanceData';
@@ -36,6 +43,11 @@ import { zoneListResourceSchema } from './zoneList';
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
+	colourCube: colourCubeResourceSchema,
+	environmentDictionary: environmentDictionaryResourceSchema,
+	environmentKeyframe: environmentKeyframeResourceSchema,
+	environmentTimeLine: environmentTimeLineResourceSchema,
+	font: fontResourceSchema,
 	guiPopup: guiPopupResourceSchema,
 	hudMessage: hudMessageResourceSchema,
 	hudMessageSequence: hudMessageSequenceResourceSchema,
@@ -43,7 +55,9 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,
 	instanceList: instanceListResourceSchema,
 	language: languageResourceSchema,
+	massiveLookupTable: massiveLookupTableResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
+	registry: registryResourceSchema,
 	polygonSoupList: polygonSoupListResourceSchema,
 	propGraphicsList: propGraphicsListResourceSchema,
 	propInstanceData: propInstanceDataResourceSchema,
