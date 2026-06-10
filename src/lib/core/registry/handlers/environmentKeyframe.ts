@@ -72,9 +72,19 @@ export const environmentKeyframeHandler: ResourceHandler<ParsedEnvironmentKeyfra
 				id: 'time',
 				// Names embed the authored time as _HHMM, so name order IS time
 				// order within one season — but this key survives renames and mixed
-				// prefixes by parsing the suffix numerically.
+				// prefixes by parsing the suffix numerically. Suffix-less names sort
+				// after timed ones, by name among themselves — the naive
+				// (a ?? Infinity) - (b ?? Infinity) form yields NaN for two untimed
+				// entries, which the picker contract forbids.
 				label: 'Time of day',
-				compare: (a, b) => (timeOfDayFromName(a.ctx.name) ?? Infinity) - (timeOfDayFromName(b.ctx.name) ?? Infinity),
+				compare: (a, b) => {
+					const ta = timeOfDayFromName(a.ctx.name);
+					const tb = timeOfDayFromName(b.ctx.name);
+					if (ta != null && tb != null) return ta - tb;
+					if (ta != null) return -1;
+					if (tb != null) return 1;
+					return compareByName(a, b);
+				},
 			},
 			{ id: 'name', label: 'Name (A→Z)', compare: compareByName },
 			{ id: 'index', label: 'Bundle order', compare: (a, b) => a.ctx.index - b.ctx.index },
