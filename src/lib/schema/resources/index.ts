@@ -17,6 +17,7 @@ import { playerCarColoursResourceSchema } from './playerCarColours';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
 import { propGraphicsListResourceSchema } from './propGraphicsList';
 import { propInstanceDataResourceSchema } from './propInstanceData';
+import { propPhysicsResourceSchema } from './propPhysics';
 import { renderableResourceSchema } from './renderable';
 import { staticSoundMapResourceSchema } from './staticSoundMap';
 import { streetDataResourceSchema } from './streetData';
@@ -35,6 +36,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	polygonSoupList: polygonSoupListResourceSchema,
 	propGraphicsList: propGraphicsListResourceSchema,
 	propInstanceData: propInstanceDataResourceSchema,
+	propPhysics: propPhysicsResourceSchema,
 	renderable: renderableResourceSchema,
 	staticSoundMap: staticSoundMapResourceSchema,
 	streetData: streetDataResourceSchema,

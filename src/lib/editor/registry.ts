@@ -20,6 +20,7 @@ import { playerCarColoursProfile } from './profiles/playerCarColours';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
 import { propInstanceDataProfile } from './profiles/propInstanceData';
 import { propGraphicsListProfile } from './profiles/propGraphicsList';
+import { propPhysicsProfile } from './profiles/propPhysics';
 import { renderableProfile } from './profiles/renderable';
 import { staticSoundMapProfile } from './profiles/staticSoundMap';
 import { streetDataProfile } from './profiles/streetData';
@@ -108,6 +109,11 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x10016,
 		key: 'staticSoundMap',
 		profiles: [staticSoundMapProfile],
+	},
+	{
+		typeId: 0x1000f,
+		key: 'propPhysics',
+		profiles: [propPhysicsProfile],
 	},
 	{
 		typeId: 0x110,
