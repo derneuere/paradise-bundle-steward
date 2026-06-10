@@ -1,6 +1,8 @@
 // Schema coverage tests for worldPainter2DResourceSchema.
 //
-// Coverage fixture: example/DISTRICTS.DAT (the single retail Districts map).
+// Coverage fixtures: example/DISTRICTS.DAT (Districts) and
+// example/SOUND/AMBIENCES.DAT (Ambiences) — the two retail variants of the
+// identical container; drift checks walk both models.
 //
 // Mirrors staticSoundMap.test.ts: parse the model and walk it against the
 // schema asserting record references resolve, walkResource visits cleanly,
@@ -15,16 +17,15 @@ import { parseBundle } from '../../core/bundle';
 import { extractResourceRaw, resourceCtxFromBundle } from '../../core/registry';
 import { parseWorldPainter2D, type ParsedWorldPainter2D } from '../../core/worldPainter2D';
 
-import { worldPainter2DResourceSchema, districtCellLabel } from './worldPainter2D';
+import { worldPainter2DResourceSchema, worldPainter2DCellLabel } from './worldPainter2D';
 import { resolveSchemaAtPath, walkResource, formatPath } from '../walk';
 import type { FieldSchema } from '../types';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
-const BUNDLE_FIXTURE = path.resolve(REPO_ROOT, 'example/DISTRICTS.DAT');
 const WORLD_PAINTER_2D_TYPE_ID = 0x30;
 
-function loadModel(fixturePath: string): ParsedWorldPainter2D {
-	const fileBytes = fs.readFileSync(fixturePath);
+function loadModel(bundleFile: string): ParsedWorldPainter2D {
+	const fileBytes = fs.readFileSync(path.resolve(REPO_ROOT, bundleFile));
 	const buffer = new Uint8Array(fileBytes.byteLength);
 	buffer.set(fileBytes);
 	const bundle = parseBundle(buffer.buffer, { strict: false });
@@ -34,10 +35,13 @@ function loadModel(fixturePath: string): ParsedWorldPainter2D {
 	return parseWorldPainter2D(extractResourceRaw(buffer.buffer, bundle, resource), ctx.littleEndian);
 }
 
-const model = loadModel(BUNDLE_FIXTURE);
+const models = [
+	{ label: 'Districts', model: loadModel('example/DISTRICTS.DAT') },
+	{ label: 'Ambiences', model: loadModel('example/SOUND/AMBIENCES.DAT') },
+];
 
 describe('worldPainter2DResourceSchema coverage', () => {
-	it('fixture parses with non-trivial content', () => {
+	it.each(models)('$label fixture parses with non-trivial content', ({ model }) => {
 		expect(model.muWidth).toBeGreaterThan(0);
 		expect(model.muHeight).toBeGreaterThan(0);
 		expect(model.cells.length).toBe(model.muWidth * model.muHeight);
@@ -62,7 +66,7 @@ describe('worldPainter2DResourceSchema coverage', () => {
 		}
 	});
 
-	it('walkResource visits every parsed field without throwing', () => {
+	it.each(models)('$label: walkResource visits every parsed field without throwing', ({ model }) => {
 		let recordCount = 0;
 		let fieldCount = 0;
 		walkResource(worldPainter2DResourceSchema, model, (_p, _v, field, rec) => {
@@ -73,7 +77,7 @@ describe('worldPainter2DResourceSchema coverage', () => {
 		expect(fieldCount).toBeGreaterThan(0);
 	});
 
-	it('no parsed record has fields absent from the schema', () => {
+	it.each(models)('$label: no parsed record has fields absent from the schema', ({ model }) => {
 		const missing: string[] = [];
 		walkResource(worldPainter2DResourceSchema, model, (p, value, _field, rec) => {
 			if (!rec) return;
@@ -90,7 +94,7 @@ describe('worldPainter2DResourceSchema coverage', () => {
 		}
 	});
 
-	it('every schema field is represented in the parsed data', () => {
+	it.each(models)('$label: every schema field is represented in the parsed data', ({ model }) => {
 		const missing: string[] = [];
 		walkResource(worldPainter2DResourceSchema, model, (p, value, _field, rec) => {
 			if (!rec) return;
@@ -128,18 +132,31 @@ describe('worldPainter2D path resolution', () => {
 	});
 });
 
-describe('districtCellLabel', () => {
-	it('labels valid districts with their v1.9/Remastered name', () => {
-		expect(districtCellLabel(0)).toBe('0 Ocean View');
-		expect(districtCellLabel(14)).toBe('14 Downtown');
-		expect(districtCellLabel(22)).toBe("22 Perren's Point");
+describe('worldPainter2DCellLabel', () => {
+	it('labels district cells with their v1.9/Remastered name', () => {
+		expect(worldPainter2DCellLabel(0, 'districts')).toBe('0 Ocean View');
+		expect(worldPainter2DCellLabel(14, 'districts')).toBe('14 Downtown');
+		expect(worldPainter2DCellLabel(22, 'districts')).toBe("22 Perren's Point");
 	});
 
-	it('labels the 0xFF sentinel as unpainted', () => {
-		expect(districtCellLabel(255)).toBe('255 (unpainted)');
+	it('labels ambience cells numerically — district names never apply to them', () => {
+		expect(worldPainter2DCellLabel(0, 'ambiences')).toBe('Ambience 0');
+		expect(worldPainter2DCellLabel(14, 'ambiences')).toBe('Ambience 14');
+		expect(worldPainter2DCellLabel(20, 'ambiences')).toBe('Ambience 20');
 	});
 
-	it('labels out-of-table values neutrally (Ambiences maps reuse the container)', () => {
-		expect(districtCellLabel(23)).toBe('23 (no district name)');
+	it('labels the 0xFF sentinel as unpainted in every variant', () => {
+		expect(worldPainter2DCellLabel(255, 'districts')).toBe('255 (unpainted)');
+		expect(worldPainter2DCellLabel(255, 'ambiences')).toBe('255 (unpainted)');
+		expect(worldPainter2DCellLabel(255, null)).toBe('255 (unpainted)');
+	});
+
+	it('labels out-of-table values neutrally, per variant', () => {
+		expect(worldPainter2DCellLabel(23, 'districts')).toBe('23 (no district name)');
+		expect(worldPainter2DCellLabel(21, 'ambiences')).toBe('21 (beyond retail ambience ids)');
+	});
+
+	it('stays palette-neutral when the debug name resolved to no variant', () => {
+		expect(worldPainter2DCellLabel(14, null)).toBe('14');
 	});
 });
