@@ -11,6 +11,8 @@
 import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
+import { colourCubeResourceSchema } from './colourCube';
+import { environmentDictionaryResourceSchema } from './environmentDictionary';
 import { environmentKeyframeResourceSchema } from './environmentKeyframe';
 import { environmentTimeLineResourceSchema } from './environmentTimeLine';
 import { guiPopupResourceSchema } from './guiPopup';
@@ -38,6 +40,8 @@ import { zoneListResourceSchema } from './zoneList';
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
+	colourCube: colourCubeResourceSchema,
+	environmentDictionary: environmentDictionaryResourceSchema,
 	environmentKeyframe: environmentKeyframeResourceSchema,
 	environmentTimeLine: environmentTimeLineResourceSchema,
 	guiPopup: guiPopupResourceSchema,

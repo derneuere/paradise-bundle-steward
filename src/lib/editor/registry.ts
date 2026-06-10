@@ -15,6 +15,8 @@
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
+import { colourCubeProfile } from './profiles/colourCube';
+import { environmentDictionaryProfile } from './profiles/environmentDictionary';
 import { environmentKeyframeProfile } from './profiles/environmentKeyframe';
 import { environmentTimeLineProfile } from './profiles/environmentTimeLine';
 import { guiPopupProfile } from './profiles/guiPopup';
@@ -162,6 +164,16 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x10013,
 		key: 'environmentTimeLine',
 		profiles: [environmentTimeLineProfile],
+	},
+	{
+		typeId: 0x10014,
+		key: 'environmentDictionary',
+		profiles: [environmentDictionaryProfile],
+	},
+	{
+		typeId: 0x2b,
+		key: 'colourCube',
+		profiles: [colourCubeProfile],
 	},
 	{
 		typeId: 0x110,
