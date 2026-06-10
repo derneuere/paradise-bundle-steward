@@ -15,6 +15,8 @@ import { aptDataResourceSchema } from './aptData';
 import { challengeListResourceSchema } from './challengeList';
 import { csisResourceSchema } from './csis';
 import { colourCubeResourceSchema } from './colourCube';
+import { commsToolListResourceSchema } from './commsToolList';
+import { commsToolListDefinitionResourceSchema } from './commsToolListDefinition';
 import { environmentDictionaryResourceSchema } from './environmentDictionary';
 import { environmentKeyframeResourceSchema } from './environmentKeyframe';
 import { environmentTimeLineResourceSchema } from './environmentTimeLine';
@@ -62,6 +64,8 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	challengeList: challengeListResourceSchema,
 	csis: csisResourceSchema,
 	colourCube: colourCubeResourceSchema,
+	commsToolList: commsToolListResourceSchema,
+	commsToolListDefinition: commsToolListDefinitionResourceSchema,
 	environmentDictionary: environmentDictionaryResourceSchema,
 	environmentKeyframe: environmentKeyframeResourceSchema,
 	environmentTimeLine: environmentTimeLineResourceSchema,

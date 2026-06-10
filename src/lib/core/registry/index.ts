@@ -56,6 +56,8 @@ import { fontHandler } from './handlers/font';
 import { massiveLookupTableHandler } from './handlers/massiveLookupTable';
 import { registryHandler } from './handlers/registry';
 import { genericRwacWaveContentHandler } from './handlers/genericRwacWaveContent';
+import { commsToolListDefinitionHandler } from './handlers/commsToolListDefinition';
+import { commsToolListHandler } from './handlers/commsToolList';
 import { aemsBankHandler } from './handlers/aemsBank';
 import { csisHandler } from './handlers/csis';
 import { splicerHandler } from './handlers/splicer';
@@ -114,6 +116,8 @@ export const registry: ResourceHandler[] = [
 	idListHandler,
 	aptDataHandler,
 	genericRwacWaveContentHandler,
+	commsToolListDefinitionHandler,
+	commsToolListHandler,
 	aemsBankHandler,
 	csisHandler,
 	splicerHandler,
