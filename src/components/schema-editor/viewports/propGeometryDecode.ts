@@ -29,7 +29,7 @@
 import * as THREE from 'three';
 import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
 import { getImportsByPtrOffset } from '@/lib/core/bundle';
-import { extractResourceSize, isCompressed, decompressData } from '@/lib/core/resourceManager';
+import { extractResourceSize, isResourceBlockCompressed, decompressData } from '@/lib/core/resourceManager';
 import {
 	parsePropGraphicsList,
 	PROP_GRAPHICS_LIST_TYPE_ID,
@@ -73,7 +73,7 @@ function extractBlock0(buffer: ArrayBuffer, bundle: ParsedBundle, entry: Resourc
 	const start = (bundle.header.resourceDataOffsets[0] + entry.diskOffsets[0]) >>> 0;
 	if (start + size > buffer.byteLength) return null;
 	let bytes: Uint8Array = new Uint8Array(buffer, start, size);
-	if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
+	if (isResourceBlockCompressed(entry, 0, bytes)) bytes = decompressData(bytes) as Uint8Array;
 	return bytes;
 }
 

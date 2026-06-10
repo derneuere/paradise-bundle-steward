@@ -49,7 +49,7 @@ import {
 	type RawLocator,
 } from '@/lib/core/graphicsSpec';
 import { getImportsByPtrOffset, getImportIds, parseBundle } from '@/lib/core/bundle';
-import { extractResourceSize, isCompressed, decompressData } from '@/lib/core/resourceManager';
+import { extractResourceSize, isResourceBlockCompressed, decompressData } from '@/lib/core/resourceManager';
 import { u64ToBigInt } from '@/lib/core/u64';
 import {
 	resolveMaterialTextures,
@@ -131,7 +131,7 @@ function decodeOneRenderable(
 			}
 			const start = (bundle.header.resourceDataOffsets[0] + entry.diskOffsets[0]) >>> 0;
 			let bytes: Uint8Array = new Uint8Array(buffer, start, size);
-			if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
+			if (isResourceBlockCompressed(entry, 0, bytes)) bytes = decompressData(bytes) as Uint8Array;
 			let parsed: ParsedVertexDescriptor | null = null;
 			try {
 				parsed = parseVertexDescriptor(bytes);

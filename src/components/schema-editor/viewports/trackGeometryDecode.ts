@@ -39,7 +39,7 @@ import {
 	type ParsedVertexDescriptor,
 	type RenderableMesh,
 } from '@/lib/core/renderable';
-import { extractResourceSize, isCompressed, decompressData } from '@/lib/core/resourceManager';
+import { extractResourceSize, isResourceBlockCompressed, decompressData } from '@/lib/core/resourceManager';
 import { u64ToBigInt } from '@/lib/core/u64';
 import { parseInstanceList, INSTANCE_LIST_TYPE_ID } from '@/lib/core/instanceList';
 
@@ -119,7 +119,7 @@ function decodeRenderableGeometries(
 			}
 			const start = (bundle.header.resourceDataOffsets[0] + entry.diskOffsets[0]) >>> 0;
 			let bytes: Uint8Array = new Uint8Array(buffer, start, size);
-			if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
+			if (isResourceBlockCompressed(entry, 0, bytes)) bytes = decompressData(bytes) as Uint8Array;
 			let parsed: ParsedVertexDescriptor | null = null;
 			try {
 				parsed = parseVertexDescriptor(bytes);
@@ -229,7 +229,7 @@ export function decodeTrackGeometry(
 		if (size <= 0) return empty;
 		const start = (bundle.header.resourceDataOffsets[0] + ilEntry.diskOffsets[0]) >>> 0;
 		let bytes: Uint8Array = new Uint8Array(buffer, start, size);
-		if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
+		if (isResourceBlockCompressed(ilEntry, 0, bytes)) bytes = decompressData(bytes) as Uint8Array;
 		il = parseInstanceList(bytes);
 	} catch {
 		return empty;

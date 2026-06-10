@@ -14,7 +14,7 @@
 // resolves the Model → Renderable chain via the bundle's resource list.
 
 import type { ParsedBundle, ResourceEntry } from './types';
-import { extractResourceSize, isCompressed, decompressData } from './resourceManager';
+import { extractResourceSize, isResourceBlockCompressed, decompressData } from './resourceManager';
 import { u64ToBigInt } from './u64';
 import { BundleError } from './errors';
 import { getImportIds } from './bundle';
@@ -100,7 +100,7 @@ export function getGraphicsSpecHeader(
 		throw new BundleError('GraphicsSpec block 0 runs past end of file', 'PARSE_ERROR');
 	}
 	let bytes: Uint8Array = new Uint8Array(buffer, start, size);
-	if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
+	if (isResourceBlockCompressed(resource, 0, bytes)) bytes = decompressData(bytes) as Uint8Array;
 	return bytes;
 }
 
@@ -291,7 +291,7 @@ function getModelHeader(
 	const rel = resource.diskOffsets[0] >>> 0;
 	const start = (base + rel) >>> 0;
 	let bytes: Uint8Array = new Uint8Array(buffer, start, size);
-	if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
+	if (isResourceBlockCompressed(resource, 0, bytes)) bytes = decompressData(bytes) as Uint8Array;
 	return bytes;
 }
 

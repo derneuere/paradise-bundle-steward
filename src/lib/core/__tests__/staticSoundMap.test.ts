@@ -389,11 +389,11 @@ describe('rebucket retail sweep (example/TRK_UNIT*_GR.BNDL)', () => {
 		? fs.readdirSync(exampleDir).filter((f) => /^TRK_UNIT\d+_GR\.BNDL$/.test(f)).sort()
 		: [];
 
-	// TRK_UNIT192_GR.BNDL fails at the BUNDLE level ('invalid stored block
-	// lengths' during decompression) — a pre-existing envelope issue unrelated
-	// to StaticSoundMap, so the sweep tolerates bundle-parse failures but
-	// reports them, pinning that only this one exists.
-	const KNOWN_UNPARSEABLE_BUNDLES = ['TRK_UNIT192_GR.BNDL'];
+	// Every retail TRK bundle parses. TRK_UNIT192 once failed here because its
+	// raw PropGraphicsList payload starts with a coincidental zlib magic and the
+	// envelope used to trust the byte sniff — keep the unparseable channel so a
+	// regression is reported by name instead of as a silent count drop.
+	const KNOWN_UNPARSEABLE_BUNDLES: string[] = [];
 
 	it.skipIf(trkBundles.length === 0)(
 		'write(rebucket(parse(raw))) is byte-identical to raw for every retail StaticSoundMap',
@@ -428,8 +428,8 @@ describe('rebucket retail sweep (example/TRK_UNIT*_GR.BNDL)', () => {
 			}
 			expect(unparseable).toEqual(KNOWN_UNPARSEABLE_BUNDLES);
 			expect(failures).toEqual([]);
-			// 427 parseable bundles x 2 maps each.
-			expect(checked).toBe(854);
+			// 428 bundles x 2 maps each.
+			expect(checked).toBe(856);
 		},
 		600_000,
 	);

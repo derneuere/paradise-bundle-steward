@@ -98,6 +98,20 @@ export function extractResourceData(
   bundle: ParsedBundle,
   resource: ResourceEntry,
 ): Uint8Array {
+  return extractResourceDataWithBlock(buffer, bundle, resource).data;
+}
+
+/**
+ * Same as {@link extractResourceData} but also reports WHICH memory block the
+ * bytes came from, so callers can run the per-block compression check
+ * ({@link isResourceBlockCompressed}) against the matching entry fields.
+ * blockIndex is -1 when no block had usable data.
+ */
+export function extractResourceDataWithBlock(
+  buffer: ArrayBuffer,
+  bundle: ParsedBundle,
+  resource: ResourceEntry,
+): { data: Uint8Array; blockIndex: number } {
   for (let i = 0; i < 3; i++) {
     const size = extractResourceSize(resource.sizeAndAlignmentOnDisk[i]);
     if (size <= 0) continue;
@@ -105,10 +119,10 @@ export function extractResourceData(
     const rel = resource.diskOffsets[i] >>> 0;
     const start = (base + rel) >>> 0;
     if (start + size <= buffer.byteLength) {
-      return new Uint8Array(buffer, start, size);
+      return { data: new Uint8Array(buffer, start, size), blockIndex: i };
     }
   }
-  return new Uint8Array();
+  return { data: new Uint8Array(), blockIndex: -1 };
 }
 
 /**
@@ -135,7 +149,7 @@ export function getResourceBlocks(
     const start = (base + rel) >>> 0;
     if (start + size > buffer.byteLength) continue;
     let bytes: Uint8Array = new Uint8Array(buffer, start, size);
-    if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
+    if (isResourceBlockCompressed(resource, i, bytes)) bytes = decompressData(bytes) as Uint8Array;
     blocks[i] = bytes;
   }
   return blocks;
@@ -171,10 +185,38 @@ export function packSizeAndAlignment(size: number, alignment: number): number {
 // ============================================================================
 
 /**
- * Detects if data is compressed (zlib format)
+ * Detects if data LOOKS like a zlib stream (magic-byte sniff).
+ *
+ * Sniffing alone is not authoritative: raw resource payloads can start with a
+ * valid zlib magic by coincidence (0x78 0x01 is also the little-endian u32
+ * 0x178 — a perfectly plausible struct offset; retail TRK_UNIT192 has exactly
+ * such a PropGraphicsList). Whenever the ResourceEntry is available, use
+ * {@link isResourceBlockCompressed} instead, which consults the envelope's
+ * disk-vs-uncompressed size pair before trusting the sniff.
  */
 export function isCompressed(data: Uint8Array): boolean {
-  return data.length >= 2 && data[0] === 0x78;
+  // zlib magic: CMF 0x78 followed by a standard-level FLG byte.
+  if (data.length < 2 || data[0] !== 0x78) return false;
+  return data[1] === 0x01 || data[1] === 0x9C || data[1] === 0xDA || data[1] === 0x5E;
+}
+
+/**
+ * Authoritative per-block compression check for a resource's memory block.
+ *
+ * BND2 entries carry both the on-disk and the in-memory (uncompressed) size
+ * per block. Equal sizes mean the block is stored raw — the bytes must NOT be
+ * inflated even if they happen to start with a zlib magic. Different sizes
+ * mean a compressed block, with the sniff kept as a sanity guard.
+ */
+export function isResourceBlockCompressed(
+  resource: ResourceEntry,
+  blockIndex: number,
+  bytes: Uint8Array,
+): boolean {
+  const diskSize = extractResourceSize(resource.sizeAndAlignmentOnDisk[blockIndex]);
+  const uncompressedSize = extractResourceSize(resource.uncompressedSizeAndAlignment[blockIndex]);
+  if (diskSize === uncompressedSize) return false;
+  return isCompressed(bytes);
 }
 
 /**
@@ -225,8 +267,8 @@ export function compressData(data: Uint8Array, level: number = 6): Uint8Array {
  * Gets resource data with automatic decompression
  */
 export function getResourceData(context: ResourceContext): ResourceData {
-  const rawData = extractResourceData(context.buffer, context.bundle, context.resource);
-  const compressed = isCompressed(rawData);
+  const { data: rawData, blockIndex } = extractResourceDataWithBlock(context.buffer, context.bundle, context.resource);
+  const compressed = blockIndex >= 0 && isResourceBlockCompressed(context.resource, blockIndex, rawData);
   const data = compressed ? decompressData(rawData) : rawData;
 
   return {
@@ -362,8 +404,8 @@ export function calculateBundleStats(bundle: ParsedBundle, buffer: ArrayBuffer):
     stats.resourceTypes[resource.resourceTypeId] = (stats.resourceTypes[resource.resourceTypeId] || 0) + 1;
 
     // Check if compressed
-    const data = extractResourceData(buffer, bundle, resource);
-    if (isCompressed(data)) {
+    const { data, blockIndex } = extractResourceDataWithBlock(buffer, bundle, resource);
+    if (blockIndex >= 0 && isResourceBlockCompressed(resource, blockIndex, data)) {
       stats.compressedResources++;
       stats.compressedSize += data.length;
     }

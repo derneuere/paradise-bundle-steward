@@ -17,7 +17,7 @@
 // bundle-level parseImportEntries() data.
 
 import type { ParsedBundle, ResourceEntry } from './types';
-import { extractResourceSize, isCompressed, decompressData } from './resourceManager';
+import { extractResourceSize, isResourceBlockCompressed, decompressData } from './resourceManager';
 import { u64ToBigInt } from './u64';
 import { BundleError } from './errors';
 
@@ -222,7 +222,7 @@ export function getRenderableBlocks(
 		const start = (base + rel) >>> 0;
 		if (start + size > buffer.byteLength) return null;
 		let bytes: Uint8Array = new Uint8Array(buffer, start, size);
-		if (isCompressed(bytes)) bytes = decompressData(bytes) as Uint8Array;
+		if (isResourceBlockCompressed(resource, i, bytes)) bytes = decompressData(bytes) as Uint8Array;
 		return bytes;
 	};
 

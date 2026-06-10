@@ -3,7 +3,7 @@
 // offset math and zlib handling only live in one place.
 
 import type { ParsedBundle, ResourceEntry } from '../types';
-import { extractResourceData, isCompressed, decompressData } from '../resourceManager';
+import { extractResourceDataWithBlock, isResourceBlockCompressed, decompressData } from '../resourceManager';
 import { BundleError } from '../errors';
 
 /**
@@ -21,13 +21,13 @@ export function extractResourceRaw(
 	bundle: ParsedBundle,
 	resource: ResourceEntry,
 ): Uint8Array {
-	const raw = extractResourceData(buffer, bundle, resource);
+	const { data: raw, blockIndex } = extractResourceDataWithBlock(buffer, bundle, resource);
 	if (raw.byteLength === 0) {
 		throw new BundleError(
 			`Resource 0x${resource.resourceTypeId.toString(16)} has no populated data block`,
 			'RESOURCE_EMPTY',
 		);
 	}
-	if (isCompressed(raw)) return decompressData(raw);
+	if (isResourceBlockCompressed(resource, blockIndex, raw)) return decompressData(raw);
 	return raw;
 }
