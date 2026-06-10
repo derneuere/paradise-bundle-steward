@@ -274,8 +274,9 @@ describe('Font char add/remove (parser/writer level)', () => {
 		const reparsed = parseFont(writeFont({ ...m, chars }));
 		expect(reparsed.chars.length).toBe(m.chars.length + 1);
 		expect(reparsed.chars[reparsed.chars.length - 1].charId).toBe(0xff);
-		// NOTE: payload-level only. Growing the char array moves the inline
-		// import table, so the bundle-level importOffset must be recomputed by
-		// the bundle writer — which is why the schema keeps the list fixed.
+		// Growing the char array moves the inline import table; the bundle-level
+		// importOffset that points at it is recomputed by writeBundleFresh via
+		// the handler's importTable() hook (pinned in
+		// bundle/__tests__/writeBundleFreshImports.test.ts).
 	});
 });

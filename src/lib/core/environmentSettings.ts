@@ -25,11 +25,11 @@
 //   - TimeLine: one import per keyframe, patched into the mppKeyframes pointer
 //     slots IN ORDER — so import i pairs with mpfKeyframeTimes[i]. Surfaced as
 //     keyframes[i].mKeyframeId (resource ids are crc32(lowercase debug name)).
-// The import table is part of the payload these writers emit, but the bundle
-// envelope's ResourceEntry.importOffset/importCount are separate metadata —
-// adding/removing timeline keyframes changes both, which the envelope writer
-// does not currently recompute. Field edits (times, colours, retargeting an
-// existing slot's id) are safe; count-changing edits need envelope support.
+// The import table is part of the payload these writers emit; the bundle
+// envelope's ResourceEntry.importOffset/importCount are separate metadata that
+// adding/removing timeline keyframes also changes — writeBundleFresh recomputes
+// them through the handlers' importTable() hooks, so count-changing edits are
+// end-to-end safe alongside field edits.
 //
 // Scope: 32-bit PC, little-endian, matching the rest of src/lib/core.
 //

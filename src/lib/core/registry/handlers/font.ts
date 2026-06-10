@@ -31,6 +31,13 @@ export const fontHandler: ResourceHandler<ParsedFont> = {
 	writeRaw(model, ctx) {
 		return writeFont(model, ctx.littleEndian);
 	},
+	importTable(payload, ctx) {
+		// One import per texture page, at the payload tail (the parser throws
+		// unless the table sits exactly at mSizeOfFont).
+		const model = parseFont(payload, ctx.littleEndian);
+		const count = model.texturePages.length;
+		return { offset: payload.byteLength - count * 16, count };
+	},
 	describe(model) {
 		return `${model.macTypefaceFamilyName} ${model.macTypefaceStyleName}, ${model.chars.length} chars, ${model.texturePages.length} page${model.texturePages.length === 1 ? '' : 's'}, ${model.muFontHeightInPixels}px`;
 	},

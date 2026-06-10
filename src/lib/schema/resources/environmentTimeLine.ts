@@ -9,10 +9,10 @@
 // (clock-time seconds, EnvironmentKeyframe id) pairs the game interpolates
 // between as the in-game clock advances. The keyframe references are BND2
 // imports resolved against the 0x10012 resources in the SAME bundle; retail
-// timelines cover every keyframe in their bundle exactly once. Editing times
-// or retargeting an entry is safe; adding/removing entries also resizes the
-// resource's inline import table, which the bundle envelope's import metadata
-// (importCount/importOffset) does not track yet — hence the warning below.
+// timelines cover every keyframe in their bundle exactly once. Adding/removing
+// entries resizes the resource's inline import table; the bundle envelope's
+// import metadata (importCount/importOffset) follows it on export via the
+// handler's importTable() hook, so count-changing edits are safe too.
 
 import type {
 	FieldSchema,
@@ -98,7 +98,6 @@ const EnvironmentTimeLineLocation: RecordSchema = {
 		keyframes: {
 			label: 'Schedule',
 			description: 'Ascending (time, keyframe) pairs. Retail timelines start at 00:00 and cover every keyframe in the bundle exactly once.',
-			warning: 'Adding or removing entries resizes the resource\'s inline import table; the bundle envelope\'s import metadata is not recomputed yet — prefer editing times / retargeting existing entries.',
 		},
 	},
 	label: (value, index) => locationLabel(value, index ?? 0),
