@@ -15,7 +15,12 @@
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
+import { guiPopupProfile } from './profiles/guiPopup';
+import { hudMessageProfile } from './profiles/hudMessage';
+import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
+import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
+import { languageProfile } from './profiles/language';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
 import { propInstanceDataProfile } from './profiles/propInstanceData';
@@ -32,6 +37,7 @@ import {
 } from './profiles/trafficData';
 import { triggerDataProfile } from './profiles/triggerData';
 import { vehicleListProfile } from './profiles/vehicleList';
+import { worldPainter2DProfile } from './profiles/worldPainter2D';
 import { zoneListProfile } from './profiles/zoneList';
 import type { EditorProfile } from './types';
 import {
@@ -114,6 +120,36 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x1000f,
 		key: 'propPhysics',
 		profiles: [propPhysicsProfile],
+	},
+	{
+		typeId: 0x27,
+		key: 'language',
+		profiles: [languageProfile],
+	},
+	{
+		typeId: 0x2c,
+		key: 'hudMessage',
+		profiles: [hudMessageProfile],
+	},
+	{
+		typeId: 0x2e,
+		key: 'hudMessageSequence',
+		profiles: [hudMessageSequenceProfile],
+	},
+	{
+		typeId: 0x2f,
+		key: 'hudMessageSequenceDictionary',
+		profiles: [hudMessageSequenceDictionaryProfile],
+	},
+	{
+		typeId: 0x1f,
+		key: 'guiPopup',
+		profiles: [guiPopupProfile],
+	},
+	{
+		typeId: 0x30,
+		key: 'worldPainter2D',
+		profiles: [worldPainter2DProfile],
 	},
 	{
 		typeId: 0x110,

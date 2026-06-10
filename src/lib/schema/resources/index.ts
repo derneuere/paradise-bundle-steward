@@ -11,8 +11,13 @@
 import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
+import { guiPopupResourceSchema } from './guiPopup';
+import { hudMessageResourceSchema } from './hudMessage';
+import { hudMessageSequenceResourceSchema } from './hudMessageSequence';
+import { hudMessageSequenceDictionaryResourceSchema } from './hudMessageSequenceDictionary';
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
 import { instanceListResourceSchema } from './instanceList';
+import { languageResourceSchema } from './language';
 import { playerCarColoursResourceSchema } from './playerCarColours';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
 import { propGraphicsListResourceSchema } from './propGraphicsList';
@@ -25,13 +30,19 @@ import { textureResourceSchema } from './texture';
 import { trafficDataResourceSchema } from './trafficData';
 import { triggerDataResourceSchema } from './triggerData';
 import { vehicleListResourceSchema } from './vehicleList';
+import { worldPainter2DResourceSchema } from './worldPainter2D';
 import { zoneListResourceSchema } from './zoneList';
 
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
+	guiPopup: guiPopupResourceSchema,
+	hudMessage: hudMessageResourceSchema,
+	hudMessageSequence: hudMessageSequenceResourceSchema,
+	hudMessageSequenceDictionary: hudMessageSequenceDictionaryResourceSchema,
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,
 	instanceList: instanceListResourceSchema,
+	language: languageResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
 	polygonSoupList: polygonSoupListResourceSchema,
 	propGraphicsList: propGraphicsListResourceSchema,
@@ -44,6 +55,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	trafficData: trafficDataResourceSchema,
 	triggerData: triggerDataResourceSchema,
 	vehicleList: vehicleListResourceSchema,
+	worldPainter2D: worldPainter2DResourceSchema,
 	zoneList: zoneListResourceSchema,
 };
 

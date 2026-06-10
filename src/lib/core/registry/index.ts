@@ -34,6 +34,12 @@ import { propGraphicsListHandler } from './handlers/propGraphicsList';
 import { propPhysicsHandler } from './handlers/propPhysics';
 import { instanceListHandler } from './handlers/instanceList';
 import { staticSoundMapHandler } from './handlers/staticSoundMap';
+import { languageHandler } from './handlers/language';
+import { hudMessageHandler } from './handlers/hudMessage';
+import { hudMessageSequenceHandler } from './handlers/hudMessageSequence';
+import { hudMessageSequenceDictionaryHandler } from './handlers/hudMessageSequenceDictionary';
+import { guiPopupHandler } from './handlers/guiPopup';
+import { worldPainter2DHandler } from './handlers/worldPainter2D';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -64,6 +70,12 @@ export const registry: ResourceHandler[] = [
 	propPhysicsHandler,
 	instanceListHandler,
 	staticSoundMapHandler,
+	languageHandler,
+	hudMessageHandler,
+	hudMessageSequenceHandler,
+	hudMessageSequenceDictionaryHandler,
+	guiPopupHandler,
+	worldPainter2DHandler,
 	textFileHandler,
 ];
 
