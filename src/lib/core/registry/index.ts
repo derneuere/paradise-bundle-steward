@@ -45,6 +45,9 @@ import { particleDescriptionCollectionHandler } from './handlers/particleDescrip
 import { textureNameMapHandler } from './handlers/textureNameMap';
 import { vfxMeshCollectionHandler } from './handlers/vfxMeshCollection';
 import { vfxPropCollectionHandler } from './handlers/vfxPropCollection';
+import { wheelListHandler } from './handlers/wheelList';
+import { idListHandler } from './handlers/idList';
+import { aptDataHandler } from './handlers/aptData';
 import { environmentKeyframeHandler } from './handlers/environmentKeyframe';
 import { environmentTimeLineHandler } from './handlers/environmentTimeLine';
 import { environmentDictionaryHandler } from './handlers/environmentDictionary';
@@ -100,6 +103,9 @@ export const registry: ResourceHandler[] = [
 	fontHandler,
 	massiveLookupTableHandler,
 	registryHandler,
+	wheelListHandler,
+	idListHandler,
+	aptDataHandler,
 	textFileHandler,
 ];
 

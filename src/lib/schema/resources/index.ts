@@ -10,6 +10,7 @@
 
 import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
+import { aptDataResourceSchema } from './aptData';
 import { challengeListResourceSchema } from './challengeList';
 import { colourCubeResourceSchema } from './colourCube';
 import { environmentDictionaryResourceSchema } from './environmentDictionary';
@@ -21,6 +22,7 @@ import { hudMessageResourceSchema } from './hudMessage';
 import { hudMessageSequenceResourceSchema } from './hudMessageSequence';
 import { hudMessageSequenceDictionaryResourceSchema } from './hudMessageSequenceDictionary';
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
+import { idListResourceSchema } from './idList';
 import { instanceListResourceSchema } from './instanceList';
 import { languageResourceSchema } from './language';
 import { massiveLookupTableResourceSchema } from './massiveLookupTable';
@@ -41,12 +43,14 @@ import { trafficDataResourceSchema } from './trafficData';
 import { triggerDataResourceSchema } from './triggerData';
 import { vehicleListResourceSchema } from './vehicleList';
 import { vfxMeshCollectionResourceSchema } from './vfxMeshCollection';
+import { wheelListResourceSchema } from './wheelList';
 import { vfxPropCollectionResourceSchema } from './vfxPropCollection';
 import { worldPainter2DResourceSchema } from './worldPainter2D';
 import { zoneListResourceSchema } from './zoneList';
 
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
+	aptData: aptDataResourceSchema,
 	challengeList: challengeListResourceSchema,
 	colourCube: colourCubeResourceSchema,
 	environmentDictionary: environmentDictionaryResourceSchema,
@@ -58,6 +62,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	hudMessageSequence: hudMessageSequenceResourceSchema,
 	hudMessageSequenceDictionary: hudMessageSequenceDictionaryResourceSchema,
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,
+	idList: idListResourceSchema,
 	instanceList: instanceListResourceSchema,
 	language: languageResourceSchema,
 	massiveLookupTable: massiveLookupTableResourceSchema,
@@ -79,6 +84,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	vehicleList: vehicleListResourceSchema,
 	vfxMeshCollection: vfxMeshCollectionResourceSchema,
 	vfxPropCollection: vfxPropCollectionResourceSchema,
+	wheelList: wheelListResourceSchema,
 	worldPainter2D: worldPainter2DResourceSchema,
 	zoneList: zoneListResourceSchema,
 };

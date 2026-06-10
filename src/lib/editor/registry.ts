@@ -14,6 +14,7 @@
 // only see the lookup helpers — never the registration array directly.
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
+import { aptDataProfile } from './profiles/aptData';
 import { challengeListProfile } from './profiles/challengeList';
 import { colourCubeProfile } from './profiles/colourCube';
 import { environmentDictionaryProfile } from './profiles/environmentDictionary';
@@ -25,6 +26,7 @@ import { hudMessageProfile } from './profiles/hudMessage';
 import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
 import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
+import { idListProfile } from './profiles/idList';
 import { languageProfile } from './profiles/language';
 import { massiveLookupTableProfile } from './profiles/massiveLookupTable';
 import { particleDescriptionProfile } from './profiles/particleDescription';
@@ -42,6 +44,7 @@ import { textureProfile } from './profiles/texture';
 import { textureNameMapProfile } from './profiles/textureNameMap';
 import { vfxMeshCollectionProfile } from './profiles/vfxMeshCollection';
 import { vfxPropCollectionProfile } from './profiles/vfxPropCollection';
+import { wheelListProfile } from './profiles/wheelList';
 import {
 	trafficDataV22Profile,
 	trafficDataV44Profile,
@@ -228,6 +231,21 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x1001b,
 		key: 'vfxPropCollection',
 		profiles: [vfxPropCollectionProfile],
+	},
+	{
+		typeId: 0x10009,
+		key: 'wheelList',
+		profiles: [wheelListProfile],
+	},
+	{
+		typeId: 0x25,
+		key: 'idList',
+		profiles: [idListProfile],
+	},
+	{
+		typeId: 0x1e,
+		key: 'aptData',
+		profiles: [aptDataProfile],
 	},
 	{
 		typeId: 0x1001f,
