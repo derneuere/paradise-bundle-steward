@@ -55,6 +55,13 @@ import { colourCubeHandler } from './handlers/colourCube';
 import { fontHandler } from './handlers/font';
 import { massiveLookupTableHandler } from './handlers/massiveLookupTable';
 import { registryHandler } from './handlers/registry';
+import { genericRwacWaveContentHandler } from './handlers/genericRwacWaveContent';
+import { aemsBankHandler } from './handlers/aemsBank';
+import { csisHandler } from './handlers/csis';
+import { splicerHandler } from './handlers/splicer';
+import { nicotineHandler } from './handlers/nicotine';
+import { snapshotDataHandler } from './handlers/snapshotData';
+import { flaptFileHandler } from './handlers/flaptFile';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -106,6 +113,13 @@ export const registry: ResourceHandler[] = [
 	wheelListHandler,
 	idListHandler,
 	aptDataHandler,
+	genericRwacWaveContentHandler,
+	aemsBankHandler,
+	csisHandler,
+	splicerHandler,
+	nicotineHandler,
+	snapshotDataHandler,
+	flaptFileHandler,
 	textFileHandler,
 ];
 

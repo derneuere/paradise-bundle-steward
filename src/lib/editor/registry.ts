@@ -14,13 +14,17 @@
 // only see the lookup helpers — never the registration array directly.
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
+import { aemsBankProfile } from './profiles/aemsBank';
 import { aptDataProfile } from './profiles/aptData';
 import { challengeListProfile } from './profiles/challengeList';
+import { csisProfile } from './profiles/csis';
 import { colourCubeProfile } from './profiles/colourCube';
 import { environmentDictionaryProfile } from './profiles/environmentDictionary';
 import { environmentKeyframeProfile } from './profiles/environmentKeyframe';
 import { environmentTimeLineProfile } from './profiles/environmentTimeLine';
+import { flaptFileProfile } from './profiles/flaptFile';
 import { fontProfile } from './profiles/font';
+import { genericRwacWaveContentProfile } from './profiles/genericRwacWaveContent';
 import { guiPopupProfile } from './profiles/guiPopup';
 import { hudMessageProfile } from './profiles/hudMessage';
 import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
@@ -29,6 +33,7 @@ import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
 import { idListProfile } from './profiles/idList';
 import { languageProfile } from './profiles/language';
 import { massiveLookupTableProfile } from './profiles/massiveLookupTable';
+import { nicotineProfile } from './profiles/nicotine';
 import { particleDescriptionProfile } from './profiles/particleDescription';
 import { particleDescriptionCollectionProfile } from './profiles/particleDescriptionCollection';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
@@ -38,6 +43,8 @@ import { propInstanceDataProfile } from './profiles/propInstanceData';
 import { propGraphicsListProfile } from './profiles/propGraphicsList';
 import { propPhysicsProfile } from './profiles/propPhysics';
 import { renderableProfile } from './profiles/renderable';
+import { snapshotDataProfile } from './profiles/snapshotData';
+import { splicerProfile } from './profiles/splicer';
 import { staticSoundMapProfile } from './profiles/staticSoundMap';
 import { streetDataProfile } from './profiles/streetData';
 import { textureProfile } from './profiles/texture';
@@ -246,6 +253,41 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x1e,
 		key: 'aptData',
 		profiles: [aptDataProfile],
+	},
+	{
+		typeId: 0xa020,
+		key: 'genericRwacWaveContent',
+		profiles: [genericRwacWaveContentProfile],
+	},
+	{
+		typeId: 0xa022,
+		key: 'aemsBank',
+		profiles: [aemsBankProfile],
+	},
+	{
+		typeId: 0xa023,
+		key: 'csis',
+		profiles: [csisProfile],
+	},
+	{
+		typeId: 0xa024,
+		key: 'nicotine',
+		profiles: [nicotineProfile],
+	},
+	{
+		typeId: 0xa025,
+		key: 'splicer',
+		profiles: [splicerProfile],
+	},
+	{
+		typeId: 0xa029,
+		key: 'snapshotData',
+		profiles: [snapshotDataProfile],
+	},
+	{
+		typeId: 0x10020,
+		key: 'flaptFile',
+		profiles: [flaptFileProfile],
 	},
 	{
 		typeId: 0x1001f,

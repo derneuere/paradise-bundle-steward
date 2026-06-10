@@ -9,14 +9,18 @@
 // generic schema form for any resource type.
 
 import type { ResourceSchema } from '../types';
+import { aemsBankResourceSchema } from './aemsBank';
 import { aiSectionsResourceSchema } from './aiSections';
 import { aptDataResourceSchema } from './aptData';
 import { challengeListResourceSchema } from './challengeList';
+import { csisResourceSchema } from './csis';
 import { colourCubeResourceSchema } from './colourCube';
 import { environmentDictionaryResourceSchema } from './environmentDictionary';
 import { environmentKeyframeResourceSchema } from './environmentKeyframe';
 import { environmentTimeLineResourceSchema } from './environmentTimeLine';
+import { flaptFileResourceSchema } from './flaptFile';
 import { fontResourceSchema } from './font';
+import { genericRwacWaveContentResourceSchema } from './genericRwacWaveContent';
 import { guiPopupResourceSchema } from './guiPopup';
 import { hudMessageResourceSchema } from './hudMessage';
 import { hudMessageSequenceResourceSchema } from './hudMessageSequence';
@@ -26,6 +30,7 @@ import { idListResourceSchema } from './idList';
 import { instanceListResourceSchema } from './instanceList';
 import { languageResourceSchema } from './language';
 import { massiveLookupTableResourceSchema } from './massiveLookupTable';
+import { nicotineResourceSchema } from './nicotine';
 import { particleDescriptionResourceSchema } from './particleDescription';
 import { particleDescriptionCollectionResourceSchema } from './particleDescriptionCollection';
 import { playerCarColoursResourceSchema } from './playerCarColours';
@@ -35,6 +40,8 @@ import { propGraphicsListResourceSchema } from './propGraphicsList';
 import { propInstanceDataResourceSchema } from './propInstanceData';
 import { propPhysicsResourceSchema } from './propPhysics';
 import { renderableResourceSchema } from './renderable';
+import { snapshotDataResourceSchema } from './snapshotData';
+import { splicerResourceSchema } from './splicer';
 import { staticSoundMapResourceSchema } from './staticSoundMap';
 import { streetDataResourceSchema } from './streetData';
 import { textureResourceSchema } from './texture';
@@ -51,12 +58,16 @@ import { zoneListResourceSchema } from './zoneList';
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	aptData: aptDataResourceSchema,
+	aemsBank: aemsBankResourceSchema,
 	challengeList: challengeListResourceSchema,
+	csis: csisResourceSchema,
 	colourCube: colourCubeResourceSchema,
 	environmentDictionary: environmentDictionaryResourceSchema,
 	environmentKeyframe: environmentKeyframeResourceSchema,
 	environmentTimeLine: environmentTimeLineResourceSchema,
+	flaptFile: flaptFileResourceSchema,
 	font: fontResourceSchema,
+	genericRwacWaveContent: genericRwacWaveContentResourceSchema,
 	guiPopup: guiPopupResourceSchema,
 	hudMessage: hudMessageResourceSchema,
 	hudMessageSequence: hudMessageSequenceResourceSchema,
@@ -66,6 +77,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	instanceList: instanceListResourceSchema,
 	language: languageResourceSchema,
 	massiveLookupTable: massiveLookupTableResourceSchema,
+	nicotine: nicotineResourceSchema,
 	particleDescription: particleDescriptionResourceSchema,
 	particleDescriptionCollection: particleDescriptionCollectionResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
@@ -75,6 +87,8 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	propInstanceData: propInstanceDataResourceSchema,
 	propPhysics: propPhysicsResourceSchema,
 	renderable: renderableResourceSchema,
+	snapshotData: snapshotDataResourceSchema,
+	splicer: splicerResourceSchema,
 	staticSoundMap: staticSoundMapResourceSchema,
 	streetData: streetDataResourceSchema,
 	texture: textureResourceSchema,
