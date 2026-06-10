@@ -40,6 +40,14 @@ import { hudMessageSequenceHandler } from './handlers/hudMessageSequence';
 import { hudMessageSequenceDictionaryHandler } from './handlers/hudMessageSequenceDictionary';
 import { guiPopupHandler } from './handlers/guiPopup';
 import { worldPainter2DHandler } from './handlers/worldPainter2D';
+import { particleDescriptionHandler } from './handlers/particleDescription';
+import { particleDescriptionCollectionHandler } from './handlers/particleDescriptionCollection';
+import { textureNameMapHandler } from './handlers/textureNameMap';
+import { vfxMeshCollectionHandler } from './handlers/vfxMeshCollection';
+import { vfxPropCollectionHandler } from './handlers/vfxPropCollection';
+import { wheelListHandler } from './handlers/wheelList';
+import { idListHandler } from './handlers/idList';
+import { aptDataHandler } from './handlers/aptData';
 import { environmentKeyframeHandler } from './handlers/environmentKeyframe';
 import { environmentTimeLineHandler } from './handlers/environmentTimeLine';
 import { environmentDictionaryHandler } from './handlers/environmentDictionary';
@@ -83,6 +91,11 @@ export const registry: ResourceHandler[] = [
 	hudMessageSequenceDictionaryHandler,
 	guiPopupHandler,
 	worldPainter2DHandler,
+	particleDescriptionHandler,
+	particleDescriptionCollectionHandler,
+	textureNameMapHandler,
+	vfxMeshCollectionHandler,
+	vfxPropCollectionHandler,
 	environmentKeyframeHandler,
 	environmentTimeLineHandler,
 	environmentDictionaryHandler,
@@ -90,6 +103,9 @@ export const registry: ResourceHandler[] = [
 	fontHandler,
 	massiveLookupTableHandler,
 	registryHandler,
+	wheelListHandler,
+	idListHandler,
+	aptDataHandler,
 	textFileHandler,
 ];
 

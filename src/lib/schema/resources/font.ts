@@ -11,12 +11,12 @@
 // space characters (U+0020, U+00A0, U+3000) are non-renderable and store the
 // (-1,-1) UV sentinel — they only contribute advance.
 //
-// Why both lists are fixed-size: glyph count changes move the inline import
-// table at the payload tail, and the bundle-level importOffset that points at
-// it is not recomputed by every export path; page count changes additionally
-// change the bundle-level importCount. Field edits keep the payload length
-// and are safe. Char ids are editable but must keep the array grouped by
-// ascending hash bucket (charId & 0x7F) — the writer throws otherwise.
+// Glyph count changes move the inline import table at the payload tail and
+// page count changes resize it; the bundle envelope recomputes its
+// importOffset/importCount on export via the handler's importTable() hook, so
+// both lists are editable. Char ids must keep the array grouped by ascending
+// hash bucket (charId & 0x7F) — the writer throws otherwise, which is why new
+// glyphs default to a bucket-127 char id (append-safe after every bucket).
 
 import type {
 	FieldSchema,
@@ -37,16 +37,34 @@ const bool = (): FieldSchema => ({ kind: 'bool' });
 const str = (): FieldSchema => ({ kind: 'string' });
 const record = (type: string): FieldSchema => ({ kind: 'record', type });
 
-const fixedRecordList = (
+const recordList = (
 	type: string,
+	makeEmpty: () => unknown,
 	itemLabel?: (item: unknown, index: number) => string,
 ): FieldSchema => ({
 	kind: 'list',
 	item: record(type),
-	addable: false,
-	removable: false,
+	addable: true,
+	removable: true,
+	makeEmpty,
 	itemLabel: itemLabel ? (item, index) => itemLabel(item, index) : undefined,
 });
+
+// charId 0xFF hashes to bucket 127 (charId & 0x7F), which sorts after every
+// existing bucket — so an appended glyph never breaks the writer's
+// bucket-grouping invariant.
+const makeEmptyFontChar = () => ({
+	charId: 0xff,
+	mTopLeftUV: { x: 0, y: 0 },
+	mDimensionsUV: { x: 0, y: 0 },
+	mStart: { x: 0, y: 0 },
+	mfAdvance: 0,
+	mu16TexturePageId: 0,
+	mbIsLowerCaseScale: false,
+	mbIsRenderable: true,
+});
+
+const makeEmptyTexturePage = () => ({ textureId: 0n, _ptrSlot: 0 });
 
 // ---------------------------------------------------------------------------
 // Tree-label helpers
@@ -190,8 +208,8 @@ const ParsedFont: RecordSchema = {
 		muFontHeightInPixels: u32(),
 		macTypefaceFamilyName: str(),
 		macTypefaceStyleName: str(),
-		chars: fixedRecordList('FontChar', fontCharLabel),
-		texturePages: fixedRecordList('FontTexturePage', texturePageLabel),
+		chars: recordList('FontChar', makeEmptyFontChar, fontCharLabel),
+		texturePages: recordList('FontTexturePage', makeEmptyTexturePage, texturePageLabel),
 	},
 	fieldMetadata: {
 		muVersionId: {
@@ -229,11 +247,11 @@ const ParsedFont: RecordSchema = {
 		},
 		chars: {
 			label: 'Glyphs',
-			description: 'Every glyph in disk order, grouped by ascending hash bucket (charId & 0x7F) — the char-lookup table is re-derived from this order on write. Fixed-size: adding/removing glyphs would move the inline import table the bundle-level importOffset points at.',
+			description: 'Every glyph in disk order, grouped by ascending hash bucket (charId & 0x7F) — the char-lookup table is re-derived from this order on write, and the writer rejects an order that breaks the grouping. New glyphs default to a bucket-127 char id so appending is always valid.',
 		},
 		texturePages: {
 			label: 'Atlas pages',
-			description: 'The Texture resources glyphs index into. Fixed-size: the page count is mirrored by the bundle-level import count. Retargeting a page\'s texture id is safe.',
+			description: 'The Texture resources glyphs index into, bound via the inline import table (recomputed on export). A new page needs a real Texture resource id; removing a page that glyphs still reference is rejected by the writer.',
 		},
 	},
 	propertyGroups: [

@@ -47,6 +47,13 @@ export const environmentKeyframeHandler: ResourceHandler<ParsedEnvironmentKeyfra
 	writeRaw(model, ctx) {
 		return writeEnvironmentKeyframe(model, ctx.littleEndian);
 	},
+	importTable(payload, ctx) {
+		// Fixed layout: exactly one import (the ColourCube) in the 16-byte tail.
+		// Parsing first makes a malformed byte override fail loudly here instead
+		// of shipping wrong envelope metadata.
+		parseEnvironmentKeyframe(payload, ctx.littleEndian);
+		return { offset: payload.byteLength - 16, count: 1 };
+	},
 	describe(model) {
 		return `key light ${fmt3(model.mLightingData.mv3KeyLightColour)}, bloom ${model.mBloomData.mfLuminance.toFixed(2)}/${model.mBloomData.mfThreshold.toFixed(2)}, colour cube 0x${model.mColourCubeId.toString(16).toUpperCase()}`;
 	},

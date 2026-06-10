@@ -171,6 +171,19 @@ export interface ResourceHandler<Model = unknown> {
 	 */
 	writeRaw?(model: Model, ctx: ResourceCtx): Uint8Array;
 
+	/**
+	 * Locate the inline BND2 import table inside an encoded payload. BND2
+	 * stores imports INSIDE each resource's header-block payload (offset is
+	 * payload-relative), with the bundle envelope's ResourceEntry carrying
+	 * only the (offset, count) metadata. When writeRaw can change the payload
+	 * layout — count-changing edits move and resize the table — the envelope
+	 * writer calls this on the freshly written payload to recompute that
+	 * metadata. Implement it on any writable handler whose payload carries
+	 * imports; without it, writeBundleFresh falls back to assuming the import
+	 * count is unchanged and the table sits at the payload tail.
+	 */
+	importTable?(payload: Uint8Array, ctx: ResourceCtx): { offset: number; count: number };
+
 	/** One-line human summary printed by `bundle-cli parse`. */
 	describe(model: Model): string;
 

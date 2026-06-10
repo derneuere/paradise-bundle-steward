@@ -14,6 +14,7 @@
 // only see the lookup helpers — never the registration array directly.
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
+import { aptDataProfile } from './profiles/aptData';
 import { challengeListProfile } from './profiles/challengeList';
 import { colourCubeProfile } from './profiles/colourCube';
 import { environmentDictionaryProfile } from './profiles/environmentDictionary';
@@ -25,8 +26,11 @@ import { hudMessageProfile } from './profiles/hudMessage';
 import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
 import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
+import { idListProfile } from './profiles/idList';
 import { languageProfile } from './profiles/language';
 import { massiveLookupTableProfile } from './profiles/massiveLookupTable';
+import { particleDescriptionProfile } from './profiles/particleDescription';
+import { particleDescriptionCollectionProfile } from './profiles/particleDescriptionCollection';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
 import { registryProfile } from './profiles/registry';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
@@ -37,6 +41,10 @@ import { renderableProfile } from './profiles/renderable';
 import { staticSoundMapProfile } from './profiles/staticSoundMap';
 import { streetDataProfile } from './profiles/streetData';
 import { textureProfile } from './profiles/texture';
+import { textureNameMapProfile } from './profiles/textureNameMap';
+import { vfxMeshCollectionProfile } from './profiles/vfxMeshCollection';
+import { vfxPropCollectionProfile } from './profiles/vfxPropCollection';
+import { wheelListProfile } from './profiles/wheelList';
 import {
 	trafficDataV22Profile,
 	trafficDataV44Profile,
@@ -88,23 +96,29 @@ const ENTRIES: RegistryEntry[] = [
 		// `(v22 prototype)` suffix).
 		profiles: [trafficDataV45Profile, trafficDataV44Profile, trafficDataV22Profile],
 	},
+	// The ten typeIds below were corrected in one sweep against the core
+	// registry (the declared source of truth) — the same scaffold-typo class
+	// the trafficData 0x10003→0x10002 fix above documents. They matter to
+	// `pickProfile(typeId, model)` callers (exportPlan); the old values made
+	// those lookups miss — and playerCarColours sat on vehicleList's REAL id
+	// (0x10005), resolving the wrong profile for vehicleList resources.
 	{
-		typeId: 0x10006,
+		typeId: 0x10018,
 		key: 'streetData',
 		profiles: [streetDataProfile],
 	},
 	{
-		typeId: 0x10009,
+		typeId: 0x10003,
 		key: 'triggerData',
 		profiles: [triggerDataProfile],
 	},
 	{
-		typeId: 0x100E,
+		typeId: 0xb000,
 		key: 'zoneList',
 		profiles: [zoneListProfile],
 	},
 	{
-		typeId: 0x10F,
+		typeId: 0x43,
 		key: 'polygonSoupList',
 		profiles: [polygonSoupListProfile],
 	},
@@ -194,32 +208,72 @@ const ENTRIES: RegistryEntry[] = [
 		profiles: [registryProfile],
 	},
 	{
-		typeId: 0x110,
+		typeId: 0x1001d,
+		key: 'particleDescription',
+		profiles: [particleDescriptionProfile],
+	},
+	{
+		typeId: 0x10008,
+		key: 'particleDescriptionCollection',
+		profiles: [particleDescriptionCollectionProfile],
+	},
+	{
+		typeId: 0x1000b,
+		key: 'textureNameMap',
+		profiles: [textureNameMapProfile],
+	},
+	{
+		typeId: 0x10019,
+		key: 'vfxMeshCollection',
+		profiles: [vfxMeshCollectionProfile],
+	},
+	{
+		typeId: 0x1001b,
+		key: 'vfxPropCollection',
+		profiles: [vfxPropCollectionProfile],
+	},
+	{
+		typeId: 0x10009,
+		key: 'wheelList',
+		profiles: [wheelListProfile],
+	},
+	{
+		typeId: 0x25,
+		key: 'idList',
+		profiles: [idListProfile],
+	},
+	{
+		typeId: 0x1e,
+		key: 'aptData',
+		profiles: [aptDataProfile],
+	},
+	{
+		typeId: 0x1001f,
 		key: 'challengeList',
 		profiles: [challengeListProfile],
 	},
 	{
-		typeId: 0x111,
+		typeId: 0x10005,
 		key: 'vehicleList',
 		profiles: [vehicleListProfile],
 	},
 	{
-		typeId: 0x10005,
+		typeId: 0x1001e,
 		key: 'playerCarColours',
 		profiles: [playerCarColoursProfile],
 	},
 	{
-		typeId: 0x10301,
+		typeId: 0x41,
 		key: 'iceTakeDictionary',
 		profiles: [iceTakeDictionaryProfile],
 	},
 	{
-		typeId: 0x05,
+		typeId: 0xc,
 		key: 'renderable',
 		profiles: [renderableProfile],
 	},
 	{
-		typeId: 0x06,
+		typeId: 0x0,
 		key: 'texture',
 		profiles: [textureProfile],
 	},

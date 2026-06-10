@@ -194,6 +194,13 @@ export function writeBundleFresh(
 
   const segmentsByBlock: Segment[][] = [[], [], []];
 
+  // Uncompressed primary-block payloads produced by an override or the
+  // cross-platform re-encode. BND2 import tables live INLINE in this payload
+  // (ResourceEntry.importOffset is payload-relative — see parseImportEntries),
+  // so a rewritten payload may have moved or resized its table and the
+  // envelope metadata must be recomputed from these bytes below.
+  const rewrittenPayloads: (Uint8Array | undefined)[] = bundle.resources.map(() => undefined);
+
   // Prepare resource data segments (apply overrides and preserve compression state)
   for (let ri = 0; ri < bundle.resources.length; ri++) {
     const resource = bundle.resources[ri];
@@ -244,6 +251,7 @@ export function writeBundleFresh(
         );
         finalBytes = wasCompressed ? compressData(newUncompressed) : newUncompressed;
         uncompressedSize = newUncompressed.length;
+        rewrittenPayloads[ri] = newUncompressed;
       } else if (isCrossPlatformExport && bi === primaryBlock) {
         // Cross-platform re-encode: the user is converting the bundle to a
         // different platform's binary layout. Parse the original bytes in the
@@ -263,6 +271,7 @@ export function writeBundleFresh(
           const newUncompressed = handler.writeRaw(model as never, ctx);
           finalBytes = wasCompressed ? compressData(newUncompressed) : newUncompressed;
           uncompressedSize = newUncompressed.length;
+          rewrittenPayloads[ri] = newUncompressed;
         } else {
           finalBytes = rawOriginal;
         }
@@ -337,26 +346,59 @@ export function writeBundleFresh(
 
   reportProgress(progressCallback, 'write', 0.5, 'Packed resource data');
 
-  // Pack import tables (copy as-is)
-  const newImportOffsets: number[] = bundle.resources.map(() => 0);
-  const importWritePlans: WritePlan[] = [];
+  // Import tables are INLINE in each resource's block-0 payload and
+  // ResourceEntry.importOffset is payload-relative (see parseImportEntries) —
+  // the table bytes already travelled with the payload copied or rewritten
+  // above, so nothing extra is written to the file here. Only the envelope
+  // metadata needs attention: a verbatim payload keeps its original
+  // offset/count, while a rewritten payload may have moved or resized its
+  // table and must be re-measured.
+  const newImportOffsets: number[] = bundle.resources.map((r) => r.importOffset >>> 0);
+  const newImportCounts: number[] = bundle.resources.map((r) => r.importCount);
 
-  // Align before import region
-  cursor = ((cursor + 15) >>> 4) << 4;
   for (let ri = 0; ri < bundle.resources.length; ri++) {
     const resource = bundle.resources[ri];
-    if (resource.importCount > 0) {
-      const bytesLen = resource.importCount * 16; // ImportEntrySchema size
-      const src = new Uint8Array(originalBuffer, resource.importOffset >>> 0, bytesLen);
-      // align 16 for each table
-      cursor = ((cursor + 15) >>> 4) << 4;
-      newImportOffsets[ri] = cursor >>> 0;
-      importWritePlans.push({ offset: cursor >>> 0, bytes: src });
-      cursor += bytesLen;
+    const payload = rewrittenPayloads[ri];
+    if (!payload) continue;
+
+    const handler = getHandlerByTypeId(resource.resourceTypeId);
+    if (handler?.importTable) {
+      const table = handler.importTable(payload, ctx);
+      newImportOffsets[ri] = table.count > 0 ? table.offset >>> 0 : 0;
+      newImportCounts[ri] = table.count;
+      continue;
     }
+    if (resource.importCount === 0) continue;
+
+    // No importTable hook: a same-size rewrite can't have moved the table
+    // (every known layout is rigid), so the original metadata still holds.
+    let primaryBlock = 0;
+    for (let bi = 0; bi < 3; bi++) {
+      if (extractResourceSize(resource.sizeAndAlignmentOnDisk[bi]) > 0) { primaryBlock = bi; break; }
+    }
+    const originalSize = extractResourceSize(resource.uncompressedSizeAndAlignment[primaryBlock]);
+    if (payload.length === originalSize) continue;
+
+    // Size changed without a hook. Every import-bearing layout in this
+    // codebase keeps its table at the payload tail, so re-anchor there with
+    // the count unchanged — correct unless the edit changed the number of
+    // imports, which only the handler could tell us.
+    const tailOffset = payload.length - resource.importCount * 16;
+    if (tailOffset < 0) {
+      throw new BundleError(
+        `Rewritten resource type 0x${resource.resourceTypeId.toString(16)} is smaller than its ${resource.importCount}-entry import table`,
+        'IMPORT_TABLE_ERROR',
+        { resourceIndex: ri, payloadLength: payload.length },
+      );
+    }
+    console.warn(
+      `Resource type 0x${resource.resourceTypeId.toString(16)} was rewritten to a new size but its handler has no importTable(); ` +
+      `assuming ${resource.importCount} imports at the payload tail (0x${tailOffset.toString(16)})`,
+    );
+    newImportOffsets[ri] = tailOffset >>> 0;
   }
 
-  reportProgress(progressCallback, 'write', 0.65, 'Copied import tables');
+  reportProgress(progressCallback, 'write', 0.65, 'Recomputed import metadata');
 
   // Optional debug data
   let debugDataOffset = 0;
@@ -426,14 +468,14 @@ export function writeBundleFresh(
     writeU32(off + 44, newDiskOffsets[i][1]);
     writeU32(off + 48, newDiskOffsets[i][2]);
 
-    // importOffset
+    // importOffset (payload-relative, matching parseImportEntries)
     writeU32(off + 52, newImportOffsets[i] || 0);
 
     // resourceTypeId
     writeU32(off + 56, re.resourceTypeId);
 
     // importCount (u16)
-    writeU16(off + 60, re.importCount);
+    writeU16(off + 60, newImportCounts[i]);
     // flags (u8)
     writeU8(off + 62, re.flags);
     // streamIndex (u8)
@@ -449,10 +491,6 @@ export function writeBundleFresh(
   // NUL terminate debug data if present
   if (debugDataOffset > 0) {
     outBytes[debugDataOffset + (new TextEncoder().encode(bundle.debugData as string)).length] = 0;
-  }
-  // Write import tables
-  for (const plan of importWritePlans) {
-    outBytes.set(plan.bytes, plan.offset);
   }
 
   reportProgress(progressCallback, 'write', 1.0, 'Fresh bundle write complete');

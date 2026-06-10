@@ -23,13 +23,20 @@ export const environmentTimeLineHandler: ResourceHandler<ParsedEnvironmentTimeLi
 	category: 'Graphics',
 	caps: { read: true, write: true },
 	wikiUrl: 'https://burnout.wiki/wiki/Environment_Timeline',
-	notes: 'Keyframe references live in the resource\'s inline import table. Editing times or retargeting existing entries is safe; adding/removing entries also changes the import table size, which the bundle envelope\'s import metadata does not track yet.',
+	notes: 'Keyframe references live in the resource\'s inline import table — one entry per schedule entry. Adding/removing entries resizes the table; the bundle envelope recomputes its import metadata via importTable() on export.',
 
 	parseRaw(raw, ctx) {
 		return parseEnvironmentTimeLine(raw, ctx.littleEndian);
 	},
 	writeRaw(model, ctx) {
 		return writeEnvironmentTimeLine(model, ctx.littleEndian);
+	},
+	importTable(payload, ctx) {
+		// One import per schedule entry, at the payload tail (the parser throws
+		// unless the layout — including the table position — is canonical).
+		const model = parseEnvironmentTimeLine(payload, ctx.littleEndian);
+		const count = model.locations.reduce((n, l) => n + l.keyframes.length, 0);
+		return { offset: payload.byteLength - count * 16, count };
 	},
 	describe(model) {
 		const total = model.locations.reduce((n, l) => n + l.keyframes.length, 0);
