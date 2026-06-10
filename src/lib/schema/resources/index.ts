@@ -11,6 +11,7 @@
 import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
+import { guiPopupResourceSchema } from './guiPopup';
 import { hudMessageResourceSchema } from './hudMessage';
 import { hudMessageSequenceResourceSchema } from './hudMessageSequence';
 import { hudMessageSequenceDictionaryResourceSchema } from './hudMessageSequenceDictionary';
@@ -34,6 +35,7 @@ import { zoneListResourceSchema } from './zoneList';
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
+	guiPopup: guiPopupResourceSchema,
 	hudMessage: hudMessageResourceSchema,
 	hudMessageSequence: hudMessageSequenceResourceSchema,
 	hudMessageSequenceDictionary: hudMessageSequenceDictionaryResourceSchema,

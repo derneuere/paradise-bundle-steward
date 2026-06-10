@@ -15,6 +15,7 @@
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
+import { guiPopupProfile } from './profiles/guiPopup';
 import { hudMessageProfile } from './profiles/hudMessage';
 import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
 import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
@@ -138,6 +139,11 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x2f,
 		key: 'hudMessageSequenceDictionary',
 		profiles: [hudMessageSequenceDictionaryProfile],
+	},
+	{
+		typeId: 0x1f,
+		key: 'guiPopup',
+		profiles: [guiPopupProfile],
 	},
 	{
 		typeId: 0x110,

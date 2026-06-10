@@ -38,6 +38,7 @@ import { languageHandler } from './handlers/language';
 import { hudMessageHandler } from './handlers/hudMessage';
 import { hudMessageSequenceHandler } from './handlers/hudMessageSequence';
 import { hudMessageSequenceDictionaryHandler } from './handlers/hudMessageSequenceDictionary';
+import { guiPopupHandler } from './handlers/guiPopup';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -72,6 +73,7 @@ export const registry: ResourceHandler[] = [
 	hudMessageHandler,
 	hudMessageSequenceHandler,
 	hudMessageSequenceDictionaryHandler,
+	guiPopupHandler,
 	textFileHandler,
 ];
 
