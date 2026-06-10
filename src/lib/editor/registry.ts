@@ -16,6 +16,7 @@
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
+import { languageProfile } from './profiles/language';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
 import { propInstanceDataProfile } from './profiles/propInstanceData';
@@ -114,6 +115,11 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x1000f,
 		key: 'propPhysics',
 		profiles: [propPhysicsProfile],
+	},
+	{
+		typeId: 0x27,
+		key: 'language',
+		profiles: [languageProfile],
 	},
 	{
 		typeId: 0x110,

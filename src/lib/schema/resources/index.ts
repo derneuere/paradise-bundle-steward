@@ -13,6 +13,7 @@ import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
 import { instanceListResourceSchema } from './instanceList';
+import { languageResourceSchema } from './language';
 import { playerCarColoursResourceSchema } from './playerCarColours';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
 import { propGraphicsListResourceSchema } from './propGraphicsList';
@@ -32,6 +33,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	challengeList: challengeListResourceSchema,
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,
 	instanceList: instanceListResourceSchema,
+	language: languageResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
 	polygonSoupList: polygonSoupListResourceSchema,
 	propGraphicsList: propGraphicsListResourceSchema,
