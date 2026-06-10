@@ -11,12 +11,25 @@
 import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
+import { colourCubeResourceSchema } from './colourCube';
+import { environmentDictionaryResourceSchema } from './environmentDictionary';
+import { environmentKeyframeResourceSchema } from './environmentKeyframe';
+import { environmentTimeLineResourceSchema } from './environmentTimeLine';
+import { fontResourceSchema } from './font';
+import { guiPopupResourceSchema } from './guiPopup';
+import { hudMessageResourceSchema } from './hudMessage';
+import { hudMessageSequenceResourceSchema } from './hudMessageSequence';
+import { hudMessageSequenceDictionaryResourceSchema } from './hudMessageSequenceDictionary';
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
 import { instanceListResourceSchema } from './instanceList';
+import { languageResourceSchema } from './language';
+import { massiveLookupTableResourceSchema } from './massiveLookupTable';
 import { playerCarColoursResourceSchema } from './playerCarColours';
+import { registryResourceSchema } from './registry';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
 import { propGraphicsListResourceSchema } from './propGraphicsList';
 import { propInstanceDataResourceSchema } from './propInstanceData';
+import { propPhysicsResourceSchema } from './propPhysics';
 import { renderableResourceSchema } from './renderable';
 import { staticSoundMapResourceSchema } from './staticSoundMap';
 import { streetDataResourceSchema } from './streetData';
@@ -24,17 +37,31 @@ import { textureResourceSchema } from './texture';
 import { trafficDataResourceSchema } from './trafficData';
 import { triggerDataResourceSchema } from './triggerData';
 import { vehicleListResourceSchema } from './vehicleList';
+import { worldPainter2DResourceSchema } from './worldPainter2D';
 import { zoneListResourceSchema } from './zoneList';
 
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
+	colourCube: colourCubeResourceSchema,
+	environmentDictionary: environmentDictionaryResourceSchema,
+	environmentKeyframe: environmentKeyframeResourceSchema,
+	environmentTimeLine: environmentTimeLineResourceSchema,
+	font: fontResourceSchema,
+	guiPopup: guiPopupResourceSchema,
+	hudMessage: hudMessageResourceSchema,
+	hudMessageSequence: hudMessageSequenceResourceSchema,
+	hudMessageSequenceDictionary: hudMessageSequenceDictionaryResourceSchema,
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,
 	instanceList: instanceListResourceSchema,
+	language: languageResourceSchema,
+	massiveLookupTable: massiveLookupTableResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
+	registry: registryResourceSchema,
 	polygonSoupList: polygonSoupListResourceSchema,
 	propGraphicsList: propGraphicsListResourceSchema,
 	propInstanceData: propInstanceDataResourceSchema,
+	propPhysics: propPhysicsResourceSchema,
 	renderable: renderableResourceSchema,
 	staticSoundMap: staticSoundMapResourceSchema,
 	streetData: streetDataResourceSchema,
@@ -42,6 +69,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	trafficData: trafficDataResourceSchema,
 	triggerData: triggerDataResourceSchema,
 	vehicleList: vehicleListResourceSchema,
+	worldPainter2D: worldPainter2DResourceSchema,
 	zoneList: zoneListResourceSchema,
 };
 

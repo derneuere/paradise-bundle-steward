@@ -31,8 +31,22 @@ import { materialHandler } from './handlers/material';
 import { zoneListHandler } from './handlers/zoneList';
 import { propInstanceDataHandler } from './handlers/propInstanceData';
 import { propGraphicsListHandler } from './handlers/propGraphicsList';
+import { propPhysicsHandler } from './handlers/propPhysics';
 import { instanceListHandler } from './handlers/instanceList';
 import { staticSoundMapHandler } from './handlers/staticSoundMap';
+import { languageHandler } from './handlers/language';
+import { hudMessageHandler } from './handlers/hudMessage';
+import { hudMessageSequenceHandler } from './handlers/hudMessageSequence';
+import { hudMessageSequenceDictionaryHandler } from './handlers/hudMessageSequenceDictionary';
+import { guiPopupHandler } from './handlers/guiPopup';
+import { worldPainter2DHandler } from './handlers/worldPainter2D';
+import { environmentKeyframeHandler } from './handlers/environmentKeyframe';
+import { environmentTimeLineHandler } from './handlers/environmentTimeLine';
+import { environmentDictionaryHandler } from './handlers/environmentDictionary';
+import { colourCubeHandler } from './handlers/colourCube';
+import { fontHandler } from './handlers/font';
+import { massiveLookupTableHandler } from './handlers/massiveLookupTable';
+import { registryHandler } from './handlers/registry';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -60,8 +74,22 @@ export const registry: ResourceHandler[] = [
 	zoneListHandler,
 	propInstanceDataHandler,
 	propGraphicsListHandler,
+	propPhysicsHandler,
 	instanceListHandler,
 	staticSoundMapHandler,
+	languageHandler,
+	hudMessageHandler,
+	hudMessageSequenceHandler,
+	hudMessageSequenceDictionaryHandler,
+	guiPopupHandler,
+	worldPainter2DHandler,
+	environmentKeyframeHandler,
+	environmentTimeLineHandler,
+	environmentDictionaryHandler,
+	colourCubeHandler,
+	fontHandler,
+	massiveLookupTableHandler,
+	registryHandler,
 	textFileHandler,
 ];
 

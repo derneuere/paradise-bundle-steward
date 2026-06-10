@@ -15,11 +15,24 @@
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
+import { colourCubeProfile } from './profiles/colourCube';
+import { environmentDictionaryProfile } from './profiles/environmentDictionary';
+import { environmentKeyframeProfile } from './profiles/environmentKeyframe';
+import { environmentTimeLineProfile } from './profiles/environmentTimeLine';
+import { fontProfile } from './profiles/font';
+import { guiPopupProfile } from './profiles/guiPopup';
+import { hudMessageProfile } from './profiles/hudMessage';
+import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
+import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
+import { languageProfile } from './profiles/language';
+import { massiveLookupTableProfile } from './profiles/massiveLookupTable';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
+import { registryProfile } from './profiles/registry';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
 import { propInstanceDataProfile } from './profiles/propInstanceData';
 import { propGraphicsListProfile } from './profiles/propGraphicsList';
+import { propPhysicsProfile } from './profiles/propPhysics';
 import { renderableProfile } from './profiles/renderable';
 import { staticSoundMapProfile } from './profiles/staticSoundMap';
 import { streetDataProfile } from './profiles/streetData';
@@ -31,6 +44,7 @@ import {
 } from './profiles/trafficData';
 import { triggerDataProfile } from './profiles/triggerData';
 import { vehicleListProfile } from './profiles/vehicleList';
+import { worldPainter2DProfile } from './profiles/worldPainter2D';
 import { zoneListProfile } from './profiles/zoneList';
 import type { EditorProfile } from './types';
 import {
@@ -108,6 +122,76 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x10016,
 		key: 'staticSoundMap',
 		profiles: [staticSoundMapProfile],
+	},
+	{
+		typeId: 0x1000f,
+		key: 'propPhysics',
+		profiles: [propPhysicsProfile],
+	},
+	{
+		typeId: 0x27,
+		key: 'language',
+		profiles: [languageProfile],
+	},
+	{
+		typeId: 0x2c,
+		key: 'hudMessage',
+		profiles: [hudMessageProfile],
+	},
+	{
+		typeId: 0x2e,
+		key: 'hudMessageSequence',
+		profiles: [hudMessageSequenceProfile],
+	},
+	{
+		typeId: 0x2f,
+		key: 'hudMessageSequenceDictionary',
+		profiles: [hudMessageSequenceDictionaryProfile],
+	},
+	{
+		typeId: 0x1f,
+		key: 'guiPopup',
+		profiles: [guiPopupProfile],
+	},
+	{
+		typeId: 0x30,
+		key: 'worldPainter2D',
+		profiles: [worldPainter2DProfile],
+	},
+	{
+		typeId: 0x10012,
+		key: 'environmentKeyframe',
+		profiles: [environmentKeyframeProfile],
+	},
+	{
+		typeId: 0x10013,
+		key: 'environmentTimeLine',
+		profiles: [environmentTimeLineProfile],
+	},
+	{
+		typeId: 0x10014,
+		key: 'environmentDictionary',
+		profiles: [environmentDictionaryProfile],
+	},
+	{
+		typeId: 0x2b,
+		key: 'colourCube',
+		profiles: [colourCubeProfile],
+	},
+	{
+		typeId: 0x21,
+		key: 'font',
+		profiles: [fontProfile],
+	},
+	{
+		typeId: 0x1001a,
+		key: 'massiveLookupTable',
+		profiles: [massiveLookupTableProfile],
+	},
+	{
+		typeId: 0xa000,
+		key: 'registry',
+		profiles: [registryProfile],
 	},
 	{
 		typeId: 0x110,
