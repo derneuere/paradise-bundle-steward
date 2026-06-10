@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { getResourceData, extractResourceSize, isCompressed, decompressData } from '@/lib/core/resourceManager';
+import { getResourceData, extractResourceSize, isResourceBlockCompressed, decompressData } from '@/lib/core/resourceManager';
 import { getResourceType } from '@/lib/resourceTypes';
 import { RESOURCE_TYPE_IDS } from '@/lib/core/types';
 import { ResourceInspectorView } from '@/components/hexviewer/ResourceInspectorView';
@@ -21,7 +21,7 @@ const ResourceInspectorPage = () => {
     const res = resourceIndex ? loadedBundle.resources[Number(resourceIndex)] : undefined;
     if (!res) return null;
 
-    let bytes: Uint8Array | null = null;
+    let data: Uint8Array | null = null;
     const bi = blockIndexParam != null ? Number(blockIndexParam) : undefined;
     if (typeof bi === 'number' && !Number.isNaN(bi)) {
       const base = loadedBundle.header.resourceDataOffsets[bi] >>> 0;
@@ -31,13 +31,14 @@ const ResourceInspectorPage = () => {
       const size = extractResourceSize(packed);
       if (start < originalArrayBuffer.byteLength && size > 0) {
         const max = Math.min(size, originalArrayBuffer.byteLength - start);
-        bytes = new Uint8Array(originalArrayBuffer, start, max);
+        const bytes = new Uint8Array(originalArrayBuffer, start, max);
+        data = isResourceBlockCompressed(res, bi, bytes) ? decompressData(bytes) : bytes;
       }
     }
-    if (!bytes) {
-      bytes = getResourceData({ bundle: loadedBundle, resource: res, buffer: originalArrayBuffer }).data;
+    if (!data) {
+      // getResourceData already returns decompressed bytes.
+      data = getResourceData({ bundle: loadedBundle, resource: res, buffer: originalArrayBuffer }).data;
     }
-    const data = isCompressed(bytes) ? decompressData(bytes) : bytes;
     const typeLabel = getResourceType(res.resourceTypeId).name;
     const overlays: { name: string; start: number; end: number; color: string }[] = [];
     if (res.resourceTypeId === RESOURCE_TYPE_IDS.VEHICLE_LIST) {

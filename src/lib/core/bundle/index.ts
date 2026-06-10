@@ -41,7 +41,7 @@ import { parsePlayerCarColours } from '../playerCarColors';
 import { RESOURCE_TYPES } from '../../resourceTypes';
 import { parseIceTakeDictionary } from '../iceTakeDictionary';
 import { parseTriggerData } from '../triggerData';
-import { extractResourceSize, extractAlignment, packSizeAndAlignment, isCompressed, compressData } from '../resourceManager';
+import { extractResourceSize, extractAlignment, packSizeAndAlignment, isResourceBlockCompressed, compressData } from '../resourceManager';
 import { parseChallengeList } from '../challengeList';
 import { parseStreetData } from '../streetData';
 import { registry, getHandlerByTypeId, resourceCtxFromBundle } from '../registry';
@@ -219,7 +219,7 @@ export function writeBundleFresh(
       const rel = resource.diskOffsets[bi] >>> 0;
       const start = (base + rel) >>> 0;
       const rawOriginal = new Uint8Array(originalBuffer, start, size);
-      const wasCompressed = isCompressed(rawOriginal);
+      const wasCompressed = isResourceBlockCompressed(resource, bi, rawOriginal);
       const align = extractAlignment(resource.sizeAndAlignmentOnDisk[bi]);
       const uncompAlign = extractAlignment(resource.uncompressedSizeAndAlignment[bi]);
 

@@ -176,7 +176,12 @@ export function parseImportEntries(
       continue;
     }
     let bytes = new Uint8Array(buffer, start, size);
-    if (isCompressedLocal(bytes)) bytes = decompressLocal(bytes);
+    // Equal disk/uncompressed sizes mean the block is stored raw; raw payloads
+    // can start with a valid zlib magic by coincidence (retail TRK_UNIT192's
+    // PropGraphicsList begins 0x78 0x01 — the u32 0x178), so the magic sniff
+    // alone must never trigger decompression.
+    const uncompSize = extractResourceSizeLocal(resource.uncompressedSizeAndAlignment[0]);
+    if (size !== uncompSize && isCompressedLocal(bytes)) bytes = decompressLocal(bytes);
 
     const importOff = resource.importOffset >>> 0;
     if (importOff + resource.importCount * 16 > bytes.byteLength) {

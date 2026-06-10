@@ -34,6 +34,7 @@ import {
   extractResourceSize,
   extractAlignment,
   isCompressed,
+  isResourceBlockCompressed,
   decompressData,
   compressData,
 } from '../resourceManager';
@@ -917,7 +918,7 @@ export function bnd2ToBnd1Shape(
     let resourceCompressed = false;
     if (size0 > 0 && absOff + 2 <= originalBuffer.byteLength) {
       const probe = new Uint8Array(originalBuffer, absOff, Math.min(2, size0));
-      resourceCompressed = isCompressed(probe);
+      resourceCompressed = isResourceBlockCompressed(r, 0, probe);
     }
     if (resourceCompressed) numCompressed++;
 
@@ -1189,7 +1190,7 @@ export function reencodeResourceChunksForTarget(
     const rel = r.diskOffsets[0] >>> 0;
     const absOff = (base + rel) >>> 0;
     const sourceChunk = new Uint8Array(originalBuffer, absOff, sizeOnDisk);
-    const wasCompressed = isCompressed(sourceChunk);
+    const wasCompressed = isResourceBlockCompressed(r, 0, sourceChunk);
     const decoded = wasCompressed ? decompressData(sourceChunk) : sourceChunk;
 
     let outBytes: Uint8Array;
