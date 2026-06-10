@@ -146,6 +146,44 @@ describe('staticSoundMap path resolution', () => {
 	});
 });
 
+describe('editability metadata (rebucketing lifted the old restrictions)', () => {
+	function listFieldAt(pathSegs: (string | number)[]) {
+		const loc = resolveSchemaAtPath(staticSoundMapResourceSchema, pathSegs);
+		expect(loc).not.toBeNull();
+		const field = loc!.field;
+		expect(field?.kind).toBe('list');
+		return field as Extract<FieldSchema, { kind: 'list' }>;
+	}
+
+	it('entities are addable and removable with a makeEmpty factory', () => {
+		const field = listFieldAt(['entities']);
+		expect(field.addable).toBe(true);
+		expect(field.removable).toBe(true);
+		expect(field.makeEmpty).toBeTypeOf('function');
+	});
+
+	it('makeEmpty produces a record covering every StaticSoundEntity field', () => {
+		const field = listFieldAt(['entities']);
+		const fresh = field.makeEmpty!({} as never) as Record<string, unknown>;
+		const declared = Object.keys(staticSoundMapResourceSchema.registry.StaticSoundEntity.fields);
+		expect(Object.keys(fresh).sort()).toEqual(declared.slice().sort());
+		expect(fresh.mPosition).toEqual({ x: 0, y: 0, z: 0 });
+	});
+
+	it('the derived subRegions grid stays fixed (recomputed on save, not hand-edited)', () => {
+		const field = listFieldAt(['subRegions']);
+		expect(field.addable).toBe(false);
+		expect(field.removable).toBe(false);
+	});
+
+	it('entity positions carry no stale-subregion warning anymore', () => {
+		const meta = staticSoundMapResourceSchema.registry.StaticSoundEntity.fieldMetadata?.mPosition;
+		expect(meta?.description).toMatch(/rebucket/i);
+		expect(meta?.description).not.toMatch(/stale/i);
+		expect(meta?.readOnly).toBeFalsy();
+	});
+});
+
 describe('typeOrDistanceLabel (dual-semantics u16)', () => {
 	it('labels values inside the passby enum with both readings', () => {
 		// 12 is Collision in a passby map but could be a 12 m radius in an
