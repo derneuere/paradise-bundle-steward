@@ -21,6 +21,7 @@ import { polygonSoupListProfile } from './profiles/polygonSoupList';
 import { propInstanceDataProfile } from './profiles/propInstanceData';
 import { propGraphicsListProfile } from './profiles/propGraphicsList';
 import { renderableProfile } from './profiles/renderable';
+import { staticSoundMapProfile } from './profiles/staticSoundMap';
 import { streetDataProfile } from './profiles/streetData';
 import { textureProfile } from './profiles/texture';
 import {
@@ -102,6 +103,11 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x10010,
 		key: 'propGraphicsList',
 		profiles: [propGraphicsListProfile],
+	},
+	{
+		typeId: 0x10016,
+		key: 'staticSoundMap',
+		profiles: [staticSoundMapProfile],
 	},
 	{
 		typeId: 0x110,

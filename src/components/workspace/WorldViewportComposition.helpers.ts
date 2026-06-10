@@ -48,6 +48,10 @@ export const WORLD_VIEWPORT_FAMILY_KEYS = [
 	// SELECTING it routes through the shared world scene (the track + props stay
 	// visible) instead of the single-overlay ViewportPane dead-end.
 	'propGraphicsList',
+	// Ambient-sound markers (two maps per track unit: emitter + passby). Last so
+	// the spheres draw on top of the track surface and prop meshes they annotate —
+	// placing audio relative to track sections is the whole editing use-case.
+	'staticSoundMap',
 ] as const;
 
 export type WorldViewportFamilyKey = typeof WORLD_VIEWPORT_FAMILY_KEYS[number];

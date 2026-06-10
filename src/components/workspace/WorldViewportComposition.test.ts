@@ -79,6 +79,9 @@ describe('WORLD_VIEWPORT_FAMILY_KEYS', () => {
 			// it keeps the shared world scene mounted.
 			'propGraphicsList',
 			'propInstanceData',
+			// Ambient-sound markers (emitter + passby per track unit) — placing
+			// audio relative to track sections needs the shared scene.
+			'staticSoundMap',
 			'streetData',
 			'trafficData',
 			'triggerData',
