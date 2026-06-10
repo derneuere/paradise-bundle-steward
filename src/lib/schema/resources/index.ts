@@ -25,6 +25,7 @@ import { instanceListResourceSchema } from './instanceList';
 import { languageResourceSchema } from './language';
 import { massiveLookupTableResourceSchema } from './massiveLookupTable';
 import { particleDescriptionResourceSchema } from './particleDescription';
+import { particleDescriptionCollectionResourceSchema } from './particleDescriptionCollection';
 import { playerCarColoursResourceSchema } from './playerCarColours';
 import { registryResourceSchema } from './registry';
 import { polygonSoupListResourceSchema } from './polygonSoupList';
@@ -35,9 +36,12 @@ import { renderableResourceSchema } from './renderable';
 import { staticSoundMapResourceSchema } from './staticSoundMap';
 import { streetDataResourceSchema } from './streetData';
 import { textureResourceSchema } from './texture';
+import { textureNameMapResourceSchema } from './textureNameMap';
 import { trafficDataResourceSchema } from './trafficData';
 import { triggerDataResourceSchema } from './triggerData';
 import { vehicleListResourceSchema } from './vehicleList';
+import { vfxMeshCollectionResourceSchema } from './vfxMeshCollection';
+import { vfxPropCollectionResourceSchema } from './vfxPropCollection';
 import { worldPainter2DResourceSchema } from './worldPainter2D';
 import { zoneListResourceSchema } from './zoneList';
 
@@ -58,6 +62,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	language: languageResourceSchema,
 	massiveLookupTable: massiveLookupTableResourceSchema,
 	particleDescription: particleDescriptionResourceSchema,
+	particleDescriptionCollection: particleDescriptionCollectionResourceSchema,
 	playerCarColours: playerCarColoursResourceSchema,
 	registry: registryResourceSchema,
 	polygonSoupList: polygonSoupListResourceSchema,
@@ -68,9 +73,12 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	staticSoundMap: staticSoundMapResourceSchema,
 	streetData: streetDataResourceSchema,
 	texture: textureResourceSchema,
+	textureNameMap: textureNameMapResourceSchema,
 	trafficData: trafficDataResourceSchema,
 	triggerData: triggerDataResourceSchema,
 	vehicleList: vehicleListResourceSchema,
+	vfxMeshCollection: vfxMeshCollectionResourceSchema,
+	vfxPropCollection: vfxPropCollectionResourceSchema,
 	worldPainter2D: worldPainter2DResourceSchema,
 	zoneList: zoneListResourceSchema,
 };

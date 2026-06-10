@@ -28,6 +28,7 @@ import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
 import { languageProfile } from './profiles/language';
 import { massiveLookupTableProfile } from './profiles/massiveLookupTable';
 import { particleDescriptionProfile } from './profiles/particleDescription';
+import { particleDescriptionCollectionProfile } from './profiles/particleDescriptionCollection';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
 import { registryProfile } from './profiles/registry';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
@@ -38,6 +39,9 @@ import { renderableProfile } from './profiles/renderable';
 import { staticSoundMapProfile } from './profiles/staticSoundMap';
 import { streetDataProfile } from './profiles/streetData';
 import { textureProfile } from './profiles/texture';
+import { textureNameMapProfile } from './profiles/textureNameMap';
+import { vfxMeshCollectionProfile } from './profiles/vfxMeshCollection';
+import { vfxPropCollectionProfile } from './profiles/vfxPropCollection';
 import {
 	trafficDataV22Profile,
 	trafficDataV44Profile,
@@ -204,6 +208,26 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x1001d,
 		key: 'particleDescription',
 		profiles: [particleDescriptionProfile],
+	},
+	{
+		typeId: 0x10008,
+		key: 'particleDescriptionCollection',
+		profiles: [particleDescriptionCollectionProfile],
+	},
+	{
+		typeId: 0x1000b,
+		key: 'textureNameMap',
+		profiles: [textureNameMapProfile],
+	},
+	{
+		typeId: 0x10019,
+		key: 'vfxMeshCollection',
+		profiles: [vfxMeshCollectionProfile],
+	},
+	{
+		typeId: 0x1001b,
+		key: 'vfxPropCollection',
+		profiles: [vfxPropCollectionProfile],
 	},
 	{
 		typeId: 0x1001f,
