@@ -11,6 +11,7 @@
 import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
+import { hudMessageResourceSchema } from './hudMessage';
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
 import { instanceListResourceSchema } from './instanceList';
 import { languageResourceSchema } from './language';
@@ -31,6 +32,7 @@ import { zoneListResourceSchema } from './zoneList';
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
+	hudMessage: hudMessageResourceSchema,
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,
 	instanceList: instanceListResourceSchema,
 	language: languageResourceSchema,

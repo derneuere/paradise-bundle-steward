@@ -35,6 +35,7 @@ import { propPhysicsHandler } from './handlers/propPhysics';
 import { instanceListHandler } from './handlers/instanceList';
 import { staticSoundMapHandler } from './handlers/staticSoundMap';
 import { languageHandler } from './handlers/language';
+import { hudMessageHandler } from './handlers/hudMessage';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -66,6 +67,7 @@ export const registry: ResourceHandler[] = [
 	instanceListHandler,
 	staticSoundMapHandler,
 	languageHandler,
+	hudMessageHandler,
 	textFileHandler,
 ];
 
