@@ -39,6 +39,7 @@ import { hudMessageHandler } from './handlers/hudMessage';
 import { hudMessageSequenceHandler } from './handlers/hudMessageSequence';
 import { hudMessageSequenceDictionaryHandler } from './handlers/hudMessageSequenceDictionary';
 import { guiPopupHandler } from './handlers/guiPopup';
+import { worldPainter2DHandler } from './handlers/worldPainter2D';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -74,6 +75,7 @@ export const registry: ResourceHandler[] = [
 	hudMessageSequenceHandler,
 	hudMessageSequenceDictionaryHandler,
 	guiPopupHandler,
+	worldPainter2DHandler,
 	textFileHandler,
 ];
 

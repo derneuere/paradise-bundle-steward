@@ -37,6 +37,7 @@ import {
 } from './profiles/trafficData';
 import { triggerDataProfile } from './profiles/triggerData';
 import { vehicleListProfile } from './profiles/vehicleList';
+import { worldPainter2DProfile } from './profiles/worldPainter2D';
 import { zoneListProfile } from './profiles/zoneList';
 import type { EditorProfile } from './types';
 import {
@@ -144,6 +145,11 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x1f,
 		key: 'guiPopup',
 		profiles: [guiPopupProfile],
+	},
+	{
+		typeId: 0x30,
+		key: 'worldPainter2D',
+		profiles: [worldPainter2DProfile],
 	},
 	{
 		typeId: 0x110,

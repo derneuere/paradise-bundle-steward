@@ -30,6 +30,7 @@ import { textureResourceSchema } from './texture';
 import { trafficDataResourceSchema } from './trafficData';
 import { triggerDataResourceSchema } from './triggerData';
 import { vehicleListResourceSchema } from './vehicleList';
+import { worldPainter2DResourceSchema } from './worldPainter2D';
 import { zoneListResourceSchema } from './zoneList';
 
 const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
@@ -54,6 +55,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	trafficData: trafficDataResourceSchema,
 	triggerData: triggerDataResourceSchema,
 	vehicleList: vehicleListResourceSchema,
+	worldPainter2D: worldPainter2DResourceSchema,
 	zoneList: zoneListResourceSchema,
 };
 
