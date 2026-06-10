@@ -44,6 +44,9 @@ import { environmentKeyframeHandler } from './handlers/environmentKeyframe';
 import { environmentTimeLineHandler } from './handlers/environmentTimeLine';
 import { environmentDictionaryHandler } from './handlers/environmentDictionary';
 import { colourCubeHandler } from './handlers/colourCube';
+import { fontHandler } from './handlers/font';
+import { massiveLookupTableHandler } from './handlers/massiveLookupTable';
+import { registryHandler } from './handlers/registry';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -84,6 +87,9 @@ export const registry: ResourceHandler[] = [
 	environmentTimeLineHandler,
 	environmentDictionaryHandler,
 	colourCubeHandler,
+	fontHandler,
+	massiveLookupTableHandler,
+	registryHandler,
 	textFileHandler,
 ];
 

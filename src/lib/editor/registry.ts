@@ -19,13 +19,16 @@ import { colourCubeProfile } from './profiles/colourCube';
 import { environmentDictionaryProfile } from './profiles/environmentDictionary';
 import { environmentKeyframeProfile } from './profiles/environmentKeyframe';
 import { environmentTimeLineProfile } from './profiles/environmentTimeLine';
+import { fontProfile } from './profiles/font';
 import { guiPopupProfile } from './profiles/guiPopup';
 import { hudMessageProfile } from './profiles/hudMessage';
 import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
 import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
 import { languageProfile } from './profiles/language';
+import { massiveLookupTableProfile } from './profiles/massiveLookupTable';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
+import { registryProfile } from './profiles/registry';
 import { polygonSoupListProfile } from './profiles/polygonSoupList';
 import { propInstanceDataProfile } from './profiles/propInstanceData';
 import { propGraphicsListProfile } from './profiles/propGraphicsList';
@@ -174,6 +177,21 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x2b,
 		key: 'colourCube',
 		profiles: [colourCubeProfile],
+	},
+	{
+		typeId: 0x21,
+		key: 'font',
+		profiles: [fontProfile],
+	},
+	{
+		typeId: 0x1001a,
+		key: 'massiveLookupTable',
+		profiles: [massiveLookupTableProfile],
+	},
+	{
+		typeId: 0xa000,
+		key: 'registry',
+		profiles: [registryProfile],
 	},
 	{
 		typeId: 0x110,
