@@ -40,6 +40,8 @@ import { hudMessageSequenceHandler } from './handlers/hudMessageSequence';
 import { hudMessageSequenceDictionaryHandler } from './handlers/hudMessageSequenceDictionary';
 import { guiPopupHandler } from './handlers/guiPopup';
 import { worldPainter2DHandler } from './handlers/worldPainter2D';
+import { environmentKeyframeHandler } from './handlers/environmentKeyframe';
+import { environmentTimeLineHandler } from './handlers/environmentTimeLine';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -76,6 +78,8 @@ export const registry: ResourceHandler[] = [
 	hudMessageSequenceDictionaryHandler,
 	guiPopupHandler,
 	worldPainter2DHandler,
+	environmentKeyframeHandler,
+	environmentTimeLineHandler,
 	textFileHandler,
 ];
 

@@ -15,6 +15,8 @@
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
+import { environmentKeyframeProfile } from './profiles/environmentKeyframe';
+import { environmentTimeLineProfile } from './profiles/environmentTimeLine';
 import { guiPopupProfile } from './profiles/guiPopup';
 import { hudMessageProfile } from './profiles/hudMessage';
 import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
@@ -150,6 +152,16 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x30,
 		key: 'worldPainter2D',
 		profiles: [worldPainter2DProfile],
+	},
+	{
+		typeId: 0x10012,
+		key: 'environmentKeyframe',
+		profiles: [environmentKeyframeProfile],
+	},
+	{
+		typeId: 0x10013,
+		key: 'environmentTimeLine',
+		profiles: [environmentTimeLineProfile],
 	},
 	{
 		typeId: 0x110,
