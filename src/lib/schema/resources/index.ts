@@ -12,6 +12,8 @@ import type { ResourceSchema } from '../types';
 import { aiSectionsResourceSchema } from './aiSections';
 import { challengeListResourceSchema } from './challengeList';
 import { hudMessageResourceSchema } from './hudMessage';
+import { hudMessageSequenceResourceSchema } from './hudMessageSequence';
+import { hudMessageSequenceDictionaryResourceSchema } from './hudMessageSequenceDictionary';
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
 import { instanceListResourceSchema } from './instanceList';
 import { languageResourceSchema } from './language';
@@ -33,6 +35,8 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	challengeList: challengeListResourceSchema,
 	hudMessage: hudMessageResourceSchema,
+	hudMessageSequence: hudMessageSequenceResourceSchema,
+	hudMessageSequenceDictionary: hudMessageSequenceDictionaryResourceSchema,
 	iceTakeDictionary: iceTakeDictionaryResourceSchema,
 	instanceList: instanceListResourceSchema,
 	language: languageResourceSchema,

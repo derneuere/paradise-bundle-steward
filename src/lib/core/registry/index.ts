@@ -36,6 +36,8 @@ import { instanceListHandler } from './handlers/instanceList';
 import { staticSoundMapHandler } from './handlers/staticSoundMap';
 import { languageHandler } from './handlers/language';
 import { hudMessageHandler } from './handlers/hudMessage';
+import { hudMessageSequenceHandler } from './handlers/hudMessageSequence';
+import { hudMessageSequenceDictionaryHandler } from './handlers/hudMessageSequenceDictionary';
 import { textFileHandler } from './handlers/textFile';
 
 export const registry: ResourceHandler[] = [
@@ -68,6 +70,8 @@ export const registry: ResourceHandler[] = [
 	staticSoundMapHandler,
 	languageHandler,
 	hudMessageHandler,
+	hudMessageSequenceHandler,
+	hudMessageSequenceDictionaryHandler,
 	textFileHandler,
 ];
 

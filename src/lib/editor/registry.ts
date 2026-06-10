@@ -16,6 +16,8 @@
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { challengeListProfile } from './profiles/challengeList';
 import { hudMessageProfile } from './profiles/hudMessage';
+import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
+import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
 import { languageProfile } from './profiles/language';
 import { playerCarColoursProfile } from './profiles/playerCarColours';
@@ -126,6 +128,16 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x2c,
 		key: 'hudMessage',
 		profiles: [hudMessageProfile],
+	},
+	{
+		typeId: 0x2e,
+		key: 'hudMessageSequence',
+		profiles: [hudMessageSequenceProfile],
+	},
+	{
+		typeId: 0x2f,
+		key: 'hudMessageSequenceDictionary',
+		profiles: [hudMessageSequenceDictionaryProfile],
 	},
 	{
 		typeId: 0x110,
