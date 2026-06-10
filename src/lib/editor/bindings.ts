@@ -25,6 +25,7 @@ import { AISectionsLegacyOverlay } from '@/components/aisections/AISectionsLegac
 import { AISectionsOverlay } from '@/components/aisections/AISectionsOverlay';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
 import { PropInstanceDataOverlay } from '@/components/schema-editor/viewports/PropInstanceDataOverlay';
+import { StaticSoundMapOverlay } from '@/components/schema-editor/viewports/StaticSoundMapOverlay';
 import { StreetDataOverlay } from '@/components/schema-editor/viewports/StreetDataOverlay';
 import { TrafficDataOverlay } from '@/components/schema-editor/viewports/TrafficDataOverlay';
 import { TriggerDataOverlay } from '@/components/schema-editor/viewports/TriggerDataOverlay';
@@ -97,6 +98,11 @@ const BINDINGS: Record<string, Record<string, ProfileRenderBinding<unknown>>> = 
 	propInstanceData: {
 		default: {
 			overlay: PropInstanceDataOverlay as ProfileRenderBinding['overlay'],
+		},
+	},
+	staticSoundMap: {
+		default: {
+			overlay: StaticSoundMapOverlay as ProfileRenderBinding['overlay'],
 		},
 	},
 	challengeList: { default: { extensions: challengeListExtensions } },

@@ -18,6 +18,7 @@ import { polygonSoupListResourceSchema } from './polygonSoupList';
 import { propGraphicsListResourceSchema } from './propGraphicsList';
 import { propInstanceDataResourceSchema } from './propInstanceData';
 import { renderableResourceSchema } from './renderable';
+import { staticSoundMapResourceSchema } from './staticSoundMap';
 import { streetDataResourceSchema } from './streetData';
 import { textureResourceSchema } from './texture';
 import { trafficDataResourceSchema } from './trafficData';
@@ -35,6 +36,7 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	propGraphicsList: propGraphicsListResourceSchema,
 	propInstanceData: propInstanceDataResourceSchema,
 	renderable: renderableResourceSchema,
+	staticSoundMap: staticSoundMapResourceSchema,
 	streetData: streetDataResourceSchema,
 	texture: textureResourceSchema,
 	trafficData: trafficDataResourceSchema,
