@@ -1,11 +1,14 @@
 // Schema coverage tests for registryResourceSchema.
 //
-// Coverage fixtures: BOTH retail registries, because they exercise disjoint
-// payload shapes — PLAYBACKREGISTRY carries five entity kinds (ContentClass /
-// ContentType / SlotSchema / ParameterSchema / FeatureSchema), while
-// RWACFEATUREREGISTRY is all GenericRwacFeatureImplementation. Entities are
-// heterogeneous: payload record fields are null on the kinds that don't use
-// them, which the walker must tolerate.
+// Coverage fixtures: all four retail registry bundles, because they exercise
+// disjoint payload shapes — PLAYBACKREGISTRY carries five entity kinds
+// (ContentClass / ContentType / SlotSchema / ParameterSchema /
+// FeatureSchema), RWACFEATUREREGISTRY is all
+// GenericRwacFeatureImplementation, SOUNDENTITY adds ContentSpec /
+// VoiceSchema / VoiceSpec, and CSIS adds AemsVoiceCsisClass (covered via the
+// first of its 30 registries that contains one). Entities are heterogeneous:
+// payload record fields are null on the kinds that don't use them, which the
+// walker must tolerate.
 //
 // Mirrors staticSoundMap.test.ts: parse each model and walk it against the
 // schema asserting record references resolve, walkResource visits cleanly,
@@ -27,21 +30,30 @@ import type { FieldSchema } from '../types';
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const REGISTRY_TYPE_ID = 0xa000;
 
-function loadModel(bundleFile: string): ParsedRegistry {
+function loadModels(bundleFile: string): ParsedRegistry[] {
 	const fileBytes = fs.readFileSync(path.resolve(REPO_ROOT, bundleFile));
 	const buffer = new Uint8Array(fileBytes.byteLength);
 	buffer.set(fileBytes);
 	const bundle = parseBundle(buffer.buffer, { strict: false });
 	const ctx = resourceCtxFromBundle(bundle);
-	const resource = bundle.resources.find((r) => r.resourceTypeId === REGISTRY_TYPE_ID)!;
-	return parseRegistry(extractResourceRaw(buffer.buffer, bundle, resource), ctx.littleEndian);
+	return bundle.resources
+		.filter((r) => r.resourceTypeId === REGISTRY_TYPE_ID)
+		.map((r) => parseRegistry(extractResourceRaw(buffer.buffer, bundle, r), ctx.littleEndian));
 }
 
-for (const [label, bundleFile] of [
-	['playback registry (five entity kinds)', 'example/PLAYBACKREGISTRY.BUNDLE'],
-	['rwac feature registry (one entity kind)', 'example/RWACFEATUREREGISTRY.BUNDLE'],
+function loadModel(bundleFile: string): ParsedRegistry {
+	return loadModels(bundleFile)[0];
+}
+
+const csisAemsModel = loadModels('example/SOUND/AEMS/CSIS.BUNDLE')
+	.find((m) => m.entities.some((e) => e.aemsVoiceCsis != null))!;
+
+for (const [label, model] of [
+	['playback registry (five entity kinds)', loadModel('example/PLAYBACKREGISTRY.BUNDLE')],
+	['rwac feature registry (one entity kind)', loadModel('example/RWACFEATUREREGISTRY.BUNDLE')],
+	['sound entity registry (ContentSpec / VoiceSchema / VoiceSpec)', loadModel('example/SOUND/SOUNDENTITY.BUNDLE')],
+	['csis registry (AemsVoiceCsisClass)', csisAemsModel],
 ] as const) {
-	const model = loadModel(bundleFile);
 
 	describe(`registryResourceSchema coverage — ${label}`, () => {
 		it('fixture parses with non-trivial content', () => {
@@ -150,6 +162,52 @@ describe('registry path resolution', () => {
 		const loc = resolveSchemaAtPath(registryResourceSchema, ['strings', 0]);
 		expect(loc).not.toBeNull();
 		expect(loc!.field?.kind).toBe('string');
+	});
+
+	it('resolves entities[0].contentSpec.mu8LoadMethod as an enum and .path as a string', () => {
+		expect(resolveSchemaAtPath(registryResourceSchema, ['entities', 0, 'contentSpec', 'mu8LoadMethod'])!.field?.kind).toBe('enum');
+		expect(resolveSchemaAtPath(registryResourceSchema, ['entities', 0, 'contentSpec', 'path'])!.field?.kind).toBe('string');
+	});
+
+	it('resolves entities[0].voiceSchema.featureSchemaHashes[0] and voiceSpec.sendHashes[0] as u32', () => {
+		expect(resolveSchemaAtPath(registryResourceSchema, ['entities', 0, 'voiceSchema', 'featureSchemaHashes', 0])!.field?.kind).toBe('u32');
+		expect(resolveSchemaAtPath(registryResourceSchema, ['entities', 0, 'voiceSpec', 'sendHashes', 0])!.field?.kind).toBe('u32');
+	});
+
+	it('resolves entities[0].voiceSpec.mu8VoiceType as an enum', () => {
+		expect(resolveSchemaAtPath(registryResourceSchema, ['entities', 0, 'voiceSpec', 'mu8VoiceType'])!.field?.kind).toBe('enum');
+	});
+
+	it('resolves entities[0].aemsVoiceCsis.label as a string', () => {
+		expect(resolveSchemaAtPath(registryResourceSchema, ['entities', 0, 'aemsVoiceCsis', 'label'])!.field?.kind).toBe('string');
+	});
+});
+
+describe('RegistryEntity derive hook (AEMS label → name hash)', () => {
+	const RegistryEntity = registryResourceSchema.registry.RegistryEntity;
+	const aemsEntity = csisAemsModel.entities.find((e) => e.aemsVoiceCsis != null)!;
+
+	it('re-derives mName as soundHash("AEMS_" + label) when the label changes', () => {
+		const next = {
+			...aemsEntity,
+			aemsVoiceCsis: { ...aemsEntity.aemsVoiceCsis!, label: 'StewardClass' },
+		};
+		const patch = RegistryEntity.derive!(aemsEntity as never, next as never);
+		expect(patch).toEqual({ mName: soundHash('AEMS_StewardClass') });
+	});
+
+	it('returns no patch when the label is unchanged or the entity is not an AEMS class', () => {
+		expect(RegistryEntity.derive!(aemsEntity as never, aemsEntity as never)).toEqual({});
+		const plain = loadModel('example/PLAYBACKREGISTRY.BUNDLE').entities[0];
+		const renamed = { ...plain, mName: 123 };
+		expect(RegistryEntity.derive!(plain as never, renamed as never)).toEqual({});
+	});
+
+	it('matches the retail naming rule for every fixture instance', () => {
+		for (const e of csisAemsModel.entities) {
+			if (e.aemsVoiceCsis == null) continue;
+			expect(e.mName).toBe(soundHash('AEMS_' + e.aemsVoiceCsis.label));
+		}
 	});
 });
 
