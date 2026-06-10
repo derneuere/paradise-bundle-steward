@@ -33,8 +33,9 @@
 //   then     zero pad to 16-byte alignment.
 //
 // Every entity starts with (mName u32, mTypeName u32) sound hashes; mTypeName
-// selects the payload shape. Decoded payloads (validated against both retail
-// fixtures):
+// selects the payload shape. Decoded payloads (validated against the four
+// retail fixtures — PLAYBACKREGISTRY, RWACFEATUREREGISTRY, SOUNDENTITY, and
+// the 30 registries inside SOUND/AEMS/CSIS.BUNDLE):
 //   ~ContentClass~      1F4F9B6F  no payload
 //   ~ContentType~       9E25A791  u32 ContentClass name hash
 //   ~SlotSchema~        EB396D83  u32 ContentClass name hash
@@ -49,23 +50,57 @@
 //       name hash, u16 block index, u16 param index within block }, slotCount
 //       × { u32 slot name hash, u32 slot class hash, u16 index, u16
 //       uninitialised pad (0xCDCD) }.
-// Any other type (~ContentSpec~, ~VoiceSchema~, ~VoiceSpec~ are known to
-// exist in other retail registries but not in these fixtures) is preserved as
-// a verbatim payload blob so unknown registries still round-trip byte-exact.
+//   ~ContentSpec~       511A448B  see soundRegistryEntities.ts
+//   ~VoiceSchema~       C7382281  see soundRegistryEntities.ts
+//   ~VoiceSpec~         3597AD9B  see soundRegistryEntities.ts
+//   ~AemsVoiceCsisClass~ 12B39DC5 (absent from the wiki) — see
+//                                 soundRegistryEntities.ts
+// Any other type is preserved as a verbatim payload blob so unknown
+// registries still round-trip byte-exact.
 //
 // Wiki divergences found against real bytes (burnout.wiki/wiki/Registry):
-//  - ~ContentType~ / ~ContentClass~ type hashes and the entire
-//    GenericRwacFeatureImplementation entity type are undocumented.
+//  - ~ContentType~ / ~ContentClass~ type hashes and the
+//    GenericRwacFeatureImplementation and AemsVoiceCsisClass entity types are
+//    undocumented.
 //  - The wiki's "ContentClass possible class values" hashes are actually the
 //    NAMES of ContentType entities: 84D7FBE7 = ~SplicerContent::
 //    SK_CONTENT_TYPE~, 7CCDA2E7 = ~GenericRwacWaveContent::
-//    SK_WAVE_DATA_CONTENT_TYPE~.
+//    SK_WAVE_DATA_CONTENT_TYPE~. (The wiki calls 84D7FBE7 "AemsVoiceCsisClass"
+//    — that string is really an entity TYPE with its own hash, 12B39DC5.)
 //  - The hash-table slot function and probe order are undocumented ("randomly
 //    placed").
 //  - The wiki's VoiceSchema offsets (0x8/0x10/0x11/0x12 for four u32s) are
-//    self-overlapping and cannot be the real layout.
+//    self-overlapping and wrong — the real layout is four u32 counts followed
+//    by featureSchemaCount name hashes (see soundRegistryEntities.ts).
+//  - String-carrying payloads (ContentSpec, AemsVoiceCsisClass) are padded to
+//    4-byte alignment with 0xCD fill; the wiki doesn't mention alignment.
 
 import { BinReader, BinWriter } from './binTools';
+import {
+	parseContentSpec,
+	parseVoiceSchema,
+	parseVoiceSpec,
+	parseAemsVoiceCsis,
+	writeContentSpec,
+	writeVoiceSchema,
+	writeVoiceSpec,
+	writeAemsVoiceCsis,
+	contentSpecPayloadSize,
+	voiceSchemaPayloadSize,
+	voiceSpecPayloadSize,
+	aemsVoiceCsisPayloadSize,
+	type RegistryContentSpec,
+	type RegistryVoiceSchema,
+	type RegistryVoiceSpec,
+	type RegistryAemsVoiceCsis,
+} from './soundRegistryEntities';
+
+export type {
+	RegistryContentSpec,
+	RegistryVoiceSchema,
+	RegistryVoiceSpec,
+	RegistryAemsVoiceCsis,
+} from './soundRegistryEntities';
 
 // =============================================================================
 // Sound hash
@@ -100,11 +135,10 @@ export const REGISTRY_TYPE_HASHES = {
 	PARAMETER_SCHEMA: 0x8d2c6829, // soundHash('~ParameterSchema~')
 	FEATURE_SCHEMA: 0xcb8b64c5, // soundHash('~FeatureSchema~')
 	RWAC_FEATURE: 0xb8083a05, // soundHash('~GenericRwacFeatureImplementation~')
-	// Known from the wiki / string tables but not present in our fixtures —
-	// parsed as verbatim payload blobs:
 	CONTENT_SPEC: 0x511a448b, // soundHash('~ContentSpec~')
 	VOICE_SCHEMA: 0xc7382281, // soundHash('~VoiceSchema~')
 	VOICE_SPEC: 0x3597ad9b, // soundHash('~VoiceSpec~')
+	AEMS_VOICE_CSIS: 0x12b39dc5, // soundHash('~AemsVoiceCsisClass~')
 } as const;
 
 export const REGISTRY_TYPE_LABELS: Record<number, string> = {
@@ -117,6 +151,7 @@ export const REGISTRY_TYPE_LABELS: Record<number, string> = {
 	[REGISTRY_TYPE_HASHES.CONTENT_SPEC]: 'ContentSpec',
 	[REGISTRY_TYPE_HASHES.VOICE_SCHEMA]: 'VoiceSchema',
 	[REGISTRY_TYPE_HASHES.VOICE_SPEC]: 'VoiceSpec',
+	[REGISTRY_TYPE_HASHES.AEMS_VOICE_CSIS]: 'AemsVoiceCsisClass',
 };
 
 export const PARAMETER_DIRECTIONS = [
@@ -179,7 +214,7 @@ export type RegistryRwacFeature = {
 };
 
 // Exactly one payload field is non-null, selected by mTypeName — except
-// ContentClass entities (no payload), where all five are null. ContentType
+// ContentClass entities (no payload), where all are null. ContentType
 // and SlotSchema share mpContentClass.
 export type RegistryEntity = {
 	/** Sound hash of the entity name (plain text usually in `strings`). */
@@ -191,6 +226,10 @@ export type RegistryEntity = {
 	parameterSchema: RegistryParameterSchema | null;
 	featureSchema: RegistryFeatureSchema | null;
 	rwacFeature: RegistryRwacFeature | null;
+	contentSpec: RegistryContentSpec | null;
+	voiceSchema: RegistryVoiceSchema | null;
+	voiceSpec: RegistryVoiceSpec | null;
+	aemsVoiceCsis: RegistryAemsVoiceCsis | null;
 	/** Verbatim payload for type names this parser doesn't decode. */
 	_unknownPayload: Uint8Array | null;
 };
@@ -221,6 +260,10 @@ export function makeEmptyRegistryEntity(): RegistryEntity {
 		parameterSchema: null,
 		featureSchema: null,
 		rwacFeature: null,
+		contentSpec: null,
+		voiceSchema: null,
+		voiceSpec: null,
+		aemsVoiceCsis: null,
 		_unknownPayload: null,
 	};
 }
@@ -235,6 +278,10 @@ function entityPayloadSize(e: RegistryEntity): number {
 		const f = e.rwacFeature;
 		return 16 + f.blocks.length * 12 + f.params.length * 8 + f.slots.length * 12;
 	}
+	if (e.contentSpec != null) return contentSpecPayloadSize(e.contentSpec);
+	if (e.voiceSchema != null) return voiceSchemaPayloadSize(e.voiceSchema);
+	if (e.voiceSpec != null) return voiceSpecPayloadSize(e.voiceSpec);
+	if (e.aemsVoiceCsis != null) return aemsVoiceCsisPayloadSize(e.aemsVoiceCsis);
 	if (e._unknownPayload != null) return e._unknownPayload.byteLength;
 	return 0;
 }
@@ -402,6 +449,18 @@ function parseEntity(r: BinReader, bytes: Uint8Array, start: number, end: number
 			entity.rwacFeature = { _uninit08, blocks, params, slots };
 			break;
 		}
+		case REGISTRY_TYPE_HASHES.CONTENT_SPEC:
+			entity.contentSpec = parseContentSpec(r, bytes, end, `entity 0x${mName.toString(16)}`);
+			break;
+		case REGISTRY_TYPE_HASHES.VOICE_SCHEMA:
+			entity.voiceSchema = parseVoiceSchema(r, avail, `entity 0x${mName.toString(16)}`);
+			break;
+		case REGISTRY_TYPE_HASHES.VOICE_SPEC:
+			entity.voiceSpec = parseVoiceSpec(r, avail, `entity 0x${mName.toString(16)}`);
+			break;
+		case REGISTRY_TYPE_HASHES.AEMS_VOICE_CSIS:
+			entity.aemsVoiceCsis = parseAemsVoiceCsis(r, bytes, end, `entity 0x${mName.toString(16)}`);
+			break;
 		default:
 			entity._unknownPayload = bytes.slice(start + 8, end);
 			break;
@@ -557,6 +616,14 @@ function writeEntity(w: BinWriter, e: RegistryEntity) {
 			w.writeU16(s.mu16Index);
 			w.writeU16(s._pad0A);
 		}
+	} else if (e.contentSpec != null) {
+		writeContentSpec(w, e.contentSpec);
+	} else if (e.voiceSchema != null) {
+		writeVoiceSchema(w, e.voiceSchema);
+	} else if (e.voiceSpec != null) {
+		writeVoiceSpec(w, e.voiceSpec);
+	} else if (e.aemsVoiceCsis != null) {
+		writeAemsVoiceCsis(w, e.aemsVoiceCsis);
 	} else if (e._unknownPayload != null) {
 		w.writeBytes(e._unknownPayload);
 	}

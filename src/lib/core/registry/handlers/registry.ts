@@ -3,11 +3,14 @@
 // name registry.ts because `src/lib/core/registry` is this folder; the
 // handler key stays 'registry', matching the wiki type name.)
 //
-// Our fixtures carry one Registry each, but retail bundles can carry many
-// (SOUND/AEMS/CSIS.BUNDLE packs nine: *CsisEntityReg / *CsisVoiceReg /
-// *CsisFactoryReg per surface type), so a picker config is included.
+// Retail bundles can carry many registries — SOUND/AEMS/CSIS.BUNDLE packs 30
+// (a *CsisEntityReg / *CsisVoiceReg / *CsisFactoryReg trio per AEMS effect
+// group: Boost, Traffic, Skids, Horns, …) — so a picker config is included.
+// The fixture harness only exercises the first resource per bundle; the gold
+// suite in __tests__/soundRegistry.test.ts sweeps all 30.
 
 import {
+	makeEmptyRegistryEntity,
 	parseRegistry,
 	writeRegistry,
 	soundHash,
@@ -39,7 +42,7 @@ export const registryHandler: ResourceHandler<ParsedRegistry> = {
 	category: 'Audio',
 	caps: { read: true, write: true },
 	wikiUrl: 'https://burnout.wiki/wiki/Registry',
-	notes: 'Entity payloads validated against PLAYBACKREGISTRY + RWACFEATUREREGISTRY; type names absent from those fixtures (ContentSpec, VoiceSchema, VoiceSpec) round-trip as verbatim payload blobs.',
+	notes: 'All nine retail entity kinds decode (validated against PLAYBACKREGISTRY, RWACFEATUREREGISTRY, SOUNDENTITY, and the 30 registries in SOUND/AEMS/CSIS.BUNDLE); any still-unknown type name round-trips as a verbatim payload blob.',
 
 	parseRaw(raw, ctx) {
 		return parseRegistry(raw, ctx.littleEndian);
@@ -83,11 +86,15 @@ export const registryHandler: ResourceHandler<ParsedRegistry> = {
 	fixtures: [
 		// Deliberately different shapes: PLAYBACK mixes five payload kinds;
 		// RWAC is all GenericRwacFeatureImplementation with 0xCD uninitialised
-		// fills that must survive verbatim. Per-kind payload edits live in
+		// fills that must survive verbatim; SOUNDENTITY adds the string-
+		// carrying ContentSpec plus VoiceSchema/VoiceSpec; CSIS adds the
+		// wiki-undocumented AemsVoiceCsisClass. Per-kind payload edits live in
 		// __tests__/soundRegistry.test.ts — the scenarios below only mutate
-		// shapes both fixtures share (names, entity list, string pool).
+		// shapes every fixture supports (names, entity list, string pool).
 		{ bundle: 'example/PLAYBACKREGISTRY.BUNDLE', expect: { parseOk: true, byteRoundTrip: true } },
 		{ bundle: 'example/RWACFEATUREREGISTRY.BUNDLE', expect: { parseOk: true, byteRoundTrip: true } },
+		{ bundle: 'example/SOUND/SOUNDENTITY.BUNDLE', expect: { parseOk: true, byteRoundTrip: true } },
+		{ bundle: 'example/SOUND/AEMS/CSIS.BUNDLE', expect: { parseOk: true, byteRoundTrip: true } },
 	],
 
 	stressScenarios: [
@@ -131,13 +138,9 @@ export const registryHandler: ResourceHandler<ParsedRegistry> = {
 			mutate: (m) => ({
 				...m,
 				entities: [...m.entities, {
+					...makeEmptyRegistryEntity(),
 					mName: soundHash('StewardStressClass'),
 					mTypeName: REGISTRY_TYPE_HASHES.CONTENT_CLASS,
-					mpContentClass: null,
-					parameterSchema: null,
-					featureSchema: null,
-					rwacFeature: null,
-					_unknownPayload: null,
 				}],
 				strings: [...m.strings, 'StewardStressClass'],
 			}),
@@ -149,6 +152,38 @@ export const registryHandler: ResourceHandler<ParsedRegistry> = {
 				}
 				if (afterReparse.strings[afterReparse.strings.length - 1] !== 'StewardStressClass') {
 					problems.push('appended string did not survive round-trip');
+				}
+				return problems;
+			},
+		},
+		{
+			name: 'add-content-spec',
+			description: 'append a ContentSpec with an odd-length path — exercises the inline string, derived u16 length, and the recomputed 0xCD pad to 4-byte alignment',
+			mutate: (m) => ({
+				...m,
+				entities: [...m.entities, {
+					...makeEmptyRegistryEntity(),
+					mName: soundHash('StewardStressSpec'),
+					mTypeName: REGISTRY_TYPE_HASHES.CONTENT_SPEC,
+					contentSpec: {
+						mpContentType: soundHash('~GenericRwacWaveContent::SK_WAVE_DATA_CONTENT_TYPE~'),
+						mu8LoadMethod: 1,
+						mu8LoadTime: 1,
+						path: 'gamedb://steward/Stress1.wav', // 28 chars + NUL → 3 pad bytes
+						_padTail: new Uint8Array(0),
+					},
+				}],
+				strings: [...m.strings, 'StewardStressSpec'],
+			}),
+			verify: (afterMutate, afterReparse) => {
+				const problems: string[] = [];
+				const last = afterReparse.entities[afterReparse.entities.length - 1];
+				if (last?.contentSpec?.path !== 'gamedb://steward/Stress1.wav') {
+					problems.push('appended ContentSpec path did not survive round-trip');
+				}
+				if (last?.contentSpec != null
+					&& (last.contentSpec._padTail.byteLength !== 3 || [...last.contentSpec._padTail].some((b) => b !== 0xcd))) {
+					problems.push('recomputed pad is not 3 bytes of 0xCD fill');
 				}
 				return problems;
 			},
