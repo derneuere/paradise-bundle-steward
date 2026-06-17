@@ -31,6 +31,7 @@ import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { type BulkTransformDelta, isIdentityDelta } from '@/hooks/useBulkTransformDrag';
+import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
@@ -112,10 +113,10 @@ export const PropTransformOverlay: WorldOverlayComponent<ParsedPropInstanceData>
 	const livePivot = useMemo(() => propInstancesPivot(data, targets), [data, targets]);
 
 	const outlineGeo = useMemo(() => buildTargetOutline(data, targets), [data, targets]);
-	// Built imperatively + handed to R3F by reference, so dispose on change.
-	const prevOutline = useRef<THREE.BufferGeometry | null>(null);
-	if (prevOutline.current && prevOutline.current !== outlineGeo) prevOutline.current.dispose();
-	prevOutline.current = outlineGeo;
+	// Built imperatively + handed to R3F by reference, so R3F won't auto-dispose
+	// it — free the prior geometry on change AND on unmount (the hook's effect
+	// cleanup covers both), matching PropCellGridOverlay / PropGeometry.
+	useDisposeOnDepsChange(() => outlineGeo?.dispose(), [outlineGeo]);
 
 	const handleMarquee = useCallback((frustum: THREE.Frustum, mode: 'add' | 'remove') => {
 		const pt = new THREE.Vector3();

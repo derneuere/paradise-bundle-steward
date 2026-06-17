@@ -54,6 +54,12 @@ const pinnedCellMat = new THREE.LineBasicMaterial({
 // same trick TrafficData's PickingPlane uses. opacity 0 keeps it from drawing.
 const pickPlaneMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
 
+// A click within this XZ radius (m²) of a placed prop is treated as "meant for
+// the prop", so the picking plane lets it fall through to prop selection instead
+// of pinning a cell — TrafficData's PickingPlane has the same open-space guard
+// (findNearestRung). Coordinate-pinning is for empty ground / empty cells.
+const PROP_PICK_SNAP_SQ = 5 * 5;
+
 export type CellBounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 
 // ---------------------------------------------------------------------------
@@ -215,13 +221,22 @@ export const PropCellGridOverlay: WorldOverlayComponent<ParsedPropInstanceData> 
 	// PropCell, also select it so the inspector tracks. Convert the world hit
 	// point to a cell id via the shared formula.
 	const onPick = useCallback((e: ThreeEvent<MouseEvent>) => {
-		e.stopPropagation();
 		if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return;
-		const { muX, muZ } = propCellId(e.point.x, e.point.z);
+		const px = e.point.x, pz = e.point.z;
+		// Don't swallow clicks meant for a placed prop: if the hit is within a
+		// prop's footprint, fall through (NO stopPropagation) so the prop overlay's
+		// own onClick selects the instance. Pinning is for open ground / empty cells.
+		for (const inst of data.instances) {
+			const dx = (inst.mWorldTransform[12] ?? 0) - px;
+			const dz = (inst.mWorldTransform[14] ?? 0) - pz;
+			if (dx * dx + dz * dz <= PROP_PICK_SNAP_SQ) return;
+		}
+		e.stopPropagation();
+		const { muX, muZ } = propCellId(px, pz);
 		setPinned({ muX, muZ });
 		const idx = cells.findIndex((c) => c.muX === muX && c.muZ === muZ);
 		if (idx >= 0) onSelect(['cells', idx] as NodePath);
-	}, [cells, onSelect]);
+	}, [cells, data.instances, onSelect]);
 
 	// Two checkboxes in the chrome HTML slot — only while this overlay owns the
 	// active selection, so sibling overlays don't stack toggles (issue #24).
@@ -263,16 +278,20 @@ export const PropCellGridOverlay: WorldOverlayComponent<ParsedPropInstanceData> 
 		<>
 			{/* Transparent picking plane over the whole region — turns any click
 			    into a cell id (works on empty cells too, the whole point of
-			    "show all"). Drawn first/below so the visible grid sits on top. */}
-			<mesh
-				position={[rect.cx, y, rect.cz]}
-				rotation={[-Math.PI / 2, 0, 0]}
-				material={pickPlaneMat}
-				onClick={onPick}
-				renderOrder={0}
-			>
-				<planeGeometry args={[rect.width, rect.depth]} />
-			</mesh>
+			    "show all"). Only the ACTIVE bundle's plane is interactive, so
+			    background bundles' grids never hijack a click; the near-prop guard
+			    in onPick keeps real props selectable. Drawn below the visible grid. */}
+			{isActive && (
+				<mesh
+					position={[rect.cx, y, rect.cz]}
+					rotation={[-Math.PI / 2, 0, 0]}
+					material={pickPlaneMat}
+					onClick={onPick}
+					renderOrder={0}
+				>
+					<planeGeometry args={[rect.width, rect.depth]} />
+				</mesh>
+			)}
 			{fillGeo && (
 				<mesh geometry={fillGeo} material={gridFillMat} renderOrder={1} raycast={() => undefined as unknown as void} />
 			)}
