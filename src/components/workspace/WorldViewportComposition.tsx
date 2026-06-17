@@ -51,6 +51,7 @@ import { WorldViewport } from '@/components/schema-editor/viewports/WorldViewpor
 import { TrackGeometry } from '@/components/schema-editor/viewports/TrackGeometry';
 import { PropGeometry } from '@/components/schema-editor/viewports/PropGeometry';
 import { PropCellGridOverlay } from '@/components/schema-editor/viewports/PropCellGridOverlay';
+import { PropTransformOverlay } from '@/components/schema-editor/viewports/PropTransformOverlay';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
 import { INSTANCE_LIST_TYPE_ID } from '@/lib/core/instanceList';
 import { PROP_GRAPHICS_LIST_TYPE_ID } from '@/lib/core/propGraphicsList';
@@ -296,6 +297,41 @@ function WorldViewportCompositionInner({
 		[bundles, isVisible, selection, select],
 	);
 
+	// Prop transform gizmo + marquee: one <PropTransformOverlay> per visible
+	// bundle with a PropInstanceData (box or mesh path alike). It owns the
+	// move/rotate gizmo and box-select, editing instance transforms via
+	// setResourceAt. Mounted alongside the cell grid (separate concern); its
+	// HTML-slot marquee only registers while propInstanceData is the active
+	// selection.
+	const propTransformChildren = useMemo(
+		() =>
+			bundles
+				.filter(
+					(b) =>
+						isVisible({ bundleId: b.id }) &&
+						isVisible({ bundleId: b.id, resourceKey: 'propInstanceData', index: 0 }) &&
+						(b.parsedResourcesAll.get('propInstanceData')?.[0] ?? null) != null,
+				)
+				.map((b) => {
+					const pid = b.parsedResourcesAll.get('propInstanceData')![0] as ParsedPropInstanceData;
+					const isSelected =
+						selection?.bundleId === b.id && selection.resourceKey === 'propInstanceData';
+					return (
+						<PropTransformOverlay
+							key={`proptransform::${b.id}`}
+							data={pid}
+							selectedPath={isSelected ? selection!.path : EMPTY_PATH}
+							onSelect={(path) =>
+								select({ bundleId: b.id, resourceKey: 'propInstanceData', index: 0, path })
+							}
+							onChange={(next) => setResourceAt(b.id, 'propInstanceData', 0, next)}
+							isActive={isSelected}
+						/>
+					);
+				}),
+		[bundles, isVisible, selection, select, setResourceAt],
+	);
+
 	// Stable per-(bundleId, key, index) callback factories. We can't memoise
 	// each one with useCallback (the descriptor list is dynamic), but a
 	// single useCallback over the closure-captured Workspace methods means
@@ -386,6 +422,7 @@ function WorldViewportCompositionInner({
 			{trackChildren}
 			{propChildren}
 			{cellGridChildren}
+			{propTransformChildren}
 			{children}
 		</WorldViewport>
 	);
