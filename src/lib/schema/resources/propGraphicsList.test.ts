@@ -195,10 +195,15 @@ describe('propGraphicsList path resolution', () => {
 		expect(parts.addable).toBe(true);
 		expect(parts.removable).toBe(true);
 		// makeEmpty: a new prop starts partless with a default Model id; a new part
-		// just needs an id + Model (its type is the owning prop's).
-		const emptyProp = props.makeEmpty!({ root: {}, resource: propGraphicsListResourceSchema }) as { mpModelId: bigint; parts: unknown[] };
+		// just needs an id + Model (its type is the owning prop's). Lock ALL four
+		// fields a partless prop needs to round-trip — _mpPartsRaw and muTypeId are
+		// load-bearing for the writer (writeU32 silently coerces undefined → 0, so a
+		// regression dropping them would otherwise escape the suite).
+		const emptyProp = props.makeEmpty!({ root: {}, resource: propGraphicsListResourceSchema }) as Record<string, unknown>;
 		expect(emptyProp.mpModelId).toBe(0n);
 		expect(emptyProp.parts).toEqual([]);
+		expect(emptyProp).toHaveProperty('_mpPartsRaw', 0);
+		expect(emptyProp).toHaveProperty('muTypeId', 0);
 		const emptyPart = parts.makeEmpty!({ root: {}, resource: propGraphicsListResourceSchema }) as { muPartId: number; mpModelId: bigint };
 		expect(emptyPart.mpModelId).toBe(0n);
 		expect(emptyPart.muPartId).toBe(0);

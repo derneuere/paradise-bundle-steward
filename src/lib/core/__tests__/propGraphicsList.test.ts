@@ -353,6 +353,20 @@ describe('PropGraphicsList — guards', () => {
 		expect(() => parsePropGraphicsList(raw)).toThrow(/no owning prop/);
 	});
 
+	it('throws when part runs are not in prop order (would round-trip to different bytes)', () => {
+		// props [0xBB, 0xAA] but on-disk part runs [0xAA-run, 0xBB-run]: contiguous,
+		// single-owner, no orphans — but the run order disagrees with the prop order,
+		// which the writer (flatten-in-prop-order) can't reproduce byte-exactly.
+		const raw = buildRaw(1, [
+			{ typeId: 0xBB, model: 0x2n, mpParts: 0 },
+			{ typeId: 0xAA, model: 0x1n, mpParts: 0 },
+		], [
+			{ typeId: 0xAA, partId: 0, model: 0xA0n },
+			{ typeId: 0xBB, partId: 0, model: 0xB0n },
+		]);
+		expect(() => parsePropGraphicsList(raw)).toThrow(/not in prop order/);
+	});
+
 	it('throws on a non-zero header pad', () => {
 		const raw = buildRaw(1, [{ typeId: 1, model: 0n, mpParts: 0 }], []);
 		raw[0x1c] = 0xab;

@@ -194,6 +194,7 @@ export function parsePropGraphicsList(raw: Uint8Array, littleEndian = true): Par
 	// after a different one), since the nested model + writer rely on it.
 	r.position = partsStart;
 	const partsByType = new Map<number, PropPartGraphics[]>();
+	const runStartByType = new Map<number, number>();   // first part-array index of each type's run
 	const closedTypes = new Set<number>();
 	let prevType: number | null = null;
 	for (let j = 0; j < muNumberOfPropPartModels; j++) {
@@ -208,6 +209,7 @@ export function parsePropGraphicsList(raw: Uint8Array, littleEndian = true): Par
 			if (prevType !== null) closedTypes.add(prevType);
 			prevType = muTypeId;
 			partsByType.set(muTypeId, []);
+			runStartByType.set(muTypeId, j);
 		}
 		partsByType.get(muTypeId)!.push({ muPartId, mpModelId });
 	}
@@ -231,6 +233,20 @@ export function parsePropGraphicsList(raw: Uint8Array, littleEndian = true): Par
 	if (claimed.size !== partsByType.size) {
 		const orphan = [...partsByType.keys()].find((t) => !claimed.has(t));
 		throw new Error(`PropGraphicsList: part run for type 0x${(orphan ?? 0).toString(16)} has no owning prop — unexpected layout`);
+	}
+
+	// Part runs must appear in PROP order — the writer flattens parts by iterating
+	// props in order, so an out-of-order on-disk run layout would round-trip to
+	// DIFFERENT bytes (silently). Verified across the corpus; fail loud here rather
+	// than write back a reordered payload, keeping the parser's loud-fail contract.
+	let lastRunStart = -1;
+	for (const p of props) {
+		if (p.parts.length === 0) continue;
+		const runStart = runStartByType.get(p.muTypeId)!;
+		if (runStart <= lastRunStart) {
+			throw new Error(`PropGraphicsList: part runs are not in prop order (type 0x${p.muTypeId.toString(16)} run starts at ${runStart}, after ${lastRunStart}) — unexpected layout`);
+		}
+		lastRunStart = runStart;
 	}
 
 	return { muZoneNumber, props };
