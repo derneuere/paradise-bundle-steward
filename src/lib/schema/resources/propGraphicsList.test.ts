@@ -155,10 +155,16 @@ describe('propGraphicsList path resolution', () => {
 		expect(loc!.record?.name).toBe('PropGraphics');
 	});
 
-	it('resolves props[0].muTypeId as u32', () => {
+	it('resolves props[0].muTypeId as an enum (prop-types vocabulary)', () => {
 		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['props', 0, 'muTypeId']);
 		expect(loc).not.toBeNull();
-		expect(loc!.field?.kind).toBe('u32');
+		expect(loc!.field?.kind).toBe('enum');
+	});
+
+	it('resolves props[0].mpModelId as an editable bigint resource id', () => {
+		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['props', 0, 'mpModelId']);
+		expect(loc).not.toBeNull();
+		expect(loc!.field?.kind).toBe('bigint');
 	});
 
 	it('resolves parts[0] as a PropPartGraphics', () => {
@@ -173,6 +179,27 @@ describe('propGraphicsList path resolution', () => {
 		expect(loc!.field?.kind).toBe('u32');
 	});
 
+	it('resolves parts[0].mpModelId as an editable bigint resource id', () => {
+		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['parts', 0, 'mpModelId']);
+		expect(loc).not.toBeNull();
+		expect(loc!.field?.kind).toBe('bigint');
+	});
+
+	it('exposes props as an addable list but locks parts (firstPartIndex linkage is internal)', () => {
+		const props = propGraphicsListResourceSchema.registry.ParsedPropGraphicsList.fields.props;
+		const parts = propGraphicsListResourceSchema.registry.ParsedPropGraphicsList.fields.parts;
+		if (props.kind !== 'list' || parts.kind !== 'list') throw new Error('expected lists');
+		expect(props.addable).toBe(true);
+		expect(props.removable).toBe(true);
+		// Parts can't be added/removed (only their fields edited) — see schema note.
+		expect(parts.addable).toBe(false);
+		expect(parts.removable).toBe(false);
+		// makeEmpty supplies a default Model id so a new prop row is valid immediately.
+		const empty = props.makeEmpty!({ root: {}, resource: propGraphicsListResourceSchema }) as { mpModelId: bigint; firstPartIndex: number | null };
+		expect(empty.mpModelId).toBe(0n);
+		expect(empty.firstPartIndex).toBeNull();
+	});
+
 	it('resolves muZoneNumber as u32', () => {
 		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['muZoneNumber']);
 		expect(loc).not.toBeNull();
@@ -185,22 +212,27 @@ describe('propGraphicsList path resolution', () => {
 // ---------------------------------------------------------------------------
 
 describeFixture('propGraphicsList tree labels', () => {
-	it('prop label includes the index and hex type id', () => {
-		// props[0] in TRK_UNIT9 has type id 0x28.
+	it('prop label includes the index, prop name, and Model id', () => {
+		// props[0] in TRK_UNIT9 has type id 0x28 and Model 0x12F7700A.
 		const prop = model.props[0];
 		const field = propGraphicsListResourceSchema.registry.ParsedPropGraphicsList.fields.props;
 		if (field.kind !== 'list') throw new Error('expected list');
 		const labelFn = field.itemLabel as (v: unknown, i: number) => string;
-		expect(labelFn(prop, 0)).toBe('#0 · type 0x28');
+		const label = labelFn(prop, 0);
+		expect(label.startsWith('#0 · ')).toBe(true);
+		expect(label).toContain('model 0x12F7700A');
 	});
 
-	it('part label includes the index, hex type id, and part number', () => {
+	it('part label includes the index, part number, and Model id', () => {
 		// parts[1] in TRK_UNIT9 is type 0x28, part 1.
 		const part = model.parts[1];
 		const field = propGraphicsListResourceSchema.registry.ParsedPropGraphicsList.fields.parts;
 		if (field.kind !== 'list') throw new Error('expected list');
 		const labelFn = field.itemLabel as (v: unknown, i: number) => string;
-		expect(labelFn(part, 1)).toBe('#1 · type 0x28 · part 1');
+		const label = labelFn(part, 1);
+		expect(label.startsWith('#1 · ')).toBe(true);
+		expect(label).toContain('part 1');
+		expect(label).toContain('model 0x');
 	});
 
 	it('PropGraphics.label callback returns a non-empty string', () => {
@@ -226,13 +258,14 @@ describeFixture('propGraphicsList getAtPath', () => {
 		expect(Number.isFinite(id)).toBe(true);
 	});
 
-	it('reads props[0].mpPropModel as a number (0 on disk)', () => {
-		const mpModel = getAtPath(model, ['props', 0, 'mpPropModel']);
-		expect(mpModel).toBe(0);
+	it('reads props[0].mpModelId as a bigint Model resource id', () => {
+		const id = getAtPath(model, ['props', 0, 'mpModelId']);
+		expect(typeof id).toBe('bigint');
+		expect(id).toBe(0x12f7700an);
 	});
 
-	it('reads a part Model pointer as 0 on disk', () => {
-		const mpModel = getAtPath(model, ['parts', 0, 'mpPropModel']);
-		expect(mpModel).toBe(0);
+	it('reads a part Model id as a bigint', () => {
+		const id = getAtPath(model, ['parts', 0, 'mpModelId']);
+		expect(typeof id).toBe('bigint');
 	});
 });

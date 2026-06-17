@@ -25,6 +25,7 @@ import type {
 } from '../types';
 import { PROP_INSTANCE_FLAGS } from '@/lib/core/propInstanceData';
 import { PROP_ALT_TYPE_NONE, PROP_TYPES, propTypeLabel } from '@/lib/core/propTypes';
+import { propCellId } from '@/lib/core/propCellGrid';
 
 // ---------------------------------------------------------------------------
 // Local helpers (mirroring zoneList.ts)
@@ -93,7 +94,12 @@ function instanceLabel(inst: unknown, index: number): string {
 		const t = i.mWorldTransform;
 		const x = t && t[12] != null ? t[12].toFixed(0) : '?';
 		const z = t && t[14] != null ? t[14].toFixed(0) : '?';
-		return `#${index} · ${name} · id ${id} · (${x}, ${z})`;
+		// Cell id derived from the world position — lets the user see which cell a
+		// prop falls into (and spot when its owning PropCell.muX/muZ is wrong).
+		const cell = t && t[12] != null && t[14] != null
+			? (() => { const c = propCellId(t[12], t[14]); return ` · cell (${c.muX}, ${c.muZ})`; })()
+			: '';
+		return `#${index} · ${name} · id ${id} · (${x}, ${z})${cell}`;
 	} catch {
 		return `#${index}`;
 	}
@@ -181,7 +187,7 @@ const PropInstance: RecordSchema = {
 
 const PropCell: RecordSchema = {
 	name: 'PropCell',
-	description: 'A coarse XZ grid cell owning a contiguous run of instances. Cells partition the instance array; muStartIndex/muCount are derived from that partition and recomputed on write.',
+	description: 'A coarse XZ grid cell owning a contiguous run of instances. Cells partition the instance array; muStartIndex/muCount are editable so the partition can be set by hand (e.g. after adding instances) and are written verbatim.',
 	fields: {
 		muX: u16(),
 		muZ: u16(),
@@ -203,13 +209,11 @@ const PropCell: RecordSchema = {
 		},
 		muStartIndex: {
 			label: 'Start index',
-			description: 'First instance index this cell owns. Derived: the running sum of prior cells\' counts. Recomputed on write.',
-			readOnly: true,
+			description: 'First instance index this cell owns. Normally the running sum of prior cells\' counts, but editable: some tools require setting the partition by hand (e.g. after adding instances). Written verbatim.',
 		},
 		muCount: {
 			label: 'Count',
-			description: 'Number of instances in this cell. Derived from the partition; recomputed on write.',
-			readOnly: true,
+			description: 'Number of instances in this cell (the cell owns [Start index, Start index + Count)). Editable so added instances can be assigned to a cell. Written verbatim.',
 		},
 	},
 	propertyGroups: [
@@ -255,7 +259,7 @@ const ParsedPropInstanceData: RecordSchema = {
 		},
 		cells: {
 			label: 'Cells',
-			description: 'The coarse XZ grid partition over the instance array. Each cell owns a contiguous run; muStartIndex/muCount are recomputed from the partition on write.',
+			description: 'The coarse XZ grid partition over the instance array. Each cell owns a contiguous run [Start index, Start index + Count); both fields are editable and written verbatim so the partition can be repaired after adding instances.',
 		},
 		_trailingPad: {
 			label: 'Trailing pad',

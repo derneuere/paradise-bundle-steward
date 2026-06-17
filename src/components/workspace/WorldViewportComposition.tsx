@@ -50,6 +50,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { WorldViewport } from '@/components/schema-editor/viewports/WorldViewport';
 import { TrackGeometry } from '@/components/schema-editor/viewports/TrackGeometry';
 import { PropGeometry } from '@/components/schema-editor/viewports/PropGeometry';
+import { PropCellGridOverlay } from '@/components/schema-editor/viewports/PropCellGridOverlay';
 import { PolygonSoupListOverlay } from '@/components/schema-editor/viewports/PolygonSoupListOverlay';
 import { INSTANCE_LIST_TYPE_ID } from '@/lib/core/instanceList';
 import { PROP_GRAPHICS_LIST_TYPE_ID } from '@/lib/core/propGraphicsList';
@@ -261,6 +262,40 @@ function WorldViewportCompositionInner({
 		[bundles, allSources, isVisible, selection, select],
 	);
 
+	// Prop cell grid: one <PropCellGridOverlay> per visible bundle that carries a
+	// PropInstanceData (whether or not it also has a PropGraphicsList, so it shows
+	// for both the real-mesh and box-fallback prop paths). It superimposes the
+	// 100 m streaming grid + cell-id labels so the user can read/verify a prop's
+	// cell. Its chrome toggle only registers when propInstanceData is the active
+	// selection, so it doesn't fight sibling overlays for the HTML slot.
+	const cellGridChildren = useMemo(
+		() =>
+			bundles
+				.filter(
+					(b) =>
+						isVisible({ bundleId: b.id }) &&
+						isVisible({ bundleId: b.id, resourceKey: 'propInstanceData', index: 0 }) &&
+						(b.parsedResourcesAll.get('propInstanceData')?.[0] ?? null) != null,
+				)
+				.map((b) => {
+					const pid = b.parsedResourcesAll.get('propInstanceData')![0] as ParsedPropInstanceData;
+					const isSelected =
+						selection?.bundleId === b.id && selection.resourceKey === 'propInstanceData';
+					return (
+						<PropCellGridOverlay
+							key={`cellgrid::${b.id}`}
+							data={pid}
+							selectedPath={isSelected ? selection!.path : EMPTY_PATH}
+							onSelect={(path) =>
+								select({ bundleId: b.id, resourceKey: 'propInstanceData', index: 0, path })
+							}
+							isActive={isSelected}
+						/>
+					);
+				}),
+		[bundles, isVisible, selection, select],
+	);
+
 	// Stable per-(bundleId, key, index) callback factories. We can't memoise
 	// each one with useCallback (the descriptor list is dynamic), but a
 	// single useCallback over the closure-captured Workspace methods means
@@ -350,6 +385,7 @@ function WorldViewportCompositionInner({
 		<WorldViewport>
 			{trackChildren}
 			{propChildren}
+			{cellGridChildren}
 			{children}
 		</WorldViewport>
 	);
