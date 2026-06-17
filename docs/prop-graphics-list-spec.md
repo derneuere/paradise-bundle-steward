@@ -37,8 +37,14 @@ PropGraphicsList (0x10010)
   ├─ props:  PropGraphics[muNumberOfPropModels]       // at 0x20, 0x0C (12) bytes each
   ├─ <align16 pad>
   ├─ parts:  PropPartGraphics[muNumberOfPropPartModels]// at align16(propEnd), 0x0C (12) bytes each
-  └─ _tail:  <align16 pad> + inline BND2 import table  // importCount × 16 bytes, to end of payload
+  └─ <align16 pad> + inline BND2 import table          // importCount × 16 bytes, to end of payload
 ```
+
+The import table is **modelled** (each entry's resource id becomes the owning
+record's `mpModelId`) and **rebuilt** by the writer from the record counts, so it
+is not carried verbatim — see "Parsed model shape" and "Round-trip / writer
+strategy" below. The on-disk field notes that follow describe the disk format; the
+"how it's modelled" column says what the parser/writer do with each field.
 
 `mpaPropGraphics` and `mpaPropPartGraphics` are absolute byte offsets into the
 payload; both are **rigid** (always `0x20` and `align16(0x20 + nProps*0x0C)`) so on
@@ -54,7 +60,7 @@ PC LE only**. Console (BE) and 64-bit are out of scope.
 
 | Offset | Size | Type | Name | Notes |
 |--------|------|------|------|-------|
-| 0x00 | 4 | u32 | `muSizeInBytes` | **stored field; does NOT consistently equal a derivable offset** — part-array end when parts exist (may be unaligned), `align16(prop-array end)` when no parts, `0x20` when empty. Preserve **verbatim**. |
+| 0x00 | 4 | u32 | `muSizeInBytes` | the **structural end**: part-array end when parts exist (may be unaligned), `align16(prop-array end)` when only props, `0x20` when empty. **Derived** — recomputed on write; the parser asserts the stored value matches (proven across all 428 fixtures). |
 | 0x04 | 4 | u32 | `muZoneNumber` | PVS zone / track-unit id (editable) |
 | 0x08 | 4 | u32 | `muNumberOfPropModels` | count of stored `PropGraphics` records = `props.length` (recomputed on write) |
 | 0x0C | 1 | u8 | `muNumberOfPropPartModels` | count of stored `PropPartGraphics` records = `parts.length`. **u8 in a 4-byte slot** (u8 + 3 zero pad). Recomputed on write. |
@@ -68,8 +74,8 @@ PC LE only**. Console (BE) and 64-bit are out of scope.
 | Offset | Size | Type | Name | Notes |
 |--------|------|------|------|-------|
 | 0x00 | 4 | u32 | `muTypeId` | prop type index (into [`prop-types.md`](prop-types.md)) |
-| 0x04 | 4 | `Model*` | `mpPropModel` | **`0x0` on disk** — a BND2 **import** (see below); the body mesh. Resolved via `getImportsByPtrOffset` keyed by this field's byte offset. Preserved verbatim. |
-| 0x08 | 4 | `PropPartGraphics*` | `mpParts` | resource-relative **internal pointer** to this prop's first part record; **`0` (NULL) when the prop has no parts**. Preserved verbatim. |
+| 0x04 | 4 | `Model*` | `mpPropModel` | **`0x0` on disk** — a BND2 **import** (see below); the body mesh. Modelled as the editable `mpModelId` (bigint); the writer emits 0 here and rebuilds the import-table entry from `mpModelId`. |
+| 0x08 | 4 | `PropPartGraphics*` | `mpParts` | resource-relative **internal pointer** to this prop's first part record; **`0` (NULL) when the prop has no parts**. Modelled as `firstPartIndex` (the part-array index) and recomputed on write. |
 
 ### `PropPartGraphics` — 12 bytes (`0x0C`) — at `align16(0x20 + nProps*0x0C)`
 
@@ -77,7 +83,7 @@ PC LE only**. Console (BE) and 64-bit are out of scope.
 |--------|------|------|------|-------|
 | 0x00 | 4 | u32 | `muTypeId` | owning prop's type id |
 | 0x04 | 4 | u32 | `muPartId` | part index within the prop |
-| 0x08 | 4 | `Model*` | `mpPropModel` | **`0x0` on disk** — a BND2 **import**; the part's mesh. Resolved via `getImportsByPtrOffset`. Preserved verbatim. |
+| 0x08 | 4 | `Model*` | `mpPropModel` | **`0x0` on disk** — a BND2 **import**; the part's mesh. Modelled as the editable `mpModelId` (bigint); the writer emits 0 here and rebuilds the import-table entry from `mpModelId`. |
 
 ## Model imports (`mpPropModel`) and the `mpParts` internal pointer
 
@@ -92,18 +98,24 @@ record's field offset (`0x20 + i*0x0C + 0x04` for prop `i`; `mpaPropPartGraphics
 j*0x0C + 0x08` for part `j`) to get the Model's `resourceId`. The Model resource may
 live in another bundle (shared/neighbour-chunk models are imported but not local).
 
+On read, the parser resolves each `mpModelId` from this table by field offset; on
+write it rebuilds the table from the per-record `mpModelId`s (see below).
+
 `mpParts` is **not** an import — it is an **internal, resource-relative pointer** to
 the prop's first `PropPartGraphics` record. Because parts are grouped contiguously
 by owning prop, a prop with parts points at its first one; a prop with **no** parts
 stores `mpParts == 0` (NULL). The parser never dereferences `mpParts` to read the
 structure (the part array is located via the recomputed `mpaPropPartGraphics`); it
-is preserved verbatim purely for byte-exactness.
+is modelled as `firstPartIndex` (the part-array index it points at) and recomputed
+on write as `mpaPropPartGraphics + firstPartIndex*0x0C`, so it survives the part
+array relocating after a prop add/remove.
 
-> The parser **never needs the import table** to decode the structure — the layout
-> is fully determined by the two counts. It captures the table verbatim in `_tail`
-> so the round-trip stays byte-exact and every Model import stays valid.
+> The parser **needs** the import table to recover each record's `mpModelId`, but
+> the structural layout is fully determined by the two counts. The writer rebuilds
+> the table from the model, so the round-trip stays byte-exact and adds/removes of
+> props re-establish every Model import.
 
-## Inline import table (the BND2 import section, captured in `_tail`)
+## Inline import table (the BND2 import section)
 
 After the last structural array, the payload is padded to a 16-byte boundary and
 then carries the resource's **inline BND2 import table**:
@@ -119,17 +131,21 @@ then carries the resource's **inline BND2 import table**:
   layout is u32 low, u32 high, u32 offset, u32 padding, all little-endian.)
 - `payload length == align16(muSizeInBytes) + importCount*16`.
 
-The whole region (align pad + import table) is captured as `_tail` and re-emitted
-**verbatim**. This is why **field edits round-trip** but **adding/removing props or
-parts is out of scope**: changing the counts shifts every `mpPropModel` field
-offset, which would invalidate the captured table's `fieldOffset` values.
+The table is **modelled** (each entry's resource id becomes the owning record's
+`mpModelId`) and **rebuilt** by the writer in canonical order — props then parts by
+ascending field offset, each entry `{ u64 resourceId, u32 fieldOffset, u32 0 }`.
+Because the table is reconstructed from the record counts rather than carried
+verbatim, **both field edits and add/remove of props/parts round-trip**: changing
+the counts shifts every `mpPropModel` field offset, and the writer simply emits the
+new offsets. The bundle envelope's `importOffset`/`importCount` are recomputed on
+export via the handler's `importTable()` hook.
 
 ## Real-fixture findings (verified 2026-06-09)
 
 Decoded against two real bundle-embedded resources via the CLI/registry extract path:
 
-| fixture | zone | raw bytes | nProps | nParts | `muSizeInBytes` | `mpaPropPartGraphics` | importCount | import-table bytes | `_tail` bytes |
-|---------|-----:|----------:|-------:|-------:|----------------:|----------------------:|------------:|-------------------:|--------------:|
+| fixture | zone | raw bytes | nProps | nParts | `muSizeInBytes` | `mpaPropPartGraphics` | importCount | import-table bytes | pad+table bytes |
+|---------|-----:|----------:|-------:|-------:|----------------:|----------------------:|------------:|-------------------:|----------------:|
 | `TRK_UNIT9_GR.BNDL` | 9 | 1776 | 10 | 52 | 784 | `0xA0` (160) | 62 | 992 | 992 |
 | `TRK_UNIT10_GR.BNDL` | 10 | 1616 | 9 | 47 | 708 | `0x90` (144) | 56 | 896 | 908 |
 
@@ -138,18 +154,18 @@ Arithmetic check (self-consistent, confirms the invariants):
 ```
 TRK9 : mpaPropPartGraphics = align16(0x20 + 10*0x0C) = align16(0x98) = 0xA0  ✓
        importCount = 10+52 = 62 ; 62*16 = 992 ; align16(784)=784 ; 784+992 = 1776 = rawLen  ✓
-       muSizeInBytes 784 is already 16-aligned, so _tail = 0 pad + 992 table = 992.
+       muSizeInBytes 784 is already 16-aligned, so the region = 0 pad + 992 table = 992.
 TRK10: mpaPropPartGraphics = align16(0x20 + 9*0x0C) = align16(0x8C) = 0x90  ✓
        importCount =  9+47 = 56 ; 56*16 = 896 ; align16(708)=720 ; 720+896 = 1616 = rawLen  ✓
        muSizeInBytes 708 is the unaligned part-array end; importOffset rounds it to 720, so
-       _tail = 12 pad (708→720) + 896 table = 908 (the parser captures pad+table, not just the table).
+       the import-table region = 12 pad (708→720) + 896 table = 908.
 ```
 
-> **`_tail` ≠ import-table bytes when `muSizeInBytes` is unaligned.** `_tail` is everything
-> from the last array end to EOF, i.e. the align-pad **plus** the import table. When
-> `muSizeInBytes` is already 16-aligned (TRK9) the pad is empty and the two coincide; when it
-> is unaligned (TRK10) `_tail` is larger by the pad width. The writer re-emits `_tail` verbatim,
-> so it reproduces both regions in one shot.
+> **The pad+table region ≠ the import-table bytes when `muSizeInBytes` is unaligned.**
+> The region from the last array end to EOF is the align-pad **plus** the import table.
+> When `muSizeInBytes` is already 16-aligned (TRK9) the pad is empty and the two coincide;
+> when it is unaligned (TRK10) the region is larger by the pad width. The writer regenerates
+> the pad as zero and rebuilds the table from the model, reproducing both regions exactly.
 
 **Corpus distribution** (sweep of all `TRK_UNIT*_GR.BNDL` in `example/`):
 
@@ -160,9 +176,11 @@ TRK10: mpaPropPartGraphics = align16(0x20 + 9*0x0C) = align16(0x8C) = 0x90  ✓
 
 **Byte-exact sweep result:** every PropGraphicsList that reaches the parser
 round-trips `writePropGraphicsList(parsePropGraphicsList(raw))` **byte-for-byte**
-(426/426 byte-exact pass, 0 fail). The parser/writer in
-[`src/lib/core/propGraphicsList.ts`](../src/lib/core/propGraphicsList.ts) needs no
-changes.
+across all 428 fixtures (256 populated + 172 empty, 0 fail) — including the
+model-driven rebuild of the import table. The parser/writer in
+[`src/lib/core/propGraphicsList.ts`](../src/lib/core/propGraphicsList.ts) were
+rewritten for this (model `mpModelId`/`firstPartIndex`, derive `muSizeInBytes`,
+rebuild the table); the byte-exactness above is what proves that rewrite safe.
 
 **Confirmed invariants (all 254 populated resources, zero violations):**
 
@@ -186,56 +204,73 @@ is a parser bug.
 
 ## Parsed model shape
 
+The catalogue is **fully editable**: Model references are modelled as per-record
+resource ids, and props/parts can be added or removed. The writer rebuilds the
+inline import table and every derived offset from the model, so nothing is carried
+verbatim except what the corpus sweep proved is reconstructable.
+
 ```ts
 type PropGraphics = {
-  muTypeId: number;    // u32 — prop type index (into prop-types)
-  mpPropModel: number; // u32 — Model* import, 0 on disk; resolved by field offset. Verbatim.
-  mpParts: number;     // u32 — internal pointer to first part (0 = no parts). Verbatim.
+  muTypeId: number;            // u32 — prop type index (into prop-types)
+  mpModelId: bigint;           // Model resource id (the BND2 import); 0n = none/unresolved. Editable.
+  firstPartIndex: number | null; // index into parts[] of this prop's first part; null = no parts
 };
 
 type PropPartGraphics = {
   muTypeId: number;    // u32 — owning prop's type id
   muPartId: number;    // u32 — part index within the prop
-  mpPropModel: number; // u32 — Model* import, 0 on disk; resolved by field offset. Verbatim.
+  mpModelId: bigint;   // Model resource id (the BND2 import). Editable.
 };
 
 type ParsedPropGraphicsList = {
   muZoneNumber: number;     // u32 — PVS zone / track-unit id (editable)
-  muSizeInBytes: number;    // u32 — stored size; not a derivable offset (preserved verbatim, readOnly)
   props: PropGraphics[];
   parts: PropPartGraphics[];
-  _tail: Uint8Array;        // align16 pad + inline import table, end-of-arrays..EOF (verbatim)
 };
 ```
 
 `muNumberOfPropModels` / `muNumberOfPropPartModels` are **not** stored on the model
 (they equal `props.length` / `parts.length`); the writer emits the array lengths.
-`mpaPropGraphics` / `mpaPropPartGraphics` are recomputed from those lengths.
+`mpaPropGraphics` / `mpaPropPartGraphics` and `muSizeInBytes` (the structural end)
+are recomputed from those lengths. `mpPropModel` (0 on disk) is rebuilt as a 0
+pointer + an import-table entry carrying `mpModelId`. `mpParts` is rebuilt from
+`firstPartIndex` (`null → 0`, else `mpaPropPartGraphics + firstPartIndex*0x0C`), so
+it stays valid when the part array relocates after a prop add/remove.
 
 ## Round-trip / writer strategy
 
 Byte-exact (`byteRoundTrip`) is achievable — the layout is rigid. Writer:
 
-1. **Header (32 bytes):** `muSizeInBytes` (**verbatim** — not a derivable offset);
+1. **Header (32 bytes):** `muSizeInBytes` = derived structural end;
    `muZoneNumber`; `muNumberOfPropModels = props.length`; `muNumberOfPropPartModels
    = parts.length & 0xff` (u8) + 3 pad; `mpaPropGraphics = props.length ? 0x20 : 0`;
    `mpaPropPartGraphics = parts.length ? align16(0x20 + nProps*0x0C) : 0`; zero-pad
    up to `0x20`.
-2. **PropGraphics:** for each, `muTypeId`; `mpPropModel` (**verbatim**, `0` on
-   disk); `mpParts` (**verbatim** internal pointer).
+2. **PropGraphics:** for each, `muTypeId`; `mpPropModel = 0` (the id is emitted into
+   the import table below); `mpParts` recomputed from `firstPartIndex`.
 3. **align16 pad → PropPartGraphics:** zero-pad to `mpaPropPartGraphics`, then for
-   each part `muTypeId`; `muPartId`; `mpPropModel` (**verbatim**, `0`).
-4. **`_tail`:** append verbatim (align pad + inline import table) → reproduces the
-   exact length and keeps every Model import valid.
+   each part `muTypeId`; `muPartId`; `mpPropModel = 0`. Then zero-pad up to the
+   structural end (a no-parts list has an align pad after the prop array).
+4. **align16 pad → import table:** for each prop, then each part, emit
+   `{ u64 mpModelId, u32 fieldOffset, u32 0 }` → reproduces the exact length and
+   re-establishes every Model import.
 
-This mirrors the [`propInstanceData`](prop-instance-data-spec.md) / `zoneList`
-precedent (recompute pointers + counts, preserve verbatim stored-size and pad for
-byte-exactness). Because the inline import table is keyed by `mpPropModel` field
-offsets, **field edits** (zone id, a prop/part `muTypeId`, `muPartId`) round-trip,
-but **adding or removing props/parts is OUT of scope** — it would shift those field
-offsets and invalidate the captured table. `muSizeInBytes` is preserved verbatim
-with no validation against the recomputed layout, so it would be stale after a
-structural mutation (which is why such mutations are blocked).
+This mirrors the [`environmentTimeLine`](../src/lib/core/environmentSettings.ts)
+precedent (model the inline import-table ids per record; recompute pointers,
+counts, structural size, and the table from the array lengths on write). Because
+the table is **rebuilt** rather than carried verbatim, both **field edits** AND
+**adding/removing props or parts** round-trip byte-exact (verified across all 256
+populated fixtures). When the prop/part count changes, the bundle envelope's
+`importOffset`/`importCount` follow via the handler's `importTable()` hook on
+export, exactly like EnvironmentTimeLine and ParticleDescriptionCollection.
+
+The corpus sweep that justified the rebuild (all 256 populated + 172 empty
+fixtures, zero violations): `muSizeInBytes` always equals the derived structural
+end; the import table is ordered props-then-parts by ascending field offset; every
+import-entry padding word and inter-array/align pad is zero; `mpParts` is always an
+aligned index into the part array; and the payload length is always exactly
+`align16(structuralEnd) + (nProps+nParts)*16`. The parser asserts each of these and
+fails loud on any unexpected layout.
 
 ## Editor / resourcespec notes
 
@@ -243,15 +278,17 @@ structural mutation (which is why such mutations are blocked).
 - `muTypeId` (on both record types) → enum dropdown sourced from `PROP_TYPES` (same
   table as [`prop-instance-data-spec.md`](prop-instance-data-spec.md)); `muPartId`
   is a plain integer.
-- `mpPropModel` is `readOnly` in the editor — it is `0` on disk and the real Model
-  id is resolved from the import table at display/render time via
-  `getImportsByPtrOffset(bundle.imports, bundle.resources, resourceIndex)`, keyed by
-  the record's field offset. Surface the resolved Model `resourceId` in the tree
-  label so artists can see which mesh a prop/part maps to.
-- `mpParts`, `muSizeInBytes`, and `_tail` are `readOnly`/`hidden` round-trip-only
-  fields (`mpaPropGraphics`/`mpaPropPartGraphics` are derived and never modelled).
-- Tree labels: prop → `#i · <propTypeName> · model <resourceId> · parts <n>`; part →
-  `#j · part <muPartId> of <propTypeName> · model <resourceId>`.
-- Adding/removing props or parts must be disabled (`addable`/`removable` off) until
-  a future slice rebuilds the inline import table from scratch.
+- `mpModelId` is an **editable** `bigint` resource id (`{ kind: 'bigint', bytes: 8,
+  hex: true }`) — the Model the runtime spawns. On disk it is a `0` pointer + an
+  import-table entry; the writer rebuilds that entry from `mpModelId`. Prop Models
+  usually live in `GLOBALPROPS.BIN`.
+- `firstPartIndex` is a `hidden`/`readOnly` round-trip-only field (the modelled form
+  of `mpParts`); `muSizeInBytes`, `mpaPropGraphics`, `mpaPropPartGraphics` are
+  derived and never modelled.
+- Tree labels: prop → `#i · <propTypeName> · model <resourceId>`; part →
+  `#j · <propTypeName> · part <muPartId> · model <resourceId>`.
+- **Adding/removing props and parts is supported** (`addable`/`removable` on, with a
+  `makeEmpty` that seeds `mpModelId = 0n`). The main workflow is cataloguing a
+  newly-placed prop type: add a prop row, set its type + Model id. The bundle
+  envelope's import metadata is recomputed on export via the `importTable()` hook.
 ```

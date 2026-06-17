@@ -202,6 +202,27 @@ export const propInstanceDataHandler: ResourceHandler<ParsedPropInstanceData> = 
 			},
 		},
 		{
+			name: 'edit-cell-partition-verbatim',
+			description: 'set the first cell muStartIndex / muCount to markers that disagree with the running sum and verify the writer keeps them verbatim (the partition is editable, not derived)',
+			mutate: (m) => {
+				if (m.cells.length === 0) return m;
+				const cells = m.cells.slice();
+				cells[0] = { ...cells[0], muStartIndex: 4321, muCount: 9 };
+				return { ...m, cells };
+			},
+			verify: (_before, after) => {
+				const problems: string[] = [];
+				if (after.cells.length === 0) return problems;
+				if (after.cells[0].muStartIndex !== 4321) {
+					problems.push(`cell[0].muStartIndex = ${after.cells[0].muStartIndex}, expected 4321 (verbatim)`);
+				}
+				if (after.cells[0].muCount !== 9) {
+					problems.push(`cell[0].muCount = ${after.cells[0].muCount}, expected 9 (verbatim)`);
+				}
+				return problems;
+			},
+		},
+		{
 			name: 'append-instance-to-last-cell',
 			description: 'clone instances[last], push it, and increment the last cell muCount; verify the new instance and recomputed partition survive',
 			mutate: (m) => {

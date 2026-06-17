@@ -28,7 +28,6 @@
 
 import * as THREE from 'three';
 import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
-import { getImportsByPtrOffset } from '@/lib/core/bundle';
 import { extractResourceSize, isResourceBlockCompressed, decompressData } from '@/lib/core/resourceManager';
 import {
 	parsePropGraphicsList,
@@ -39,11 +38,6 @@ import type { ParsedVertexDescriptor } from '@/lib/core/renderable';
 import { findResourceById } from '@/lib/core/renderable';
 import { MODEL_TYPE_ID } from '@/lib/core/model';
 import { decodeModelGeometries, instanceTransformToMatrix4 } from './trackGeometryDecode';
-
-// PropGraphics array begins at 0x20; each record is 0x0C with mpPropModel at +4.
-const PROP_GRAPHICS_OFFSET = 0x20;
-const PROP_RECORD_SIZE = 0x0c;
-const PROP_MODEL_FIELD = 0x04;
 
 /** A bundle paired with its raw bytes — prop Models often live in a companion
  *  bundle (GLOBALPROPS.BIN), so resolution searches these after the local one. */
@@ -86,6 +80,10 @@ function extractBlock0(buffer: ArrayBuffer, bundle: ParsedBundle, entry: Resourc
  * Returns an empty map when the bundle has no PropGraphicsList. Throws are
  * swallowed (a malformed catalogue just yields no prop meshes — the boxes
  * remain), since this feeds a best-effort viewport, never an edit path.
+ *
+ * The parsed model carries each prop's Model id directly (mpModelId, decoded
+ * from the resource's inline import table), so no separate import-table lookup
+ * is needed. A 0n id means "unresolved" — skip it so the box fallback shows.
  */
 export function buildPropTypeModelMap(bundle: ParsedBundle, buffer: ArrayBuffer): Map<number, bigint> {
 	const map = new Map<number, bigint>();
@@ -95,12 +93,9 @@ export function buildPropTypeModelMap(bundle: ParsedBundle, buffer: ArrayBuffer)
 		const raw = extractBlock0(buffer, bundle, entry);
 		if (!raw) return map;
 		const pgl = parsePropGraphicsList(raw);
-		const index = bundle.resources.indexOf(entry);
-		const imports = getImportsByPtrOffset(bundle.imports, bundle.resources, index);
-		pgl.props.forEach((prop, i) => {
-			const id = imports.get(PROP_GRAPHICS_OFFSET + i * PROP_RECORD_SIZE + PROP_MODEL_FIELD);
-			if (id != null) map.set(prop.muTypeId, id);
-		});
+		for (const prop of pgl.props) {
+			if (prop.mpModelId !== 0n) map.set(prop.muTypeId, prop.mpModelId);
+		}
 	} catch {
 		return map;
 	}

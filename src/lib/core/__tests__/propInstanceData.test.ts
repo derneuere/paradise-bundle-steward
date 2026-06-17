@@ -97,6 +97,28 @@ describe('PropInstanceData gold file (example/BE_9F_C7_93.dat)', () => {
 	});
 });
 
+// The cell partition (muStartIndex / muCount) is editable, not derived: some
+// external tools — and the "add new instances" workflow — need to set it by
+// hand. The writer must therefore emit whatever the model carries, even values
+// that disagree with the running-sum a derive-on-write writer would compute.
+describe('PropInstanceData cell partition is written verbatim (editable)', () => {
+	const bytes = loadGold();
+
+	it('preserves a hand-edited muStartIndex / muCount instead of recomputing', () => {
+		const model = parsePropInstanceData(bytes);
+		// Poison cell[0] with a partition that is NOT the running sum a derive-on-
+		// write writer would produce (cell[0] always starts at 0 in a valid file).
+		const cells = model.cells.map((c) => ({ ...c }));
+		cells[0] = { ...cells[0], muStartIndex: 123, muCount: 7 };
+		const re = parsePropInstanceData(writePropInstanceData({ ...model, cells }));
+		expect(re.cells[0].muStartIndex).toBe(123);
+		expect(re.cells[0].muCount).toBe(7);
+		// Other cells are untouched and survive unchanged.
+		expect(re.cells[1].muStartIndex).toBe(model.cells[1].muStartIndex);
+		expect(re.cells[1].muCount).toBe(model.cells[1].muCount);
+	});
+});
+
 // ~40% of track units (172/427 in example/) ship an *empty* prop zone: no
 // props, no cells, with maInstances and maCells stored as null (0) rather than
 // the populated-layout 0x20. The parser must accept this all-zero shape instead

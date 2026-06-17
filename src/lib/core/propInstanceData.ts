@@ -31,8 +31,13 @@
 //    preserved verbatim on the model so the writer reproduces them exactly.
 //  - The exact original byte length is reproduced by capturing the trailing zero
 //    pad (end-of-cells → end-of-buffer) as _trailingPad and re-emitting it.
-//  - Per-cell muStartIndex / muCount are derived from the partition (cells own a
-//    contiguous run of instances) and recomputed on write.
+//  - Per-cell muStartIndex / muCount describe the partition (each cell owns the
+//    contiguous run [muStartIndex, muStartIndex+muCount) of the instance array).
+//    They are written VERBATIM, not recomputed: some external tools (and the
+//    "add new instances" workflow) need to set the partition by hand, so the
+//    editor exposes both fields and the writer trusts the model. For a
+//    well-formed file muStartIndex is the running sum of prior muCount, so an
+//    untouched resource still round-trips byte-exact.
 
 import { BinReader, BinWriter } from './binTools';
 import { PROP_TYPE_ID_MASK, PROP_TYPE_ID_BITS } from './propTypes';
@@ -71,8 +76,12 @@ export type PropInstance = {
 export type PropCell = {
 	muX: number;                        // PropCellId.muX — grid coord
 	muZ: number;                        // PropCellId.muZ — grid coord
-	muStartIndex: number;               // derived: running sum of prior muCount
-	muCount: number;                    // derived: instances owned by this cell
+	// First instance index this cell owns, and how many it owns. The partition
+	// is editable (see the round-trip note in the file header) — both are
+	// written verbatim. For a well-formed file muStartIndex equals the running
+	// sum of prior cells' muCount.
+	muStartIndex: number;               // u16
+	muCount: number;                    // u16
 	muNumberOfRespawnDifferent: number; // u16, ordered first within the cell
 	muNumberOfDontRespawn: number;      // u16, ordered after the respawn-different ones
 };
@@ -247,19 +256,17 @@ export function writePropInstanceData(model: ParsedPropInstanceData, littleEndia
 	}
 	if (w.offset !== instancesEnd) throw new Error(`PropInstanceData writer: cells offset mismatch ${w.offset} vs ${instancesEnd}`);
 
-	// --- Cells (12 bytes each) — muStartIndex / muCount derived from the
-	// partition: each cell consumes the next muCount instances contiguously. We
-	// recompute muStartIndex as the running sum of the cells' muCount so the
-	// partition stays self-consistent after edits.
-	let runningStart = 0;
+	// --- Cells (12 bytes each) — muStartIndex / muCount written VERBATIM so the
+	// editor can set the partition by hand (e.g. after adding instances). The
+	// caller owns keeping it self-consistent; for an untouched file the stored
+	// muStartIndex already equals the running sum, so this stays byte-exact.
 	for (const cell of cells) {
 		w.writeU16(cell.muX);
 		w.writeU16(cell.muZ);
-		w.writeU16(runningStart);
+		w.writeU16(cell.muStartIndex);
 		w.writeU16(cell.muCount);
 		w.writeU16(cell.muNumberOfRespawnDifferent);
 		w.writeU16(cell.muNumberOfDontRespawn);
-		runningStart += cell.muCount;
 	}
 	if (w.offset !== cellsEnd) throw new Error(`PropInstanceData writer: trailing-pad offset mismatch ${w.offset} vs ${cellsEnd}`);
 

@@ -22,6 +22,7 @@ import { useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { ParsedPropInstanceData, PropInstance } from '@/lib/core/propInstanceData';
 import { propTypeLabel } from '@/lib/core/propTypes';
+import { propCellId } from '@/lib/core/propCellGrid';
 import { useUpdateInstancedMesh } from '@/lib/three/scene/useUpdateInstancedMesh';
 import { useFlyCameraToTarget } from '@/lib/three/scene/useFlyCameraToTarget';
 import type { NodePath } from '@/lib/schema/walk';
@@ -118,6 +119,7 @@ export function SelectedPropDecor({
 }) {
 	const matrix = useMemo(() => propInstanceMatrix(inst, new THREE.Matrix4()), [inst]);
 	const [x, y, z] = propInstancePosition(inst);
+	const cell = propCellId(x, z);
 	return (
 		<>
 			<lineSegments geometry={outline ?? MARKER_EDGES_GEO} material={MARKER_EDGES_MAT} matrixAutoUpdate={false} matrix={matrix} />
@@ -130,7 +132,7 @@ export function SelectedPropDecor({
 					borderRadius: 4, fontSize: 10, whiteSpace: 'nowrap', fontFamily: 'monospace',
 					transform: 'translateY(-22px)',
 				}}>
-					#{index} {propTypeLabel(inst.typeId)} | id {inst.muInstanceID}
+					#{index} {propTypeLabel(inst.typeId)} | id {inst.muInstanceID} | cell ({cell.muX}, {cell.muZ})
 				</div>
 			</Html>
 		</>
