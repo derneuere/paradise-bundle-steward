@@ -13,6 +13,7 @@ import {
 	parsePropInstanceData,
 	writePropInstanceData,
 	PROP_INSTANCE_FLAGS,
+	PROP_ROT_AXIS,
 } from '../propInstanceData';
 import { PROP_ALT_TYPE_NONE, propTypeLabel } from '../propTypes';
 
@@ -94,6 +95,42 @@ describe('PropInstanceData gold file (example/BE_9F_C7_93.dat)', () => {
 		const write1 = writePropInstanceData(parsePropInstanceData(bytes));
 		const write2 = writePropInstanceData(parsePropInstanceData(write1));
 		expect(bytesEqual(write1, write2)).toBe(true);
+	});
+});
+
+// The on-disk rotation byte packs the spinning axis (top 2 bits) + speed
+// magnitude (low 6 bits); the model splits them and the writer recombines.
+describe('PropInstanceData rotation byte split (axis + speed)', () => {
+	const bytes = loadGold();
+
+	it('splits the gold file\'s rotation bytes into in-range axis + speed', () => {
+		const model = parsePropInstanceData(bytes);
+		for (const inst of model.instances) {
+			expect([0x00, 0x40, 0x80, 0xc0]).toContain(inst.mRotationAxis);
+			expect(inst.mn8RotSpeed).toBeGreaterThanOrEqual(0);
+			expect(inst.mn8RotSpeed).toBeLessThanOrEqual(0x3f);
+		}
+	});
+
+	it('recombines a hand-set axis + speed byte-exactly (Y axis, speed 5)', () => {
+		const model = parsePropInstanceData(bytes);
+		const instances = model.instances.map((i) => ({ ...i }));
+		instances[0] = { ...instances[0], mRotationAxis: PROP_ROT_AXIS.Y, mn8RotSpeed: 5 };
+		const re = parsePropInstanceData(writePropInstanceData({ ...model, instances }));
+		expect(re.instances[0].mRotationAxis).toBe(PROP_ROT_AXIS.Y);
+		expect(re.instances[0].mn8RotSpeed).toBe(5);
+	});
+
+	it('keeps the two halves independent across the full byte range (0xC0 | 0x3F)', () => {
+		const model = parsePropInstanceData(bytes);
+		const instances = model.instances.map((i) => ({ ...i }));
+		instances[0] = { ...instances[0], mRotationAxis: PROP_ROT_AXIS.NONE, mn8RotSpeed: 0x3f };
+		const re = parsePropInstanceData(writePropInstanceData({ ...model, instances }));
+		expect(re.instances[0].mRotationAxis).toBe(0xc0);
+		expect(re.instances[0].mn8RotSpeed).toBe(0x3f);
+		// Other instances' rotation bytes are untouched.
+		expect(re.instances[1].mRotationAxis).toBe(model.instances[1].mRotationAxis);
+		expect(re.instances[1].mn8RotSpeed).toBe(model.instances[1].mn8RotSpeed);
 	});
 });
 
