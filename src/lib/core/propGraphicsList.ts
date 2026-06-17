@@ -128,8 +128,7 @@ export function parsePropGraphicsList(raw: Uint8Array, littleEndian = true): Par
 	const muSizeInBytes = r.readU32();
 	const muZoneNumber = r.readU32();
 	const muNumberOfPropModels = r.readU32();
-	const muNumberOfPropPartModels = r.readU8();
-	r.readU8(); r.readU8(); r.readU8();          // 3 pad (muNumberOfPropPartModels occupies a 4-byte slot)
+	const muNumberOfPropPartModels = r.readU32(); // full u32 on disk; corpus max is 82 so the high 3 bytes are always 0
 	const mpaPropGraphics = r.readU32();
 	const mpaPropPartGraphics = r.readU32();
 	// 0x18..0x20 is zero pad up to where PropGraphics begins (mpaPropGraphics).
@@ -261,11 +260,8 @@ export function writePropGraphicsList(model: ParsedPropGraphicsList, littleEndia
 	const nProps = props.length;
 	const nParts = countParts(props);
 
-	// muNumberOfPropPartModels is a u8 on disk; refuse to silently truncate a
-	// model carrying >255 parts into a desynced count. Real fixtures top out at 82.
-	if (nParts > 0xff) {
-		throw new Error(`PropGraphicsList: ${nParts} parts exceeds the u8 muNumberOfPropPartModels field (max 255)`);
-	}
+	// muNumberOfPropPartModels is a full u32 on disk (real fixtures top out at 82),
+	// so no field-width cap is needed here.
 
 	// Parts are owned BY TYPE (the on-disk flat array is grouped by muTypeId), so
 	// two props sharing a type where one owns parts can't round-trip — on reload
@@ -293,8 +289,7 @@ export function writePropGraphicsList(model: ParsedPropGraphicsList, littleEndia
 	w.writeU32(structuralEnd);                   // muSizeInBytes — derived structural end
 	w.writeU32(model.muZoneNumber);
 	w.writeU32(nProps);
-	w.writeU8(nParts & 0xff);
-	w.writeU8(0); w.writeU8(0); w.writeU8(0);    // 3 pad
+	w.writeU32(nParts);                          // muNumberOfPropPartModels (u32)
 	w.writeU32(mpaPropGraphics);
 	w.writeU32(mpaPropPartGraphics);
 	while (w.offset < HEADER_SIZE) w.writeU8(0); // pad header up to 0x20
@@ -368,6 +363,6 @@ export function propGraphicsListImportTable(payload: Uint8Array, littleEndian = 
 	const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
 	const muSizeInBytes = dv.getUint32(0x00, littleEndian);
 	const nProps = dv.getUint32(0x08, littleEndian);
-	const nParts = dv.getUint8(0x0c);
+	const nParts = dv.getUint32(0x0c, littleEndian); // full u32
 	return { offset: align16(muSizeInBytes), count: nProps + nParts };
 }

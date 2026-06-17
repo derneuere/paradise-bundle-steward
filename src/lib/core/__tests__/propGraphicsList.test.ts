@@ -65,7 +65,7 @@ function buildRaw(zone: number, props: PropSpec[], parts: PartSpec[]): Uint8Arra
 	dv.setUint32(0x00, structuralEnd, true);
 	dv.setUint32(0x04, zone, true);
 	dv.setUint32(0x08, nProps, true);
-	dv.setUint8(0x0c, nParts & 0xff);
+	dv.setUint32(0x0c, nParts, true); // muNumberOfPropPartModels is a full u32 on disk
 	dv.setUint32(0x10, nProps > 0 ? 0x20 : 0, true);
 	dv.setUint32(0x14, nParts > 0 ? partsStart : 0, true);
 
@@ -407,15 +407,20 @@ describe('PropGraphicsList — guards', () => {
 		expect(re.props.map((p) => p.mpModelId)).toEqual([0x1n, 0x2n]);
 	});
 
-	it('throws rather than truncate when a model carries more than 255 parts', () => {
+	it('round-trips a model with more than 255 parts (muNumberOfPropPartModels is a u32, not a u8)', () => {
+		// The part-count field is a full u32 on disk — so a model with
+		// >255 parts must round-trip, not throw a u8-overflow.
 		const model: ParsedPropGraphicsList = {
 			muZoneNumber: 1,
 			props: [{
 				muTypeId: 1, mpModelId: 0n, _mpPartsRaw: 0,
-				parts: Array.from({ length: 300 }, (_, i) => ({ muPartId: i, mpModelId: 0n })),
+				parts: Array.from({ length: 300 }, (_, i) => ({ muPartId: i, mpModelId: BigInt(i) })),
 			}],
 		};
-		expect(() => writePropGraphicsList(model)).toThrow(/exceeds the u8/);
+		const re = parsePropGraphicsList(writePropGraphicsList(model));
+		expect(re.props[0].parts.length).toBe(300);
+		expect(re.props[0].parts[299].muPartId).toBe(299);
+		expect(re.props[0].parts[299].mpModelId).toBe(299n);
 	});
 });
 

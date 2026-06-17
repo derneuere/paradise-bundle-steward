@@ -63,7 +63,7 @@ PC LE only**. Console (BE) and 64-bit are out of scope.
 | 0x00 | 4 | u32 | `muSizeInBytes` | the **structural end**: part-array end when parts exist (may be unaligned), `align16(prop-array end)` when only props, `0x20` when empty. **Derived** — recomputed on write; the parser asserts the stored value matches (proven across all 428 fixtures). |
 | 0x04 | 4 | u32 | `muZoneNumber` | PVS zone / track-unit id (editable) |
 | 0x08 | 4 | u32 | `muNumberOfPropModels` | count of stored `PropGraphics` records = `props.length` (recomputed on write) |
-| 0x0C | 1 | u8 | `muNumberOfPropPartModels` | count of stored `PropPartGraphics` records = `parts.length`. **u8 in a 4-byte slot** (u8 + 3 zero pad). Recomputed on write. |
+| 0x0C | 4 | u32 | `muNumberOfPropPartModels` | count of stored `PropPartGraphics` records = total parts across all props. **Full u32** (an earlier reading as a u8+3-pad was wrong; byte-identical for the corpus since the max is 82, so the high 3 bytes are 0). Recomputed on write. |
 | 0x0D | 3 | — | padding | zero |
 | 0x10 | 4 | `PropGraphics*` | `mpaPropGraphics` | abs offset to prop array; **always `0x20`** when populated, `0` when empty. **Recomputed.** |
 | 0x14 | 4 | `PropPartGraphics*` | `mpaPropPartGraphics` | abs offset to part array; **always `align16(0x20 + nProps*0x0C)`** when parts exist, `0` otherwise. **Recomputed.** |
@@ -259,7 +259,7 @@ Byte-exact (`byteRoundTrip`) is achievable — the layout is rigid. Writer:
 
 1. **Header (32 bytes):** `muSizeInBytes` = derived structural end;
    `muZoneNumber`; `muNumberOfPropModels = props.length`; `muNumberOfPropPartModels
-   = parts.length & 0xff` (u8) + 3 pad; `mpaPropGraphics = props.length ? 0x20 : 0`;
+   = total parts` (u32); `mpaPropGraphics = props.length ? 0x20 : 0`;
    `mpaPropPartGraphics = parts.length ? align16(0x20 + nProps*0x0C) : 0`; zero-pad
    up to `0x20`.
 2. **PropGraphics:** for each, `muTypeId`; `mpPropModel = 0` (the id is emitted into
