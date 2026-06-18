@@ -23,6 +23,7 @@ import { parseBundle } from '../../core/bundle';
 import { extractResourceRaw, resourceCtxFromBundle } from '../../core/registry';
 import {
 	parsePropInstanceData,
+	writePropInstanceData,
 	type ParsedPropInstanceData,
 } from '../../core/propInstanceData';
 import { PROP_ALT_TYPE_NONE } from '../../core/propTypes';
@@ -68,14 +69,24 @@ function loadBundleModel(fixturePath: string): ParsedPropInstanceData {
 	return parsePropInstanceData(raw, ctx.littleEndian);
 }
 
-const goldModel = loadRawModel(GOLD_RAW);
-const bundleModel = loadBundleModel(BUNDLE_FIXTURE);
+// Some checkouts (e.g. a worktree with only tracked fixtures) lack the binary
+// example/ files. Skip the fixture-backed coverage suites there instead of
+// throwing at import and taking the whole test file down — the schema-only and
+// constructed-model checks below still run everywhere.
+const haveGold = fs.existsSync(GOLD_RAW);
+const haveBundle = fs.existsSync(BUNDLE_FIXTURE);
 
-// Run the same coverage checks against each fixture.
-for (const [label, model] of [
+const goldModel = haveGold ? loadRawModel(GOLD_RAW) : null;
+const bundleModel = haveBundle ? loadBundleModel(BUNDLE_FIXTURE) : null;
+
+// Run the same coverage checks against each fixture that is present.
+const fixtures: [string, ParsedPropInstanceData | null][] = [
 	['raw gold BE_9F_C7_93.dat', goldModel],
 	['bundle TRK_UNIT9_GR.BNDL', bundleModel],
-] as const) {
+];
+for (const [label, model] of fixtures.filter(
+	(entry): entry is [string, ParsedPropInstanceData] => entry[1] != null,
+)) {
 	describe(`propInstanceDataResourceSchema coverage — ${label}`, () => {
 		it('fixture parses with non-trivial content', () => {
 			expect(model.instances.length).toBeGreaterThan(0);
@@ -217,10 +228,12 @@ describe('propInstanceData path resolution', () => {
 // Tree labels
 // ---------------------------------------------------------------------------
 
-describe('propInstanceData tree labels', () => {
+describe.skipIf(goldModel == null)('propInstanceData tree labels', () => {
+	const gold = goldModel!; // non-null inside this block (skipped when the fixture is absent)
+
 	it('instance label includes the prop name, instance id, and (x, z)', () => {
 		// instances[10] in the gold file is billboard_overdrive_YELLOW, id 473825.
-		const inst = goldModel.instances[10];
+		const inst = gold.instances[10];
 		const field = propInstanceDataResourceSchema.registry.ParsedPropInstanceData.fields.instances;
 		if (field.kind !== 'list') throw new Error('expected list');
 		const labelFn = field.itemLabel as (v: unknown, i: number) => string;
@@ -233,7 +246,7 @@ describe('propInstanceData tree labels', () => {
 
 	it('cell label includes grid coords, the index range, and R/D counts', () => {
 		// cells[2] in the gold file: X=70 Z=37 start=10 count=51 R=1 D=4.
-		const cell = goldModel.cells[2];
+		const cell = gold.cells[2];
 		const field = propInstanceDataResourceSchema.registry.ParsedPropInstanceData.fields.cells;
 		if (field.kind !== 'list') throw new Error('expected list');
 		const labelFn = field.itemLabel as (v: unknown, i: number) => string;
@@ -242,14 +255,14 @@ describe('propInstanceData tree labels', () => {
 	});
 
 	it('PropInstance.label and PropCell.label callbacks return strings', () => {
-		const ctx = { root: goldModel, resource: propInstanceDataResourceSchema };
+		const ctx = { root: gold, resource: propInstanceDataResourceSchema };
 		const instLabel = propInstanceDataResourceSchema.registry.PropInstance.label!(
-			goldModel.instances[0] as unknown as Record<string, unknown>,
+			gold.instances[0] as unknown as Record<string, unknown>,
 			0,
 			ctx,
 		);
 		const cellLbl = propInstanceDataResourceSchema.registry.PropCell.label!(
-			goldModel.cells[0] as unknown as Record<string, unknown>,
+			gold.cells[0] as unknown as Record<string, unknown>,
 			0,
 			ctx,
 		);
@@ -264,20 +277,77 @@ describe('propInstanceData tree labels', () => {
 // Sanity: representative reads via getAtPath
 // ---------------------------------------------------------------------------
 
-describe('propInstanceData getAtPath', () => {
+describe.skipIf(goldModel == null)('propInstanceData getAtPath', () => {
+	const gold = goldModel!; // non-null inside this block (skipped when the fixture is absent)
+
 	it('reads an instance world position component as a number', () => {
-		const x = getAtPath(goldModel, ['instances', 0, 'mWorldTransform', 12]);
+		const x = getAtPath(gold, ['instances', 0, 'mWorldTransform', 12]);
 		expect(typeof x).toBe('number');
 		expect(Number.isFinite(x)).toBe(true);
 	});
 
 	it('reads a cell grid coord as a number', () => {
-		const muX = getAtPath(goldModel, ['cells', 0, 'muX']);
+		const muX = getAtPath(gold, ['cells', 0, 'muX']);
 		expect(typeof muX).toBe('number');
 	});
 
 	it('reads instances[0].typeId as a number (enum storage)', () => {
-		const typeId = getAtPath(goldModel, ['instances', 0, 'typeId']);
+		const typeId = getAtPath(gold, ['instances', 0, 'typeId']);
 		expect(typeof typeId).toBe('number');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Header fields muSizeInBytes / muNumberOfInstances are MANUALLY editable.
+//
+// They cannot be auto-recomputed here (muSizeInBytes' formula is unverified and
+// muNumberOfInstances needs a join with the PropGraphicsList resource), so the
+// schema exposes them for hand-fixing rather than flagging them read-only. These
+// checks are fixture-independent: they read the schema directly and round-trip a
+// constructed model, so they run on every checkout.
+// ---------------------------------------------------------------------------
+
+describe('propInstanceData editable header fields', () => {
+	const root = propInstanceDataResourceSchema.registry.ParsedPropInstanceData;
+
+	it('muSizeInBytes field metadata is not read-only', () => {
+		const meta = root.fieldMetadata?.muSizeInBytes;
+		expect(meta).toBeDefined();
+		expect(meta?.readOnly).toBeFalsy();
+		// A warning is surfaced so users know the value is not auto-maintained.
+		expect(meta?.warning).toBeTruthy();
+	});
+
+	it('muNumberOfInstances field metadata is not read-only', () => {
+		const meta = root.fieldMetadata?.muNumberOfInstances;
+		expect(meta).toBeDefined();
+		expect(meta?.readOnly).toBeFalsy();
+		expect(meta?.warning).toBeTruthy();
+	});
+
+	it('manual edits to both header fields survive a write → parse round-trip', () => {
+		// A minimal empty-zone model (no instances/cells) — enough to exercise the
+		// header path without depending on a binary fixture.
+		const model: ParsedPropInstanceData = {
+			muZoneId: 206,
+			muSizeInBytes: 100,
+			muNumberOfInstances: 7,
+			instances: [],
+			cells: [],
+			_trailingPad: new Uint8Array(0),
+		};
+
+		// Set the two header fields to new, distinct values by hand.
+		const edited: ParsedPropInstanceData = {
+			...model,
+			muSizeInBytes: 4242,
+			muNumberOfInstances: 1234,
+		};
+
+		const reparsed = parsePropInstanceData(writePropInstanceData(edited));
+		expect(reparsed.muSizeInBytes).toBe(4242);
+		expect(reparsed.muNumberOfInstances).toBe(1234);
+		// muZoneId is unaffected, confirming the header round-trips intact.
+		expect(reparsed.muZoneId).toBe(206);
 	});
 });

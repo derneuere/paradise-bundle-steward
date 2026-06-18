@@ -48,6 +48,15 @@ import type {
 import type { NodePath } from '@/lib/schema/walk';
 import { isWorldViewportFamilyKey } from './WorldViewportComposition.helpers';
 
+// Natural-numeric name collator so `TRK_COL_2` sorts before `TRK_COL_10`
+// instead of lexicographically. Mirrors the `NATURAL_NAME` collator the
+// multi-instance handlers use (polygonSoupList.ts / idList.ts) so the tree's
+// instance order matches the order those handlers' pickers would produce.
+const NAME_COLLATOR = new Intl.Collator(undefined, {
+	numeric: true,
+	sensitivity: 'base',
+});
+
 // ---------------------------------------------------------------------------
 // Visibility predicates
 // ---------------------------------------------------------------------------
@@ -596,7 +605,21 @@ export function buildWorkspaceFlat({
 
 			if (isMulti) {
 				const pickerCtxs = buildInstancePickerCtxs(bundle, handler, entry.count);
-				for (let i = 0; i < entry.count; i++) {
+				// Display rows in natural-name order (TRK_COL_0 → TRK_COL_428),
+				// matching the old Resources page, instead of raw disk order.
+				// Only the ITERATION order changes: the loop variable `i` stays
+				// the TRUE disk index everywhere (key, `index`, instances[i],
+				// selection match) so selection, editing, and on-disk write order
+				// remain byte-identical — we reorder what the user sees, never the
+				// resource's identity.
+				const order = [...Array(entry.count).keys()].sort((a, b) => {
+					const cmp = NAME_COLLATOR.compare(
+						pickerCtxs[a].name,
+						pickerCtxs[b].name,
+					);
+					return cmp !== 0 ? cmp : a - b;
+				});
+				for (const i of order) {
 					const iKey = instanceKey(bundle.id, entry.key, i);
 					const instanceSelected =
 						(level === 'instance' || level === 'schema') &&

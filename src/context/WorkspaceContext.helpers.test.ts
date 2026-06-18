@@ -9,6 +9,7 @@ import {
 	ancestorKeys,
 	appendBundle,
 	applyResourceWriteToBundle,
+	buildSingleInstanceOverrides,
 	classifyLoad,
 	clearBundleDirty,
 	dropHistoryForBundle,
@@ -245,6 +246,65 @@ describe('clearBundleDirty', () => {
 		// for reverting edits.
 		expect(cleaned.parsedResourcesAll.get('streetData')).toEqual([{ v: 1 }]);
 		expect(cleaned.parsedResources.get('streetData')).toEqual({ v: 1 });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Single-instance export override — the multi-instance save-corruption guard.
+//
+// The bundle writer broadcasts a typeId-keyed override to EVERY resource of
+// that type, so it is only safe for types with exactly one instance. A bundle
+// like WORLDCOL.BIN holds hundreds of one type (428 polygonSoupList); a
+// typeId override there would overwrite every sibling with index 0's model.
+// ---------------------------------------------------------------------------
+
+describe('buildSingleInstanceOverrides', () => {
+	it('includes a single-instance type that is dirty at :0', () => {
+		const parsedResources = new Map<string, unknown>([['streetData', { v: 1 }]]);
+		const parsedResourcesAll = new Map<string, (unknown | null)[]>([
+			['streetData', [{ v: 1 }]],
+		]);
+		const dirty = new Set(['streetData:0']);
+		const out = buildSingleInstanceOverrides(parsedResources, parsedResourcesAll, dirty);
+		expect(out.get('streetData')).toEqual({ v: 1 });
+		expect(out.size).toBe(1);
+	});
+
+	it('EXCLUDES a multi-instance type even when index 0 is dirty (corruption guard)', () => {
+		// Regression guard: before the fix this entry was emitted, and the
+		// writer broadcast index 0's model onto all 427 other polygonSoupList
+		// siblings. With >1 instances, the byResourceId path must carry the
+		// edit instead — never the typeId-keyed override.
+		const parsedResources = new Map<string, unknown>([['polygonSoupList', { soup: 0 }]]);
+		const parsedResourcesAll = new Map<string, (unknown | null)[]>([
+			['polygonSoupList', [{ soup: 0 }, { soup: 1 }, { soup: 2 }]],
+		]);
+		const dirty = new Set(['polygonSoupList:0']);
+		const out = buildSingleInstanceOverrides(parsedResources, parsedResourcesAll, dirty);
+		expect(out.has('polygonSoupList')).toBe(false);
+		expect(out.size).toBe(0);
+	});
+
+	it('excludes a single-instance type that is not dirty', () => {
+		const parsedResources = new Map<string, unknown>([['streetData', { v: 1 }]]);
+		const parsedResourcesAll = new Map<string, (unknown | null)[]>([
+			['streetData', [{ v: 1 }]],
+		]);
+		const out = buildSingleInstanceOverrides(parsedResources, parsedResourcesAll, new Set());
+		expect(out.size).toBe(0);
+	});
+
+	it('treats a missing parsedResourcesAll entry as single-instance (count defaults to 1)', () => {
+		// Defensive: parsedResources holds the model but parsedResourcesAll has
+		// no list. A single-instance bundle is the safe default, matching the
+		// pre-fix behaviour for the common one-resource-per-type case.
+		const parsedResources = new Map<string, unknown>([['streetData', { v: 1 }]]);
+		const out = buildSingleInstanceOverrides(
+			parsedResources,
+			new Map(),
+			new Set(['streetData:0']),
+		);
+		expect(out.get('streetData')).toEqual({ v: 1 });
 	});
 });
 
