@@ -30,7 +30,12 @@ import type { ParsedDxbc } from './dxbc';
 // preview tonemap; the others scale their cb0 constant group off its seeded base.
 // ---------------------------------------------------------------------------
 export type EngineKnobs = { exposure: number; keyLight: number; ambient: number; fog: number };
-export const DEFAULT_ENGINE_KNOBS: EngineKnobs = { exposure: 1, keyLight: 1, ambient: 1, fog: 1 };
+// Default exposure < 1: the translated vehicle shaders output HDR for the game's
+// own tonemap, and with the approximated (white) key light the relatively-dark
+// vehicle albedo lands high enough that the Reinhard preview tonemap saturates
+// toward white — flattening the diffuse texture. ~0.5 keeps the HDR in range so
+// the texture detail reads; the exposure slider fine-tunes from there.
+export const DEFAULT_ENGINE_KNOBS: EngineKnobs = { exposure: 0.5, keyLight: 1, ambient: 1, fog: 1 };
 export const engineKnobs: EngineKnobs = { ...DEFAULT_ENGINE_KNOBS };
 
 /** Which knob group (if any) scales a given engine constant by name. */
