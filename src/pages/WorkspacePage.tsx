@@ -60,6 +60,7 @@ import {
 } from '@/components/workspace/WorldViewportComposition';
 import { WorkspaceHierarchy } from '@/components/workspace/WorkspaceHierarchy';
 import { RenderableDecodedProvider } from '@/components/schema-editor/viewports/renderableDecodedContext';
+import { TextureDecodedProvider } from '@/components/schema-editor/viewports/TextureDecodedProvider';
 import {
 	PSLBulkProvider,
 	useWorkspacePSLBulk,
@@ -267,9 +268,9 @@ function CenterViewport() {
 	if (!profile) {
 		return (
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
-				No viewport available for {selection.resourceKey} yet.
+				No viewport for {selection.resourceKey}.
 				<br />
-				Use the legacy per-resource page to edit this type.
+				Edit its fields in the Inspector panel →
 			</div>
 		);
 	}
@@ -929,6 +930,7 @@ const WorkspacePage = () => {
 			    it decodes the selected bundle's renderables and sources textures
 			    + shaders from every other loaded bundle. */}
 			<RenderableDecodedProvider>
+			<TextureDecodedProvider>
 			<ResizablePanelGroup direction="horizontal">
 				<ResizablePanel id="ws-tree" order={1} defaultSize={20} minSize={14} className="bg-background">
 					<div className="h-full flex flex-col">
@@ -987,6 +989,7 @@ const WorkspacePage = () => {
 					</div>
 				</ResizablePanel>
 			</ResizablePanelGroup>
+			</TextureDecodedProvider>
 			</RenderableDecodedProvider>
 		</div>
 		</WorkspaceBulkWrapper>

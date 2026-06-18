@@ -15,6 +15,8 @@
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { aemsBankProfile } from './profiles/aemsBank';
+import { attribSysVaultProfile } from './profiles/attribSysVault';
+import { deformationSpecProfile } from './profiles/deformationSpec';
 import { aptDataProfile } from './profiles/aptData';
 import { challengeListProfile } from './profiles/challengeList';
 import { csisProfile } from './profiles/csis';
@@ -337,6 +339,16 @@ const ENTRIES: RegistryEntry[] = [
 		key: 'texture',
 		profiles: [textureProfile],
 	},
+	{
+		typeId: 0x1c,
+		key: 'attribSysVault',
+		profiles: [attribSysVaultProfile],
+	},
+	{
+		typeId: 0x1001c,
+		key: 'deformationSpec',
+		profiles: [deformationSpecProfile],
+	},
 ];
 
 const byTypeId = new Map<number, RegistryEntry>();
@@ -374,6 +386,14 @@ export function pickProfile(typeId: number, model: unknown): EditorProfile | und
 export function pickProfileByKey(key: string, model: unknown): EditorProfile | undefined {
 	const entry = byKey.get(key);
 	return entry ? pickProfileFromList(entry.profiles, model) : undefined;
+}
+
+/** True when a handler key has at least one EditorProfile registered — i.e.
+ *  the resource has a dedicated editor surface in the Workspace. Drives the
+ *  UI-facing `editor` capability flag (resources without a profile but with a
+ *  bespoke editor opt in via the handler's `capabilityOverrides.editor`). */
+export function hasEditorProfile(key: string): boolean {
+	return byKey.has(key);
 }
 
 /** Convenience for the Workspace tree-row label: surfaces a
