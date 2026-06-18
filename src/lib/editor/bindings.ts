@@ -14,6 +14,7 @@
 
 import type { ProfileRenderBinding } from './types';
 import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
+import { attribSysVaultExtensions } from '@/components/schema-editor/extensions/attribSysVaultExtensions';
 import { challengeListExtensions } from '@/components/schema-editor/extensions/challengeListExtensions';
 import { polygonSoupListExtensions } from '@/components/schema-editor/extensions/collisionTagExtension';
 import { renderableExtensions } from '@/components/schema-editor/extensions/renderableExtensions';
@@ -108,6 +109,9 @@ const BINDINGS: Record<string, Record<string, ProfileRenderBinding<unknown>>> = 
 	challengeList: { default: { extensions: challengeListExtensions } },
 	vehicleList: { default: { extensions: vehicleListExtensions } },
 	renderable: { default: { extensions: renderableExtensions } },
+	// AttribSys Vault's per-attribute typed `fields` are a custom field; the
+	// extension resolves the right per-class schema by classHash.
+	attribSysVault: { default: { extensions: attribSysVaultExtensions } },
 	// playerCarColours / iceTakeDictionary / texture have no overlay or
 	// extensions; the schema editor's default form is enough.
 };

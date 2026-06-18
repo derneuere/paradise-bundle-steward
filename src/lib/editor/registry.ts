@@ -15,6 +15,8 @@
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { aemsBankProfile } from './profiles/aemsBank';
+import { attribSysVaultProfile } from './profiles/attribSysVault';
+import { deformationSpecProfile } from './profiles/deformationSpec';
 import { aptDataProfile } from './profiles/aptData';
 import { challengeListProfile } from './profiles/challengeList';
 import { csisProfile } from './profiles/csis';
@@ -336,6 +338,16 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x0,
 		key: 'texture',
 		profiles: [textureProfile],
+	},
+	{
+		typeId: 0x1c,
+		key: 'attribSysVault',
+		profiles: [attribSysVaultProfile],
+	},
+	{
+		typeId: 0x1001c,
+		key: 'deformationSpec',
+		profiles: [deformationSpecProfile],
 	},
 ];
 

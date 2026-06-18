@@ -61,7 +61,6 @@ import {
 import { WorkspaceHierarchy } from '@/components/workspace/WorkspaceHierarchy';
 import { RenderableDecodedProvider } from '@/components/schema-editor/viewports/renderableDecodedContext';
 import { TextureDecodedProvider } from '@/components/schema-editor/viewports/TextureDecodedProvider';
-import { BespokeResourceEditor, hasBespokeEditor } from '@/components/workspace/BespokeResourceEditor';
 import {
 	PSLBulkProvider,
 	useWorkspacePSLBulk,
@@ -227,21 +226,6 @@ function CenterViewport() {
 		return list?.[selection.index] ?? undefined;
 	}, [selection, selectedBundle]);
 
-	// Schema-less resources (deformationSpec, attribSysVault) have a bespoke
-	// hand-written editor instead of a 3D scene or schema form. They render in
-	// the main pane — the widest slot — same as texture/shader/renderable's
-	// bespoke surfaces. They're never world-family, so this short-circuits
-	// before the composition check.
-	if (selection?.resourceKey && hasBespokeEditor(selection.resourceKey)) {
-		return (
-			<ViewportErrorBoundary
-				resetKey={`${selection.bundleId}/${selection.resourceKey}/${selection.index}`}
-			>
-				<BespokeResourceEditor resourceKey={selection.resourceKey} />
-			</ViewportErrorBoundary>
-		);
-	}
-
 	// World-viewport-family resources (AI sections, street/traffic/trigger
 	// data, zone list, polygon soups) compose into a single shared
 	// <WorldViewport> across every loaded Bundle (issue #18). Bundle and
@@ -394,18 +378,6 @@ function RightInspector() {
 					})
 				}
 			/>
-		);
-	}
-
-	// Schema-less resources (deformationSpec, attribSysVault) have a bespoke
-	// editor that owns the whole main pane — there's no separate schema form
-	// for the inspector, so it just points the user at the main panel.
-	if (selection.resourceKey && hasBespokeEditor(selection.resourceKey)) {
-		const name = getHandlerByKey(selection.resourceKey)?.name ?? selection.resourceKey;
-		return wrapWithBulk(
-			<div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
-				{name} is edited in the main panel.
-			</div>,
 		);
 	}
 

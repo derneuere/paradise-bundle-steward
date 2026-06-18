@@ -12,6 +12,8 @@ import type { ResourceSchema } from '../types';
 import { aemsBankResourceSchema } from './aemsBank';
 import { aiSectionsResourceSchema } from './aiSections';
 import { aptDataResourceSchema } from './aptData';
+import { attribSysVaultResourceSchema } from './attribSysVault';
+import { deformationSpecResourceSchema } from './deformationSpec';
 import { challengeListResourceSchema } from './challengeList';
 import { csisResourceSchema } from './csis';
 import { colourCubeResourceSchema } from './colourCube';
@@ -61,6 +63,8 @@ const RESOURCE_SCHEMAS: Record<string, ResourceSchema> = {
 	aiSections: aiSectionsResourceSchema,
 	aptData: aptDataResourceSchema,
 	aemsBank: aemsBankResourceSchema,
+	attribSysVault: attribSysVaultResourceSchema,
+	deformationSpec: deformationSpecResourceSchema,
 	challengeList: challengeListResourceSchema,
 	csis: csisResourceSchema,
 	colourCube: colourCubeResourceSchema,

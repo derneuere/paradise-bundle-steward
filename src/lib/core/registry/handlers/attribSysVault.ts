@@ -15,9 +15,6 @@ export const attribSysVaultHandler: ResourceHandler<ParsedAttribSys> = {
 	description: 'AttribSys object database vault (vehicle physics, camera, engine attributes)',
 	category: 'Data',
 	caps: { read: true, write: true },
-	// Edited in the Workspace via a bespoke (schema-less) editor, so opt the
-	// `editor` capability in explicitly — it has no EditorProfile to derive it.
-	capabilityOverrides: { editor: true },
 
 	parseRaw(raw, ctx) {
 		return parseAttribSys(raw, ctx.littleEndian);
