@@ -387,6 +387,16 @@ export function useRenderableDecoded(): RenderableDecodedValue | null {
 }
 
 export function RenderableDecodedProvider({ children }: { children: React.ReactNode }) {
+	// Idempotent: when a parent already provides the decoded context (the
+	// legacy RenderablePage wraps the whole page in one), pass through so the
+	// ~100-renderable decode pass doesn't run twice. The workspace mounts this
+	// provider in ViewportPane where there's no parent, so it decodes there.
+	const parent = useContext(RenderableDecodedContext);
+	if (parent) return <>{children}</>;
+	return <RenderableDecodedProviderInner>{children}</RenderableDecodedProviderInner>;
+}
+
+function RenderableDecodedProviderInner({ children }: { children: React.ReactNode }) {
 	const activeBundle = useFirstLoadedBundle();
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;

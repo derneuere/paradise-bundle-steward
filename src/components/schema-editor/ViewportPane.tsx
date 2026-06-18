@@ -11,6 +11,8 @@ import { ViewportErrorBoundary } from '@/components/common/ViewportErrorBoundary
 import { useSchemaEditor } from './context';
 import type { NodePath } from '@/lib/schema/walk';
 import { RenderableViewport } from './viewports/RenderableViewport';
+import { RenderableDecodedProvider } from './viewports/renderableDecodedContext';
+import { ShaderViewport } from './viewports/ShaderViewport';
 import { TextureViewport } from './viewports/TextureViewport';
 import { WorldViewport } from './viewports/WorldViewport';
 import type { ResourceSchema } from '@/lib/schema/types';
@@ -58,9 +60,23 @@ function ViewportPaneInner({
 		// Renderable's 3D preview is the main user-facing value of the
 		// resource — a full three.js scene that decodes every 0xC record in
 		// the bundle. It pulls its own state from useWorkspace + the
-		// RenderableDecodedProvider supplied by RenderablePage, and wires
-		// click events back to the schema editor via useSchemaEditor.
-		return <RenderableViewport />;
+		// RenderableDecodedProvider, and wires click events back to the schema
+		// editor via useSchemaEditor. The provider is mounted here so the
+		// viewport works in the workspace (the legacy RenderablePage mounts its
+		// own; the provider is idempotent, so the page's isn't double-decoded).
+		return (
+			<RenderableDecodedProvider>
+				<RenderableViewport />
+			</RenderableDecodedProvider>
+		);
+	}
+	if (resource.key === 'shader') {
+		// Shader's 3D preview translates its DXBC programs to GLSL and renders
+		// them on a test mesh. Self-contained (reads the selected Shader from
+		// the workspace + resolves its program-buffer imports), so it mounts
+		// directly like the renderable viewport rather than via a WorldViewport
+		// overlay.
+		return <ShaderViewport />;
 	}
 	if (resource.key === 'texture') {
 		// 2D preview: the schema's root is just the ParsedTextureHeader, but
