@@ -707,6 +707,58 @@ describe('buildWorkspaceFlat — multi-instance Instance row labels (issue #29)'
 });
 
 // ---------------------------------------------------------------------------
+// Multi-instance Instance rows sorted by natural name (not disk order)
+// ---------------------------------------------------------------------------
+
+describe('buildWorkspaceFlat — natural-name instance ordering', () => {
+	it('emits Instance rows in natural-name order while preserving disk index', () => {
+		// Disk order is deliberately out of natural order: TRK_COL_10 at slot 0,
+		// TRK_COL_2 at slot 1, TRK_COL_1 at slot 2. The tree must DISPLAY them in
+		// natural-numeric name order (1, 2, 10) — matching the old Resources page —
+		// while each node's `index` keeps pointing at the original disk slot so
+		// selection / editing / write order stay byte-identical.
+		const PSL_TYPE_ID = 0x43;
+		const bundles = [
+			makeBundle(
+				'WORLDCOL.BIN',
+				{ polygonSoupList: [{ soups: [] }, { soups: [] }, { soups: [] }] },
+				{
+					uiResources: {
+						polygonSoupList: [
+							{ id: '0xA', name: 'TRK_COL_10', typeId: PSL_TYPE_ID },
+							{ id: '0xB', name: 'TRK_COL_2', typeId: PSL_TYPE_ID },
+							{ id: '0xC', name: 'TRK_COL_1', typeId: PSL_TYPE_ID },
+						],
+					},
+				},
+			),
+		];
+		const flat = buildWorkspaceFlat({
+			bundles,
+			expanded: new Set([
+				bundleKey('WORLDCOL.BIN'),
+				resourceTypeKey('WORLDCOL.BIN', 'polygonSoupList'),
+			]),
+			selection: null,
+		});
+		const instances = flat.filter(
+			(n): n is InstanceFlatNode => n.kind === 'instance',
+		);
+		// Rows are sorted by natural name.
+		expect(instances.map((n) => n.label)).toEqual([
+			'TRK_COL_1',
+			'TRK_COL_2',
+			'TRK_COL_10',
+		]);
+		// Each node's `index` still points at its original disk slot.
+		const byLabel = new Map(instances.map((n) => [n.label, n.index]));
+		expect(byLabel.get('TRK_COL_1')).toBe(2);
+		expect(byLabel.get('TRK_COL_2')).toBe(1);
+		expect(byLabel.get('TRK_COL_10')).toBe(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Visibility-icon rules per acceptance criterion
 // ---------------------------------------------------------------------------
 
