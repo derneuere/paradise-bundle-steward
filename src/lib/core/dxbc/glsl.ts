@@ -637,11 +637,23 @@ function emitHeader(ctx: EmitCtx, p: ParsedDxbc, decoded: DecodedShader): string
 				lines.push(`#define ${dxName} ${builtin}`);
 			} else {
 				const comps = maskBits(el.mask);
-				const zero = comps === 1 ? '0.0'
-					: comps === 2 ? 'vec2(0.0)'
-					: comps === 3 ? 'vec3(0.0)'
-					: 'vec4(0.0)';
-				lines.push(`#define ${dxName} ${zero}`);
+				// BLENDWEIGHT is the skin-blend weight vector. Stubbing it to zero
+				// makes a skinned vertex collapse to the origin (pos = boneMatrix *
+				// pos * 0). With the bone palette seeded to identity at rest (see
+				// shaderEngineConstants), defaulting the dominant weight to 1 makes
+				// the vertex resolve to its rest position instead — so skinned
+				// vehicle meshes render at rest pose rather than vanishing.
+				const isBlendWeight = /^BLENDWEIGHT$/i.test(el.semanticName);
+				const stub = isBlendWeight
+					? (comps === 1 ? '1.0'
+						: comps === 2 ? 'vec2(1.0, 0.0)'
+						: comps === 3 ? 'vec3(1.0, 0.0, 0.0)'
+						: 'vec4(1.0, 0.0, 0.0, 0.0)')
+					: (comps === 1 ? '0.0'
+						: comps === 2 ? 'vec2(0.0)'
+						: comps === 3 ? 'vec3(0.0)'
+						: 'vec4(0.0)');
+				lines.push(`#define ${dxName} ${stub}`);
 			}
 		}
 	}

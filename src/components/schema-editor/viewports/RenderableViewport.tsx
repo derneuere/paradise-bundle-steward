@@ -46,6 +46,7 @@ import { translateDxbc, type TranslatedShader } from '@/lib/core/dxbc';
 import { buildTextureCatalog, type TextureCatalogEntry } from '@/lib/core/textureCatalog';
 import { buildMaterialIndex, pickBestMaterial } from '@/lib/core/materialBinding';
 import { buildTranslatedShaderMaterial, type TranslatedMaterial } from '@/lib/core/translatedShaderMaterial';
+import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout } from '@/lib/core/shaderEngineConstants';
 import { decodeTexture } from '@/lib/core/texture';
 import { parseMaterialData } from '@/lib/core/material';
 import {
@@ -227,23 +228,10 @@ function applyWrapping(
 // guesses below.
 // =============================================================================
 
-const TRANSLATED_HEURISTIC_DEFAULTS: Record<string, [number, number, number, number]> = {
-	g_PerVehicleFog: [0, 0, 0, 1],
-	FogColourPlusWhiteLevel: [0.55, 0.70, 0.85, 1],
-	KeyLightColour: [1, 1, 1, 1],
-	KeyLightClampedColour: [1, 1, 1, 1],
-	KeyLightSpecularColour: [1, 1, 1, 1],
-	KeyLightDirection: [0.4, -0.7, 0.6, 0],
-	SkyReflectionColour: [0.55, 0.75, 0.95, 1],
-	ShadowMap_Constants: [1, 1, 1, 1],
-	ShadowMap_Constants2: [1, 1, 1, 1],
-	ShadowMap_Constants3: [1, 1, 1, 1],
-	ScattCoeffs: [0.4, 0.4, 0.5, 1],
-	g_damageConstants: [0, 0, 0, 1],
-	sampleCoverage: [1, 1, 1, 1],
-	g_paintColour: [0.6, 0.1, 0.1, 1],
-	g_pearlescentColour: [0.2, 0.2, 0.3, 1],
-};
+// Engine-supplied cb0 defaults are shared in @/lib/core/shaderEngineConstants
+// (ENGINE_CONSTANT_DEFAULTS) so the viewport, ShaderPage and the harness stay
+// in sync.
+const TRANSLATED_HEURISTIC_DEFAULTS = ENGINE_CONSTANT_DEFAULTS;
 
 type Source = { source: string; bundle: ParsedBundle; arrayBuffer: ArrayBuffer; debug: any[] };
 
@@ -319,30 +307,9 @@ function translateShaderById(shaderId: bigint, sources: Source[]): { vs: Transla
 	return null;
 }
 
-/** Pattern-match the cb0 layout from a translated VS, falling back to the
- *  RDEF variable names when available. Identical to ShaderPage's
- *  `inferCbLayout` — duplicated here so the renderable viewport doesn't
- *  pull React state from the shader-page module. */
-function inferCbLayoutForRV(vsSrc: string, parsed: any) {
-	const slotByName = (name: string): number | null => {
-		if (!parsed) return null;
-		for (const cb of parsed.reflection.constantBuffers) {
-			for (const v of cb.variables) {
-				if (v.name === name) return Math.floor(v.startOffset / 16);
-			}
-		}
-		return null;
-	};
-	const worldMatch = vsSrc.match(/position, 0\.0\)\.xxxx \* cb0\[(\d+)\]/);
-	const worldRow0 = slotByName('world') ?? (worldMatch ? Number(worldMatch[1]) : 44);
-	const viewMatch = vsSrc.match(/r1\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
-	const viewRow2 = viewMatch ? Number(viewMatch[1]) : 7;
-	const vpMatch = vsSrc.match(/o0\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
-	const vpRow0 = slotByName('ViewProjectionModified') ?? (vpMatch ? Number(vpMatch[1]) : 5);
-	const camMatch = vsSrc.match(/-\(r0\.xyzx\) \+ cb0\[(\d+)\]\.xyzx/);
-	const cameraPos = slotByName('ViewPosition') ?? (camMatch ? Number(camMatch[1]) : null);
-	return { worldRow0, vpRow0, viewRow2, depthEncode: 8, cameraPos };
-}
+// cb0 layout inference is shared via @/lib/core/shaderEngineConstants
+// (inferCbLayout), so the viewport and ShaderPage recover slots identically and
+// both pick up the worldViewProj / viewProjection matrix bindings.
 
 // =============================================================================
 // Mesh rendering + materials
@@ -627,7 +594,7 @@ function RenderableMeshes({
 			const matKeyNorm = matKey.padStart(16, '0');
 			const matBinding = materialIndex.get(shaderIdHex)?.find((b) => b.materialId === matKeyNorm)
 				?? pickBestMaterial(shaderIdHex, [], materialIndex);
-			const layout = inferCbLayoutForRV(translated.vs.source, translated.vs.parsed);
+			const layout = inferCbLayout(translated.vs.source, translated.vs.parsed);
 			const sm = buildTranslatedShaderMaterial({
 				vsSource: translated.vs.source,
 				psSource: translated.ps.source,

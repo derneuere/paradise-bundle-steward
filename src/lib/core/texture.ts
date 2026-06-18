@@ -11,7 +11,7 @@
 
 import type { ParsedBundle, ResourceEntry } from './types';
 import { getResourceBlocks } from './resourceManager';
-import { decodeDXT1, decodeDXT5 } from './dxt';
+import { decodeDXT1, decodeDXT3, decodeDXT5 } from './dxt';
 import { BundleError } from './errors';
 
 // =============================================================================
@@ -219,6 +219,9 @@ function decodeTexturePixels(
 		case 'DXT1':
 			return decodeDXT1(pixelData, width, height);
 
+		case 'DXT3':
+			return decodeDXT3(pixelData, width, height);
+
 		case 'DXT5':
 			return decodeDXT5(pixelData, width, height);
 
@@ -271,8 +274,6 @@ function decodeTexturePixels(
 			// Already RGBA — return as-is.
 			return pixelData.slice(0, width * height * 4);
 
-		case 'DXT3':
-			// DXT3 is rare in Burnout; fall through to unsupported for now.
 		default:
 			throw new BundleError(
 				`Unsupported texture format: ${format} (raw 0x${header.formatRaw.toString(16)})`,

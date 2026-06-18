@@ -42,6 +42,7 @@ import { u64ToBigInt } from '@/lib/core/u64';
 import { buildTextureCatalog, pickTextureForSampler, type TextureCatalogEntry } from '@/lib/core/textureCatalog';
 import { buildMaterialIndex, pickBestMaterial, type MaterialBinding } from '@/lib/core/materialBinding';
 import { buildTranslatedShaderMaterial, type TranslatedMaterial } from '@/lib/core/translatedShaderMaterial';
+import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout } from '@/lib/core/shaderEngineConstants';
 import type { DecodedTexture } from '@/lib/core/texture';
 import { formatResourceId } from '@/lib/core/bundle';
 
@@ -147,62 +148,9 @@ const FALLBACK_FS = /* glsl */ `
 	void main() { gl_FragColor = vec4(0.6, 0.1, 0.6, 1.0); }
 `;
 
-// Per-shader cb0 slot discovery. Burnout's fxc output is extremely regular,
-// so we can recover the world / view / viewProj / depth-encode slots by
-// pattern-matching the translated GLSL. Anything we can't recover falls
-// back to reasonable defaults so the binding hook always has *something*
-// to bind.
-type CbLayout = {
-	/** Slot of row 0 of the world matrix. Typically 40..48. */
-	worldRow0: number;
-	/** Slot of row 0 of view*projection. Typically 5. */
-	vpRow0: number;
-	/** Slot of view matrix row 2 (used to compute view-space z). Typically 7. */
-	viewRow2: number;
-	/** Slot of the depth encoder `(A, B, C, D)` — always 8 in practice. */
-	depthEncode: number;
-	/** Slot of the camera-position vector (SM5 typically 37..38). */
-	cameraPos: number | null;
-};
-
-function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
-	// Prefer slot lookups by RDEF variable name when we have parsed
-	// reflection data — that's the authoritative answer per shader (vehicle
-	// shaders put ViewPosition at slot 37, water at slot 35, etc.). Fall
-	// back to regex pattern matching for the few cases without parsed data.
-	const slotByName = (name: string): number | null => {
-		if (!parsed) return null;
-		for (const cb of parsed.reflection.constantBuffers) {
-			for (const v of cb.variables) {
-				if (v.name === name) return Math.floor(v.startOffset / 16);
-			}
-		}
-		return null;
-	};
-
-	// worldRow0: look for `pos.xxxx * cb0[N]` — N is the row-0 slot. fxc
-	// emits rows in {y, x, z, w} accumulation order; we key on the .xxxx row
-	// which is always the row-0 multiply.
-	const worldMatch = vs.match(/position, 0\.0\)\.xxxx \* cb0\[(\d+)\]/);
-	const worldRow0 = slotByName('world') ?? (worldMatch ? Number(worldMatch[1]) : 44);
-
-	// viewRow2: first `dot(r0.xyzw, cb0[N].xyzw)` after the world transform,
-	// whose result feeds into the `o0.zw` depth-encode pair.
-	const viewMatch = vs.match(/r1\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
-	const viewRow2 = viewMatch ? Number(viewMatch[1]) : 7;
-
-	// vpRow0: the ViewProjectionModified matrix slot, or the first cb used
-	// in an o0.x dp4 if we can't read the RDEF.
-	const vpMatch = vs.match(/o0\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
-	const vpRow0 = slotByName('ViewProjectionModified') ?? (vpMatch ? Number(vpMatch[1]) : 5);
-
-	// cameraPos: prefer the named ViewPosition variable over the regex
-	// pattern, since vehicle shaders put it at a different slot than terrain.
-	const camMatch = vs.match(/-\(r0\.xyzx\) \+ cb0\[(\d+)\]\.xyzx/);
-	const cameraPos = slotByName('ViewPosition') ?? (camMatch ? Number(camMatch[1]) : null);
-
-	return { worldRow0, vpRow0, viewRow2, depthEncode: 8, cameraPos };
-}
+// cb0 slot discovery + engine-constant defaults live in
+// @/lib/core/shaderEngineConstants (shared with the RenderableViewport and the
+// differential harness). inferCbLayout / ENGINE_CONSTANT_DEFAULTS are imported.
 
 // Given a translated program, guess reasonable default three.js attribute
 // aliases so a_POSITION0 / a_NORMAL0 / a_TEXCOORD0 are fed from standard
@@ -361,29 +309,11 @@ function decodedToDataTexture(dt: DecodedTexture): THREE.DataTexture {
 	return tex;
 }
 
-// Defaults applied to runtime-bound cb0 variables that the game would
-// normally fill from the engine but we leave as plausible static values
-// so the preview doesn't collapse to black. Module-scope so the Inputs
-// tab can show users which variables we made up.
-const HEURISTIC_DEFAULTS: Record<string, [number, number, number, number]> = {
-	g_PerVehicleFog: [0, 0, 0, 1],
-	FogColourPlusWhiteLevel: [0.55, 0.70, 0.85, 1],
-	KeyLightColour: [1, 1, 1, 1],
-	KeyLightClampedColour: [1, 1, 1, 1],
-	KeyLightSpecularColour: [1, 1, 1, 1],
-	KeyLightDirection: [0.4, -0.7, 0.6, 0],
-	SkyReflectionColour: [0.55, 0.75, 0.95, 1],
-	ShadowMap_Constants: [1, 1, 1, 1],
-	ShadowMap_Constants2: [1, 1, 1, 1],
-	ShadowMap_Constants3: [1, 1, 1, 1],
-	ScattCoeffs: [0.4, 0.4, 0.5, 1],
-	g_damageConstants: [0, 0, 0, 1],
-	sampleCoverage: [1, 1, 1, 1],
-	// Vehicle paint defaults — without these the vehicle PaintGloss
-	// shader's `r0 *= g_paintColour` collapses the body to black.
-	g_paintColour: [0.6, 0.1, 0.1, 1],
-	g_pearlescentColour: [0.2, 0.2, 0.3, 1],
-};
+// Engine-supplied cb0 defaults (key light, fog, sky, irradiance, shadow, etc.)
+// live in @/lib/core/shaderEngineConstants as ENGINE_CONSTANT_DEFAULTS, shared
+// across the previews + harness. The Inputs tab reads it to show which
+// variables are engine stand-ins vs material-baked.
+const HEURISTIC_DEFAULTS = ENGINE_CONSTANT_DEFAULTS;
 
 // A self-contained, known-good water shader used as a "does the rendering
 // pipeline actually work?" reference. Three.js auto-provides modelMatrix,
