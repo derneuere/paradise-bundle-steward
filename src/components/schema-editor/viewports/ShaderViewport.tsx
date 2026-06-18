@@ -30,25 +30,16 @@ import { buildTextureCatalog } from '@/lib/core/textureCatalog';
 import { buildMaterialIndex, pickBestMaterial, type MaterialBinding } from '@/lib/core/materialBinding';
 import { buildTranslatedShaderMaterial } from '@/lib/core/translatedShaderMaterial';
 import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout } from '@/lib/core/shaderEngineConstants';
+import { pickEngineSamplerFallback } from '@/lib/core/engineSamplerFallback';
 import type { DecodedTexture } from '@/lib/core/texture';
 import type { ParsedBundle } from '@/lib/core/types';
 
 // ---------------------------------------------------------------------------
-// Fallback textures (samplers with no catalog match — same intent as the
-// ShaderPage preview, trimmed to the cases the workspace needs).
+// Engine-global sampler stand-ins (reflection/shadow/fracture/…) live in the
+// shared engineSamplerFallback helper so the sphere preview and the vehicle
+// viewport bind identical neutral textures.
 // ---------------------------------------------------------------------------
 
-function make1x1(r: number, g: number, b: number, a: number): THREE.DataTexture {
-	const t = new THREE.DataTexture(new Uint8Array([r, g, b, a]), 1, 1, THREE.RGBAFormat);
-	t.needsUpdate = true;
-	return t;
-}
-function pickFallbackTexture(samplerName: string): THREE.DataTexture {
-	// Shadow / depth samplers read "lit" from white; everything else gets a
-	// magenta marker so a missing texture is obvious rather than silently black.
-	if (/shadow|depth/i.test(samplerName)) return make1x1(255, 255, 255, 255);
-	return make1x1(255, 64, 200, 255);
-}
 function decodedToDataTexture(dt: DecodedTexture): THREE.DataTexture {
 	const tex = new THREE.DataTexture(dt.pixels, dt.header.width, dt.header.height, THREE.RGBAFormat);
 	tex.colorSpace = THREE.SRGBColorSpace;
@@ -136,7 +127,7 @@ function ShaderPreviewMesh({
 			materialBinding,
 			textureCatalog,
 			heuristicDefaults: ENGINE_CONSTANT_DEFAULTS,
-			pickFallbackTexture,
+			pickFallbackTexture: pickEngineSamplerFallback,
 			decodedToDataTexture: (entry) => {
 				try { return decodedToDataTexture(entry.decode()); } catch { return null; }
 			},
