@@ -513,80 +513,94 @@ function RenderableMeshes({
 		[baseMaterial, hoverMaterial, selectedMaterial, texturedMaterials],
 	);
 
-	// Translated-shader materials. Keyed by materialAssemblyId so shared
-	// materials produce one ShaderMaterial reused across every mesh that
-	// references them. Each entry caches `{ shader translation, material
-	// binding, ShaderMaterial }` so swapping the toggle off then on again
-	// doesn't re-translate every shader.
+	// Translated-shader materials, keyed `${renderableIndex}:${materialAssemblyId}`
+	// — ONE ShaderMaterial PER (renderable, material), NOT one per material.
+	//
+	// Why per-renderable: each material's cb0 holds the per-object `world`
+	// matrix, refreshed every draw from the mesh's locator in __updateCb0. But
+	// three.js uploads a ShaderMaterial's uniforms only once per run of
+	// consecutive draws that use it — so if two DIFFERENT parts (different part
+	// locators) shared one material instance, both would render with whichever
+	// part's world was uploaded last, and three's camera-distance sort makes
+	// that "last" change as the camera orbits (parts visibly swim with the
+	// camera). Meshes WITHIN one renderable share a locator, so they can safely
+	// share an instance — hence the key is per-renderable, not per-mesh.
+	//
+	// Translations (DXBC parse, expensive) are cached per shader id and decoded
+	// textures per texture id, so the extra instances are cheap: ~12 programs +
+	// ~N textures shared across all the per-part material objects.
 	const translatedMaterialMap = useMemo(() => {
 		const out = new Map<string, TranslatedMaterial | null>();
 		if (!translatedSetup) return out;
 		const { sources, textureCatalog, materialIndex } = translatedSetup;
-		// First, find the Material → Shader id for each materialAssemblyId
-		// we've actually seen on a mesh. Walk all sources for the matching
-		// Material resource and read its shaderImport.id.
-		const matIdToShaderId = new Map<string, bigint>();
-		for (const r of renderables) {
-			for (const m of r.meshes) {
-				if (!m.materialAssemblyId) continue;
-				const key = m.materialAssemblyId.toString(16);
-				if (matIdToShaderId.has(key)) continue;
-				// Search loaded sources for the Material with this id and
-				// read its shaderImport.
-				outer: for (const s of sources) {
-					for (const res of s.bundle.resources) {
-						if (res.resourceTypeId !== 0x01) continue;
-						if (u64ToBigInt(res.resourceId) !== m.materialAssemblyId) continue;
-						try {
-							const blocks = getResourceBlocks(s.arrayBuffer, s.bundle, res as ResourceEntry);
-							const block0 = blocks[0];
-							if (!block0) break outer;
-							const parsedMat = parseMaterialData(block0);
-							matIdToShaderId.set(key, parsedMat.shaderImport.id);
-						} catch { /* fall through */ }
-						break outer;
-					}
+
+		const shaderIdByMat = new Map<string, bigint | null>();
+		const translationCache = new Map<string, ReturnType<typeof translateShaderById>>();
+		const texCache = new Map<string, THREE.DataTexture | null>();
+		const decodeTexCached = (entry: TextureCatalogEntry) => {
+			if (texCache.has(entry.id)) return texCache.get(entry.id)!;
+			const t = decodedToDataTextureRV(entry);
+			texCache.set(entry.id, t);
+			return t;
+		};
+		const shaderIdFor = (matAsmId: bigint, matKey: string): bigint | null => {
+			if (shaderIdByMat.has(matKey)) return shaderIdByMat.get(matKey)!;
+			let sid: bigint | null = null;
+			outer: for (const s of sources) {
+				for (const res of s.bundle.resources) {
+					if (res.resourceTypeId !== 0x01) continue;
+					if (u64ToBigInt(res.resourceId) !== matAsmId) continue;
+					try {
+						const block0 = getResourceBlocks(s.arrayBuffer, s.bundle, res as ResourceEntry)[0];
+						if (block0) sid = parseMaterialData(block0).shaderImport.id;
+					} catch { /* fall through */ }
+					break outer;
 				}
 			}
-		}
-		// For each unique material, build a ShaderMaterial by translating
-		// its target shader and pulling per-register bindings from the
-		// material index.
-		for (const [matKey, shaderId] of matIdToShaderId) {
-			const translated = translateShaderById(shaderId, sources);
-			if (!translated) {
-				out.set(matKey, null);
-				continue;
+			shaderIdByMat.set(matKey, sid);
+			return sid;
+		};
+
+		for (let ri = 0; ri < renderables.length; ri++) {
+			for (const m of renderables[ri].meshes) {
+				if (!m.materialAssemblyId) continue;
+				const matKey = m.materialAssemblyId.toString(16);
+				const key = `${ri}:${matKey}`;
+				if (out.has(key)) continue;
+				const shaderId = shaderIdFor(m.materialAssemblyId, matKey);
+				if (shaderId == null) { out.set(key, null); continue; }
+				const shaderHex = shaderId.toString(16);
+				let translated = translationCache.get(shaderHex);
+				if (translated === undefined) {
+					translated = translateShaderById(shaderId, sources);
+					translationCache.set(shaderHex, translated);
+				}
+				if (!translated) { out.set(key, null); continue; }
+				// Bind THIS material's own per-part textures (Skin / AO / Scratch),
+				// not just any material targeting the shader. matKey drops leading
+				// zeros (toString(16)); materialId keeps them, so normalise.
+				const shaderIdHex = shaderId.toString(16).padStart(16, '0');
+				const matKeyNorm = matKey.padStart(16, '0');
+				const matBinding = materialIndex.get(shaderIdHex)?.find((b) => b.materialId === matKeyNorm)
+					?? pickBestMaterial(shaderIdHex, [], materialIndex);
+				const layout = inferCbLayout(translated.vs.source, translated.vs.parsed);
+				out.set(key, buildTranslatedShaderMaterial({
+					vsSource: translated.vs.source,
+					psSource: translated.ps.source,
+					vsParsed: translated.vs.parsed,
+					psParsed: translated.ps.parsed,
+					shaderName: translated.shaderName,
+					shaderConstants: translated.constants,
+					layout,
+					materialBinding: matBinding ?? null,
+					textureCatalog,
+					heuristicDefaults: TRANSLATED_HEURISTIC_DEFAULTS,
+					pickFallbackTexture: pickEngineSamplerFallback,
+					decodedToDataTexture: decodeTexCached,
+					applyPreviewTonemap: true,  // vehicle shaders run HDR; without an engine tonemap, paint-gloss saturates to white
+					side: THREE.DoubleSide,
+				}));
 			}
-			const shaderIdHex = shaderId.toString(16).padStart(16, '0');
-			// Find the Material whose id matches this MESH's materialAssemblyId,
-			// not just any material targeting the shader. Multiple body parts
-			// share the same shader (PaintGloss) but each has its own Material
-			// pointing at its own per-part Skin / AO / Scratch textures —
-			// picking one arbitrarily smears the same texture across every
-			// part. The hex-comparison normalises both sides because matKey
-			// drops leading zeros (toString(16)) while materialId keeps them.
-			const matKeyNorm = matKey.padStart(16, '0');
-			const matBinding = materialIndex.get(shaderIdHex)?.find((b) => b.materialId === matKeyNorm)
-				?? pickBestMaterial(shaderIdHex, [], materialIndex);
-			const layout = inferCbLayout(translated.vs.source, translated.vs.parsed);
-			const sm = buildTranslatedShaderMaterial({
-				vsSource: translated.vs.source,
-				psSource: translated.ps.source,
-				vsParsed: translated.vs.parsed,
-				psParsed: translated.ps.parsed,
-				shaderName: translated.shaderName,
-				shaderConstants: translated.constants,
-				layout,
-				materialBinding: matBinding ?? null,
-				textureCatalog,
-				heuristicDefaults: TRANSLATED_HEURISTIC_DEFAULTS,
-				pickFallbackTexture: pickEngineSamplerFallback,
-				decodedToDataTexture: decodedToDataTextureRV,
-				applyPreviewTonemap: true,  // vehicle shaders run HDR; without an engine tonemap, paint-gloss saturates to white
-				side: THREE.DoubleSide,
-			});
-			out.set(matKey, sm);
 		}
 		return out;
 	}, [translatedSetup, renderables]);
@@ -627,7 +641,7 @@ function RenderableMeshes({
 					// to the PBR-approximation MeshStandardMaterial otherwise
 					// so the toggle is non-destructive.
 					const translatedMat = useTranslatedShaders && matKey
-						? translatedMaterialMap.get(matKey) ?? null
+						? translatedMaterialMap.get(`${ri}:${matKey}`) ?? null
 						: null;
 					const texturedMat = !translatedMat && matKey
 						? texturedMaterials.get(matKey) ?? null

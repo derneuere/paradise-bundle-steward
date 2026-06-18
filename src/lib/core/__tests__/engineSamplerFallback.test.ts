@@ -36,8 +36,9 @@ describe('classifyEngineSampler', () => {
 	});
 });
 
-function rgba(t: { image: { data: Uint8Array | Uint8ClampedArray } }): number[] {
-	return Array.from(t.image.data.slice(0, 4));
+function rgba(t: { image: { data: ArrayLike<number> } }): number[] {
+	const d = t.image.data;
+	return [d[0], d[1], d[2], d[3]];
 }
 
 describe('pickEngineSamplerFallback', () => {
