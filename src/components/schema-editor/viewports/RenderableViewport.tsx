@@ -40,7 +40,7 @@ import { D3DTextureAddress } from '@/lib/core/textureState';
 import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
 import { SHADER_TYPE_ID, parseShaderData, SHADER_PROGRAM_BUFFER_TYPE_ID } from '@/lib/core/shader';
 import { getResourceBlocks } from '@/lib/core/resourceManager';
-import { getImportIds } from '@/lib/core/bundle';
+import { getImportIds, formatResourceId } from '@/lib/core/bundle';
 import { u64ToBigInt } from '@/lib/core/u64';
 import { translateDxbc, type TranslatedShader } from '@/lib/core/dxbc';
 import { buildTextureCatalog, type TextureCatalogEntry } from '@/lib/core/textureCatalog';
@@ -626,12 +626,14 @@ function RenderableMeshes({
 					translationCache.set(shaderHex, translated);
 				}
 				if (!translated) { out.set(key, null); continue; }
-				// Bind THIS material's own per-part textures (Skin / AO / Scratch),
-				// not just any material targeting the shader. matKey drops leading
-				// zeros (toString(16)); materialId keeps them, so normalise.
-				const shaderIdHex = shaderId.toString(16).padStart(16, '0');
-				const matKeyNorm = matKey.padStart(16, '0');
-				const matBinding = materialIndex.get(shaderIdHex)?.find((b) => b.materialId === matKeyNorm)
+				// Bind THIS material's own per-part textures (Diffuse / AO / Scratch),
+				// not just any material targeting the shader. The index is keyed by
+				// formatResourceId (`0x`-prefixed, upper-case, 16 digits) — use the
+				// SAME formatting to look up, or the binding is never found and every
+				// sampler falls through to the name-match/placeholder (untextured).
+				const shaderIdHex = formatResourceId(shaderId);
+				const matIdHex = formatResourceId(m.materialAssemblyId);
+				const matBinding = materialIndex.get(shaderIdHex)?.find((b) => b.materialId === matIdHex)
 					?? pickBestMaterial(shaderIdHex, [], materialIndex);
 				const layout = inferCbLayout(translated.vs.source, translated.vs.parsed);
 				out.set(key, buildTranslatedShaderMaterial({
