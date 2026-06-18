@@ -47,7 +47,7 @@ import { buildTextureCatalog, type TextureCatalogEntry } from '@/lib/core/textur
 import { buildMaterialIndex, pickBestMaterial } from '@/lib/core/materialBinding';
 import { buildTranslatedShaderMaterial, type TranslatedMaterial } from '@/lib/core/translatedShaderMaterial';
 import { pickEngineSamplerFallback } from '@/lib/core/engineSamplerFallback';
-import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout } from '@/lib/core/shaderEngineConstants';
+import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout, engineKnobs, DEFAULT_ENGINE_KNOBS, type EngineKnobs } from '@/lib/core/shaderEngineConstants';
 import { decodeTexture } from '@/lib/core/texture';
 import { parseMaterialData } from '@/lib/core/material';
 import {
@@ -165,6 +165,56 @@ function VehicleColorPicker({
 					);
 				})}
 			</div>
+		</div>
+	);
+}
+
+// =============================================================================
+// Engine-constant debug knobs
+//
+// The translated vehicle shaders fold engine-RUNTIME constants (key light,
+// ambient irradiance, fog/white-level) into the output, and those values aren't
+// in the bundle — we stand in heuristic defaults, which tends to blow the paint
+// out to white. These sliders SCALE each group (and a final exposure) live so
+// you can see which term dominates. They mutate the module-global `engineKnobs`,
+// which a translated material's __updateCb0 reads every frame — no rebuild.
+// =============================================================================
+
+const KNOB_ROWS: { key: keyof EngineKnobs; label: string; min: number; max: number; step: number }[] = [
+	{ key: 'exposure', label: 'exposure', min: 0.05, max: 2, step: 0.01 },
+	{ key: 'keyLight', label: 'key light', min: 0, max: 3, step: 0.05 },
+	{ key: 'ambient', label: 'ambient', min: 0, max: 3, step: 0.05 },
+	{ key: 'fog', label: 'fog/white', min: 0, max: 2, step: 0.05 },
+];
+
+function EngineKnobsPanel() {
+	const [knobs, setKnobs] = useState<EngineKnobs>({ ...engineKnobs });
+	const set = (key: keyof EngineKnobs, value: number) => {
+		engineKnobs[key] = value;
+		setKnobs({ ...engineKnobs });
+	};
+	return (
+		<div className="px-3 pb-2 space-y-1 text-xs">
+			<div className="flex items-center gap-2">
+				<span className="font-medium text-muted-foreground">engine knobs (translated)</span>
+				<button
+					className="px-2 py-0.5 rounded bg-muted hover:bg-muted/80"
+					onClick={() => { Object.assign(engineKnobs, DEFAULT_ENGINE_KNOBS); setKnobs({ ...engineKnobs }); }}
+				>
+					reset
+				</button>
+			</div>
+			{KNOB_ROWS.map((r) => (
+				<label key={r.key} className="flex items-center gap-2">
+					<span className="w-20 text-muted-foreground">{r.label}</span>
+					<input
+						type="range" min={r.min} max={r.max} step={r.step} value={knobs[r.key]}
+						onChange={(e) => set(r.key, Number(e.target.value))}
+						className="flex-1"
+					/>
+					<span className="w-10 text-right tabular-nums">{knobs[r.key].toFixed(2)}</span>
+				</label>
+			))}
 		</div>
 	);
 }
@@ -890,6 +940,7 @@ export function RenderableViewport() {
 					paintColor={paintColor}
 					onSelectColor={setPaintColor}
 				/>
+				{useTranslatedShaders && <EngineKnobsPanel />}
 			</div>
 
 			{/* 3D canvas — fills remaining space */}
