@@ -13,11 +13,14 @@ partitioned into spatial **cells** (a coarse XZ grid) so the runtime can
 stream/spawn props near the player. Each instance references a **prop type**
 (index into [`prop-types.md`](prop-types.md)) and carries a full world transform.
 
-> **Ordering matters.** Within a cell the instances are grouped by respawn
-> behaviour (`muNumberOfRespawnDifferent`, then `muNumberOfDontRespawn`, then the
-> remainder). Collectibles and other respawn-sensitive props only work when laid
-> out in that order — the reason this editor exists (Blender exporters don't
-> expose the toggles). The round-trip and editor MUST preserve instance order
+> **Ordering matters.** Each cell carries two counts, `muNumberOfRespawnDifferent`
+> and `muNumberOfDontRespawn`, that partition its instances by respawn behaviour.
+> The exact within-cell layout is **believed** to be respawn-changed first, then
+> don't-respawn, then the remainder — but only the two counts are certain; the
+> precise ordering is **unconfirmed**. Collectibles and other respawn-sensitive
+> props only work when laid out in that order — the reason this editor exists
+> (Blender exporters don't expose the toggles). The round-trip and editor MUST
+> preserve instance order
 > within each cell exactly.
 
 ## High-level model
@@ -48,7 +51,7 @@ streetData/trafficData/zoneList we implement **32-bit PC LE only**. Console
 | 0x05 | 3 | — | padding | zero |
 | 0x08 | 4 | `PropInstanceData*` | `maInstances` | abs offset to instances; **always `0x20`** |
 | 0x0C | 4 | u32 | `muSizeInBytes` | **stored field; does NOT equal the buffer length** (see below) — preserve verbatim |
-| 0x10 | 4 | u32 | `muNumberOfInstances` | a larger logical count (> props); meaning not fully understood — preserve verbatim |
+| 0x10 | 4 | u32 | `muNumberOfInstances` | total runtime instance slots = `muNumberOfProps` + every prop's part count (the zone loader allocates one slot per prop + one per part). So it's `>=` the stored prop count. Part counts live in the PropGraphicsList, not here, so it's preserved verbatim |
 | 0x14 | 4 | u32 | `muNumberOfProps` | **count of stored `PropInstanceData` records** = `instances.length` |
 | 0x18 | 2 | u16 | `muZoneId` | track-unit / zone id (e.g. 206) |
 | 0x1A | 2 | — | padding | zero |
@@ -76,7 +79,7 @@ sum of all `muCount` equals `muNumberOfProps`.
 | 0x40 | 4 | u32 | `muTypeIdAndFlags` | lower **26 bits** = prop type index (into prop-types); upper **6 bits** = flags |
 | 0x44 | 4 | u32 | `muInstanceID` | per-instance id |
 | 0x48 | 2 | u16 | `muAlternativeType` | alternate prop type index, or `0xFFFF` = none |
-| 0x4A | 1 | i8 | `mn8RotSpeed` | rotation speed (signed); `-64` is common |
+| 0x4A | 1 | u8 | `mn8RotSpeed` (rotation byte) | Packs two fields: **top 2 bits (`& 0xC0`) = spinning axis** — `0x40` Y, `0x80` Z, `0xC0` none (`0x00` also occurs, e.g. static props); **low 6 bits (`& 0x3F`) = speed magnitude** (0–63). Modelled split as `mRotationAxis` + `mn8RotSpeed`; recombined on write. (An earlier reading as a single signed i8 saw `-64` = `0xC0` = axis-none/speed-0.) |
 | 0x4B | 1 | u8 | `mn8MaxAngle` | |
 | 0x4C | 1 | u8 | `mn8MinAngle` | |
 | 0x4D | 3 | u8[3] | `mau8Padding` | zero — preserve verbatim |
@@ -114,7 +117,7 @@ extracted resource, 27680 bytes) and two real bundle-embedded resources:
 Invariants confirmed on all three (the layout is **rigid**):
 
 1. `maInstances == 0x20` always; instances are 80 bytes; `maCells == 0x20 + muNumberOfProps*0x50` exactly.
-2. `(maCells - maInstances) / 0x50 == muNumberOfProps` (the stored record count). `muNumberOfInstances` is a different, larger number — **not** the stored count; preserve it verbatim.
+2. `(maCells - maInstances) / 0x50 == muNumberOfProps` (the stored record count). `muNumberOfInstances` is a different, larger number = props + every prop's part count (total runtime instance slots) — **not** the stored prop count; preserve it verbatim.
 3. Cells immediately follow instances; everything after the cells is **all zero**.
 4. `muSizeInBytes` does NOT track the buffer length consistently (gold: len−32; TRK9: len−40; TRK10: len−28 — and TRK10's `muSizeInBytes` even exceeds `len−header`). It is an internal stored field → **preserve verbatim**, and reproduce the exact buffer length from a captured trailing-pad buffer.
 
@@ -141,16 +144,17 @@ type PropInstance = {
   flags: number;                 // muTypeIdAndFlags >>> 26 (6-bit field)
   muInstanceID: number;          // u32
   muAlternativeType: number;     // u16, 0xFFFF = none
-  mn8RotSpeed: number;           // i8
+  mRotationAxis: number;         // rotation byte & 0xC0 — 0x00 / 0x40(Y) / 0x80(Z) / 0xC0(none)
+  mn8RotSpeed: number;           // rotation byte & 0x3F — speed magnitude 0..63
   mn8MaxAngle: number;           // u8
   mn8MinAngle: number;           // u8
   _pad4D: [number, number, number]; // u8[3], preserved (zero)
 };
 
 type PropCell = {
-  muX: number; muZ: number;                 // PropCellId
-  muStartIndex: number;                     // derived from layout (readOnly in editor)
-  muCount: number;                          // derived = instances owned by this cell (readOnly)
+  muX: number; muZ: number;                 // PropCellId — editable
+  muStartIndex: number;                     // editable (written verbatim; not recomputed)
+  muCount: number;                          // editable (written verbatim)
   muNumberOfRespawnDifferent: number;       // u16
   muNumberOfDontRespawn: number;            // u16
 };
@@ -175,8 +179,8 @@ Byte-exact (`byteRoundTrip`) is achievable — the layout is rigid and the tail 
 zero. Writer:
 
 1. **Header (32 bytes):** `maInstances=0x20`; `muNumCells=cells.length` (u8) + 3 pad; `maCells = 0x20 + instances.length*0x50`; `muSizeInBytes` (verbatim); `muNumberOfInstances` (verbatim); `muNumberOfProps = instances.length`; `muZoneId`; 2 pad.
-2. **Instances:** for each, 16 f32 transform; `muTypeIdAndFlags = (flags << 26) | (typeId & 0x03FFFFFF)`; `muInstanceID`; `muAlternativeType`; `mn8RotSpeed`; `mn8MaxAngle`; `mn8MinAngle`; 3 pad bytes from `_pad4D`.
-3. **Cells:** recompute `muStartIndex` (running sum of `muCount`) and `muCount` from the partition; `muX`,`muZ`,`muNumberOfRespawnDifferent`,`muNumberOfDontRespawn` from the model.
+2. **Instances:** for each, 16 f32 transform; `muTypeIdAndFlags = (flags << 26) | (typeId & 0x03FFFFFF)`; `muInstanceID`; `muAlternativeType`; the rotation byte = `(mRotationAxis & 0xC0) | (mn8RotSpeed & 0x3F)`; `mn8MaxAngle`; `mn8MinAngle`; 3 pad bytes from `_pad4D`.
+3. **Cells:** `muX`,`muZ`,`muStartIndex`,`muCount`,`muNumberOfRespawnDifferent`,`muNumberOfDontRespawn` all written **verbatim** from the model (the partition is editable — see below; not recomputed).
 4. **Trailing pad:** append `_trailingPad` verbatim (zeros) → reproduces the exact original length.
 
 This matches the `zoneList` precedent (recompute pointers + preserve verbatim
@@ -190,5 +194,6 @@ not a fixed offset.
 - `typeId` → enum dropdown sourced from `PROP_TYPES` (247 entries). `muAlternativeType` → same enum plus a `0xFFFF = (none)` entry.
 - `flags` → flags field with `KI_PROP_FLAG_DISABLEPHYSICS` (mask `0x1` within the 6-bit field).
 - `mWorldTransform` → `matrix44` leaf. Translation (world position) lives in indices 12/13/14; surface that in the tree label so artists can find a prop by position.
-- Cell `muStartIndex`/`muCount` are `readOnly` (derived from the partition). `muSizeInBytes`, `muNumberOfInstances` are `readOnly`/preserved. `_trailingPad`, `_pad4D` are `hidden` round-trip-only fields.
+- The rotation byte is split into two editable fields: `mRotationAxis` → enum (`Unset 0x00` / `Y 0x40` / `Z 0x80` / `None 0xC0`) and `mn8RotSpeed` → `u8` clamped 0–63 (the speed magnitude). They recombine into one byte on write.
+- Cell `muStartIndex`/`muCount` are **editable** (written verbatim — some tools set the partition by hand; see the round-trip note). `muSizeInBytes`, `muNumberOfInstances` are `readOnly`/preserved. `_trailingPad`, `_pad4D` are `hidden` round-trip-only fields.
 - Tree labels: instance → `#i · <propName> · id <muInstanceID> · (x, z)`; cell → `(X=muX, Z=muZ) · #start..#end · R<respawnDifferent>/D<dontRespawn>`.

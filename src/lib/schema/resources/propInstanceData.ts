@@ -23,7 +23,7 @@ import type {
 	SchemaContext,
 	SchemaRegistry,
 } from '../types';
-import { PROP_INSTANCE_FLAGS } from '@/lib/core/propInstanceData';
+import { PROP_INSTANCE_FLAGS, PROP_ROT_AXIS } from '@/lib/core/propInstanceData';
 import { PROP_ALT_TYPE_NONE, PROP_TYPES, propTypeLabel } from '@/lib/core/propTypes';
 import { propCellId } from '@/lib/core/propCellGrid';
 
@@ -32,7 +32,6 @@ import { propCellId } from '@/lib/core/propCellGrid';
 // ---------------------------------------------------------------------------
 
 const u8 = (): FieldSchema => ({ kind: 'u8' });
-const i8 = (): FieldSchema => ({ kind: 'i8' });
 const u16 = (): FieldSchema => ({ kind: 'u16' });
 const u32 = (): FieldSchema => ({ kind: 'u32' });
 const matrix44 = (): FieldSchema => ({ kind: 'matrix44' });
@@ -79,6 +78,15 @@ const ALT_TYPE_VALUES = [
 
 const PROP_INSTANCE_FLAG_BITS = [
 	{ mask: PROP_INSTANCE_FLAGS.DISABLE_PHYSICS, label: 'Disable physics' },
+];
+
+// Rotation axis enum (top 2 bits of the on-disk rotation byte). 0x40/0x80/0xC0
+// are the Y/Z/None values; 0x00 ("unset") also appears on disk (e.g. static props).
+const ROT_AXIS_VALUES = [
+	{ value: PROP_ROT_AXIS.UNSET, label: 'Unset (0x00)' },
+	{ value: PROP_ROT_AXIS.Y, label: 'Y axis' },
+	{ value: PROP_ROT_AXIS.Z, label: 'Z axis' },
+	{ value: PROP_ROT_AXIS.NONE, label: 'None (0xC0)' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -139,7 +147,8 @@ const PropInstance: RecordSchema = {
 		flags: { kind: 'flags', storage: 'u32', bits: PROP_INSTANCE_FLAG_BITS },
 		muInstanceID: u32(),
 		muAlternativeType: { kind: 'enum', storage: 'u16', values: ALT_TYPE_VALUES },
-		mn8RotSpeed: i8(),
+		mRotationAxis: { kind: 'enum', storage: 'u8', values: ROT_AXIS_VALUES },
+		mn8RotSpeed: { kind: 'u8', min: 0, max: 63 },
 		mn8MaxAngle: u8(),
 		mn8MinAngle: u8(),
 		_pad4D: fixedList(u8(), 3),
@@ -165,9 +174,13 @@ const PropInstance: RecordSchema = {
 			label: 'Alternative type',
 			description: 'A second prop type the runtime may substitute (e.g. a damaged / destroyed variant). 0xFFFF = (none).',
 		},
+		mRotationAxis: {
+			label: 'Rotation axis',
+			description: 'Spinning axis for animated props (billboards, fans, windmills) — the top 2 bits of the on-disk rotation byte: Y (0x40), Z (0x80), None (0xC0); 0x00 also occurs (e.g. static props) and is shown as "Unset".',
+		},
 		mn8RotSpeed: {
 			label: 'Rotation speed',
-			description: 'Signed rotation speed for spinning props (billboards, fans, windmills). -64 is common; 0 for static props.',
+			description: 'Rotation speed magnitude for spinning props — the low 6 bits of the on-disk rotation byte (0–63). 0 for static props. Combined with the rotation axis into one byte on write.',
 		},
 		mn8MaxAngle: { label: 'Max angle' },
 		mn8MinAngle: { label: 'Min angle' },
@@ -180,7 +193,7 @@ const PropInstance: RecordSchema = {
 	propertyGroups: [
 		{ title: 'Transform', properties: ['mWorldTransform'] },
 		{ title: 'Identity', properties: ['typeId', 'muInstanceID', 'muAlternativeType'] },
-		{ title: 'Behaviour', properties: ['flags', 'mn8RotSpeed', 'mn8MaxAngle', 'mn8MinAngle'] },
+		{ title: 'Behaviour', properties: ['flags', 'mRotationAxis', 'mn8RotSpeed', 'mn8MaxAngle', 'mn8MinAngle'] },
 	],
 	label: (value, index) => instanceLabel(value, index ?? 0),
 };

@@ -7,11 +7,14 @@
 // prop type (an index into prop-types — see propTypes.ts) and carries a full
 // world transform.
 //
-// Ordering is load-bearing: within a cell the instances are grouped by respawn
-// behaviour (muNumberOfRespawnDifferent first, then muNumberOfDontRespawn, then
-// the rest). Collectibles and other respawn-sensitive props only work when laid
-// out in that order, so the round-trip MUST preserve instance order within each
-// cell exactly. The parser keeps the array as-is and the writer never reorders.
+// Ordering is load-bearing. A cell carries two counts — muNumberOfRespawnDifferent
+// and muNumberOfDontRespawn — that partition its instances by respawn behaviour.
+// The exact within-cell layout is BELIEVED to be the respawn-changed group first,
+// then don't-respawn, then the rest — but only the two counts are certain; the
+// precise ordering is unconfirmed. Either way, collectibles and other
+// respawn-sensitive props depend on the order, so the round-trip MUST preserve
+// instance order within each cell exactly: the parser keeps the array as-is and
+// the writer never reorders.
 //
 // Scope: 32-bit PC, little-endian. The wiki documents a 64-bit (Paradise
 // Remastered) layout and console (BE) variants; both are out of scope here,
@@ -27,8 +30,9 @@
 //    empty) rather than stored on the model. muNumberOfProps == instances.length.
 //  - muSizeInBytes does NOT track the buffer length (it is an internal stored
 //    field — gold fixture has len-32, others differ), and muNumberOfInstances is
-//    a larger logical count distinct from the stored record count. Both are
-//    preserved verbatim on the model so the writer reproduces them exactly.
+//    the total runtime instance slots (props + every prop's parts; see its field
+//    comment). Both are preserved verbatim on the model so the writer reproduces
+//    them exactly.
 //  - The exact original byte length is reproduced by capturing the trailing zero
 //    pad (end-of-cells → end-of-buffer) as _trailingPad and re-emitting it.
 //  - Per-cell muStartIndex / muCount describe the partition (each cell owns the
@@ -54,6 +58,24 @@ export const PROP_INSTANCE_FLAGS = {
 } as const;
 
 // =============================================================================
+// Rotation byte (the on-disk i8 the wiki labels mn8RotSpeed) — the top 2 bits
+// select the spinning axis (mask 0xC0) and the low 6 bits are the speed magnitude.
+// =============================================================================
+
+export const PROP_ROT_AXIS_MASK = 0xc0;
+export const PROP_ROT_SPEED_MASK = 0x3f;
+
+// Axis values stored in bits 6-7. 0x40/0x80/0xC0 are the known Y/Z/None values;
+// 0x00 also occurs on disk (notably static props with speed 0) — treated as
+// "unset" here.
+export const PROP_ROT_AXIS = {
+	UNSET: 0x00,
+	Y: 0x40,
+	Z: 0x80,
+	NONE: 0xc0,
+} as const;
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -66,7 +88,13 @@ export type PropInstance = {
 	flags: number;                      // muTypeIdAndFlags >>> 26 (6-bit field)
 	muInstanceID: number;               // u32
 	muAlternativeType: number;          // u16, 0xFFFF = none
-	mn8RotSpeed: number;                // i8
+	// The on-disk rotation byte (the field the wiki/old model called "mn8RotSpeed")
+	// packs TWO things: the spinning AXIS in the top 2 bits (mask 0xC0; 0x40 Y /
+	// 0x80 Z / 0xC0 none) and the speed magnitude in the low 6 bits. We model them
+	// separately so the editor can edit each; the writer recombines
+	// `(axis & 0xC0) | (speed & 0x3F)` byte-exactly.
+	mRotationAxis: number;              // byte & 0xC0 — one of 0x00, 0x40(Y), 0x80(Z), 0xC0(none)
+	mn8RotSpeed: number;                // byte & 0x3F — rotation speed magnitude (0..63)
 	mn8MaxAngle: number;                // u8
 	mn8MinAngle: number;                // u8
 	// u8[3] trailing pad on the on-disk record — zero, preserved verbatim.
@@ -91,8 +119,12 @@ export type ParsedPropInstanceData = {
 	// Internal stored size field; does NOT equal the buffer length — preserved
 	// verbatim so the writer reproduces the original header byte-for-byte.
 	muSizeInBytes: number;
-	// A larger logical count distinct from the stored record count (meaning not
-	// fully understood) — preserved verbatim.
+	// Total RUNTIME instance slots = muNumberOfProps + the sum of every prop's part
+	// count (each prop and each of its parts takes one slot when a zone loads). So
+	// it is >= the stored prop-record count (instances.length). The part counts come
+	// from the PropGraphicsList (0x10010) catalogue, not this resource, so we can't
+	// recompute it here — preserved verbatim. (If a future edit ADDS prop instances
+	// this would go stale; recomputing it needs a PID↔PGL join.)
 	muNumberOfInstances: number;
 	instances: PropInstance[];
 	cells: PropCell[];
@@ -151,7 +183,8 @@ export function parsePropInstanceData(raw: Uint8Array, littleEndian = true): Par
 		const muTypeIdAndFlags = r.readU32();
 		const muInstanceID = r.readU32();
 		const muAlternativeType = r.readU16();
-		const mn8RotSpeed = r.readI8();
+		// Rotation byte: top 2 bits = spinning axis, low 6 bits = speed magnitude.
+		const rotByte = r.readU8();
 		const mn8MaxAngle = r.readU8();
 		const mn8MinAngle = r.readU8();
 		const pad0 = r.readU8();
@@ -163,7 +196,8 @@ export function parsePropInstanceData(raw: Uint8Array, littleEndian = true): Par
 			flags: muTypeIdAndFlags >>> PROP_TYPE_ID_BITS,
 			muInstanceID,
 			muAlternativeType,
-			mn8RotSpeed,
+			mRotationAxis: rotByte & PROP_ROT_AXIS_MASK,
+			mn8RotSpeed: rotByte & PROP_ROT_SPEED_MASK,
 			mn8MaxAngle,
 			mn8MinAngle,
 			_pad4D: [pad0, pad1, pad2],
@@ -247,7 +281,9 @@ export function writePropInstanceData(model: ParsedPropInstanceData, littleEndia
 		w.writeU32(muTypeIdAndFlags);
 		w.writeU32(inst.muInstanceID);
 		w.writeU16(inst.muAlternativeType);
-		w.writeI8(inst.mn8RotSpeed);
+		// Recombine the rotation byte from the split axis (top 2 bits) + speed
+		// (low 6 bits) — byte-exact since the two masks are disjoint and cover 0xFF.
+		w.writeU8(((inst.mRotationAxis & PROP_ROT_AXIS_MASK) | (inst.mn8RotSpeed & PROP_ROT_SPEED_MASK)) & 0xff);
 		w.writeU8(inst.mn8MaxAngle);
 		w.writeU8(inst.mn8MinAngle);
 		w.writeU8(inst._pad4D[0]);

@@ -30,6 +30,7 @@ function makeInstance(x: number, y: number, z: number, typeId = 0): PropInstance
 		flags: 0,
 		muInstanceID: 1234,
 		muAlternativeType: 0xffff,
+		mRotationAxis: 0,
 		mn8RotSpeed: 0,
 		mn8MaxAngle: 0,
 		mn8MinAngle: 0,

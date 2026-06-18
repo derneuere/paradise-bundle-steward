@@ -17,7 +17,7 @@ function instAt(x: number, y: number, z: number): PropInstance {
 	const m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 0];
 	return {
 		mWorldTransform: m, typeId: 0, flags: 0, muInstanceID: 0,
-		muAlternativeType: 0xffff, mn8RotSpeed: 0, mn8MaxAngle: 0, mn8MinAngle: 0,
+		muAlternativeType: 0xffff, mRotationAxis: 0, mn8RotSpeed: 0, mn8MaxAngle: 0, mn8MinAngle: 0,
 		_pad4D: [0, 0, 0],
 	};
 }
