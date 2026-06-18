@@ -12,7 +12,7 @@ import {
   registry,
   type ResourceHandler,
 } from './core/registry';
-import { EDITOR_PAGES } from './core/registry/editors';
+import { hasEditorProfile } from './editor/registry';
 
 export type FeatureCapability = {
   /**
@@ -39,11 +39,13 @@ function capabilityFromHandler(h: ResourceHandler): FeatureCapability {
     resourceTypeId: h.typeId,
     // capabilityOverrides lets a handler declare a softer UI signal (e.g.
     // `'partial'`) without disabling the parser. Falls back to the machine
-    // gate (`caps.read` / `caps.write`) and to EDITOR_PAGES presence for
-    // the editor flag.
+    // gate (`caps.read` / `caps.write`) and, for the editor flag, to whether
+    // the resource has an EditorProfile in the Workspace editor registry.
+    // Schema-less resources with a bespoke Workspace editor (deformationSpec,
+    // attribSysVault) opt in via `capabilityOverrides.editor` instead.
     read: overrides?.read ?? h.caps.read,
     write: overrides?.write ?? h.caps.write,
-    editor: overrides?.editor ?? (EDITOR_PAGES[h.key] !== undefined),
+    editor: overrides?.editor ?? hasEditorProfile(h.key),
     notes: h.notes,
     wikiUrl: h.wikiUrl,
   };

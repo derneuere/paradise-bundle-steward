@@ -1,4 +1,3 @@
-import { Suspense, createElement } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,32 +7,16 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { WorkspaceProvider } from "./context/WorkspaceContext";
 import BundleLayout from "./layouts/BundleLayout";
-import ResourcesPage from "./pages/ResourcesPage";
 import HexViewPage from "./pages/HexViewPage";
 import ResourceInspectorPage from "./pages/ResourceInspectorPage";
 import WorkspacePage from "./pages/WorkspacePage";
-import { registry } from "@/lib/core/registry";
-import { EDITOR_PAGES } from "@/lib/core/registry/editors";
 
 const queryClient = new QueryClient();
 
-// Generate one <Route path="/{key}" /> per registered handler that has an
-// editor page mapped. Adding a new editable resource = one new entry in
-// EDITOR_PAGES plus one registry/index.ts line. App.tsx stays untouched.
-const handlerRoutes = registry
-  .filter((h) => EDITOR_PAGES[h.key])
-  .map((h) => (
-    <Route
-      key={h.key}
-      path={`/${h.key}`}
-      element={
-        <Suspense fallback={<div className="p-6 text-muted-foreground">Loading {h.name}…</div>}>
-          {createElement(EDITOR_PAGES[h.key])}
-        </Suspense>
-      }
-    />
-  ));
-
+// The multi-Bundle Workspace (/workspace) is the sole resource editor — every
+// resource type is viewed and edited there. The Hex View / Resource Inspector
+// routes remain as byte-level debug tooling. The standalone per-resource pages
+// and the resource browser were folded into the Workspace.
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -42,16 +25,11 @@ const App = () => (
       <BrowserRouter>
         <WorkspaceProvider>
           <Routes>
-            <Route path="/" element={<Navigate to="/resources" replace />} />
+            <Route path="/" element={<Navigate to="/workspace" replace />} />
             <Route element={<BundleLayout />}>
-              <Route path="/resources" element={<ResourcesPage />} />
+              <Route path="/workspace" element={<WorkspacePage />} />
               <Route path="/hexview" element={<HexViewPage />} />
               <Route path="/inspect" element={<ResourceInspectorPage />} />
-              {/* Multi-Bundle Workspace editor (issue #16). Coexists with the
-                  per-resource pages above; #2 brings the additive load and
-                  same-name prompt, #3 the multi-overlay scene composition. */}
-              <Route path="/workspace" element={<WorkspacePage />} />
-              {handlerRoutes}
             </Route>
             {/* Legacy index route kept if needed */}
             <Route path="/legacy" element={<Index />} />

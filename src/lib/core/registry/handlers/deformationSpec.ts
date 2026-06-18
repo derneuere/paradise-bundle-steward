@@ -34,6 +34,9 @@ export const deformationSpecHandler: ResourceHandler<ParsedDeformationSpec> = {
 	description: 'Vehicle crash deformation: handling body, wheels, sensors, IK parts, tag points, glass panes',
 	category: 'Data',
 	caps: { read: true, write: true },
+	// Edited in the Workspace via a bespoke (schema-less) editor, so opt the
+	// `editor` capability in explicitly — it has no EditorProfile to derive it.
+	capabilityOverrides: { editor: true },
 
 	parseRaw(raw, ctx) {
 		return parseDeformationSpecData(raw, ctx.littleEndian);

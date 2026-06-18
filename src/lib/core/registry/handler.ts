@@ -104,7 +104,8 @@ type PickerConfig<Model = unknown> = {
  * but the spec is incomplete (e.g. ICE Take Dictionary), or when the editor
  * is partial, the handler can declare `'partial'` here to surface a softer
  * badge / warning without disabling the parser. Omit fields default to the
- * machine value (read/write) or to `EDITOR_PAGES[key] !== undefined` (editor).
+ * machine value (read/write) or, for `editor`, to whether the resource has an
+ * EditorProfile in the Workspace editor registry (`hasEditorProfile`).
  */
 type HandlerCapabilityOverrides = {
 	read?: 'partial' | boolean;

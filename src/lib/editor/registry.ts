@@ -376,6 +376,14 @@ export function pickProfileByKey(key: string, model: unknown): EditorProfile | u
 	return entry ? pickProfileFromList(entry.profiles, model) : undefined;
 }
 
+/** True when a handler key has at least one EditorProfile registered — i.e.
+ *  the resource has a dedicated editor surface in the Workspace. Drives the
+ *  UI-facing `editor` capability flag (resources without a profile but with a
+ *  bespoke editor opt in via the handler's `capabilityOverrides.editor`). */
+export function hasEditorProfile(key: string): boolean {
+	return byKey.has(key);
+}
+
 /** Convenience for the Workspace tree-row label: surfaces a
  *  `displayName` suffix when a typeId has more than one variant
  *  registered. Single-profile types return undefined so the tree

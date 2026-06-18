@@ -1,23 +1,30 @@
 // Deformation Spec editor — tabbed form for vehicle crash data.
 //
+// Presentational: takes the parsed model + an onChange and renders the full
+// editor. The Workspace mounts it via the bespoke-editor dispatch (this
+// resource has no schema, so it can't go through the generic SchemaEditor).
+//
 // Every tab exposes one region of the resource: handling body / offsets,
 // wheels (4), sensors (20), car→handling body transform, the variable-length
 // tag-point / driven-point / IK / glass-pane tables, and the three parallel
 // transform-tag tables (generic / camera / light). Edits are propagated
-// immutably into `setResource('deformationSpec', ...)`; array lengths are
-// preserved since the writer's layout normalizer depends on them.
+// immutably; array lengths are preserved since the writer's layout normalizer
+// depends on them.
+//
+// This file is intentionally long: it is a near 1:1 field map of the
+// ParsedDeformationSpec struct, so its size tracks the binary layout it
+// mirrors rather than accidental complexity.
 //
 // Byte-exact round-trip is validated by the handler's `byteRoundTrip` fixture,
 // plus every stress scenario (scale-handling-body, raise-all-wheels,
 // sensor-radii-x2, etc.) exercises exactly the same field paths this UI edits.
 
-import { useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import type {
 	ParsedDeformationSpec,
 	Vec3,
@@ -731,23 +738,18 @@ function GlassPanesTab({
 	);
 }
 
-// ── Main page ────────────────────────────────────────────────────────────
+// ── Editor ────────────────────────────────────────────────────────────────
 
-const DeformationSpecPage = () => {
-	const { getResource, setResource } = useWorkspace();
-	const bundleId = useFirstLoadedBundleId();
-	const data = bundleId ? getResource<ParsedDeformationSpec>(bundleId, 'deformationSpec') : null;
-
-	const set = useCallback(
-		(patch: Partial<ParsedDeformationSpec>) => {
-			if (!data || !bundleId) return;
-			setResource(bundleId, 'deformationSpec', { ...data, ...patch });
-		},
-		[data, bundleId, setResource],
-	);
+export function DeformationSpecEditor({
+	data,
+	onChange,
+}: {
+	data: ParsedDeformationSpec;
+	onChange: (next: ParsedDeformationSpec) => void;
+}) {
+	const set = (patch: Partial<ParsedDeformationSpec>) => onChange({ ...data, ...patch });
 
 	const summary = useMemo(() => {
-		if (!data) return '';
 		const [hx, hy, hz] = data.handlingBodyDimensions;
 		return `v${data.version} · body[${hx.toFixed(2)}, ${hy.toFixed(2)}, ${hz.toFixed(2)}] · `
 			+ `${data.wheels.length}W ${data.sensors.length}S · tp=${data.tagPoints.length} dp=${data.drivenPoints.length} `
@@ -755,23 +757,8 @@ const DeformationSpecPage = () => {
 			+ `cam=${data.cameraTags.length} lit=${data.lightTags.length} · ${data.totalSize}B`;
 	}, [data]);
 
-	if (!data) {
-		return (
-			<Card>
-				<CardHeader>
-					<CardTitle>Deformation Spec</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<div className="text-sm text-muted-foreground">
-						Load a bundle containing a DeformationSpec resource (e.g. VEH_*_AT.BIN) to begin.
-					</div>
-				</CardContent>
-			</Card>
-		);
-	}
-
 	return (
-		<div className="h-full min-h-0 flex flex-col gap-3">
+		<div className="h-full min-h-0 flex flex-col gap-3 p-4">
 			<Card className="shrink-0">
 				<CardHeader className="py-3">
 					<CardTitle className="text-base">Deformation Spec</CardTitle>
@@ -849,6 +836,4 @@ const DeformationSpecPage = () => {
 			</div>
 		</div>
 	);
-};
-
-export default DeformationSpecPage;
+}

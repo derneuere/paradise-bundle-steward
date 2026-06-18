@@ -1,7 +1,7 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Upload, Download, Hexagon, Database, Box, Layers } from 'lucide-react';
+import { Upload, Download, Hexagon, Box, Layers } from 'lucide-react';
 import {
   useFirstLoadedBundle,
   useFirstLoadedBundleId,
@@ -305,9 +305,6 @@ const BundleLayout = () => {
 
       <nav className="px-6 py-2 border-b">
         <div className="flex items-center gap-2">
-          <NavLink to="/resources" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
-            <Database className="inline w-4 h-4 mr-1" /> Resources
-          </NavLink>
           <NavLink to="/workspace" className={({ isActive }) => `px-3 py-1.5 rounded ${isActive ? 'bg-muted' : 'hover:bg-muted/60'}`}>
             <Layers className="inline w-4 h-4 mr-1" /> Workspace
           </NavLink>

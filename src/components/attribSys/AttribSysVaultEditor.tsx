@@ -1,23 +1,22 @@
 // AttribSys Vault editor — form-per-attribute-class.
 //
-// The AttribSys model stores a heterogeneous list of attribute instances, one
-// per recognized class (physicsvehiclebaseattribs, physicsvehicleboostattribs,
-// camerabumperbehaviour, …). Each class has its own field schema defined in
-// src/lib/core/vehicleAttribs.ts. The schema-editor framework expects a fixed
-// record tree rather than a discriminated union of records, so this page
-// drives its layout directly from AttribSchema via getSchemaByClassHash.
+// Presentational: takes the parsed model + an onChange and renders the full
+// editor. The Workspace mounts it via the bespoke-editor dispatch (this
+// resource has no ResourceSchema — its model is a heterogeneous list of
+// attribute instances, one per recognized class, so it can't go through the
+// generic SchemaEditor).
 //
-// Only numeric-ish fields are editable here: f32 / int / bool / vec4. Bigint
-// / bytes / refspecs are displayed read-only; padding is hidden. The writer
+// Each class has its own field schema defined in src/lib/core/vehicleAttribs.ts.
+// Only numeric-ish fields are editable here: f32 / int / bool / vec4. Bigint /
+// bytes / refspecs are displayed read-only; padding is hidden. The writer
 // preserves every field regardless of whether the UI exposed it.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { useFirstLoadedBundleId, useWorkspace } from '@/context/WorkspaceContext';
 import type { ParsedAttribSys } from '@/lib/core/attribSys';
 import {
 	getSchemaByClassHash,
@@ -227,7 +226,7 @@ function hex8(bytes: number[]): string {
 // bytes8 fields carry short ASCII names in practice (VehicleID="CARBRWDS",
 // InGameName packed text, etc.). Decode up to the first null; fall back to
 // hex if the payload isn't all printable ASCII.
-function decodeBytes8(bytes: number[]): { ascii: string | null; hex: string } {
+export function decodeBytes8(bytes: number[]): { ascii: string | null; hex: string } {
 	const hex = hex8(bytes);
 	const out: number[] = [];
 	for (const b of bytes) {
@@ -239,7 +238,7 @@ function decodeBytes8(bytes: number[]): { ascii: string | null; hex: string } {
 	return { ascii: printable ? String.fromCharCode(...out) : null, hex };
 }
 
-function encodeBytes8(text: string): number[] {
+export function encodeBytes8(text: string): number[] {
 	const out = new Array(8).fill(0);
 	for (let i = 0; i < Math.min(text.length, 8); i++) {
 		out[i] = text.charCodeAt(i) & 0xFF;
@@ -532,28 +531,26 @@ function FieldRow({
 	}
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────
+// ── Editor ────────────────────────────────────────────────────────────────
 
-const AttribSysVaultPage = () => {
-	const { getResource, setResource } = useWorkspace();
-	const bundleId = useFirstLoadedBundleId();
-	const data = bundleId ? getResource<ParsedAttribSys>(bundleId, 'attribSysVault') : null;
+export function AttribSysVaultEditor({
+	data,
+	onChange,
+}: {
+	data: ParsedAttribSys;
+	onChange: (next: ParsedAttribSys) => void;
+}) {
 	const [showAdvanced, setShowAdvanced] = useState(false);
 
-	const update = useCallback<UpdateField>(
-		(attrIndex, fieldName, newValue) => {
-			if (!data || !bundleId) return;
-			const nextAttributes: ParsedAttribute[] = data.attributes.map((attr, i) => {
-				if (i !== attrIndex) return attr;
-				return { ...attr, fields: { ...attr.fields, [fieldName]: newValue } };
-			});
-			setResource(bundleId, 'attribSysVault', { ...data, attributes: nextAttributes });
-		},
-		[data, bundleId, setResource],
-	);
+	const update: UpdateField = (attrIndex, fieldName, newValue) => {
+		const nextAttributes: ParsedAttribute[] = data.attributes.map((attr, i) => {
+			if (i !== attrIndex) return attr;
+			return { ...attr, fields: { ...attr.fields, [fieldName]: newValue } };
+		});
+		onChange({ ...data, attributes: nextAttributes });
+	};
 
 	const defaultOpen = useMemo(() => {
-		if (!data) return [];
 		const present = new Set(data.attributes.map((a) => a.className));
 		const preferred = DEFAULT_OPEN_CLASSES.filter((c) => present.has(c));
 		// Fallback to the first two attributes if none of the preferred classes
@@ -563,24 +560,9 @@ const AttribSysVaultPage = () => {
 			: data.attributes.slice(0, 2).map((a) => a.className);
 	}, [data]);
 
-	if (!data) {
-		return (
-			<Card>
-				<CardHeader>
-					<CardTitle>AttribSys Vault</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<div className="text-sm text-muted-foreground">
-						Load a bundle containing an AttribSys vault (e.g. VEH_*_AT.BIN) to begin.
-					</div>
-				</CardContent>
-			</Card>
-		);
-	}
-
 	if (data.binRaw && data.attributes.length === 0) {
 		return (
-			<Card>
+			<Card className="m-4">
 				<CardHeader>
 					<CardTitle>AttribSys Vault</CardTitle>
 				</CardHeader>
@@ -595,7 +577,7 @@ const AttribSysVaultPage = () => {
 	}
 
 	return (
-		<div className="h-full min-h-0 flex flex-col gap-3">
+		<div className="h-full min-h-0 flex flex-col gap-3 p-4">
 			<Card className="shrink-0">
 				<CardHeader className="py-3 flex-row items-center justify-between space-y-0">
 					<CardTitle className="text-base">AttribSys Vault</CardTitle>
@@ -670,6 +652,4 @@ const AttribSysVaultPage = () => {
 			</div>
 		</div>
 	);
-};
-
-export default AttribSysVaultPage;
+}
