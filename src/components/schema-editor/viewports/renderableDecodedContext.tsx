@@ -23,10 +23,10 @@
 // "Fast" viewport state (wireframe, paint color, selection highlight)
 // stays local to the viewport.
 
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 import { useLoadShaderNameMap } from '@/hooks/useLoadShaderNameMap';
 import * as THREE from 'three';
-import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
+import { useWorkspace } from '@/context/WorkspaceContext';
 import {
 	RENDERABLE_TYPE_ID,
 	VERTEX_DESCRIPTOR_TYPE_ID,
@@ -48,7 +48,7 @@ import {
 	resolveGraphicsSpecParts,
 	type RawLocator,
 } from '@/lib/core/graphicsSpec';
-import { getImportsByPtrOffset, getImportIds, parseBundle } from '@/lib/core/bundle';
+import { getImportsByPtrOffset, getImportIds } from '@/lib/core/bundle';
 import { extractResourceSize, isResourceBlockCompressed, decompressData } from '@/lib/core/resourceManager';
 import { u64ToBigInt } from '@/lib/core/u64';
 import {
@@ -374,9 +374,12 @@ export type RenderableDecodedValue = {
 	setDecodeMode: (m: DecodeMode) => void;
 	includeNonLOD0: boolean;
 	setIncludeNonLOD0: (b: boolean) => void;
+	/** Every OTHER loaded workspace bundle, as texture/shader sources. Textures
+	 *  and shaders resolve from whatever bundles are loaded in the workspace —
+	 *  no separate "texture pack" step. */
 	textureBundles: TextureSourceBundle[];
+	/** Display names of the bundles contributing textures/shaders. */
 	textureBundleNames: string[];
-	loadTexturePack: () => Promise<void>;
 	shaderNameMap: ShaderNameMap | null;
 };
 
@@ -397,38 +400,42 @@ export function RenderableDecodedProvider({ children }: { children: React.ReactN
 }
 
 function RenderableDecodedProviderInner({ children }: { children: React.ReactNode }) {
-	const activeBundle = useFirstLoadedBundle();
-	const loadedBundle = activeBundle?.parsed ?? null;
-	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
-	const debugResources = activeBundle?.debugResources ?? [];
+	const { bundles, selection } = useWorkspace();
 	const [decodeMode, setDecodeMode] = useState<DecodeMode>('graphics');
 	const [includeNonLOD0, setIncludeNonLOD0] = useState(false);
-	const [textureBundles, setTextureBundles] = useState<TextureSourceBundle[]>([]);
-	const [textureBundleNames, setTextureBundleNames] = useState<string[]>([]);
 	const [shaderNameMap, setShaderNameMap] = useState<ShaderNameMap | null>(null);
 
 	// Auto-load SHADERS.BNDL from the example directory at mount; every
 	// consumer sees the resulting shader name map.
 	useLoadShaderNameMap(setShaderNameMap);
 
-	const loadTexturePack = useCallback(async () => {
-		const input = document.createElement('input');
-		input.type = 'file';
-		input.accept = '.BIN,.BNDL,.BUNDLE,.bin,.bndl,.bundle';
-		input.onchange = async () => {
-			const file = input.files?.[0];
-			if (!file) return;
-			const ab = await file.arrayBuffer();
-			try {
-				const bundle = parseBundle(ab);
-				setTextureBundles(prev => [...prev, { buffer: ab, bundle }]);
-				setTextureBundleNames(prev => [...prev, file.name]);
-			} catch (e) {
-				console.warn('Failed to parse texture bundle:', e);
-			}
-		};
-		input.click();
-	}, []);
+	// Decode the renderables of the SELECTED bundle (the one the user is
+	// inspecting), falling back to the first loaded bundle. Textures + shaders
+	// come from EVERY loaded workspace bundle — load the vehicle GR bundle, its
+	// texture bundle and SHADERS.BNDL into the workspace and they all resolve
+	// automatically; there's no separate "texture pack" step.
+	const renderableBundle = useMemo(() => {
+		const sel = selection?.bundleId ? bundles.find((b) => b.id === selection.bundleId) : null;
+		return sel ?? bundles[0] ?? null;
+	}, [bundles, selection]);
+
+	const loadedBundle = renderableBundle?.parsed ?? null;
+	const originalArrayBuffer = renderableBundle?.originalArrayBuffer ?? null;
+	const debugResources = renderableBundle?.debugResources ?? [];
+
+	// Every OTHER loaded bundle is a texture/shader source for the material
+	// chain (cross-bundle texture resolution — a vehicle's pixels live in its
+	// companion texture bundle, its shaders in SHADERS.BNDL).
+	const textureBundles = useMemo<TextureSourceBundle[]>(
+		() => bundles
+			.filter((b) => b !== renderableBundle)
+			.map((b) => ({ buffer: b.originalArrayBuffer, bundle: b.parsed })),
+		[bundles, renderableBundle],
+	);
+	const textureBundleNames = useMemo(
+		() => bundles.filter((b) => b !== renderableBundle).map((b) => b.id),
+		[bundles, renderableBundle],
+	);
 
 	const debugNames = useMemo(() => {
 		const norm = (s: string) => s.toLowerCase().replace(/^0x/, '').replace(/^0+(?=.)/, '');
@@ -439,8 +446,12 @@ function RenderableDecodedProviderInner({ children }: { children: React.ReactNod
 		return m;
 	}, [debugResources]);
 
+	// Decoding the whole bundle's renderables is expensive; only run it while a
+	// renderable is actually being viewed.
+	const active = selection?.resourceKey === 'renderable';
+
 	const decoded = useMemo(() => {
-		if (!loadedBundle || !originalArrayBuffer) return null;
+		if (!active || !loadedBundle || !originalArrayBuffer) return null;
 		const result = decodeAllRenderables(
 			originalArrayBuffer,
 			loadedBundle,
@@ -454,7 +465,7 @@ function RenderableDecodedProviderInner({ children }: { children: React.ReactNod
 		// the devtools console while reproducing user reports.
 		(window as unknown as Record<string, unknown>).__decoded = result;
 		return result;
-	}, [loadedBundle, originalArrayBuffer, debugNames, includeNonLOD0, decodeMode, textureBundles, shaderNameMap]);
+	}, [active, loadedBundle, originalArrayBuffer, debugNames, includeNonLOD0, decodeMode, textureBundles, shaderNameMap]);
 
 	// Derive the ParsedRenderable array the schema editor walks. Failed
 	// parses are dropped; everything else is kept in decode order so a click
@@ -526,7 +537,6 @@ function RenderableDecodedProviderInner({ children }: { children: React.ReactNod
 		setIncludeNonLOD0,
 		textureBundles,
 		textureBundleNames,
-		loadTexturePack,
 		shaderNameMap,
 	}), [
 		decoded,
@@ -540,7 +550,6 @@ function RenderableDecodedProviderInner({ children }: { children: React.ReactNod
 		includeNonLOD0,
 		textureBundles,
 		textureBundleNames,
-		loadTexturePack,
 		shaderNameMap,
 	]);
 

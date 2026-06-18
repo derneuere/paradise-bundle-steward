@@ -30,7 +30,7 @@ import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
-import { useFirstLoadedBundle, useWorkspaceCompanion } from '@/context/WorkspaceContext';
+import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import { RENDERABLE_TYPE_ID } from '@/lib/core/renderable';
 import { extractResourceRaw } from '@/lib/core/registry/extract';
 import type { ResolvedMaterial } from '@/lib/core/materialChain';
@@ -338,32 +338,26 @@ function RenderableMeshes({
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	const debugResources = activeBundle?.debugResources ?? [];
-	const { secondaryBundles } = useWorkspaceCompanion();
 	const decoded = useRenderableDecoded();
 
 	// Cross-bundle catalog + material index, only computed when the user
-	// actually flips to translated shaders. Sources include the primary
-	// bundle, the global secondaryBundles, AND the renderable page's own
-	// "+ texture pack" list — that way users can drop SHADERS.BNDL via the
-	// existing texture-pack button and have its shaders become translatable.
+	// actually flips to translated shaders. Sources are the primary (renderable)
+	// bundle plus every OTHER bundle loaded in the workspace (decoded.textureBundles)
+	// — so a vehicle's textures (VEHICLETEX.BIN) and shaders (SHADERS.BNDL)
+	// resolve simply by being loaded into the workspace alongside the GR bundle.
 	const translatedSetup = useMemo(() => {
 		if (!useTranslatedShaders) return null;
 		const sources: Source[] = [];
 		if (loadedBundle && originalArrayBuffer) {
 			sources.push({ source: 'primary', bundle: loadedBundle, arrayBuffer: originalArrayBuffer, debug: debugResources });
 		}
-		for (const sb of secondaryBundles) {
-			sources.push({ source: sb.name, bundle: sb.bundle, arrayBuffer: sb.arrayBuffer, debug: sb.debugResources });
-		}
-		// Renderable's own texture-pack list — separate state, but the same
-		// raw bytes work fine as Material/Shader sources too.
 		for (const tb of decoded?.textureBundles ?? []) {
-			sources.push({ source: 'texture-pack', bundle: tb.bundle, arrayBuffer: tb.buffer, debug: [] });
+			sources.push({ source: 'workspace', bundle: tb.bundle, arrayBuffer: tb.buffer, debug: [] });
 		}
 		const textureCatalog = buildTextureCatalog(sources);
 		const materialIndex = buildMaterialIndex(sources, textureCatalog);
 		return { sources, textureCatalog, materialIndex };
-	}, [useTranslatedShaders, loadedBundle, originalArrayBuffer, debugResources, secondaryBundles, decoded?.textureBundles]);
+	}, [useTranslatedShaders, loadedBundle, originalArrayBuffer, debugResources, decoded?.textureBundles]);
 	const baseMaterial = useMemo(
 		() => {
 			const mat = new THREE.MeshStandardMaterial({ color: 0xb0b8c0, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide, wireframe });
@@ -816,7 +810,7 @@ export function RenderableViewport() {
 	if (!decoded) {
 		return (
 			<div className="h-full flex items-center justify-center text-xs text-muted-foreground">
-				Renderable decoded context missing. Wrap the page in RenderableDecodedProvider.
+				Decoding renderables…
 			</div>
 		);
 	}
@@ -885,23 +879,20 @@ export function RenderableViewport() {
 						variant={useTranslatedShaders ? 'default' : 'outline'}
 						size="sm"
 						onClick={() => setUseTranslatedShaders(v => !v)}
-						title="Use real DXBC-translated shaders instead of PBR approximations. Requires SHADERS.BNDL + texture bundles to be loaded as companions."
+						title="Use real DXBC-translated shaders instead of PBR approximations. Load the vehicle's texture bundle (e.g. VEHICLETEX.BIN) and SHADERS.BNDL into the workspace to resolve real textures."
 					>
 						translated shaders
 					</Button>
-					<span className="font-medium ml-2">textures:</span>
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => { void decoded.loadTexturePack(); }}
-						title="Load a secondary bundle containing textures (e.g. VEHICLETEX.BIN)"
-					>
-						+ texture pack
-					</Button>
+					{/* Textures + shaders resolve from every bundle loaded in the
+					    workspace — no separate "texture pack" step. This shows which
+					    companion bundles are contributing. */}
 					{decoded.textureBundleNames.length > 0 && (
-						<span className="text-xs text-muted-foreground">
-							{decoded.textureBundleNames.join(', ')}
-						</span>
+						<>
+							<span className="font-medium ml-2">textures from:</span>
+							<span className="text-xs text-muted-foreground">
+								{decoded.textureBundleNames.join(', ')}
+							</span>
+						</>
 					)}
 				</div>
 				<VehicleColorPicker
