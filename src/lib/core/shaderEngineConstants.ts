@@ -16,6 +16,31 @@
 
 import type { ParsedDxbc } from './dxbc';
 
+// ---------------------------------------------------------------------------
+// Live debug knobs for the over-bright preview.
+//
+// The translated vehicle shaders fold engine-RUNTIME constants (key light,
+// ambient irradiance, fog/white-level) into the output colour, and those values
+// aren't in the bundle — we stand in heuristic defaults. When the result blows
+// out to white it's hard to know which term dominates, so the viewport exposes
+// sliders that SCALE each group plus a final exposure. This object is module-
+// global and mutated in place by the sliders; a translated material's
+// __updateCb0 reads it every frame (R3F renders continuously), so the knobs are
+// live with no material rebuild. `exposure` multiplies gl_FragColor before the
+// preview tonemap; the others scale their cb0 constant group off its seeded base.
+// ---------------------------------------------------------------------------
+export type EngineKnobs = { exposure: number; keyLight: number; ambient: number; fog: number };
+export const DEFAULT_ENGINE_KNOBS: EngineKnobs = { exposure: 1, keyLight: 1, ambient: 1, fog: 1 };
+export const engineKnobs: EngineKnobs = { ...DEFAULT_ENGINE_KNOBS };
+
+/** Which knob group (if any) scales a given engine constant by name. */
+export function knobGroupForConstant(name: string): Exclude<keyof EngineKnobs, 'exposure'> | null {
+	if (/^KeyLight/.test(name)) return 'keyLight';
+	if (/^Irradiance/.test(name)) return 'ambient';
+	if (/^FogColour/.test(name)) return 'fog';
+	return null;
+}
+
 /** cb0 slot map for a shader. Slots are vec4 indices (byte offset / 16).
  *  The `Row0` matrix slots are the first of a 4-consecutive-row matrix; null
  *  means the shader doesn't declare that matrix. */

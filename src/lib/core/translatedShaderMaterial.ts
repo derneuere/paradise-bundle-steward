@@ -27,7 +27,7 @@ import type { TextureCatalogEntry } from './textureCatalog';
 import { pickTextureForSampler } from './textureCatalog';
 import type { MaterialBinding } from './materialBinding';
 import type { ParsedShaderConstant } from './shader';
-import { type CbLayout, seedSkinningPalettes } from './shaderEngineConstants';
+import { type CbLayout, seedSkinningPalettes, engineKnobs, knobGroupForConstant, type EngineKnobs } from './shaderEngineConstants';
 
 export type BuildOptions = {
 	vsSource: string;
@@ -83,9 +83,12 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 	// standard `position` / `normal` / `uv` attributes.
 	const finalVs = attributeAliasPrefix(harmonizedVs) + harmonizedVs;
 
-	// Optional preview safety net + Reinhard tonemap on gl_FragColor.
+	// Optional preview safety net + exposure-scaled Reinhard tonemap on
+	// gl_FragColor. `uExposure` is driven live by the viewport's exposure knob.
 	const finalPs = applyPreviewTonemap
-		? harmonizedPs.replace(/\}\s*$/, PREVIEW_TONEMAP_SUFFIX)
+		? harmonizedPs
+			.replace(/(precision\s+highp\s+float;\s*)/, '$1uniform float uExposure;\n')
+			.replace(/\}\s*$/, PREVIEW_TONEMAP_SUFFIX)
 		: harmonizedPs;
 
 	const m = new THREE.ShaderMaterial({
@@ -95,6 +98,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		side,
 		transparent,
 	}) as TranslatedMaterial;
+	if (applyPreviewTonemap) m.uniforms.uExposure = { value: engineKnobs.exposure };
 
 	// Allocate zeroed cb arrays for every `uniform vec4 cbN[...]` declared.
 	const cbDecls = Array.from(finalPs.matchAll(/uniform vec4 (cb\d+)\[(\d+)\];/g)).concat(
@@ -135,6 +139,12 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 				const comp = (v.startOffset % 16) / 4;
 				const nFloats = Math.max(1, Math.min(4 - comp, Math.floor(v.size / 4)));
 				if (/time/i.test(v.name)) timeSlots.add(slot);
+				// g_verletOffsets is the per-vertex deformation array — zero at rest
+				// (the engine fills it per-vehicle at draw time). Its baked default can
+				// be a non-zero placeholder (e.g. (1,1,1,0) on PaintGloss); seeding that
+				// adds a constant offset to every vertex through the skin/verlet blend,
+				// so the part renders shifted. Leave it zeroed for the rest-pose preview.
+				if (/verlet/i.test(v.name)) continue;
 				const baked = shaderConstants.find((c) => c.name === v.name && c.instanceData);
 				if (baked?.instanceData) {
 					writeScalars(arr, slot, comp, baked.instanceData, nFloats);
@@ -158,6 +168,28 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		seedSkinningPalettes(vsParsed, writeVec4);
 		seedSkinningPalettes(psParsed, writeVec4);
 	}
+
+	// Record the cb0 slots the viewport's debug knobs scale, capturing the seeded
+	// BASE value so a knob multiplies (not replaces) it each frame.
+	const knobSlots: { slot: number; base: THREE.Vector4; group: Exclude<keyof EngineKnobs, 'exposure'> }[] = [];
+	const recordKnobs = (parsed: ParsedDxbc | undefined) => {
+		if (!parsed) return;
+		const arr = m.uniforms.cb0?.value as THREE.Vector4[] | undefined;
+		if (!arr) return;
+		for (const cbuf of parsed.reflection.constantBuffers) {
+			for (const v of cbuf.variables) {
+				const group = knobGroupForConstant(v.name);
+				if (!group) continue;
+				const start = Math.floor(v.startOffset / 16);
+				const end = Math.floor((v.startOffset + v.size - 1) / 16);
+				for (let slot = start; slot <= end && slot < arr.length; slot++) {
+					if (!knobSlots.some((k) => k.slot === slot)) knobSlots.push({ slot, base: arr[slot].clone(), group });
+				}
+			}
+		}
+	};
+	recordKnobs(vsParsed);
+	recordKnobs(psParsed);
 
 	// __updateCb0 — engine-fed slots refreshed per frame from three.js
 	// matrices + clock. The mesh's onBeforeRender invokes this.
@@ -231,6 +263,14 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 					if (cb0[slot]) cb0[slot].set(t, t, t, t);
 				}
 			}
+			// Live debug knobs: scale the key-light / ambient / fog constant groups
+			// off their seeded base. Read every frame so the viewport sliders take
+			// effect without rebuilding the material.
+			for (const k of knobSlots) {
+				const s = engineKnobs[k.group];
+				cb0[k.slot].set(k.base.x * s, k.base.y * s, k.base.z * s, k.base.w * s);
+			}
+			if (m.uniforms.uExposure) m.uniforms.uExposure.value = engineKnobs.exposure;
 		};
 	}
 
@@ -280,7 +320,7 @@ function attributeAliasPrefix(vs: string): string {
 
 const PREVIEW_TONEMAP_SUFFIX = `
 	{
-		vec3 _c = gl_FragColor.rgb;
+		vec3 _c = gl_FragColor.rgb * uExposure;
 		bool _nan = (_c.r != _c.r) || (_c.g != _c.g) || (_c.b != _c.b);
 		bool _inf = (abs(_c.r) > 1e10) || (abs(_c.g) > 1e10) || (abs(_c.b) > 1e10);
 		if (_nan) gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
