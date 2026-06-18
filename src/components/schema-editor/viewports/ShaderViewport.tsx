@@ -194,10 +194,19 @@ export function ShaderViewport() {
 		return -1;
 	}, [bundle, selection]);
 
-	const sources = useMemo(
-		() => (bundle ? [{ source: 'primary', bundle: bundle.parsed, arrayBuffer: bundle.originalArrayBuffer, debug: bundle.debugResources }] : []),
-		[bundle],
-	);
+	// Texture + shader sources = every loaded workspace bundle (the selected
+	// bundle first, then the rest), so a shader's textures resolve from whatever
+	// companion bundles (e.g. VEHICLETEX.BIN) are loaded — no separate step.
+	const sources = useMemo(() => {
+		if (!bundle) return [];
+		const ordered = [bundle, ...bundles.filter((b) => b !== bundle)];
+		return ordered.map((b, i) => ({
+			source: i === 0 ? 'primary' : b.id,
+			bundle: b.parsed,
+			arrayBuffer: b.originalArrayBuffer,
+			debug: b.debugResources,
+		}));
+	}, [bundle, bundles]);
 	// TODO(types): buildTextureCatalog/buildMaterialIndex take a loosely-typed
 	// source list shared with ShaderPage; cast until that shape is exported.
 	const textureCatalog = useMemo(() => buildTextureCatalog(sources as never), [sources]);

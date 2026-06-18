@@ -59,6 +59,7 @@ import {
 	isWorldViewportFamilyKey,
 } from '@/components/workspace/WorldViewportComposition';
 import { WorkspaceHierarchy } from '@/components/workspace/WorkspaceHierarchy';
+import { RenderableDecodedProvider } from '@/components/schema-editor/viewports/renderableDecodedContext';
 import {
 	PSLBulkProvider,
 	useWorkspacePSLBulk,
@@ -922,6 +923,12 @@ const WorkspacePage = () => {
 				}}
 				className="hidden"
 			/>
+			{/* Renderable decode context spans the whole editor so BOTH the centre
+			    viewport (RenderableViewport) and the right inspector's
+			    "Materials & Textures" tab share one decode pass. Workspace-aware:
+			    it decodes the selected bundle's renderables and sources textures
+			    + shaders from every other loaded bundle. */}
+			<RenderableDecodedProvider>
 			<ResizablePanelGroup direction="horizontal">
 				<ResizablePanel id="ws-tree" order={1} defaultSize={20} minSize={14} className="bg-background">
 					<div className="h-full flex flex-col">
@@ -980,6 +987,7 @@ const WorkspacePage = () => {
 					</div>
 				</ResizablePanel>
 			</ResizablePanelGroup>
+			</RenderableDecodedProvider>
 		</div>
 		</WorkspaceBulkWrapper>
 	);

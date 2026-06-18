@@ -17,8 +17,9 @@ import { lazy, type ComponentType } from 'react';
 export const EDITOR_PAGES: Record<string, ComponentType<unknown>> = {
 	attribSysVault: lazy(() => import('@/pages/AttribSysVaultPage')),
 	deformationSpec: lazy(() => import('@/pages/DeformationSpecPage')),
-	renderable: lazy(() => import('@/pages/RenderablePage')),
 	texture: lazy(() => import('@/pages/TexturePage')),
 	polygonSoupList: lazy(() => import('@/pages/PolygonSoupListPage')),
-	shader: lazy(() => import('@/pages/ShaderPage')),
+	// Shader (0x32) and Renderable (0xC) are edited exclusively in the Workspace
+	// (/workspace) now — their 3D previews live in ShaderViewport /
+	// RenderableViewport. No standalone resource page.
 };
