@@ -15,6 +15,7 @@ import { makeEditableBundle } from './WorkspaceContext.bundle';
 import {
 	appendBundle,
 	applyResourceWriteToBundle,
+	buildSingleInstanceOverrides,
 	classifyLoad,
 	clearBundleDirty,
 	dropHistoryForBundle,
@@ -23,6 +24,10 @@ import {
 	replaceBundleById,
 	visibilityKey,
 } from './WorkspaceContext.helpers';
+import {
+	buildByResourceIdOverrides,
+	keyedOverridesToTypeIdMap,
+} from './WorkspaceContext';
 import {
 	emptyHistory,
 	recordCommit,
@@ -723,3 +728,67 @@ describe('per-Bundle save bookkeeping', () => {
 		expect(after.bundles[1]).toBe(s.bundles[1]);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Multi-instance save-corruption guard (WORLDCOL.BIN)
+//
+// WORLDCOL.BIN holds 428 polygonSoupList resources of the same type. Editing
+// instance #0 must NOT broadcast onto its 427 siblings. The two override maps
+// saveBundle emits encode exactly that:
+//   - the typeId-keyed override (broadcast to every resource of the type) must
+//     be EMPTY for a multi-instance type, and
+//   - byResourceId must carry exactly the edited instance, keyed by its unique
+//     resourceId, so the writer rewrites only that one collision mesh.
+// Gated on the fixture being present — a fresh worktree may not have the big
+// untracked binaries (mirrors the repo's describe.skipIf fixture pattern).
+// ---------------------------------------------------------------------------
+
+const WORLDCOL = path.resolve(__dirname, '../../example/WORLDCOL.BIN');
+
+describe.skipIf(!fs.existsSync(WORLDCOL))(
+	'multi-instance save override (WORLDCOL.BIN polygonSoupList)',
+	() => {
+		function loadWorldcol(): EditableBundle {
+			const raw = fs.readFileSync(WORLDCOL);
+			const bytes = new Uint8Array(raw.byteLength);
+			bytes.set(raw);
+			return makeEditableBundle(bytes.buffer, 'WORLDCOL.BIN');
+		}
+
+		it('editing polygonSoupList #0: typeId override is empty, byResourceId has only #0', () => {
+			const bundle = loadWorldcol();
+			const all = bundle.parsedResourcesAll.get('polygonSoupList');
+			expect(all).toBeDefined();
+			// Sanity: this really is a multi-instance type in this fixture.
+			expect(all!.length).toBeGreaterThan(1);
+
+			// Edit only instance 0 — the exact gesture that corrupted siblings.
+			const original = all![0] as Record<string, unknown>;
+			const edited = applyResourceWriteToBundle(bundle, 'polygonSoupList', 0, {
+				...original,
+				__edited: true,
+			});
+
+			// Typeid-keyed override must NOT include polygonSoupList — otherwise
+			// the writer would broadcast #0's model onto all 427 siblings.
+			const single = buildSingleInstanceOverrides(
+				edited.parsedResources,
+				edited.parsedResourcesAll,
+				edited.dirtyMulti,
+			);
+			expect(single.has('polygonSoupList')).toBe(false);
+			expect(keyedOverridesToTypeIdMap(single)).toEqual({});
+
+			// The per-resource path carries exactly the edited instance, keyed by
+			// its unique resourceId — so only that one collision mesh is rewritten.
+			const byId = buildByResourceIdOverrides(
+				edited.parsed,
+				edited.parsedResourcesAll,
+				edited.dirtyMulti,
+			);
+			const idHexes = Object.keys(byId);
+			expect(idHexes).toHaveLength(1);
+			expect((byId[idHexes[0]] as Record<string, unknown>).__edited).toBe(true);
+		});
+	},
+);

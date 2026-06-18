@@ -63,6 +63,7 @@ import type {
 import {
 	appendBundle,
 	applyResourceWriteToBundle,
+	buildSingleInstanceOverrides,
 	classifyLoad,
 	clearBundleDirty,
 	dropHistoryForBundle,
@@ -639,10 +640,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 					b.dirtyMulti,
 				);
 
-				const filteredSingleResource = new Map<string, unknown>();
-				for (const [k, model] of b.parsedResources) {
-					if (b.dirtyMulti.has(`${k}:0`)) filteredSingleResource.set(k, model);
-				}
+				const filteredSingleResource = buildSingleInstanceOverrides(
+					b.parsedResources,
+					b.parsedResourcesAll,
+					b.dirtyMulti,
+				);
 
 				const outBuffer = writeBundleFresh(
 					b.parsed,
@@ -906,9 +908,12 @@ export function useFirstLoadedBundle(): EditableBundle | null {
 
 // ---------------------------------------------------------------------------
 // Internal helpers — exporter override builders
+//
+// Exported so the save-path override shape can be asserted against a real
+// multi-instance bundle in the integration test (no DOM / provider needed).
 // ---------------------------------------------------------------------------
 
-function keyedOverridesToTypeIdMap(map: Map<string, unknown>): Record<number, unknown> {
+export function keyedOverridesToTypeIdMap(map: Map<string, unknown>): Record<number, unknown> {
 	const out: Record<number, unknown> = {};
 	for (const [key, model] of map) {
 		const handler = getHandlerByKey(key);
@@ -918,7 +923,7 @@ function keyedOverridesToTypeIdMap(map: Map<string, unknown>): Record<number, un
 	return out;
 }
 
-function buildByResourceIdOverrides(
+export function buildByResourceIdOverrides(
 	bundle: ParsedBundle,
 	parsedResourcesAll: Map<string, (unknown | null)[]>,
 	dirty: Set<string>,

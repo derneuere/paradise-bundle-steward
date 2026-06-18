@@ -246,6 +246,35 @@ export function applyResourceWriteToBundle(
 }
 
 /**
+ * Builds the typeId-keyed export override for the SINGLE-instance resources a
+ * save touched. The bundle writer broadcasts a typeId-keyed override to every
+ * resource carrying that type id, so it is only safe to emit one for a type
+ * that has exactly one instance in the bundle. A bundle like WORLDCOL.BIN
+ * holds hundreds of resources of the same type (e.g. 428 polygonSoupList);
+ * emitting a typeId override there because instance #0 was edited would
+ * overwrite every sibling with index 0's model. Multi-instance types are
+ * instead covered per-resource by `buildByResourceIdOverrides` (keyed by the
+ * unique resourceId), which already includes index 0, so excluding them here
+ * loses no coverage.
+ *
+ * Returns one entry per `[k, model]` in `parsedResources` that is both dirty
+ * at `:0` and the only instance of its type in the bundle.
+ */
+export function buildSingleInstanceOverrides(
+	parsedResources: ReadonlyMap<string, unknown>,
+	parsedResourcesAll: ReadonlyMap<string, (unknown | null)[]>,
+	dirtyMulti: ReadonlySet<string>,
+): Map<string, unknown> {
+	const out = new Map<string, unknown>();
+	for (const [k, model] of parsedResources) {
+		if (!dirtyMulti.has(`${k}:0`)) continue;
+		if ((parsedResourcesAll.get(k)?.length ?? 1) !== 1) continue;
+		out.set(k, model);
+	}
+	return out;
+}
+
+/**
  * Resets the dirty-tracking bookkeeping after a save. The model maps stay
  * intact — only the dirty set and the modified flag clear.
  */
