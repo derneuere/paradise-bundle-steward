@@ -45,6 +45,7 @@ import { propInstanceDataProfile } from './profiles/propInstanceData';
 import { propGraphicsListProfile } from './profiles/propGraphicsList';
 import { propPhysicsProfile } from './profiles/propPhysics';
 import { renderableProfile } from './profiles/renderable';
+import { shaderProfile } from './profiles/shader';
 import { snapshotDataProfile } from './profiles/snapshotData';
 import { splicerProfile } from './profiles/splicer';
 import { staticSoundMapProfile } from './profiles/staticSoundMap';
@@ -325,6 +326,11 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0xc,
 		key: 'renderable',
 		profiles: [renderableProfile],
+	},
+	{
+		typeId: 0x32,
+		key: 'shader',
+		profiles: [shaderProfile],
 	},
 	{
 		typeId: 0x0,
