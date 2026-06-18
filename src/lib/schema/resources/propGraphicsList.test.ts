@@ -62,7 +62,7 @@ const model = hasFixture ? loadBundleModel(BUNDLE_9) : (undefined as unknown as 
 describeFixture('propGraphicsListResourceSchema coverage — bundle TRK_UNIT9_GR.BNDL', () => {
 	it('fixture parses with non-trivial content', () => {
 		expect(model.props.length).toBeGreaterThan(0);
-		expect(model.parts.length).toBeGreaterThan(0);
+		expect(model.props.reduce((n, p) => n + p.parts.length, 0)).toBeGreaterThan(0);
 	});
 
 	it('every record type referenced by a `record` or `list<record>` field is registered', () => {
@@ -167,37 +167,46 @@ describe('propGraphicsList path resolution', () => {
 		expect(loc!.field?.kind).toBe('bigint');
 	});
 
-	it('resolves parts[0] as a PropPartGraphics', () => {
-		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['parts', 0]);
+	it('resolves a nested part props[0].parts[0] as a PropPartGraphics', () => {
+		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['props', 0, 'parts', 0]);
 		expect(loc).not.toBeNull();
 		expect(loc!.record?.name).toBe('PropPartGraphics');
 	});
 
-	it('resolves parts[0].muPartId as u32', () => {
-		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['parts', 0, 'muPartId']);
+	it('resolves props[0].parts[0].muPartId as u32', () => {
+		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['props', 0, 'parts', 0, 'muPartId']);
 		expect(loc).not.toBeNull();
 		expect(loc!.field?.kind).toBe('u32');
 	});
 
-	it('resolves parts[0].mpModelId as an editable bigint resource id', () => {
-		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['parts', 0, 'mpModelId']);
+	it('resolves props[0].parts[0].mpModelId as an editable bigint resource id', () => {
+		const loc = resolveSchemaAtPath(propGraphicsListResourceSchema, ['props', 0, 'parts', 0, 'mpModelId']);
 		expect(loc).not.toBeNull();
 		expect(loc!.field?.kind).toBe('bigint');
 	});
 
-	it('exposes props as an addable list but locks parts (firstPartIndex linkage is internal)', () => {
+	it('exposes props AND each prop\'s nested parts as addable/removable lists', () => {
 		const props = propGraphicsListResourceSchema.registry.ParsedPropGraphicsList.fields.props;
-		const parts = propGraphicsListResourceSchema.registry.ParsedPropGraphicsList.fields.parts;
+		const parts = propGraphicsListResourceSchema.registry.PropGraphics.fields.parts;
 		if (props.kind !== 'list' || parts.kind !== 'list') throw new Error('expected lists');
 		expect(props.addable).toBe(true);
 		expect(props.removable).toBe(true);
-		// Parts can't be added/removed (only their fields edited) — see schema note.
-		expect(parts.addable).toBe(false);
-		expect(parts.removable).toBe(false);
-		// makeEmpty supplies a default Model id so a new prop row is valid immediately.
-		const empty = props.makeEmpty!({ root: {}, resource: propGraphicsListResourceSchema }) as { mpModelId: bigint; firstPartIndex: number | null };
-		expect(empty.mpModelId).toBe(0n);
-		expect(empty.firstPartIndex).toBeNull();
+		// Parts are now add/removable, nested under their owning prop.
+		expect(parts.addable).toBe(true);
+		expect(parts.removable).toBe(true);
+		// makeEmpty: a new prop starts partless with a default Model id; a new part
+		// just needs an id + Model (its type is the owning prop's). Lock ALL four
+		// fields a partless prop needs to round-trip — _mpPartsRaw and muTypeId are
+		// load-bearing for the writer (writeU32 silently coerces undefined → 0, so a
+		// regression dropping them would otherwise escape the suite).
+		const emptyProp = props.makeEmpty!({ root: {}, resource: propGraphicsListResourceSchema }) as Record<string, unknown>;
+		expect(emptyProp.mpModelId).toBe(0n);
+		expect(emptyProp.parts).toEqual([]);
+		expect(emptyProp).toHaveProperty('_mpPartsRaw', 0);
+		expect(emptyProp).toHaveProperty('muTypeId', 0);
+		const emptyPart = parts.makeEmpty!({ root: {}, resource: propGraphicsListResourceSchema }) as { muPartId: number; mpModelId: bigint };
+		expect(emptyPart.mpModelId).toBe(0n);
+		expect(emptyPart.muPartId).toBe(0);
 	});
 
 	it('resolves muZoneNumber as u32', () => {
@@ -223,10 +232,10 @@ describeFixture('propGraphicsList tree labels', () => {
 		expect(label).toContain('model 0x12F7700A');
 	});
 
-	it('part label includes the index, part number, and Model id', () => {
-		// parts[1] in TRK_UNIT9 is type 0x28, part 1.
-		const part = model.parts[1];
-		const field = propGraphicsListResourceSchema.registry.ParsedPropGraphicsList.fields.parts;
+	it('part label (nested under a prop) includes the index, part number, and Model id', () => {
+		// props[0] in TRK_UNIT9 owns parts 0,1,… of type 0x28.
+		const part = model.props[0].parts[1];
+		const field = propGraphicsListResourceSchema.registry.PropGraphics.fields.parts;
 		if (field.kind !== 'list') throw new Error('expected list');
 		const labelFn = field.itemLabel as (v: unknown, i: number) => string;
 		const label = labelFn(part, 1);
@@ -264,8 +273,8 @@ describeFixture('propGraphicsList getAtPath', () => {
 		expect(id).toBe(0x12f7700an);
 	});
 
-	it('reads a part Model id as a bigint', () => {
-		const id = getAtPath(model, ['parts', 0, 'mpModelId']);
+	it('reads a nested part Model id as a bigint', () => {
+		const id = getAtPath(model, ['props', 0, 'parts', 0, 'mpModelId']);
 		expect(typeof id).toBe('bigint');
 	});
 });

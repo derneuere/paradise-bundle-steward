@@ -63,7 +63,7 @@ PC LE only**. Console (BE) and 64-bit are out of scope.
 | 0x00 | 4 | u32 | `muSizeInBytes` | the **structural end**: part-array end when parts exist (may be unaligned), `align16(prop-array end)` when only props, `0x20` when empty. **Derived** — recomputed on write; the parser asserts the stored value matches (proven across all 428 fixtures). |
 | 0x04 | 4 | u32 | `muZoneNumber` | PVS zone / track-unit id (editable) |
 | 0x08 | 4 | u32 | `muNumberOfPropModels` | count of stored `PropGraphics` records = `props.length` (recomputed on write) |
-| 0x0C | 1 | u8 | `muNumberOfPropPartModels` | count of stored `PropPartGraphics` records = `parts.length`. **u8 in a 4-byte slot** (u8 + 3 zero pad). Recomputed on write. |
+| 0x0C | 4 | u32 | `muNumberOfPropPartModels` | count of stored `PropPartGraphics` records = total parts across all props. **Full u32** (an earlier reading as a u8+3-pad was wrong; byte-identical for the corpus since the max is 82, so the high 3 bytes are 0). Recomputed on write. |
 | 0x0D | 3 | — | padding | zero |
 | 0x10 | 4 | `PropGraphics*` | `mpaPropGraphics` | abs offset to prop array; **always `0x20`** when populated, `0` when empty. **Recomputed.** |
 | 0x14 | 4 | `PropPartGraphics*` | `mpaPropPartGraphics` | abs offset to part array; **always `align16(0x20 + nProps*0x0C)`** when parts exist, `0` otherwise. **Recomputed.** |
@@ -75,7 +75,7 @@ PC LE only**. Console (BE) and 64-bit are out of scope.
 |--------|------|------|------|-------|
 | 0x00 | 4 | u32 | `muTypeId` | prop type index (into [`prop-types.md`](prop-types.md)) |
 | 0x04 | 4 | `Model*` | `mpPropModel` | **`0x0` on disk** — a BND2 **import** (see below); the body mesh. Modelled as the editable `mpModelId` (bigint); the writer emits 0 here and rebuilds the import-table entry from `mpModelId`. |
-| 0x08 | 4 | `PropPartGraphics*` | `mpParts` | resource-relative **internal pointer** to this prop's first part record; **`0` (NULL) when the prop has no parts**. Modelled as `firstPartIndex` (the part-array index) and recomputed on write. |
+| 0x08 | 4 | `PropPartGraphics*` | `mpParts` | resource-relative **internal pointer** to this prop's first part record; leftover/garbage when the prop has no parts. Derived on write for a prop that owns parts; preserved verbatim (`_mpPartsRaw`) for a partless prop. |
 
 ### `PropPartGraphics` — 12 bytes (`0x0C`) — at `align16(0x20 + nProps*0x0C)`
 
@@ -102,13 +102,15 @@ On read, the parser resolves each `mpModelId` from this table by field offset; o
 write it rebuilds the table from the per-record `mpModelId`s (see below).
 
 `mpParts` is **not** an import — it is an **internal, resource-relative pointer** to
-the prop's first `PropPartGraphics` record. Because parts are grouped contiguously
-by owning prop, a prop with parts points at its first one; a prop with **no** parts
-stores `mpParts == 0` (NULL). The parser never dereferences `mpParts` to read the
-structure (the part array is located via the recomputed `mpaPropPartGraphics`); it
-is modelled as `firstPartIndex` (the part-array index it points at) and recomputed
-on write as `mpaPropPartGraphics + firstPartIndex*0x0C`, so it survives the part
-array relocating after a prop add/remove.
+the prop's first `PropPartGraphics` record. Parts are grouped contiguously by
+owning prop (the prop with the matching `muTypeId`), so a prop with parts points at
+its run's first record. A prop with **no** parts carries a leftover/garbage `mpParts`
+the runtime never dereferences (nonzero in most fixtures — 2951 of them — and `0` in
+the rest). The parser never follows `mpParts` to read the structure (the part array
+is located via the recomputed `mpaPropPartGraphics` and grouped by `muTypeId`); the
+writer derives `mpParts` for a prop that owns parts (the byte offset of its run) and
+re-emits `_mpPartsRaw` verbatim for a partless prop — so it survives the part array
+relocating after a prop add/remove.
 
 > The parser **needs** the import table to recover each record's `mpModelId`, but
 > the structural layout is fully determined by the two counts. The writer rebuilds
@@ -179,8 +181,9 @@ round-trips `writePropGraphicsList(parsePropGraphicsList(raw))` **byte-for-byte*
 across all 428 fixtures (256 populated + 172 empty, 0 fail) — including the
 model-driven rebuild of the import table. The parser/writer in
 [`src/lib/core/propGraphicsList.ts`](../src/lib/core/propGraphicsList.ts) were
-rewritten for this (model `mpModelId`/`firstPartIndex`, derive `muSizeInBytes`,
-rebuild the table); the byte-exactness above is what proves that rewrite safe.
+rewritten for this (model `mpModelId` per record, nest parts under their owning
+prop, derive `muSizeInBytes`/`mpParts`, rebuild the table); the byte-exactness above
+is what proves that rewrite safe.
 
 **Confirmed invariants (all 254 populated resources, zero violations):**
 
@@ -191,8 +194,10 @@ rebuild the table); the byte-exactness above is what proves that rewrite safe.
    mpaPropPartGraphics)` are **all zero** in every fixture.
 5. Every `mpPropModel` field is `0` on disk; the real id lives in the inline import
    table, keyed by the field offset.
-6. A prop with no parts stores `mpParts == 0` (NULL) — it does **not** reuse a
-   neighbour's pointer or the part-array-end value.
+6. Parts are grouped contiguously by `muTypeId`; the prop with the matching type
+   owns that run (no two parts-owning props share a type; every run matches a prop;
+   runs are in prop order). A prop with no parts carries a leftover/garbage `mpParts`
+   (nonzero in 2951 fixtures, `0` in 610) the runtime never dereferences.
 
 **Extractor false-positives (not PGL bugs):** `TRK_UNIT158_GR.BNDL` throws a
 spurious "incorrect header check" zlib error inside the bundle extractor's
@@ -205,37 +210,48 @@ is a parser bug.
 ## Parsed model shape
 
 The catalogue is **fully editable**: Model references are modelled as per-record
-resource ids, and props/parts can be added or removed. The writer rebuilds the
-inline import table and every derived offset from the model, so nothing is carried
-verbatim except what the corpus sweep proved is reconstructable.
+resource ids, and props **and parts** can be added or removed. The writer rebuilds
+the inline import table and every derived offset from the model, so nothing is
+carried verbatim except what the corpus sweep proved is reconstructable.
+
+**Parts nest under their owning prop.** The on-disk part array is flat and grouped
+contiguously by `muTypeId`; the prop with the matching type owns that run (verified
+across all 234 PGLs-with-parts: contiguous-by-type, single-owner, every run matches
+a prop, runs in prop order). So the model nests each prop's parts under it rather
+than carrying a flat array + a pointer — ownership is then structural and can't
+desync on edit. `mpParts` is derived on write for a prop that owns parts; for a
+**partless** prop it's leftover/garbage the runtime never dereferences, preserved
+verbatim as `_mpPartsRaw` so the round-trip stays byte-exact.
 
 ```ts
-type PropGraphics = {
-  muTypeId: number;            // u32 — prop type index (into prop-types)
-  mpModelId: bigint;           // Model resource id (the BND2 import); 0n = none/unresolved. Editable.
-  firstPartIndex: number | null; // index into parts[] of this prop's first part; null = no parts
+type PropPartGraphics = {
+  muPartId: number;   // u32 — part index within the owning prop
+  mpModelId: bigint;  // Model resource id (the BND2 import). Editable.
+  // On disk the part ALSO stores muTypeId == the owning prop's type id; it isn't
+  // modelled — the part is nested under its prop, so the writer re-emits the prop's.
 };
 
-type PropPartGraphics = {
-  muTypeId: number;    // u32 — owning prop's type id
-  muPartId: number;    // u32 — part index within the prop
-  mpModelId: bigint;   // Model resource id (the BND2 import). Editable.
+type PropGraphics = {
+  muTypeId: number;          // u32 — prop type index (into prop-types)
+  mpModelId: bigint;         // Model resource id (the BND2 import); 0n = none/unresolved. Editable.
+  parts: PropPartGraphics[]; // this prop's destructible parts (owned by type; empty = partless)
+  _mpPartsRaw: number;       // raw on-disk mpParts — derived on write for owners, preserved verbatim for partless props
 };
 
 type ParsedPropGraphicsList = {
-  muZoneNumber: number;     // u32 — PVS zone / track-unit id (editable)
-  props: PropGraphics[];
-  parts: PropPartGraphics[];
+  muZoneNumber: number;      // u32 — PVS zone / track-unit id (editable)
+  props: PropGraphics[];     // each prop carries its own parts; there is no top-level parts array
 };
 ```
 
 `muNumberOfPropModels` / `muNumberOfPropPartModels` are **not** stored on the model
-(they equal `props.length` / `parts.length`); the writer emits the array lengths.
-`mpaPropGraphics` / `mpaPropPartGraphics` and `muSizeInBytes` (the structural end)
-are recomputed from those lengths. `mpPropModel` (0 on disk) is rebuilt as a 0
-pointer + an import-table entry carrying `mpModelId`. `mpParts` is rebuilt from
-`firstPartIndex` (`null → 0`, else `mpaPropPartGraphics + firstPartIndex*0x0C`), so
-it stays valid when the part array relocates after a prop add/remove.
+(they equal `props.length` / `sum(props[].parts.length)`); the writer emits those
+counts. `mpaPropGraphics` / `mpaPropPartGraphics` and `muSizeInBytes` (the structural
+end) are recomputed. `mpPropModel` (0 on disk) is rebuilt as a 0 pointer + an
+import-table entry carrying `mpModelId`. `mpParts` is the byte offset of a prop's
+first part run (derived from the running part offset) for owners, else `_mpPartsRaw`
+verbatim. The writer rejects two props of the same type where one owns parts (parts
+are owned by type, so that shape can't round-trip).
 
 ## Round-trip / writer strategy
 
@@ -243,14 +259,16 @@ Byte-exact (`byteRoundTrip`) is achievable — the layout is rigid. Writer:
 
 1. **Header (32 bytes):** `muSizeInBytes` = derived structural end;
    `muZoneNumber`; `muNumberOfPropModels = props.length`; `muNumberOfPropPartModels
-   = parts.length & 0xff` (u8) + 3 pad; `mpaPropGraphics = props.length ? 0x20 : 0`;
+   = total parts` (u32); `mpaPropGraphics = props.length ? 0x20 : 0`;
    `mpaPropPartGraphics = parts.length ? align16(0x20 + nProps*0x0C) : 0`; zero-pad
    up to `0x20`.
 2. **PropGraphics:** for each, `muTypeId`; `mpPropModel = 0` (the id is emitted into
-   the import table below); `mpParts` recomputed from `firstPartIndex`.
-3. **align16 pad → PropPartGraphics:** zero-pad to `mpaPropPartGraphics`, then for
-   each part `muTypeId`; `muPartId`; `mpPropModel = 0`. Then zero-pad up to the
-   structural end (a no-parts list has an align pad after the prop array).
+   the import table below); `mpParts` = the byte offset of this prop's part run
+   (running part offset) when it owns parts, else `_mpPartsRaw` verbatim.
+3. **align16 pad → PropPartGraphics:** zero-pad to `mpaPropPartGraphics`, then flatten
+   parts in prop order — for each prop, for each of its parts: the owning prop's
+   `muTypeId`; `muPartId`; `mpPropModel = 0`. Then zero-pad up to the structural end
+   (a no-parts list has an align pad after the prop array).
 4. **align16 pad → import table:** for each prop, then each part, emit
    `{ u64 mpModelId, u32 fieldOffset, u32 0 }` → reproduces the exact length and
    re-establishes every Model import.
@@ -275,16 +293,17 @@ fails loud on any unexpected layout.
 ## Editor / resourcespec notes
 
 - `muZoneNumber` is the only freely-editable header field.
-- `muTypeId` (on both record types) → enum dropdown sourced from `PROP_TYPES` (same
-  table as [`prop-instance-data-spec.md`](prop-instance-data-spec.md)); `muPartId`
-  is a plain integer.
-- `mpModelId` is an **editable** `bigint` resource id (`{ kind: 'bigint', bytes: 8,
-  hex: true }`) — the Model the runtime spawns. On disk it is a `0` pointer + an
-  import-table entry; the writer rebuilds that entry from `mpModelId`. Prop Models
-  usually live in `GLOBALPROPS.BIN`.
-- `firstPartIndex` is a `hidden`/`readOnly` round-trip-only field (the modelled form
-  of `mpParts`); `muSizeInBytes`, `mpaPropGraphics`, `mpaPropPartGraphics` are
-  derived and never modelled.
+- A prop's `muTypeId` → enum dropdown sourced from `PROP_TYPES` (same table as
+  [`prop-instance-data-spec.md`](prop-instance-data-spec.md)). Parts are nested under
+  their prop and take the prop's type, so a part exposes only `muPartId` (a plain
+  integer) + `mpModelId`. Props and parts are both **addable/removable**.
+- `mpModelId` (on props and parts) is an **editable** `bigint` resource id
+  (`{ kind: 'bigint', bytes: 8, hex: true }`) — the Model the runtime spawns. On
+  disk it is a `0` pointer + an import-table entry; the writer rebuilds that entry
+  from `mpModelId`. Prop Models usually live in `GLOBALPROPS.BIN`.
+- `_mpPartsRaw` is a `hidden`/`readOnly` round-trip-only field (the raw `mpParts`,
+  preserved verbatim for partless props); `muSizeInBytes`, `mpaPropGraphics`,
+  `mpaPropPartGraphics` are derived and never modelled.
 - Tree labels: prop → `#i · <propTypeName> · model <resourceId>`; part →
   `#j · <propTypeName> · part <muPartId> · model <resourceId>`.
 - **Adding/removing props and parts is supported** (`addable`/`removable` on, with a
