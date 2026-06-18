@@ -46,6 +46,7 @@ import { translateDxbc, type TranslatedShader } from '@/lib/core/dxbc';
 import { buildTextureCatalog, type TextureCatalogEntry } from '@/lib/core/textureCatalog';
 import { buildMaterialIndex, pickBestMaterial } from '@/lib/core/materialBinding';
 import { buildTranslatedShaderMaterial, type TranslatedMaterial } from '@/lib/core/translatedShaderMaterial';
+import { pickEngineSamplerFallback } from '@/lib/core/engineSamplerFallback';
 import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout } from '@/lib/core/shaderEngineConstants';
 import { decodeTexture } from '@/lib/core/texture';
 import { parseMaterialData } from '@/lib/core/material';
@@ -234,26 +235,6 @@ function applyWrapping(
 const TRANSLATED_HEURISTIC_DEFAULTS = ENGINE_CONSTANT_DEFAULTS;
 
 type Source = { source: string; bundle: ParsedBundle; arrayBuffer: ArrayBuffer; debug: any[] };
-
-/** One-shot procedural placeholder — same look the ShaderPage uses for
- *  shadow-map and reflection probe samplers. */
-function makePinkTex(): THREE.DataTexture {
-	const t = new THREE.DataTexture(new Uint8Array([255, 64, 200, 255]), 1, 1, THREE.RGBAFormat);
-	t.needsUpdate = true;
-	return t;
-}
-function makeWhiteTex(): THREE.DataTexture {
-	const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
-	t.needsUpdate = true;
-	return t;
-}
-const _fallback2x2 = makePinkTex();
-const _fallbackWhite = makeWhiteTex();
-function pickRenderableFallback(name: string): THREE.DataTexture {
-	const n = name.toLowerCase();
-	if (n.includes('shadow')) return _fallbackWhite;
-	return _fallback2x2;
-}
 
 function decodedToDataTextureRV(entry: TextureCatalogEntry): THREE.DataTexture | null {
 	let dt: DecodedTexture;
@@ -600,7 +581,7 @@ function RenderableMeshes({
 				materialBinding: matBinding ?? null,
 				textureCatalog,
 				heuristicDefaults: TRANSLATED_HEURISTIC_DEFAULTS,
-				pickFallbackTexture: pickRenderableFallback,
+				pickFallbackTexture: pickEngineSamplerFallback,
 				decodedToDataTexture: decodedToDataTextureRV,
 				applyPreviewTonemap: true,  // vehicle shaders run HDR; without an engine tonemap, paint-gloss saturates to white
 				side: THREE.DoubleSide,
@@ -679,14 +660,7 @@ function RenderableMeshes({
 								// partLocator. Using `this` per-call gives the correct
 								// world matrix for every draw.
 								const upd = (material as TranslatedMaterial).__updateCb0;
-								if (upd) {
-									// DEBUG: verify `this` is the mesh — should log
-									// the mesh's id and its own matrixWorld diagonal
-									// (different per mesh).
-									const w = (this as THREE.Object3D)?.matrixWorld?.elements;
-									if (w) console.log('onBeforeRender mesh id=', (this as THREE.Object3D).id, 'mw[12,13,14]=', w[12].toFixed(2), w[13].toFixed(2), w[14].toFixed(2));
-									upd(camera, this);
-								}
+								if (upd) upd(camera, this);
 								void _r; void _s; void _g; void _group;
 							}}
 							onClick={(e) => {

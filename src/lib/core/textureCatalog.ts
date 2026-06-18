@@ -98,7 +98,7 @@ export function buildTextureCatalog(sources: Source[]): TextureCatalogEntry[] {
  *  the wrong choice — the procedural fallback always wins. Shadow maps
  *  encode depth (not colour), and Reflection probes are cube maps the
  *  translator can't sample correctly through `sampler2D`. */
-const PROCEDURAL_ONLY_SAMPLERS = /shadow|reflect|envmap|cube|depth/i;
+const PROCEDURAL_ONLY_SAMPLERS = /shadow|reflect|envmap|cube|depth|fracture/i;
 
 export function pickTextureForSampler(
 	samplerName: string,
