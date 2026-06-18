@@ -167,10 +167,28 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		const viewProj = new THREE.Matrix4();
 		const worldViewProj = new THREE.Matrix4();
 		const cameraPos = new THREE.Vector3();
+		// Two ways a shader consumes a matrix from cb0, and they need DIFFERENT
+		// extraction:
+		//  - dot pattern  `o.x = dot(v, cb0[N])`  → cb0[N] = math ROW N of the
+		//    matrix. fxc emits this for the view/projection matrices applied to an
+		//    already-transformed worldPos.
+		//  - mad pattern  `wp = v.x*cb0[N] + v.y*cb0[N+1] + v.z*cb0[N+2] + cb0[N+3]`
+		//    → cb0[N..N+3] = the matrix's COLUMNS, so the translation lands in
+		//    cb0[N+3].xyz. fxc emits this for the object `world` matrix applied to
+		//    the local vertex position.
+		// Using setRow for a mad-consumed matrix drops the translation (cb0[N+3]
+		// becomes the (0,0,0,1) bottom row) — every part collapses toward local
+		// origin, which on a multi-part vehicle reads as "GraphicsSpec ignored".
 		const setRow = (cb: THREE.Vector4[], slot: number, mm: THREE.Matrix4, row: number) => {
 			if (slot < 0 || slot >= cb.length) return;
 			const e = mm.elements;
 			cb[slot].set(e[row], e[4 + row], e[8 + row], e[12 + row]);
+		};
+		const setCol = (cb: THREE.Vector4[], slot: number, mm: THREE.Matrix4, col: number) => {
+			if (slot < 0 || slot >= cb.length) return;
+			const e = mm.elements;
+			const o = col * 4;
+			cb[slot].set(e[o], e[o + 1], e[o + 2], e[o + 3]);
 		};
 		m.__updateCb0 = (camera, object) => {
 			world.copy(object.matrixWorld);
@@ -187,10 +205,12 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 			const A = -(far + near) / (far - near);
 			const B = -2 * far * near / (far - near);
 			if (cb0[layout.depthEncode]) cb0[layout.depthEncode].set(A, B, -1, 0);
-			setRow(cb0, layout.worldRow0 + 0, world, 0);
-			setRow(cb0, layout.worldRow0 + 1, world, 1);
-			setRow(cb0, layout.worldRow0 + 2, world, 2);
-			setRow(cb0, layout.worldRow0 + 3, world, 3);
+			// world is mad-consumed (`wp = pos.x*cb0[w] + … + cb0[w+3]`), so write
+			// COLUMNS — cb0[worldRow0+3] must carry the locator translation.
+			setCol(cb0, layout.worldRow0 + 0, world, 0);
+			setCol(cb0, layout.worldRow0 + 1, world, 1);
+			setCol(cb0, layout.worldRow0 + 2, world, 2);
+			setCol(cb0, layout.worldRow0 + 3, world, 3);
 			// Full 4-row engine matrices: shaders that transform with
 			// `worldViewProj` / `viewProjection` directly (rather than the
 			// ViewProjectionModified depth-encode scheme) need all four rows or
