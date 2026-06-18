@@ -102,6 +102,84 @@ export function decodeDXT1(
 }
 
 // ---------------------------------------------------------------------------
+// BC2 (DXT3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Decode a BC2 (DXT3) compressed buffer into RGBA pixels.
+ *
+ * BC2: 16 bytes per 4×4 block.
+ *   - 8 bytes: explicit alpha — 16 × 4-bit alpha values (one per texel, row
+ *     major, little-endian within each byte: low nibble = even texel).
+ *   - 8 bytes: BC1 color block, always interpreted in 4-color mode (no 1-bit
+ *     punch-through alpha — alpha comes from the explicit block).
+ *
+ * BC2 stores alpha as a flat 4-bit value (no interpolation), unlike BC3's
+ * interpolated alpha. Used by a few Burnout textures with sharp alpha edges.
+ */
+export function decodeDXT3(
+	src: Uint8Array,
+	width: number,
+	height: number,
+): Uint8Array {
+	const blocksX = Math.max(1, (width + 3) >> 2);
+	const blocksY = Math.max(1, (height + 3) >> 2);
+	const out = new Uint8Array(width * height * 4);
+	const dv = new DataView(src.buffer, src.byteOffset, src.byteLength);
+
+	let blockOff = 0;
+	for (let by = 0; by < blocksY; by++) {
+		for (let bx = 0; bx < blocksX; bx++) {
+			// ---- Color block (8 bytes, BC1 always-4-color mode) ----
+			const colorOff = blockOff + 8;
+			const c0 = dv.getUint16(colorOff + 0, true);
+			const c1 = dv.getUint16(colorOff + 2, true);
+			const bits = dv.getUint32(colorOff + 4, true);
+
+			const [r0, g0, b0] = unpackRgb565(c0);
+			const [r1, g1, b1] = unpackRgb565(c1);
+
+			const palette = new Uint8Array(12); // 4 colors × RGB (alpha is explicit)
+			palette[0] = r0; palette[1] = g0; palette[2] = b0;
+			palette[3] = r1; palette[4] = g1; palette[5] = b1;
+			palette[6]  = (2 * r0 + r1 + 1) / 3 | 0;
+			palette[7]  = (2 * g0 + g1 + 1) / 3 | 0;
+			palette[8]  = (2 * b0 + b1 + 1) / 3 | 0;
+			palette[9]  = (r0 + 2 * r1 + 1) / 3 | 0;
+			palette[10] = (g0 + 2 * g1 + 1) / 3 | 0;
+			palette[11] = (b0 + 2 * b1 + 1) / 3 | 0;
+
+			for (let py = 0; py < 4; py++) {
+				const y = by * 4 + py;
+				if (y >= height) break;
+				for (let px = 0; px < 4; px++) {
+					const x = bx * 4 + px;
+					if (x >= width) continue;
+
+					const pixelIndex = py * 4 + px;
+					// Explicit 4-bit alpha: byte holds two texels (low nibble first).
+					const alphaByte = src[blockOff + (pixelIndex >> 1)];
+					const nibble = (pixelIndex & 1) ? (alphaByte >> 4) : (alphaByte & 0x0f);
+					const alpha = nibble * 17; // 4-bit → 8-bit (0xf * 17 = 255)
+
+					const colorIdx = (bits >> (pixelIndex * 2)) & 0x3;
+					const dst = (y * width + x) * 4;
+					const csrc = colorIdx * 3;
+					out[dst]     = palette[csrc];
+					out[dst + 1] = palette[csrc + 1];
+					out[dst + 2] = palette[csrc + 2];
+					out[dst + 3] = alpha;
+				}
+			}
+
+			blockOff += 16;
+		}
+	}
+
+	return out;
+}
+
+// ---------------------------------------------------------------------------
 // BC3 (DXT5)
 // ---------------------------------------------------------------------------
 

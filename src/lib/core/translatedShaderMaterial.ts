@@ -27,16 +27,7 @@ import type { TextureCatalogEntry } from './textureCatalog';
 import { pickTextureForSampler } from './textureCatalog';
 import type { MaterialBinding } from './materialBinding';
 import type { ParsedShaderConstant } from './shader';
-
-/** cb0 slot map for a given shader; matches the inferCbLayout shape used
- *  by the shader-page preview. */
-type CbLayout = {
-	worldRow0: number;
-	vpRow0: number;
-	viewRow2: number;
-	depthEncode: number;
-	cameraPos: number | null;
-};
+import { type CbLayout, seedSkinningPalettes } from './shaderEngineConstants';
 
 export type BuildOptions = {
 	vsSource: string;
@@ -157,12 +148,24 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 	seedDefaults(vsParsed);
 	seedDefaults(psParsed);
 
+	// Identity-fill the bone-matrix palette so skinned vehicle meshes render at
+	// rest pose instead of collapsing to the origin (see shaderEngineConstants).
+	const cb0Arr = m.uniforms.cb0?.value as THREE.Vector4[] | undefined;
+	if (cb0Arr) {
+		const writeVec4 = (slot: number, x: number, y: number, z: number, w: number) => {
+			if (slot >= 0 && slot < cb0Arr.length) cb0Arr[slot].set(x, y, z, w);
+		};
+		seedSkinningPalettes(vsParsed, writeVec4);
+		seedSkinningPalettes(psParsed, writeVec4);
+	}
+
 	// __updateCb0 — engine-fed slots refreshed per frame from three.js
 	// matrices + clock. The mesh's onBeforeRender invokes this.
 	if (seededCbs.has('cb0')) {
 		const world = new THREE.Matrix4();
 		const viewMat = new THREE.Matrix4();
 		const viewProj = new THREE.Matrix4();
+		const worldViewProj = new THREE.Matrix4();
 		const cameraPos = new THREE.Vector3();
 		const setRow = (cb: THREE.Vector4[], slot: number, mm: THREE.Matrix4, row: number) => {
 			if (slot < 0 || slot >= cb.length) return;
@@ -188,6 +191,17 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 			setRow(cb0, layout.worldRow0 + 1, world, 1);
 			setRow(cb0, layout.worldRow0 + 2, world, 2);
 			setRow(cb0, layout.worldRow0 + 3, world, 3);
+			// Full 4-row engine matrices: shaders that transform with
+			// `worldViewProj` / `viewProjection` directly (rather than the
+			// ViewProjectionModified depth-encode scheme) need all four rows or
+			// the vertex never reaches clip space and the mesh vanishes.
+			if (layout.viewProjectionRow0 != null) {
+				for (let r = 0; r < 4; r++) setRow(cb0, layout.viewProjectionRow0 + r, viewProj, r);
+			}
+			if (layout.worldViewProjRow0 != null) {
+				worldViewProj.multiplyMatrices(viewProj, world);
+				for (let r = 0; r < 4; r++) setRow(cb0, layout.worldViewProjRow0 + r, worldViewProj, r);
+			}
 			if (layout.cameraPos != null && cb0[layout.cameraPos]) {
 				cb0[layout.cameraPos].set(cameraPos.x, cameraPos.y, cameraPos.z, 1);
 			}
