@@ -31,8 +31,9 @@
 //  - muSizeInBytes does NOT track the buffer length (it is an internal stored
 //    field — gold fixture has len-32, others differ), and muNumberOfInstances is
 //    the total runtime instance slots (props + every prop's parts; see its field
-//    comment). Both are preserved verbatim on the model so the writer reproduces
-//    them exactly.
+//    comment). Neither can be auto-recomputed here, so both are editable and
+//    written verbatim — the editor exposes them for hand-fixing and the writer
+//    reproduces whatever the model carries (byte-exact for an untouched file).
 //  - The exact original byte length is reproduced by capturing the trailing zero
 //    pad (end-of-cells → end-of-buffer) as _trailingPad and re-emitting it.
 //  - Per-cell muStartIndex / muCount describe the partition (each cell owns the
@@ -116,15 +117,16 @@ export type PropCell = {
 
 export type ParsedPropInstanceData = {
 	muZoneId: number;                   // track-unit / zone id (editable)
-	// Internal stored size field; does NOT equal the buffer length — preserved
-	// verbatim so the writer reproduces the original header byte-for-byte.
+	// Internal stored size field; does NOT equal the buffer length. Editable and
+	// written verbatim (not derived) — its exact formula is not pinned down, so the
+	// editor exposes it for hand-fixing rather than auto-recomputing it on write.
 	muSizeInBytes: number;
 	// Total RUNTIME instance slots = muNumberOfProps + the sum of every prop's part
 	// count (each prop and each of its parts takes one slot when a zone loads). So
 	// it is >= the stored prop-record count (instances.length). The part counts come
-	// from the PropGraphicsList (0x10010) catalogue, not this resource, so we can't
-	// recompute it here — preserved verbatim. (If a future edit ADDS prop instances
-	// this would go stale; recomputing it needs a PID↔PGL join.)
+	// from the PropGraphicsList (0x10010) catalogue, not this resource, so it can't
+	// be recomputed here. Editable and written verbatim (not derived): adding prop
+	// instances makes it stale, so the editor exposes it for hand-fixing.
 	muNumberOfInstances: number;
 	instances: PropInstance[];
 	cells: PropCell[];

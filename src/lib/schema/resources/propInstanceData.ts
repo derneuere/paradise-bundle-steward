@@ -258,13 +258,13 @@ const ParsedPropInstanceData: RecordSchema = {
 		},
 		muSizeInBytes: {
 			label: 'Size in bytes',
-			description: 'Internal stored size field. Does NOT equal the buffer length (varies per fixture); preserved verbatim so the writer reproduces the header byte-for-byte.',
-			readOnly: true,
+			description: 'Internal stored size field. Does NOT equal the buffer length (varies per file); written verbatim, so you can set it by hand if you need a specific value. Not auto-maintained: its exact formula is not pinned down.',
+			warning: 'Not updated automatically when you add or remove instances - set by hand if the value matters.',
 		},
 		muNumberOfInstances: {
 			label: 'Number of instances',
-			description: 'A larger logical count distinct from the stored record count (instances.length). Meaning not fully understood; preserved verbatim.',
-			readOnly: true,
+			description: 'A larger logical count distinct from the stored record count (instances.length): props plus the sum of every prop\'s part count. Written verbatim, so you can set it by hand. Not auto-maintained: the part counts come from the PropGraphicsList resource and are not available here.',
+			warning: 'Not updated automatically when you add or remove instances - set by hand if the count matters.',
 		},
 		instances: {
 			label: 'Instances',
