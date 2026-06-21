@@ -16,6 +16,8 @@ import type { ProfileRenderBinding } from './types';
 import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
 import { attribSysVaultExtensions } from '@/components/schema-editor/extensions/attribSysVaultExtensions';
 import { challengeListExtensions } from '@/components/schema-editor/extensions/challengeListExtensions';
+import { iceTakeDictionaryExtensions } from '@/components/schema-editor/extensions/iceTakeDictionaryExtensions';
+import { iceDataExtensions } from '@/components/schema-editor/extensions/iceDataExtensions';
 import { polygonSoupListExtensions } from '@/components/schema-editor/extensions/collisionTagExtension';
 import { renderableExtensions } from '@/components/schema-editor/extensions/renderableExtensions';
 import { streetDataExtensions } from '@/components/schema-editor/extensions/streetDataExtensions';
@@ -112,8 +114,14 @@ const BINDINGS: Record<string, Record<string, ProfileRenderBinding<unknown>>> = 
 	// AttribSys Vault's per-attribute typed `fields` are a custom field; the
 	// extension resolves the right per-class schema by classHash.
 	attribSysVault: { default: { extensions: attribSysVaultExtensions } },
-	// playerCarColours / iceTakeDictionary / texture have no overlay or
-	// extensions; the schema editor's default form is enough.
+	// ICE Take Dictionary's per-take `runs` are a custom field; the extension
+	// renders the typed per-channel keyframe editor.
+	iceTakeDictionary: { default: { extensions: iceTakeDictionaryExtensions } },
+	// ICE Data is a single standalone take; it reuses the same channel editor,
+	// but rooted at the resource's `take` rather than entries[i].take.
+	iceData: { default: { extensions: iceDataExtensions } },
+	// playerCarColours / texture have no overlay or extensions; the schema
+	// editor's default form is enough.
 };
 
 /** Look up the render binding for the variant of `model` parsed for

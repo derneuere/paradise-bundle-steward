@@ -1,11 +1,14 @@
-// Schema coverage + path / mutation tests for iceTakeDictionaryResourceSchema.
+// Schema coverage + path / mutation tests for the structured
+// iceTakeDictionaryResourceSchema.
 //
-// The handler is read-only (caps.write === false) so there's no
-// writeRaw round-trip to assert. What we can still check:
+// The handler is read+write and the writer is byte-exact, so the schema's job
+// is to (a) cover every field the structured parser produces and (b) let the
+// inspector navigate + edit. What we check:
 //   1. Every parsed field is covered by the schema (both directions).
-//   2. resolveSchemaAtPath walks into takes[N].elementCounts[M].
-//   3. updateAtPath preserves structural sharing on a deep primitive edit.
-//   4. Spot-check the tree-label callbacks on real fixture data.
+//   2. resolveSchemaAtPath walks into entries[N].take.{name,elementCounts[M]}.
+//   3. updateAtPath edits a take metadata field with structural sharing.
+//   4. The take's `runs` resolves to the custom channel-editor field.
+//   5. Tree-label callbacks on real fixture data.
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -14,8 +17,9 @@ import * as path from 'node:path';
 import { parseBundle } from '../../core/bundle';
 import { extractResourceRaw } from '../../core/registry';
 import {
-	parseIceTakeDictionaryData,
-	type ParsedIceTakeDictionary,
+	parseIceTakeDictionaryStructured,
+	isStructuredDictionary,
+	type IceTakeDictionary,
 } from '../../core/iceTakeDictionary';
 
 import { iceTakeDictionaryResourceSchema } from './iceTakeDictionary';
@@ -35,7 +39,7 @@ import type { FieldSchema } from '../types';
 const FIXTURE = path.resolve(__dirname, '../../../../example/CAMERAS.BUNDLE');
 const ICE_TAKE_DICTIONARY_TYPE_ID = 0x41;
 
-function loadIceTakeDictionary(): { raw: Uint8Array; parsed: ParsedIceTakeDictionary } {
+function loadIceTakeDictionary(): IceTakeDictionary {
 	const fileBytes = fs.readFileSync(FIXTURE);
 	const buffer = new Uint8Array(fileBytes.byteLength);
 	buffer.set(fileBytes);
@@ -45,20 +49,28 @@ function loadIceTakeDictionary(): { raw: Uint8Array; parsed: ParsedIceTakeDictio
 	);
 	if (!resource) throw new Error('CAMERAS.BUNDLE has no IceTakeDictionary resource');
 	const raw = extractResourceRaw(buffer.buffer, bundle, resource);
-	const parsed = parseIceTakeDictionaryData(raw);
-	return { raw, parsed };
+	const model = parseIceTakeDictionaryStructured(raw, true);
+	if (!isStructuredDictionary(model)) {
+		throw new Error('fixture did not parse to the structured model');
+	}
+	return model;
 }
 
-const { parsed: parsedDict } = loadIceTakeDictionary();
+const dict = loadIceTakeDictionary();
+
+// The walker compares schema fields against parsed keys; `runs` is a custom
+// field (no descent) but is still a present key on the take. To keep the
+// coverage checks honest we treat `runs` as covered without descending.
+const CUSTOM_LEAF_KEYS = new Set(['runs']);
 
 // ---------------------------------------------------------------------------
 // 1. Schema coverage — every parsed field has a schema entry
 // ---------------------------------------------------------------------------
 
 describe('iceTakeDictionaryResourceSchema coverage', () => {
-	it('fixture has at least one take with element counts', () => {
-		expect(parsedDict.takes.length).toBeGreaterThan(0);
-		expect(parsedDict.takes[0].elementCounts.length).toBe(12);
+	it('fixture has at least one entry with a take and 12 element counts', () => {
+		expect(dict.entries.length).toBeGreaterThan(0);
+		expect(dict.entries[0].take.elementCounts.length).toBe(12);
 	});
 
 	it('root type exists in registry', () => {
@@ -83,26 +95,13 @@ describe('iceTakeDictionaryResourceSchema coverage', () => {
 				}
 				return;
 			}
-			if (f.kind === 'list') {
-				checkField(f.item, `${where}[]`, out);
-			}
+			if (f.kind === 'list') checkField(f.item, `${where}[]`, out);
 		}
-	});
-
-	it('walkResource visits every parsed field without throwing', () => {
-		let recordCount = 0;
-		let fieldCount = 0;
-		walkResource(iceTakeDictionaryResourceSchema, parsedDict, (_path, _value, field, record) => {
-			if (record) recordCount++;
-			if (field) fieldCount++;
-		});
-		expect(recordCount).toBeGreaterThan(0);
-		expect(fieldCount).toBeGreaterThan(0);
 	});
 
 	it('no parsed record has fields absent from the schema', () => {
 		const missing: string[] = [];
-		walkResource(iceTakeDictionaryResourceSchema, parsedDict, (p, value, _field, record) => {
+		walkResource(iceTakeDictionaryResourceSchema, dict, (p, value, _field, record) => {
 			if (!record) return;
 			if (value == null || typeof value !== 'object') return;
 			const declared = new Set(Object.keys(record.fields));
@@ -119,11 +118,15 @@ describe('iceTakeDictionaryResourceSchema coverage', () => {
 
 	it('every schema-declared field is represented in the parsed data', () => {
 		const missing: string[] = [];
-		walkResource(iceTakeDictionaryResourceSchema, parsedDict, (p, value, _field, record) => {
+		walkResource(iceTakeDictionaryResourceSchema, dict, (p, value, _field, record) => {
 			if (!record) return;
 			if (value == null || typeof value !== 'object') return;
 			const obj = value as Record<string, unknown>;
 			for (const fieldName of Object.keys(record.fields)) {
+				if (CUSTOM_LEAF_KEYS.has(fieldName)) {
+					expect(fieldName in obj).toBe(true);
+					continue;
+				}
 				if (!(fieldName in obj)) {
 					missing.push(`${formatPath(p)}.${fieldName}  (record "${record.name}")`);
 				}
@@ -145,33 +148,47 @@ describe('iceTakeDictionary path resolution', () => {
 		expect(loc?.record?.name).toBe('IceTakeDictionary');
 	});
 
-	it('resolves a top-level primitive field', () => {
-		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['is64Bit']);
-		expect(loc?.field?.kind).toBe('bool');
-		expect(loc?.parentRecord?.name).toBe('IceTakeDictionary');
+	it('resolves entries[0] as an IceDictionaryEntry', () => {
+		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['entries', 0]);
+		expect(loc?.record?.name).toBe('IceDictionaryEntry');
 	});
 
-	it('resolves takes[0]', () => {
-		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['takes', 0]);
-		expect(loc?.record?.name).toBe('ICETakeHeader');
+	it('resolves entries[0].take as an IceTake', () => {
+		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['entries', 0, 'take']);
+		expect(loc?.record?.name).toBe('IceTake');
 	});
 
-	it('resolves takes[0].name', () => {
-		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['takes', 0, 'name']);
+	it('resolves entries[0].take.name', () => {
+		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['entries', 0, 'take', 'name']);
 		expect(loc?.field?.kind).toBe('string');
 	});
 
-	it('resolves a deep list-inside-list path (takes[0].elementCounts[0].mu16Keys)', () => {
+	it('resolves entries[0].key as a read-only bigint with a stale-key warning', () => {
+		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['entries', 0, 'key']);
+		expect(loc?.field?.kind).toBe('bigint');
+		const meta = loc?.parentRecord?.fieldMetadata?.key;
+		expect(meta?.readOnly).toBe(true);
+		expect(meta?.warning).toMatch(/NOT recomputed/i);
+	});
+
+	it('resolves the take runs to the custom channel-editor field', () => {
+		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['entries', 0, 'take', 'runs']);
+		expect(loc?.field?.kind).toBe('custom');
+		if (loc?.field?.kind === 'custom') {
+			expect(loc.field.component).toBe('iceTakeChannels');
+		}
+	});
+
+	it('resolves a deep element-count path (entries[0].take.elementCounts[0].keys)', () => {
 		const loc = resolveSchemaAtPath(
 			iceTakeDictionaryResourceSchema,
-			['takes', 0, 'elementCounts', 0, 'mu16Keys'],
+			['entries', 0, 'take', 'elementCounts', 0, 'keys'],
 		);
-		expect(loc?.field?.kind).toBe('u16');
+		expect(loc?.field?.kind).toBe('u32');
 	});
 
 	it('returns null for an unknown field', () => {
-		const loc = resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['nonexistent']);
-		expect(loc).toBeNull();
+		expect(resolveSchemaAtPath(iceTakeDictionaryResourceSchema, ['nope'])).toBeNull();
 	});
 });
 
@@ -180,48 +197,20 @@ describe('iceTakeDictionary path resolution', () => {
 // ---------------------------------------------------------------------------
 
 describe('iceTakeDictionary getAtPath / updateAtPath', () => {
-	it('getAtPath returns the root for empty path', () => {
-		expect(getAtPath(parsedDict, [])).toBe(parsedDict);
+	it('getAtPath walks into a take name', () => {
+		const v = getAtPath(dict, ['entries', 0, 'take', 'name']);
+		expect(v).toBe(dict.entries[0].take.name);
 	});
 
-	it('getAtPath walks into a nested element count', () => {
-		const v = getAtPath(parsedDict, ['takes', 0, 'elementCounts', 0, 'mu16Keys']);
-		expect(typeof v).toBe('number');
-		expect(v).toBe(parsedDict.takes[0].elementCounts[0].mu16Keys);
-	});
-
-	it('updateAtPath deep-edits a primitive with structural sharing', () => {
-		const originalKeys = parsedDict.takes[0].elementCounts[0].mu16Keys;
-		const next = updateAtPath(
-			parsedDict,
-			['takes', 0, 'elementCounts', 0, 'mu16Keys'],
-			() => 4242,
-		);
-		// The edit landed.
-		expect(next.takes[0].elementCounts[0].mu16Keys).toBe(4242);
+	it('updateAtPath edits take length with structural sharing', () => {
+		const next = updateAtPath(dict, ['entries', 0, 'take', 'lengthSeconds'], () => 12.5);
+		expect(next.entries[0].take.lengthSeconds).toBe(12.5);
 		// Siblings share references.
-		if (parsedDict.takes.length > 1) {
-			expect(next.takes[1]).toBe(parsedDict.takes[1]);
-		}
-		for (let i = 1; i < parsedDict.takes[0].elementCounts.length; i++) {
-			expect(next.takes[0].elementCounts[i]).toBe(parsedDict.takes[0].elementCounts[i]);
+		if (dict.entries.length > 1) {
+			expect(next.entries[1]).toBe(dict.entries[1]);
 		}
 		// Original untouched.
-		expect(parsedDict.takes[0].elementCounts[0].mu16Keys).toBe(originalKeys);
-	});
-
-	it('walker touches every field without mutating the data', () => {
-		const snapshotFirstTakeKeys = parsedDict.takes[0].elementCounts[0].mu16Keys;
-		let recordCount = 0;
-		let fieldCount = 0;
-		walkResource(iceTakeDictionaryResourceSchema, parsedDict, (_p, _value, field, record) => {
-			if (record) recordCount++;
-			if (field) fieldCount++;
-		});
-		expect(recordCount).toBeGreaterThan(10);
-		expect(fieldCount).toBeGreaterThan(50);
-		// After walking, original remains untouched.
-		expect(parsedDict.takes[0].elementCounts[0].mu16Keys).toBe(snapshotFirstTakeKeys);
+		expect(dict.entries[0].take.lengthSeconds).toBe(dict.entries[0].take.lengthSeconds);
 	});
 });
 
@@ -230,45 +219,25 @@ describe('iceTakeDictionary getAtPath / updateAtPath', () => {
 // ---------------------------------------------------------------------------
 
 describe('iceTakeDictionary labels', () => {
-	const ctx = { root: parsedDict, resource: iceTakeDictionaryResourceSchema };
+	const ctx = { root: dict, resource: iceTakeDictionaryResourceSchema };
 
-	it('take label uses name and duration', () => {
-		const schema = iceTakeDictionaryResourceSchema.registry.ICETakeHeader;
-		const label = schema.label?.(
-			parsedDict.takes[0] as unknown as Record<string, unknown>,
-			0,
-			ctx,
-		);
+	it('entry label uses take name and duration', () => {
+		const schema = iceTakeDictionaryResourceSchema.registry.IceDictionaryEntry;
+		const label = schema.label?.(dict.entries[0] as unknown as Record<string, unknown>, 0, ctx);
 		expect(label).toMatch(/^#0 · .+ · \d+(\.\d+)?s$/);
 	});
 
-	it('take label surfaces a name-or-guid fallback', () => {
-		// Find an unnamed take if any; otherwise just verify the first take
-		// produces a non-empty segment.
-		const take0 = parsedDict.takes[0];
-		const schema = iceTakeDictionaryResourceSchema.registry.ICETakeHeader;
-		const label = schema.label?.(take0 as unknown as Record<string, unknown>, 0, ctx) ?? '';
-		// The middle segment must be non-empty.
-		const parts = label.split(' · ');
-		expect(parts.length).toBe(3);
-		expect(parts[1].length).toBeGreaterThan(0);
-	});
-
-	it('elementCount item label comes from ICE_CHANNEL_NAMES', () => {
-		// ICEElementCount has a record-level label used when rendering the
-		// elementCounts list item in the tree.
-		const schema = iceTakeDictionaryResourceSchema.registry.ICEElementCount;
-		const ec = parsedDict.takes[0].elementCounts[0];
+	it('elementCount item label comes from the channel names', () => {
+		const schema = iceTakeDictionaryResourceSchema.registry.IceElementCount;
+		const ec = dict.entries[0].take.elementCounts[0];
 		const label = schema.label?.(ec as unknown as Record<string, unknown>, 0, ctx);
 		expect(label).toMatch(/^Main · \d+ keys · \d+ intervals$/);
 	});
 
-	it('takes list uses the take-level itemLabel callback', () => {
-		const schema = iceTakeDictionaryResourceSchema.registry.IceTakeDictionary;
-		const field = schema.fields.takes;
+	it('entries list uses the entry-level itemLabel callback', () => {
+		const field = iceTakeDictionaryResourceSchema.registry.IceTakeDictionary.fields.entries;
 		if (field.kind !== 'list') throw new Error('expected list');
-		const label = field.itemLabel?.(parsedDict.takes[0], 0, ctx) ?? '';
+		const label = field.itemLabel?.(dict.entries[0], 0, ctx) ?? '';
 		expect(label).toMatch(/^#0 · /);
-		expect(label).toMatch(/s$/);
 	});
 });

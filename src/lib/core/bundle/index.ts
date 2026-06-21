@@ -39,7 +39,6 @@ import {
 import { parseVehicleList } from '../vehicleList';
 import { parsePlayerCarColours } from '../playerCarColors';
 import { RESOURCE_TYPES } from '../../resourceTypes';
-import { parseIceTakeDictionary } from '../iceTakeDictionary';
 import { parseTriggerData } from '../triggerData';
 import { extractResourceSize, extractAlignment, packSizeAndAlignment, isResourceBlockCompressed, compressData } from '../resourceManager';
 import { parseChallengeList } from '../challengeList';

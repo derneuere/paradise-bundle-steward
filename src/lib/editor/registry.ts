@@ -34,6 +34,8 @@ import { hudMessageProfile } from './profiles/hudMessage';
 import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
 import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
+import { iceListProfile } from './profiles/iceList';
+import { iceDataProfile } from './profiles/iceData';
 import { idListProfile } from './profiles/idList';
 import { languageProfile } from './profiles/language';
 import { massiveLookupTableProfile } from './profiles/massiveLookupTable';
@@ -323,6 +325,16 @@ const ENTRIES: RegistryEntry[] = [
 		typeId: 0x41,
 		key: 'iceTakeDictionary',
 		profiles: [iceTakeDictionaryProfile],
+	},
+	{
+		typeId: 0x1000c,
+		key: 'iceList',
+		profiles: [iceListProfile],
+	},
+	{
+		typeId: 0x1000d,
+		key: 'iceData',
+		profiles: [iceDataProfile],
 	},
 	{
 		typeId: 0xc,
