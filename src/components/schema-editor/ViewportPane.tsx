@@ -13,6 +13,7 @@ import type { NodePath } from '@/lib/schema/walk';
 import { RenderableViewport } from './viewports/RenderableViewport';
 import { ShaderViewport } from './viewports/ShaderViewport';
 import { TextureViewport } from './viewports/TextureViewport';
+import { IceTakePreviewViewport } from './viewports/IceTakePreviewViewport';
 import { WorldViewport } from './viewports/WorldViewport';
 import type { ResourceSchema } from '@/lib/schema/types';
 import { pickRenderBinding } from '@/lib/editor/bindings';
@@ -76,6 +77,13 @@ function ViewportPaneInner({
 		// TextureViewport pulls decoded RGBA pixels from TextureContext
 		// (provided by TexturePage) so the center pane can show the image.
 		return <TextureViewport />;
+	}
+	if (resource.key === 'iceTakeDictionary' || resource.key === 'iceData') {
+		// ICE takes are camera paths, not level-space data — preview them by
+		// flying the take's (car-relative) camera along a jump arc through a
+		// loaded track unit. Self-contained: reads the selected take from the
+		// SchemaEditor and picks the world bundle from the workspace itself.
+		return <IceTakePreviewViewport />;
 	}
 
 	const binding = pickRenderBinding(resource.key, data);
