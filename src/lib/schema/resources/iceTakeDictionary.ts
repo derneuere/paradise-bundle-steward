@@ -1,59 +1,47 @@
-// Hand-written schema for ParsedIceTakeDictionary (resource type 0x41).
+// Schema for the structured ICE Take Dictionary (resource type 0x41).
 //
-// Mirrors the types in `src/lib/core/iceTakeDictionary.ts`. The parser uses a
-// heuristic byte-scan over the raw payload to locate header-shaped regions,
-// so the parsed model is NOT a full dictionary round-trip — it's a list of
-// `ICETakeHeader` snapshots, each tagged with the `offset` they were found
-// at. Those metadata fields (`offset`, per-take `is64Bit`) don't correspond
-// to anything the user edits directly and are marked readOnly + hidden.
+// Mirrors the model in `src/lib/core/iceTakeDictionary.ts`:
+//   IceTakeDictionary { kind, indexOffset, entries: IceDictionaryEntry[] }
+//   IceDictionaryEntry { key: bigint, userFlags, take: IceTake }
+//   IceTake { nodeBase, guid, name, nameBytes, lengthSeconds, allocated,
+//             elementCounts[12], indices[], parameters[], alignPadBytes, runs[] }
 //
-// The handler is read-only (`caps.write: false`), so this schema's purpose is
-// navigation + inspection, not mutation. The default field renderers cover
-// every field here — no extensions required.
+// The dictionary is a list of camera takes. Each take's editable surface is its
+// metadata (guid, name, length) plus the 48 keyframed channel elements. Those
+// elements can't be a static record — the control for each value depends on the
+// element-descriptions table — so the take's `runs` array is a `custom` field
+// rendered by the `iceTakeChannels` extension (see iceTakeDictionaryExtensions).
+//
+// Structural / derived fields (the entry table offset, per-take node links, the
+// indices / parameters / alignment-pad bookkeeping, and the per-channel element
+// counts) are preserved by the walker's structural sharing and are marked
+// readOnly or hidden — they are rebuilt by the byte-exact writer, not edited.
 
 import type {
 	FieldSchema,
 	RecordSchema,
 	ResourceSchema,
 	SchemaRegistry,
-	SchemaContext,
 } from '../types';
 
 // ---------------------------------------------------------------------------
 // Local field helpers
 // ---------------------------------------------------------------------------
 
-const u16 = (): FieldSchema => ({ kind: 'u16' });
 const u32 = (): FieldSchema => ({ kind: 'u32' });
 const f32 = (): FieldSchema => ({ kind: 'f32' });
-const bool = (): FieldSchema => ({ kind: 'bool' });
 const string = (): FieldSchema => ({ kind: 'string' });
 const record = (type: string): FieldSchema => ({ kind: 'record', type });
 
-const fixedRecordList = (type: string, length: number): FieldSchema => ({
+const numberList = (): FieldSchema => ({
 	kind: 'list',
-	item: record(type),
-	minLength: length,
-	maxLength: length,
+	item: { kind: 'u32' },
 	addable: false,
 	removable: false,
 });
 
-const recordList = (
-	type: string,
-	itemLabel?: (item: unknown, index: number, ctx: SchemaContext) => string,
-): FieldSchema => ({
-	kind: 'list',
-	item: record(type),
-	addable: true,
-	removable: true,
-	itemLabel,
-});
-
 // ---------------------------------------------------------------------------
-// ICE channel names — taken from the ICEChannels enum in
-// src/lib/core/iceTakeDictionary.ts. Pinned 12 entries; index is the channel
-// slot (eICE_CHANNEL_MAIN = 0, …, eICE_CHANNEL_SHAKE_DATA = 11).
+// ICE channel names — the ICEChannels enum, one per channel slot.
 // ---------------------------------------------------------------------------
 
 const ICE_CHANNEL_NAMES = [
@@ -75,111 +63,157 @@ const ICE_CHANNEL_NAMES = [
 // Tree-label helpers
 // ---------------------------------------------------------------------------
 
-function takeLabel(take: unknown, index: number): string {
-	if (!take || typeof take !== 'object') return `#${index}`;
-	const t = take as {
-		name?: string;
-		guid?: number;
-		lengthSeconds?: number;
-	};
-	const nameOrId = t.name && t.name.length > 0
-		? t.name
-		: (t.guid != null ? `guid ${t.guid}` : '?');
-	const dur = typeof t.lengthSeconds === 'number' ? t.lengthSeconds.toFixed(2) : '?';
-	return `#${index} · ${nameOrId} · ${dur}s`;
+function takeNameFor(take: unknown): string {
+	if (!take || typeof take !== 'object') return '?';
+	const t = take as { name?: string; guid?: number };
+	if (t.name && t.name.length > 0) return t.name;
+	return t.guid != null ? `guid ${t.guid}` : '?';
+}
+
+function entryLabel(entry: unknown, index: number): string {
+	if (!entry || typeof entry !== 'object') return `#${index}`;
+	const e = entry as { take?: { lengthSeconds?: number } };
+	const name = takeNameFor(e.take);
+	const dur = typeof e.take?.lengthSeconds === 'number' ? e.take.lengthSeconds.toFixed(2) : '?';
+	return `#${index} · ${name} · ${dur}s`;
 }
 
 function elementCountLabel(ec: unknown, index: number): string {
 	const name = ICE_CHANNEL_NAMES[index] ?? `Channel ${index}`;
 	if (!ec || typeof ec !== 'object') return name;
-	const e = ec as { mu16Keys?: number; mu16Intervals?: number };
-	const keys = e.mu16Keys ?? 0;
-	const ivl = e.mu16Intervals ?? 0;
-	return `${name} · ${keys} keys · ${ivl} intervals`;
+	const e = ec as { keys?: number; intervals?: number };
+	return `${name} · ${e.keys ?? 0} keys · ${e.intervals ?? 0} intervals`;
 }
 
 // ---------------------------------------------------------------------------
 // Record schemas
 // ---------------------------------------------------------------------------
 
-const ICEElementCount: RecordSchema = {
-	name: 'ICEElementCount',
-	description: 'Per-channel key/interval counts for a take. One entry per ICE channel (12 total).',
+const IceElementCount: RecordSchema = {
+	name: 'IceElementCount',
+	description: 'Per-channel key/interval value counts. One entry per ICE channel (12 total).',
 	fields: {
-		mu16Intervals: u16(),
-		mu16Keys: u16(),
+		intervals: u32(),
+		keys: u32(),
 	},
 	fieldMetadata: {
-		mu16Intervals: { label: 'Intervals' },
-		mu16Keys: { label: 'Keys' },
+		// Counts drive how many values each element holds; changing one would
+		// desync the keyframe runs from the header, so they are structural.
+		intervals: { label: 'Intervals', readOnly: true },
+		keys: { label: 'Keys', readOnly: true },
 	},
 	label: (value, index) => elementCountLabel(value, index ?? 0),
 };
 
-const ICETakeHeader: RecordSchema = {
-	name: 'ICETakeHeader',
-	description: 'One ICE take — a camera cut with keyframed channels.',
+const IceTake: RecordSchema = {
+	name: 'IceTake',
+	description: 'One camera take — keyframed channels played as a single camera cut.',
 	fields: {
 		guid: u32(),
 		name: string(),
 		lengthSeconds: f32(),
+		nodeBase: { kind: 'list', item: { kind: 'u32' }, addable: false, removable: false },
 		allocated: u32(),
-		elementCounts: fixedRecordList('ICEElementCount', 12),
-		offset: u32(),
-		is64Bit: bool(),
+		elementCounts: {
+			kind: 'list',
+			item: record('IceElementCount'),
+			minLength: 12,
+			maxLength: 12,
+			addable: false,
+			removable: false,
+			itemLabel: (v, i) => elementCountLabel(v, i),
+		},
+		indices: numberList(),
+		parameters: numberList(),
+		alignPadBytes: u32(),
+		// nameBytes is the raw char[32] preserved for byte-exact padding; it's a
+		// Uint8Array, not editable — hidden from the form.
+		nameBytes: { kind: 'list', item: { kind: 'u8' }, addable: false, removable: false },
+		// The 48 keyframed elements, rendered by the channel editor extension.
+		runs: { kind: 'custom', component: 'iceTakeChannels' },
 	},
 	fieldMetadata: {
-		guid: { label: 'GUID', description: 'CRC32 hash of the lowercase take name.' },
-		name: { label: 'Name', description: 'UTF-8 decoded from the fixed char[32] macTakeName field.' },
-		lengthSeconds: { label: 'Length (seconds)', description: 'mfLength — total duration of the take.' },
-		allocated: { label: 'Allocated', description: 'muAllocated — opaque count from the runtime header.' },
+		guid: { label: 'GUID', description: 'miGuid — GameDB identifier for the take.' },
+		name: {
+			label: 'Name',
+			description: 'Take name (decoded from the fixed char[32] field).',
+		},
+		lengthSeconds: { label: 'Length (seconds)', description: 'mfLength — total take duration.' },
+		allocated: { label: 'Allocated', readOnly: true, hidden: true },
+		nodeBase: { label: 'Node links', readOnly: true, hidden: true },
 		elementCounts: {
 			label: 'Element counts (12 channels)',
-			description: 'Parallel to the ICEChannels enum: Main, Blend, Raw Focus, Shake, Time, Tag, Overlay, Letterbox, Fade, PostFX, Assembly, Shake Data.',
-		},
-		offset: {
-			label: 'Scan offset',
 			readOnly: true,
-			hidden: true,
-			description: 'Byte offset within the raw payload where the header was located by the heuristic scanner. Not part of the on-disk layout.',
+			description:
+				'Parallel to the ICEChannels enum: Main, Blend, Raw Focus, Shake, Time, Tag, Overlay, Letterbox, Fade, PostFX, Assembly, Shake Data.',
 		},
-		is64Bit: {
-			label: '64-bit layout',
-			readOnly: true,
-			hidden: true,
-			description: 'Whether the scanner matched the 64-bit header shape (0x6C bytes) vs 32-bit (0x64 bytes). Duplicated from the root flag to preserve per-take provenance.',
-		},
+		indices: { label: 'Indices', readOnly: true, hidden: true },
+		parameters: { label: 'Parameters', readOnly: true, hidden: true },
+		alignPadBytes: { label: 'Alignment pad', readOnly: true, hidden: true },
+		nameBytes: { hidden: true, readOnly: true },
+		runs: { label: 'Channels' },
 	},
-	label: (value, index) => takeLabel(value, index ?? 0),
+	label: (value) => takeNameFor(value),
+	propertyGroups: [
+		{ title: 'Take', properties: ['guid', 'name', 'lengthSeconds'] },
+		{ title: 'Channels', properties: ['runs'] },
+	],
+};
+
+const IceDictionaryEntry: RecordSchema = {
+	name: 'IceDictionaryEntry',
+	description: 'One dictionary entry — a key/flags pair pointing at a take.',
+	fields: {
+		key: { kind: 'bigint', hex: true },
+		userFlags: u32(),
+		take: record('IceTake'),
+	},
+	fieldMetadata: {
+		key: {
+			label: 'Key',
+			readOnly: true,
+			// The key is the take-name hash; the writer does not recompute it
+			// from an edited name, so editing the name leaves the key stale.
+			warning: 'Lookup key (name hash) — NOT recomputed when you edit the take name.',
+			description: 'mKey — DictionaryKey hash of the lowercase take name.',
+		},
+		userFlags: {
+			label: 'User flags',
+			readOnly: true,
+			description: 'mxUserFlags — 0x80000000 in retail.',
+		},
+		take: { label: 'Take' },
+	},
+	label: (value, index) => entryLabel(value, index ?? 0),
 };
 
 const IceTakeDictionary: RecordSchema = {
 	name: 'IceTakeDictionary',
-	description: 'Root record for the ICE Take Dictionary resource (0x41). A list of camera takes recovered by a heuristic byte-scan of the raw payload.',
+	description: 'Root record for the ICE Take Dictionary resource (0x41) — a list of camera takes.',
 	fields: {
-		takes: recordList('ICETakeHeader', (v, i) => takeLabel(v, i)),
-		is64Bit: bool(),
-		totalTakes: u32(),
+		// `kind` is the structural discriminant carried on the model; declared so
+		// the coverage walker accounts for it. Hidden — not user-facing.
+		kind: string(),
+		indexOffset: u32(),
+		entries: {
+			kind: 'list',
+			item: record('IceDictionaryEntry'),
+			addable: true,
+			removable: true,
+			itemLabel: (v, i) => entryLabel(v, i),
+		},
 	},
 	fieldMetadata: {
-		takes: { label: 'Takes' },
-		is64Bit: {
-			label: '64-bit layout',
-			readOnly: true,
-			description: 'Whether the scanner picked the 64-bit header layout for this resource. Determined by whichever layout/endianness matched the most plausible headers.',
-		},
-		totalTakes: {
-			label: 'Total takes',
+		kind: { hidden: true, readOnly: true },
+		indexOffset: {
+			label: 'Index offset',
 			readOnly: true,
 			hidden: true,
-			derivedFrom: 'takes',
-			description: 'Convenience count — always equals takes.length.',
+			description: 'mpaIndex — entry-table file offset, rebuilt by the writer.',
 		},
+		entries: { label: 'Takes' },
 	},
-	propertyGroups: [
-		{ title: 'Summary', properties: ['is64Bit', 'totalTakes'] },
-		{ title: 'Takes', properties: ['takes'] },
-	],
+	propertyGroups: [{ title: 'Takes', properties: ['entries'] }],
 };
 
 // ---------------------------------------------------------------------------
@@ -188,8 +222,9 @@ const IceTakeDictionary: RecordSchema = {
 
 const registry: SchemaRegistry = {
 	IceTakeDictionary,
-	ICETakeHeader,
-	ICEElementCount,
+	IceDictionaryEntry,
+	IceTake,
+	IceElementCount,
 };
 
 export const iceTakeDictionaryResourceSchema: ResourceSchema = {

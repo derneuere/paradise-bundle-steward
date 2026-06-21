@@ -10,7 +10,7 @@ import { HexTable } from './HexTable';
 import { getSchemaFields, getSchemaSize } from './utils.ts';
 import { VehicleEntrySchema } from '@/lib/core/vehicleList';
 import { TriggerDataHeaderSchema, TriggerRegionBaseSchema, LandmarkHeaderSchema, GenericRegionHeaderSchema, BlackspotHeaderSchema, VFXBoxRegionHeaderSchema } from '@/lib/core/triggerData';
-import { ICETakeHeader32Schema, ICETakeHeader64Schema, parseIceTakeDictionaryData } from '@/lib/core/iceTakeDictionary';
+import { ICETakeHeader32Schema, parseIceTakeDictionaryData } from '@/lib/core/iceTakeDictionary';
 import { ChallengeListEntryActionSchema, parseChallengeListData } from '@/lib/core/challengeList';
 import { BufferReader } from 'typed-binary';
 import type { HexRow } from './types';
@@ -55,10 +55,7 @@ const schemaRegistry: Record<number, SchemaProvider> = {
   [RESOURCE_TYPE_IDS.ICE_TAKE_DICTIONARY]: {
     label: 'ICETakeHeader',
     headerSizeFromData: () => 0,
-    entrySizeFromData: (data) => {
-      const parsed = parseIceTakeDictionaryData(data);
-      return parsed.is64Bit ? 0x6C : 0x64;
-    },
+    entrySizeFromData: () => 0x64,
     countFromData: (data) => {
       const parsed = parseIceTakeDictionaryData(data);
       return parsed.totalTakes;
@@ -67,10 +64,7 @@ const schemaRegistry: Record<number, SchemaProvider> = {
       const parsed = parseIceTakeDictionaryData(data);
       return parsed.takes.map(t => t.offset >>> 0).sort((a, b) => a - b);
     },
-    fieldsFromData: (data) => {
-      const parsed = parseIceTakeDictionaryData(data);
-      return getSchemaFields(parsed.is64Bit ? ICETakeHeader64Schema : ICETakeHeader32Schema);
-    }
+    fieldsFromData: () => getSchemaFields(ICETakeHeader32Schema)
   },
   [RESOURCE_TYPE_IDS.TRIGGER_DATA]: {
     label: 'TriggerData',

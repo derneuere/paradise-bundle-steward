@@ -14,6 +14,8 @@ import { challengeListHandler } from './handlers/challengeList';
 import { vehicleListHandler } from './handlers/vehicleList';
 import { playerCarColoursHandler } from './handlers/playerCarColors';
 import { iceTakeDictionaryHandler } from './handlers/iceTakeDictionary';
+import { iceListHandler } from './handlers/iceList';
+import { iceDataHandler } from './handlers/iceData';
 import { renderableHandler } from './handlers/renderable';
 import { textureHandler } from './handlers/texture';
 import { textureStateHandler } from './handlers/textureState';
@@ -76,6 +78,8 @@ export const registry: ResourceHandler[] = [
 	vehicleListHandler,
 	playerCarColoursHandler,
 	iceTakeDictionaryHandler,
+	iceListHandler,
+	iceDataHandler,
 	renderableHandler,
 	textureHandler,
 	textureStateHandler,

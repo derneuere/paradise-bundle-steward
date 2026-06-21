@@ -1,4 +1,23 @@
-// ICE Take Dictionary - schemas, types, and reading functions
+// ICE Take Dictionary (resource 0x41) — structured parser + byte-exact writer.
+//
+// Container layout (32-bit, see docs/ICETakeDictionary.md):
+//
+//   DictionaryBase @0 { miNumEntries u32, miDictionarySize u32, mpaIndex u32 }
+//   pad to 16
+//   DictEntry[miNumEntries] @mpaIndex   (16-byte stride)
+//     { mKey s64, mpData u32, mxUserFlags u32 }
+//   ICETakeData[...] packed contiguously after the entry table
+//
+// On disk, `mpaIndex` and each entry's `mpData` are FILE OFFSETS into the
+// payload (they become runtime pointers after FixUp). In every observed retail
+// bundle the entry table sits immediately after the 16-byte-aligned base and the
+// takes follow contiguously in entry order, each take 4-byte aligned. The writer
+// rebuilds those offsets from the layout (Tier-1 offset-recompute) so the bytes
+// are reproduced exactly; the take payloads are re-emitted via the iceVariableData
+// codec, which preserves each value's raw packed bits.
+//
+// A heuristic header scanner is kept as a labelled fallback for inputs that fail
+// the structured parse (the old behaviour); structured parse is preferred.
 
 import {
 	object,
@@ -7,7 +26,7 @@ import {
 	u16,
 	u32,
 	f32,
-	type Parsed
+	type Parsed,
 } from 'typed-binary';
 import { BufferReader } from 'typed-binary';
 import { parseBundle } from './bundle';
@@ -15,51 +34,57 @@ import { getResourceData, isNestedBundle, decompressData } from './resourceManag
 import type {
 	ResourceEntry,
 	ResourceContext,
-	ParsedBundle,
 	ParseOptions,
 	ProgressCallback,
-	RESOURCE_TYPE_IDS as _IGNORE
 } from './types';
 import { ResourceNotFoundError, BundleError } from './errors';
+import {
+	parseIceTakeData,
+	writeIceTakeData,
+	computeTakeSize,
+	type IceTake,
+} from './iceVariableData';
+
+const DICT_BASE_SIZE = 12; // miNumEntries + miDictionarySize + mpaIndex (32-bit)
+const DICT_ENTRY_STRIDE = 16; // mKey(8) + mpData(4) + mxUserFlags(4)
+const DEFAULT_USER_FLAGS = 0x80000000;
 
 // ============================================================================
-// Schemas (header-only; payload after header is variable and not parsed yet)
+// Structured model types (exported — the schema is built from these)
 // ============================================================================
 
-const ICEElementCountSchema = object({
-	mu16Intervals: u16,
-	mu16Keys: u16
-});
+export type IceDictionaryEntry = {
+	/** mKey — DictionaryKey, the CRC32-of-lowercase-name hash widened to s64. */
+	key: bigint;
+	/** mxUserFlags — always 0x80000000 in retail. */
+	userFlags: number;
+	/** The take payload this entry points at. */
+	take: IceTake;
+};
 
-// 32-bit: bTNode is 8 bytes (next, prev pointers)
+export type IceTakeDictionary = {
+	/** Resolved by the structured parser. */
+	kind: 'structured';
+	/** mpaIndex — file offset of the entry table (preserved for byte-exact write). */
+	indexOffset: number;
+	entries: IceDictionaryEntry[];
+};
+
+// ============================================================================
+// Legacy heuristic header model (fallback only)
+// ============================================================================
+
+const ICEElementCountSchema = object({ mu16Intervals: u16, mu16Keys: u16 });
+
 export const ICETakeHeader32Schema = object({
-	// bTNode (next, prev) - ignored semantics
 	bNodeNext: u32,
 	bNodePrev: u32,
 	miGuid: u32,
-	macTakeName: arrayOf(u8, 32), // char[32]
+	macTakeName: arrayOf(u8, 32),
 	mfLength: f32,
 	muAllocated: u32,
-	mElementCounts: arrayOf(ICEElementCountSchema, 12)
+	mElementCounts: arrayOf(ICEElementCountSchema, 12),
 });
-
-// 64-bit: bTNode is 16 bytes (next, prev pointers)
-export const ICETakeHeader64Schema = object({
-	// bTNode (next, prev) - ignored semantics
-	bNodeNextLow: u32,
-	bNodeNextHigh: u32,
-	bNodePrevLow: u32,
-	bNodePrevHigh: u32,
-	miGuid: u32,
-	macTakeName: arrayOf(u8, 32), // char[32]
-	mfLength: f32,
-	muAllocated: u32,
-	mElementCounts: arrayOf(ICEElementCountSchema, 12)
-});
-
-// ============================================================================
-// Types
-// ============================================================================
 
 type ICEElementCount = Parsed<typeof ICEElementCountSchema>;
 
@@ -68,23 +93,149 @@ type ICETakeHeader = {
 	name: string;
 	lengthSeconds: number;
 	allocated: number;
-	elementCounts: ICEElementCount[]; // 12 channels
-	offset: number; // offset in data where header was found
+	elementCounts: ICEElementCount[];
+	offset: number;
 	is64Bit: boolean;
-}
+};
 
+// NOTE: intentionally has NO `kind` discriminant — the legacy hand-written
+// schema (src/lib/schema/resources/iceTakeDictionary.ts) walks this shape and
+// asserts every field is declared. The union below discriminates structurally.
 export type ParsedIceTakeDictionary = {
 	takes: ICETakeHeader[];
 	is64Bit: boolean;
 	totalTakes: number;
+};
+
+/**
+ * Union of the structured parse and the heuristic fallback. Discriminate via
+ * {@link isStructuredDictionary} (structural — the structured model carries
+ * `kind: 'structured'`, the heuristic one carries `takes`).
+ */
+export type IceTakeDictionaryModel = IceTakeDictionary | ParsedIceTakeDictionary;
+
+/** Type guard: true when the model is the structured (writable) parse. */
+export function isStructuredDictionary(model: IceTakeDictionaryModel): model is IceTakeDictionary {
+	return (model as IceTakeDictionary).kind === 'structured';
 }
 
 // ============================================================================
-// Utilities
+// Structured parse
+// ============================================================================
+
+/**
+ * Parse the 0x41 payload into the structured dictionary model. Throws if the
+ * container header, entry table, or any take fails to line up — callers that
+ * want graceful degradation catch and fall back to the heuristic scanner.
+ */
+export function parseIceTakeDictionary(data: Uint8Array, littleEndian = true): IceTakeDictionary {
+	if (data.byteLength < DICT_BASE_SIZE) {
+		throw new BundleError('ICE dictionary payload too small for DictionaryBase', 'ICE_PARSE_ERROR');
+	}
+	const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+	const u32r = (o: number) => dv.getUint32(o, littleEndian);
+
+	const numEntries = dv.getInt32(0, littleEndian);
+	// miDictionarySize @4 is the dictionary span; it is recomputed on write so we
+	// do not need to retain it.
+	const indexOffset = u32r(8);
+
+	if (numEntries < 0 || numEntries > 0x100000) {
+		throw new BundleError(`ICE dictionary entry count out of range: ${numEntries}`, 'ICE_PARSE_ERROR');
+	}
+	const tableEnd = indexOffset + numEntries * DICT_ENTRY_STRIDE;
+	if (indexOffset < DICT_BASE_SIZE || tableEnd > data.byteLength) {
+		throw new BundleError('ICE dictionary entry table out of bounds', 'ICE_PARSE_ERROR');
+	}
+
+	const entries: IceDictionaryEntry[] = [];
+	for (let i = 0; i < numEntries; i++) {
+		const base = indexOffset + i * DICT_ENTRY_STRIDE;
+		const key = readS64(dv, base, littleEndian);
+		const mpData = u32r(base + 8);
+		const userFlags = u32r(base + 12);
+		if (mpData + 0x64 > data.byteLength) {
+			throw new BundleError(`ICE take offset out of bounds at entry ${i}: ${mpData}`, 'ICE_PARSE_ERROR');
+		}
+		const take = parseIceTakeData(data, mpData, littleEndian);
+		entries.push({ key, userFlags, take });
+	}
+
+	return { kind: 'structured', indexOffset, entries };
+}
+
+function readS64(dv: DataView, offset: number, littleEndian: boolean): bigint {
+	const lo = BigInt(dv.getUint32(offset + (littleEndian ? 0 : 4), littleEndian));
+	const hi = BigInt(dv.getInt32(offset + (littleEndian ? 4 : 0), littleEndian));
+	return (hi << 32n) | (lo & 0xffffffffn);
+}
+
+function writeS64(dv: DataView, offset: number, value: bigint, littleEndian: boolean): void {
+	const lo = Number(value & 0xffffffffn) >>> 0;
+	const hi = Number((value >> 32n) & 0xffffffffn) >>> 0;
+	dv.setUint32(offset + (littleEndian ? 0 : 4), lo, littleEndian);
+	dv.setUint32(offset + (littleEndian ? 4 : 0), hi, littleEndian);
+}
+
+// ============================================================================
+// Structured write (byte-exact)
+// ============================================================================
+
+/**
+ * Rebuild the 0x41 payload byte-exact. Layout: DictionaryBase, pad to 16, the
+ * entry table, then each take contiguously (4-byte aligned, which the take size
+ * already guarantees) in entry order. mpaIndex/mpData offsets are recomputed
+ * from the layout; miDictionarySize/miNumEntries are derived; node bases are 0.
+ */
+export function writeIceTakeDictionary(model: IceTakeDictionary, littleEndian = true): Uint8Array {
+	const numEntries = model.entries.length;
+	const indexOffset = roundUp(DICT_BASE_SIZE, 16); // 16
+	const tableEnd = indexOffset + numEntries * DICT_ENTRY_STRIDE;
+
+	// Pre-encode takes to learn their sizes and place them contiguously.
+	const takeBytes = model.entries.map((e) => writeIceTakeData(e.take, littleEndian));
+	let cursor = tableEnd;
+	const takeOffsets: number[] = [];
+	for (const tb of takeBytes) {
+		takeOffsets.push(cursor);
+		cursor += tb.byteLength;
+	}
+	const total = cursor;
+
+	const out = new Uint8Array(total);
+	const dv = new DataView(out.buffer);
+
+	dv.setInt32(0, numEntries, littleEndian);
+	// miDictionarySize: the doc describes this as "file size minus DictionaryBase
+	// length", but every retail payload stores the FULL payload size here, so we
+	// match the observed bytes.
+	dv.setInt32(4, total, littleEndian);
+	dv.setUint32(8, indexOffset, littleEndian);
+
+	for (let i = 0; i < numEntries; i++) {
+		const base = indexOffset + i * DICT_ENTRY_STRIDE;
+		writeS64(dv, base, model.entries[i].key, littleEndian);
+		dv.setUint32(base + 8, takeOffsets[i], littleEndian);
+		dv.setUint32(base + 12, model.entries[i].userFlags >>> 0, littleEndian);
+	}
+
+	for (let i = 0; i < numEntries; i++) {
+		out.set(takeBytes[i], takeOffsets[i]);
+	}
+
+	return out;
+}
+
+function roundUp(value: number, align: number): number {
+	return (value + align - 1) & ~(align - 1);
+}
+
+// ============================================================================
+// Heuristic fallback scanner (legacy)
 // ============================================================================
 
 function decodeFixedCStringFromBytes(bytesArr: number[]): string {
-	const bytes = new Uint8Array(bytesArr.map(v => v & 0xFF));
+	const bytes = new Uint8Array(bytesArr.map((v) => v & 0xff));
 	const nul = bytes.indexOf(0);
 	const slice = nul >= 0 ? bytes.subarray(0, nul) : bytes;
 	return new TextDecoder('utf-8').decode(slice).trim();
@@ -94,47 +245,33 @@ function isPrintableAscii(str: string): boolean {
 	if (str.length === 0) return false;
 	for (let i = 0; i < str.length; i++) {
 		const c = str.charCodeAt(i);
-		if (c < 0x20 || c > 0x7E) return false;
+		if (c < 0x20 || c > 0x7e) return false;
 	}
 	return true;
 }
 
-function isPlausibleHeader(h: {
-	name: string;
-	lengthSeconds: number;
-	elementCounts: ICEElementCount[];
-}): boolean {
+function isPlausibleHeader(h: { name: string; lengthSeconds: number; elementCounts: ICEElementCount[] }): boolean {
 	if (!isPrintableAscii(h.name)) return false;
 	if (h.name.length > 32) return false;
-	if (!(h.lengthSeconds >= 0 && h.lengthSeconds < 6000)) return false; // less than 100 minutes
+	if (!(h.lengthSeconds >= 0 && h.lengthSeconds < 6000)) return false;
 	if (!h.elementCounts || h.elementCounts.length !== 12) return false;
 	let totalKeys = 0;
 	for (const ec of h.elementCounts) {
 		if (ec.mu16Intervals > 0x4000 || ec.mu16Keys > 0x4000) return false;
 		totalKeys += ec.mu16Keys;
 	}
-	return totalKeys < 20000; // conservative bound
+	return totalKeys < 20000;
 }
 
-// ============================================================================
-// Core parsing (header scanning heuristic)
-// ============================================================================
-
-function tryReadHeaderAt(
-	data: Uint8Array,
-	offset: number,
-	is64Bit: boolean,
-	endianness: 'little' | 'big'
-): ICETakeHeader | null {
+function tryReadHeaderAt(data: Uint8Array, offset: number, endianness: 'little' | 'big'): ICETakeHeader | null {
 	try {
-		const headerSize = is64Bit ? 0x6C : 0x64; // 108 vs 100 bytes
+		const headerSize = 0x64;
 		if (offset + headerSize > data.byteLength) return null;
 		const reader = new BufferReader(
 			data.buffer.slice(data.byteOffset + offset, data.byteOffset + offset + headerSize),
-			{ endianness }
+			{ endianness },
 		);
-
-		const raw = (is64Bit ? ICETakeHeader64Schema : ICETakeHeader32Schema).read(reader);
+		const raw = ICETakeHeader32Schema.read(reader);
 		const name = decodeFixedCStringFromBytes(raw.macTakeName as unknown as number[]);
 		const header: ICETakeHeader = {
 			guid: raw.miGuid >>> 0,
@@ -143,202 +280,132 @@ function tryReadHeaderAt(
 			allocated: raw.muAllocated >>> 0,
 			elementCounts: raw.mElementCounts,
 			offset,
-			is64Bit
+			is64Bit: false,
 		};
-
 		return isPlausibleHeader(header) ? header : null;
-	} catch (_e) {
+	} catch {
 		return null;
 	}
 }
 
-function scanHeaders(
-	data: Uint8Array,
-	is64Bit: boolean,
-	endianness: 'little' | 'big'
-): ICETakeHeader[] {
+function scanHeaders(data: Uint8Array, endianness: 'little' | 'big'): ICETakeHeader[] {
 	const headers: ICETakeHeader[] = [];
-	const headerSize = is64Bit ? 0x6C : 0x64;
-
-	// Step through data with 4-byte alignment to find plausible headers
+	const headerSize = 0x64;
 	for (let off = 0; off + headerSize <= data.byteLength; off += 4) {
-		const h = tryReadHeaderAt(data, off, is64Bit, endianness);
+		const h = tryReadHeaderAt(data, off, endianness);
 		if (h) {
-			// Prevent excessive duplicates in case of overlapping scans
-			if (!headers.some(e => e.offset === h.offset)) {
-				headers.push(h);
-			}
-			// Jump ahead by at least header size to avoid re-detecting inside payload
+			if (!headers.some((e) => e.offset === h.offset)) headers.push(h);
 			off += headerSize - 4;
 		}
 	}
-
-	// De-duplicate by name, prefer first occurrence
 	const seen = new Set<string>();
 	const unique: ICETakeHeader[] = [];
 	for (const h of headers) {
 		const key = h.name.toLowerCase();
-		if (key && !seen.has(key)) {
-			seen.add(key);
-			unique.push(h);
-		}
+		if (key && !seen.has(key)) { seen.add(key); unique.push(h); }
 	}
-
 	return unique;
 }
 
+function scanHeuristic(data: Uint8Array): ParsedIceTakeDictionary {
+	const le = scanHeaders(data, 'little');
+	const be = scanHeaders(data, 'big');
+	const takes = le.length >= be.length ? le : be;
+	return { takes, is64Bit: false, totalTakes: takes.length };
+}
+
 // ============================================================================
-// High-Level Parsing Functions
+// Public entry points
 // ============================================================================
 
-export function parseIceTakeDictionary(
+/**
+ * Parse already-extracted, decompressed 0x41 bytes into the STRUCTURED model,
+ * falling back to the labelled heuristic scanner only if structured parse
+ * throws. This is the path the registry handler (and writer) uses.
+ */
+export function parseIceTakeDictionaryStructured(data: Uint8Array, littleEndian = true): IceTakeDictionaryModel {
+	if (data.length >= 2 && data[0] === 0x78) {
+		data = decompressData(data);
+	}
+	try {
+		return parseIceTakeDictionary(data, littleEndian);
+	} catch {
+		return scanHeuristic(data);
+	}
+}
+
+/**
+ * Legacy heuristic-shape parse retained for the hex-viewer inspector and the
+ * existing hand-written schema, which read `.takes` / `.totalTakes` / `.is64Bit`.
+ * New code should prefer {@link parseIceTakeDictionaryStructured}.
+ */
+export function parseIceTakeDictionaryData(data: Uint8Array): ParsedIceTakeDictionary {
+	if (data.length >= 2 && data[0] === 0x78) {
+		data = decompressData(data);
+	}
+	return scanHeuristic(data);
+}
+
+/** Bundle-aware entry point (handles nested-bundle/decompression like other parsers). */
+export function parseIceTakeDictionaryFromBundle(
 	buffer: ArrayBuffer,
 	resource: ResourceEntry,
 	options: ParseOptions = {},
-	progressCallback?: ProgressCallback
-): ParsedIceTakeDictionary {
+	progressCallback?: ProgressCallback,
+): IceTakeDictionaryModel {
 	try {
 		reportProgress(progressCallback, 'parse', 0, 'Starting ICE dictionary parsing');
-
-		const context: ResourceContext = {
-			bundle: parseBundle(buffer),
-			resource,
-			buffer
-		};
-
+		const context: ResourceContext = { bundle: parseBundle(buffer), resource, buffer };
 		let { data } = getResourceData(context);
-
-		reportProgress(progressCallback, 'parse', 0.2, 'Processing nested bundle if present');
 		data = handleNestedBundle(data, buffer, resource);
-
-		// Decompress if needed after nested extraction
-		if (data.length >= 2 && data[0] === 0x78) {
-			data = decompressData(data);
-		}
-
-		reportProgress(progressCallback, 'parse', 0.4, 'Scanning for ICETake headers');
-
-
-		// Try both endianness and both 32/64-bit layouts; pick best
-		const candidates = [
-			{ list: scanHeaders(data, false, 'little'), is64: false, end: 'little' as const },
-			{ list: scanHeaders(data, false, 'big'), is64: false, end: 'big' as const },
-			{ list: scanHeaders(data, true, 'little'), is64: true, end: 'little' as const },
-			{ list: scanHeaders(data, true, 'big'), is64: true, end: 'big' as const },
-		];
-		// Sort by number of detected entries; tie-breaker prefers caller endianness hint if provided
-		candidates.sort((a, b) => {
-			const byCount = b.list.length - a.list.length;
-			if (byCount !== 0) return byCount;
-			if (options && typeof options.littleEndian === 'boolean') {
-				const prefer = options.littleEndian ? 'little' : 'big';
-				const bPref = b.end === prefer ? 1 : 0;
-				const aPref = a.end === prefer ? 1 : 0;
-				return bPref - aPref;
-			}
-			return 0;
-		});
-		const best = candidates[0];
-
-		const picks = best.list;
-		const is64Bit = best.is64;
-
-		reportProgress(progressCallback, 'parse', 1.0, `Parsed ${picks.length} ICE takes`);
-
-		return {
-			takes: picks,
-			is64Bit,
-			totalTakes: picks.length
-		};
-
+		if (data.length >= 2 && data[0] === 0x78) data = decompressData(data);
+		const littleEndian = options.littleEndian ?? true;
+		const model = parseIceTakeDictionaryStructured(data, littleEndian);
+		reportProgress(progressCallback, 'parse', 1.0, 'Parsed ICE dictionary');
+		return model;
 	} catch (error) {
-		if (error instanceof BundleError) {
-			throw error;
-		}
+		if (error instanceof BundleError) throw error;
 		throw new BundleError(
 			`Failed to parse ICE take dictionary: ${error instanceof Error ? error.message : String(error)}`,
 			'ICE_TAKE_DICTIONARY_PARSE_ERROR',
-			{ error, resourceId: resource.resourceId.toString() }
+			{ error, resourceId: resource.resourceId.toString() },
 		);
 	}
 }
 
+export function describeIceTakeDictionary(model: IceTakeDictionaryModel): string {
+	if (isStructuredDictionary(model)) return `takes ${model.entries.length}`;
+	return `takes ${model.totalTakes} (heuristic)`;
+}
+
 // ============================================================================
-// Nested Bundle Handling (similar to other parsers)
+// Nested bundle handling (unchanged from the previous parser)
 // ============================================================================
 
-function handleNestedBundle(
-	data: Uint8Array,
-	originalBuffer: ArrayBuffer,
-	resource: ResourceEntry
-): Uint8Array {
-	if (!isNestedBundle(data)) {
-		return data;
-	}
-
+function handleNestedBundle(data: Uint8Array, originalBuffer: ArrayBuffer, resource: ResourceEntry): Uint8Array {
+	if (!isNestedBundle(data)) return data;
 	const innerBuffer = (data.buffer as ArrayBuffer).slice(data.byteOffset, data.byteOffset + data.byteLength);
 	const bundle = parseBundle(innerBuffer);
-
-	const innerResource = bundle.resources.find(r => r.resourceTypeId === resource.resourceTypeId);
-	if (!innerResource) {
-		throw new ResourceNotFoundError(resource.resourceTypeId);
-	}
+	const innerResource = bundle.resources.find((r) => r.resourceTypeId === resource.resourceTypeId);
+	if (!innerResource) throw new ResourceNotFoundError(resource.resourceTypeId);
 
 	const dataOffsets = bundle.header.resourceDataOffsets;
 	let best: Uint8Array | null = null;
 	for (let sectionIndex = 0; sectionIndex < dataOffsets.length; sectionIndex++) {
 		const sectionOffset = dataOffsets[sectionIndex];
 		if (sectionOffset === 0) continue;
-
 		const absoluteOffset = data.byteOffset + sectionOffset;
 		if (absoluteOffset >= originalBuffer.byteLength) continue;
-
 		const maxSize = originalBuffer.byteLength - absoluteOffset;
 		const sectionData = new Uint8Array(originalBuffer, absoluteOffset, Math.min(maxSize, 500000));
-
-		// Return compressed block immediately; we'll decompress later upstream
-		if (sectionData.length >= 2 && sectionData[0] === 0x78) {
-			return sectionData;
-		}
-
-		// Track the largest uncompressed candidate section
-		if (!best || sectionData.length > best.length) {
-			best = sectionData;
-		}
+		if (sectionData.length >= 2 && sectionData[0] === 0x78) return sectionData;
+		if (!best || sectionData.length > best.length) best = sectionData;
 	}
-
-	// If no specific section matched, return the largest uncompressed candidate, else original
 	return best ?? data;
 }
 
-// ============================================================================
-// Public helpers
-// ============================================================================
-
-export function parseIceTakeDictionaryData(
-	data: Uint8Array,
-): ParsedIceTakeDictionary {
-	if (data.length >= 2 && data[0] === 0x78) {
-		data = decompressData(data);
-	}
-	const candidates = [
-		{ list: scanHeaders(data, false, 'little'), is64: false },
-		{ list: scanHeaders(data, false, 'big'), is64: false },
-		{ list: scanHeaders(data, true, 'little'), is64: true },
-		{ list: scanHeaders(data, true, 'big'), is64: true },
-	];
-	candidates.sort((a, b) => b.list.length - a.list.length);
-	const best = candidates[0];
-	return { takes: best.list, is64Bit: best.is64, totalTakes: best.list.length };
-}
-
-function reportProgress(
-	callback: ProgressCallback | undefined,
-	type: string,
-	progress: number,
-	message?: string
-) {
+function reportProgress(callback: ProgressCallback | undefined, type: string, progress: number, message?: string) {
 	callback?.({ type: type as 'parse' | 'write' | 'compress' | 'validate', stage: type, progress, message });
 }
 
-
+export { DEFAULT_USER_FLAGS };

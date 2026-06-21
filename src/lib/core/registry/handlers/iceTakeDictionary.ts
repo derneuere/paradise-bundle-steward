@@ -1,42 +1,51 @@
-// ICE Take Dictionary registry handler (read-only, partial — spec incomplete).
+// ICE Take Dictionary registry handler.
 //
-// The existing parser uses a heuristic scan that tries both endiannesses and
-// both pointer widths and picks whichever finds the most valid-looking takes.
-// We pass raw bytes through unchanged; per the refactor's "32-bit PC only"
-// constraint the parser will be narrowed separately if/when the wiki spec
-// catches up.
+// Structured, byte-exact parser + writer. The payload is a CgsContainers
+// dictionary: a DictionaryBase header, a DictEntry table at mpaIndex, then the
+// ICETakeData payloads packed contiguously after it. mpData/mpaIndex are plain
+// payload file offsets (no BND2 inline import table), so no importTable() hook
+// is needed — the writer recomputes the offsets from the layout.
+//
+// The take variable-data codec preserves each value's raw packed bits, so an
+// unedited dictionary round-trips bit-for-bit; see src/lib/core/iceVariableData.ts.
 
 import {
-	parseIceTakeDictionaryData,
-	type ParsedIceTakeDictionary,
+	parseIceTakeDictionaryStructured,
+	writeIceTakeDictionary,
+	describeIceTakeDictionary,
+	isStructuredDictionary,
+	type IceTakeDictionaryModel,
 } from '../../iceTakeDictionary';
+import { BundleError } from '../../errors';
 import type { ResourceHandler } from '../handler';
 
-export const iceTakeDictionaryHandler: ResourceHandler<ParsedIceTakeDictionary> = {
+export const iceTakeDictionaryHandler: ResourceHandler<IceTakeDictionaryModel> = {
 	typeId: 0x41,
 	key: 'iceTakeDictionary',
 	featureId: 'icetake-dictionary',
 	name: 'ICE Dictionary',
 	description: 'In-game Camera Editor take dictionary (camera cuts for race starts, Picture Paradise, Super Jumps)',
 	category: 'Camera',
-	caps: { read: true, write: false },
-	notes: 'Partial support: can view some of the data, but not save changes. Blocked: specification missing from Burnout Wiki.',
+	caps: { read: true, write: true },
 	wikiUrl: 'https://burnout.wiki/wiki/ICE_Take_Dictionary',
-	// caps.read is `true` (the heuristic parser does return data), but the
-	// spec is incomplete so the UI flags this as a `'partial'` read with a
-	// matching `'partial'` editor signal.
-	capabilityOverrides: {
-		read: 'partial',
-		editor: 'partial',
-	},
+	notes: 'Each take is a fixed header plus a bit-packed keyframe stream decoded with the ICE element-descriptions table. Values keep their raw packed bits so unedited takes round-trip byte-exact.',
 
-	parseRaw(raw, _ctx) {
-		return parseIceTakeDictionaryData(raw);
+	parseRaw(raw, ctx) {
+		return parseIceTakeDictionaryStructured(raw, ctx.littleEndian);
+	},
+	writeRaw(model, ctx) {
+		if (!isStructuredDictionary(model)) {
+			throw new BundleError(
+				'ICE dictionary writer requires a structured parse (heuristic fallback is read-only)',
+				'ICE_WRITE_UNSUPPORTED',
+			);
+		}
+		return writeIceTakeDictionary(model, ctx.littleEndian);
 	},
 	describe(model) {
-		return `takes ${model.totalTakes}`;
+		return describeIceTakeDictionary(model);
 	},
 	fixtures: [
-		{ bundle: 'example/CAMERAS.BUNDLE', expect: { parseOk: true } },
+		{ bundle: 'example/CAMERAS.BUNDLE', expect: { parseOk: true, byteRoundTrip: true, stableWriter: true } },
 	],
 };
