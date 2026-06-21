@@ -41,7 +41,7 @@ import {
 	type DebugResource,
 } from '@/lib/core/bundle/debugData';
 import type { ParsedBundle, Platform } from '@/lib/core/types';
-import { makeEditableBundle } from './WorkspaceContext.bundle';
+import { makeEditableBundle, rebaseEditableBundle } from './WorkspaceContext.bundle';
 import {
 	canRedo as historyCanRedo,
 	canUndo as historyCanUndo,
@@ -673,9 +673,31 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 				a.remove();
 				setTimeout(() => URL.revokeObjectURL(url), 0);
 
-				// Clear dirty bookkeeping on the saved Bundle. History stays —
-				// the user can still undo edits made before the save.
-				replaceBundle(bundleId, clearBundleDirty);
+				// Promote the just-written bytes to the Bundle's new baseline so
+				// a later save doesn't revert edits this save already persisted:
+				// `writeBundleFresh` rebuilds from `originalArrayBuffer` + the
+				// CURRENT dirty set, and we clear dirty below, so any instance
+				// edited-and-saved now would otherwise pass through from the
+				// original (un-edited) bytes on the next save. Only safe when the
+				// output matches the Bundle's own platform — a cross-platform
+				// export produces a different-format file that must NOT replace
+				// the working Bundle, so that path keeps the old dirty-only reset.
+				// History stays either way — the user can still undo past edits.
+				const isSamePlatformSave =
+					targetPlatform === undefined ||
+					targetPlatform === b.parsed.header.platform;
+				if (isSamePlatformSave) {
+					try {
+						replaceBundle(bundleId, (cur) => rebaseEditableBundle(cur, outBuffer));
+					} catch {
+						// Re-parsing our own freshly-written envelope should never
+						// fail, but never let a re-base hiccup undo a successful
+						// download — fall back to the plain dirty reset.
+						replaceBundle(bundleId, clearBundleDirty);
+					}
+				} else {
+					replaceBundle(bundleId, clearBundleDirty);
+				}
 
 				toast.success('Exported bundle', {
 					description: `Size: ${(outBuffer.byteLength / 1024).toFixed(1)} KB`,

@@ -98,3 +98,46 @@ export function makeEditableBundle(
 		isModified: false,
 	};
 }
+
+/**
+ * Re-base a saved bundle onto the bytes it was just exported as, then mark it
+ * clean. Used by `saveBundle` after a same-platform export.
+ *
+ * Why this exists: `saveBundle` rebuilds output from `originalArrayBuffer` plus
+ * the resources currently in `dirtyMulti`, and clears the dirty set afterwards.
+ * If `originalArrayBuffer` stayed pinned to the first-loaded file, a SECOND
+ * save would re-emit only the instances edited since the first save and let
+ * every previously-saved-but-no-longer-dirty instance pass through from the
+ * ORIGINAL (un-edited) bytes — silently reverting earlier edits. Promoting the
+ * just-written bytes to the new baseline (and re-reading the envelope so disk
+ * offsets line up with them) means subsequent saves pass those edits through
+ * verbatim.
+ *
+ * The parsed *models* are deliberately preserved (not re-parsed from the saved
+ * bytes): they already reflect every edit, keeping the in-memory state exactly
+ * what the user has and avoiding both a full re-parse and any round-trip drift
+ * from a lossy writer. Only the byte baseline + the envelope view (`parsed` and
+ * the `resources` UIResource list, whose sizes/offsets moved during re-layout)
+ * are refreshed. A same-platform save never adds, removes, or reorders
+ * resources, so the preserved per-instance model lists stay index-aligned with
+ * the refreshed `parsed.resources`.
+ */
+export function rebaseEditableBundle(
+	prev: EditableBundle,
+	savedArrayBuffer: ArrayBuffer,
+): EditableBundle {
+	const parsed = parseBundle(savedArrayBuffer);
+	const debugResources = parsed.debugData
+		? parseDebugDataFromXml(parsed.debugData)
+		: [];
+	const resources = parsed.resources.map((r) => toUIResource(r, parsed, debugResources));
+	return {
+		...prev,
+		originalArrayBuffer: savedArrayBuffer,
+		parsed,
+		resources,
+		debugResources,
+		dirtyMulti: new Set(),
+		isModified: false,
+	};
+}
