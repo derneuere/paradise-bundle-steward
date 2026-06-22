@@ -10,6 +10,7 @@ import BundleLayout from "./layouts/BundleLayout";
 import HexViewPage from "./pages/HexViewPage";
 import ResourceInspectorPage from "./pages/ResourceInspectorPage";
 import WorkspacePage from "./pages/WorkspacePage";
+import SaveProfilePage from "./pages/SaveProfilePage";
 
 const queryClient = new QueryClient();
 
@@ -31,6 +32,8 @@ const App = () => (
               <Route path="/hexview" element={<HexViewPage />} />
               <Route path="/inspect" element={<ResourceInspectorPage />} />
             </Route>
+            {/* Save-game profile editor — standalone (not a BND2 bundle), own layout */}
+            <Route path="/save" element={<SaveProfilePage />} />
             {/* Legacy index route kept if needed */}
             <Route path="/legacy" element={<Index />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

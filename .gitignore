@@ -30,3 +30,8 @@ debug_textures/
 # Stryker mutation-testing reports + incremental cache
 reports/mutation/
 .stryker-tmp/
+
+# Personal Burnout Paradise save profiles — contain player progression and
+# friends' names; used only as local round-trip fixtures, never committed.
+example/SAVE/
+*.BurnoutParadiseSave
