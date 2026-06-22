@@ -214,9 +214,18 @@ const BundleLayout = () => {
       <header className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">Online Bundle Manager</h1>
-              <p className="text-muted-foreground">Burnout Paradise Bundle Editor & Resource Explorer</p>
+            <div className="flex items-center gap-3">
+              <img
+                src="/logo.svg"
+                alt="Bundle Manager logo"
+                width={44}
+                height={44}
+                className="h-11 w-11 shrink-0"
+              />
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">Online Bundle Manager</h1>
+                <p className="text-muted-foreground">Burnout Paradise Bundle Editor & Resource Explorer</p>
+              </div>
             </div>
             <div className="flex items-center gap-3">
               {hasBundle && loadedBundle && (

@@ -1,0 +1,67 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bundle Manager">
+  <title>Bundle Manager</title>
+  <defs>
+    <!-- Dark badge background, faint blue tilt -->
+    <linearGradient id="bm-bg" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#192231"/>
+      <stop offset="1" stop-color="#0A0D13"/>
+    </linearGradient>
+    <!-- Cyan glow that sits behind the cube -->
+    <radialGradient id="bm-glow" cx="256" cy="250" r="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#24E4EC" stop-opacity="0.42"/>
+      <stop offset="0.55" stop-color="#1BB7E8" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#1BB7E8" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Lit top face -->
+    <linearGradient id="bm-top" x1="256" y1="121" x2="256" y2="261" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#B4F3FF"/>
+      <stop offset="1" stop-color="#34C9EE"/>
+    </linearGradient>
+    <!-- Left (brighter) side -->
+    <linearGradient id="bm-left" x1="186" y1="191" x2="186" y2="391" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22B9F3"/>
+      <stop offset="1" stop-color="#0A82C2"/>
+    </linearGradient>
+    <!-- Right (shadowed) side -->
+    <linearGradient id="bm-right" x1="326" y1="191" x2="326" y2="391" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0E72AB"/>
+      <stop offset="1" stop-color="#06466F"/>
+    </linearGradient>
+    <filter id="bm-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#05323F" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <!-- Badge -->
+  <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#bm-bg)"/>
+  <rect x="6" y="6" width="500" height="500" rx="110" fill="none" stroke="#2BD6E8" stroke-opacity="0.18" stroke-width="3"/>
+
+  <!-- Glow halo -->
+  <circle cx="256" cy="252" r="190" fill="url(#bm-glow)"/>
+
+  <!-- Bundle cube: a stack of layered resource slabs -->
+  <g filter="url(#bm-shadow)">
+    <!-- right / shadow face -->
+    <path d="M256 261 L396 191 L396 321 L256 391 Z" fill="url(#bm-right)"/>
+    <!-- left / lit face -->
+    <path d="M116 191 L256 261 L256 391 L116 321 Z" fill="url(#bm-left)"/>
+    <!-- top face -->
+    <path d="M256 121 L396 191 L256 261 L116 191 Z" fill="url(#bm-top)"/>
+
+    <!-- slab seams (grooves) showing the bundle is layered -->
+    <g stroke="#05080C" stroke-opacity="0.5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <polyline points="116,234 256,304 396,234"/>
+      <polyline points="116,278 256,348 396,278"/>
+    </g>
+    <!-- lit edge catching light just under each seam -->
+    <g stroke="#9DEEFF" stroke-opacity="0.38" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <polyline points="116,239 256,309 396,239"/>
+      <polyline points="116,283 256,353 396,283"/>
+    </g>
+
+    <!-- glossy top rim -->
+    <polyline points="116,191 256,121 396,191" fill="none" stroke="#D6F8FF" stroke-opacity="0.9" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- front vertical edge -->
+    <line x1="256" y1="261" x2="256" y2="391" stroke="#0A4E73" stroke-opacity="0.55" stroke-width="2.5"/>
+  </g>
+</svg>
