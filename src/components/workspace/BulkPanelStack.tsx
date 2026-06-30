@@ -10,9 +10,8 @@
 //     instance (path: []), so the user can return to the inspector form
 //     for that resource without losing their bulk.
 //   - [✕] click: clears that bulk only (other bulks coexist).
-//   - Body (when expanded): per-resource — AI Sections shows the export
-//     buttons; TriggerData shows just `[Clear]` until a TriggerData-
-//     specific aggregate editor is designed (issue #60 follow-up).
+//   - Body (when expanded): per-resource export buttons (Export → clipboard /
+//     file…). AI Sections and TriggerData share the same export-button row.
 //
 // PSL retrofit (mounting PSL bulks here too) remains out of scope. This
 // stack consults the AI Sections + TriggerData providers; adding more
@@ -37,11 +36,14 @@ import {
 import { sortBulkSummaries } from './bulkPanelStack.helpers';
 import {
 	buildEnvelopeFromBulk,
+	buildTriggerEnvelopeFromBulk,
 	exportEnvelopeFilename,
+	exportTriggerEnvelopeFilename,
 } from './bulkPanelExport.helpers';
 import { encodeBulkEnvelope } from '@/lib/clipboard/bulkEnvelope';
 import type { EditableBundle } from '@/context/WorkspaceContext.types';
 import type { ParsedAISections } from '@/lib/core/aiSections';
+import type { ParsedTriggerData } from '@/lib/core/triggerData';
 
 const AI_KEY = 'aiSections';
 const TRIGGER_KEY = 'triggerData';
@@ -280,53 +282,80 @@ function BulkPanel({
 				</button>
 			</div>
 			{expanded && (
-				<div className="px-3 py-2 border-t border-amber-500/40 space-y-2">
-					<div className="flex flex-wrap gap-1.5">
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="h-7 text-xs gap-1"
-							disabled={!canExport}
-							onClick={() => void handleExportClipboard()}
-							title="Copy this bulk as JSON to the OS clipboard"
-						>
-							<Clipboard className="h-3 w-3" />
-							Export → clipboard
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="h-7 text-xs gap-1"
-							disabled={!canExport}
-							onClick={handleExportFile}
-							title="Download this bulk as a JSON file"
-						>
-							<Download className="h-3 w-3" />
-							Export → file…
-						</Button>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							className="h-7 text-xs ml-auto"
-							onClick={onClear}
-						>
-							Clear
-						</Button>
-					</div>
-				</div>
+				<BulkExportButtons
+					canExport={canExport}
+					onExportClipboard={() => void handleExportClipboard()}
+					onExportFile={handleExportFile}
+					onClear={onClear}
+				/>
 			)}
 		</div>
 	);
 }
 
 // ---------------------------------------------------------------------------
-// One TriggerData panel — minimal body (just `[Clear]`) until a TriggerData-
-// specific aggregate editor is designed (issue #60 leaves this stub on
-// purpose; bulk-edit UI is a follow-up). Keeps the header chrome identical
-// to `BulkPanel` so users see one consistent panel shape across resources.
+// Shared export-button row — identical chrome for every bulk panel's expanded
+// body (Export → clipboard / Export → file… / Clear). Each panel wires its own
+// resource-specific handlers; only the disabled state + click targets differ.
+// ---------------------------------------------------------------------------
+
+function BulkExportButtons({
+	canExport,
+	onExportClipboard,
+	onExportFile,
+	onClear,
+}: {
+	canExport: boolean;
+	onExportClipboard: () => void;
+	onExportFile: () => void;
+	onClear: () => void;
+}) {
+	return (
+		<div className="px-3 py-2 border-t border-amber-500/40 space-y-2">
+			<div className="flex flex-wrap gap-1.5">
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="h-7 text-xs gap-1"
+					disabled={!canExport}
+					onClick={onExportClipboard}
+					title="Copy this bulk as JSON to the OS clipboard"
+				>
+					<Clipboard className="h-3 w-3" />
+					Export → clipboard
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="h-7 text-xs gap-1"
+					disabled={!canExport}
+					onClick={onExportFile}
+					title="Download this bulk as a JSON file"
+				>
+					<Download className="h-3 w-3" />
+					Export → file…
+				</Button>
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					className="h-7 text-xs ml-auto"
+					onClick={onClear}
+				>
+					Clear
+				</Button>
+			</div>
+		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// One TriggerData panel — same export chrome as `BulkPanel` (Export →
+// clipboard / file…), wired through the six-list TriggerData export pipeline.
+// Keeps the header chrome identical so users see one consistent panel shape
+// across resources.
 // ---------------------------------------------------------------------------
 
 function TriggerDataBulkPanel({
@@ -345,6 +374,65 @@ function TriggerDataBulkPanel({
 	const handler = getHandlerByKey(TRIGGER_KEY);
 	const resourceLabel = handler?.name ?? TRIGGER_KEY;
 	const filename = bundle?.id ?? summary.bundleId;
+
+	const model = bundle?.parsedResourcesAll.get(TRIGGER_KEY)?.[summary.index] as
+		| ParsedTriggerData
+		| undefined;
+	const canExport = summary.count > 0 && model != null;
+
+	const handleExportClipboard = async () => {
+		if (!canExport || !model) return;
+		try {
+			const envelope = buildTriggerEnvelopeFromBulk(model, summary, filename);
+			const json = encodeBulkEnvelope({
+				resourceKey: envelope.resourceKey,
+				profile: envelope.profile,
+				items: envelope.items,
+				sourceBundle: envelope.sourceBundle,
+			});
+			if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(json);
+				toast.success(`Copied ${envelope.items.length} trigger${envelope.items.length === 1 ? '' : 's'} to clipboard`);
+			} else {
+				toast.error('Clipboard API unavailable', {
+					description: 'Use [Export → file…] instead — your browser blocks clipboard writes.',
+				});
+			}
+		} catch (err) {
+			console.error('Trigger bulk export to clipboard failed:', err);
+			toast.error('Copy to clipboard failed', {
+				description: err instanceof Error ? err.message : 'Unknown error',
+			});
+		}
+	};
+
+	const handleExportFile = () => {
+		if (!canExport || !model) return;
+		try {
+			const envelope = buildTriggerEnvelopeFromBulk(model, summary, filename);
+			const json = encodeBulkEnvelope({
+				resourceKey: envelope.resourceKey,
+				profile: envelope.profile,
+				items: envelope.items,
+				sourceBundle: envelope.sourceBundle,
+			});
+			const blob = new Blob([json], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = exportTriggerEnvelopeFilename(filename);
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			setTimeout(() => URL.revokeObjectURL(url), 0);
+			toast.success(`Saved ${envelope.items.length} trigger${envelope.items.length === 1 ? '' : 's'}`);
+		} catch (err) {
+			console.error('Trigger bulk export to file failed:', err);
+			toast.error('Save to file failed', {
+				description: err instanceof Error ? err.message : 'Unknown error',
+			});
+		}
+	};
 
 	return (
 		<div className="rounded border border-amber-500/40 bg-amber-500/5">
@@ -390,19 +478,12 @@ function TriggerDataBulkPanel({
 				</button>
 			</div>
 			{expanded && (
-				<div className="px-3 py-2 border-t border-amber-500/40 space-y-2">
-					<div className="flex flex-wrap gap-1.5">
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							className="h-7 text-xs ml-auto"
-							onClick={onClear}
-						>
-							Clear
-						</Button>
-					</div>
-				</div>
+				<BulkExportButtons
+					canExport={canExport}
+					onExportClipboard={() => void handleExportClipboard()}
+					onExportFile={handleExportFile}
+					onClear={onClear}
+				/>
 			)}
 		</div>
 	);
