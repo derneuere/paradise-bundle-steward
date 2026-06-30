@@ -71,6 +71,7 @@ import { BulkPanelStack } from '@/components/workspace/BulkPanelStack';
 import { BulkTransformGizmoSessionProvider } from '@/components/workspace/BulkTransformGizmoSession';
 import { BulkTransformNumericPanel } from '@/components/workspace/BulkTransformNumericPanel';
 import { BulkImportDialog } from '@/components/workspace/BulkImportDialog';
+import { TriggerDataBulkImportDialog } from '@/components/workspace/TriggerDataBulkImportDialog';
 import { BundleExportValidationDialog } from '@/components/workspace/BundleExportValidationDialog';
 import { findUnresolvedPortals, type UnresolvedPortal } from '@/lib/core/aiSectionsValidate';
 import { BulkEditPanel } from '@/components/polygonSoupList/BulkEditPanel';
@@ -412,6 +413,14 @@ function RightInspector() {
 		selection.index != null &&
 		inspectorBundle != null;
 
+	// TriggerData has a single profile (no v12/v4 split), so the import
+	// affordance is gated only on the resource key — every TriggerData
+	// instance is importable.
+	const showTriggerImport =
+		selection.resourceKey === 'triggerData' &&
+		selection.index != null &&
+		inspectorBundle != null;
+
 	// The inspector gets its own error boundary (the centre viewport already has
 	// one). Without it, any throw while rendering the schema form propagates
 	// uncaught and React 18 unmounts the entire root — which destroys the
@@ -432,6 +441,12 @@ function RightInspector() {
 			>
 				{showAIImport && inspectorBundle && selection.index != null ? (
 					<AIImportInspectorWrapper
+						bundle={inspectorBundle}
+						index={selection.index}
+						setResourceAt={setResourceAt as never}
+					/>
+				) : showTriggerImport && inspectorBundle && selection.index != null ? (
+					<TriggerImportInspectorWrapper
 						bundle={inspectorBundle}
 						index={selection.index}
 						setResourceAt={setResourceAt as never}
@@ -501,6 +516,69 @@ function AIImportInspectorWrapper({
 				bundleId={bundle.id}
 				onConfirm={(result) => {
 					setResourceAt(bundle.id, 'aiSections', index, result);
+				}}
+			/>
+		</div>
+	);
+}
+
+// Inspector wrapper that prepends the "Import bulk JSON" affordance for a
+// TriggerData instance. Mirrors AIImportInspectorWrapper — pulled into its own
+// component so the import dialog state stays attached to the (bundle, index)
+// pair via React keys. TriggerData has one profile, so there's no v12/v4 gate.
+function TriggerImportInspectorWrapper({
+	bundle,
+	index,
+	setResourceAt,
+}: {
+	bundle: EditableBundle;
+	index: number;
+	setResourceAt: <T>(bundleId: string, key: string, index: number, value: T) => void;
+}) {
+	const [importOpen, setImportOpen] = useState(false);
+	const model = bundle.parsedResourcesAll.get('triggerData')?.[index] as
+		| import('@/lib/core/triggerData').ParsedTriggerData
+		| undefined;
+	if (!model) {
+		return <InspectorPanel />;
+	}
+	return (
+		<div className="h-full flex flex-col min-h-0">
+			<div className="shrink-0 border-b bg-card/40 px-3 py-2">
+				<div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+					Import bulk JSON
+				</div>
+				<div className="flex flex-wrap gap-1.5">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="h-7 text-xs"
+						onClick={() => setImportOpen(true)}
+					>
+						Paste from clipboard
+					</Button>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="h-7 text-xs"
+						onClick={() => setImportOpen(true)}
+					>
+						From file…
+					</Button>
+				</div>
+			</div>
+			<div className="flex-1 min-h-0 overflow-auto">
+				<InspectorPanel />
+			</div>
+			<TriggerDataBulkImportDialog
+				open={importOpen}
+				onOpenChange={setImportOpen}
+				destination={model}
+				bundleId={bundle.id}
+				onConfirm={(result) => {
+					setResourceAt(bundle.id, 'triggerData', index, result);
 				}}
 			/>
 		</div>
