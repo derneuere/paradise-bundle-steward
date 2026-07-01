@@ -331,6 +331,106 @@ describe('importTriggerDataBulk — append assigns fresh id + regionIndex', () =
 	});
 });
 
+describe('importTriggerDataBulk — startId override (mId base only)', () => {
+	it('seeds the first assigned mId from startId instead of the destination max', () => {
+		const dest = makeDestination();
+		const env = envelopeFrom(makeDestination(), [{ listKey: 'genericRegions', index: 0 }]);
+		const out = importTriggerDataBulk({
+			envelope: env,
+			destination: dest,
+			mode: 'append',
+			startId: 0x90000000,
+		});
+		const imported = out.result.genericRegions[out.result.genericRegions.length - 1];
+		expect(imported.id).toBe(0x90000000);
+		expect(out.assignedIdRange).toEqual({ firstId: 0x90000000, lastId: 0x90000000 });
+	});
+
+	it('assigns sequential mIds counting up from startId across box lists', () => {
+		const dest = makeDestination();
+		const env = envelopeFrom(makeDestination(), [
+			{ listKey: 'landmarks', index: 0 },
+			{ listKey: 'genericRegions', index: 0 },
+			{ listKey: 'blackspots', index: 0 },
+			{ listKey: 'vfxBoxRegions', index: 0 },
+		]);
+		const out = importTriggerDataBulk({
+			envelope: env,
+			destination: dest,
+			mode: 'append',
+			startId: 5000,
+		});
+		expect(out.assignedIdRange).toEqual({ firstId: 5000, lastId: 5003 });
+		const importedIds = [
+			out.result.landmarks[out.result.landmarks.length - 1].id,
+			out.result.genericRegions[out.result.genericRegions.length - 1].id,
+			out.result.blackspots[out.result.blackspots.length - 1].id,
+			out.result.vfxBoxRegions[out.result.vfxBoxRegions.length - 1].id,
+		];
+		expect(importedIds).toEqual([5000, 5001, 5002, 5003]);
+	});
+
+	it('leaves regionIndex on the auto path (above the destination max) regardless of startId', () => {
+		// Destination box maxes: regionIndex 3 (vfx). startId is a huge mId, but
+		// regionIndex must still take max+1 = 4.
+		const dest = makeDestination();
+		const before = boxMaxes(dest);
+		const env = envelopeFrom(makeDestination(), [{ listKey: 'blackspots', index: 0 }]);
+		const out = importTriggerDataBulk({
+			envelope: env,
+			destination: dest,
+			mode: 'append',
+			startId: 0x90000000,
+		});
+		const imported = out.result.blackspots[out.result.blackspots.length - 1];
+		expect(imported.regionIndex).toBe(before.ri + 1);
+		expect(out.assignedRegionIndexRange).toEqual({ first: before.ri + 1, last: before.ri + 1 });
+	});
+
+	it('is byte-identical to the default when startId is omitted', () => {
+		const dest = makeDestination();
+		const env = envelopeFrom(makeDestination(), [
+			{ listKey: 'genericRegions', index: 0 },
+			{ listKey: 'blackspots', index: 0 },
+		]);
+		const omitted = importTriggerDataBulk({ envelope: env, destination: dest, mode: 'append' });
+		const explicit = importTriggerDataBulk({
+			envelope: env,
+			destination: dest,
+			mode: 'append',
+			startId: boxMaxes(dest).id + 1,
+		});
+		expect(explicit.assignedIdRange).toEqual(omitted.assignedIdRange);
+		expect(allBoxRegionIds(explicit.result)).toEqual(allBoxRegionIds(omitted.result));
+	});
+
+	it('ignores a non-finite startId, falling back to the default base', () => {
+		const dest = makeDestination();
+		const before = boxMaxes(dest);
+		const env = envelopeFrom(makeDestination(), [{ listKey: 'genericRegions', index: 0 }]);
+		const out = importTriggerDataBulk({
+			envelope: env,
+			destination: dest,
+			mode: 'append',
+			startId: Number.NaN,
+		});
+		expect(out.assignedIdRange).toEqual({ firstId: before.id + 1, lastId: before.id + 1 });
+	});
+
+	it('leaves ranges null for a spawn-only import even with a startId', () => {
+		const dest = makeDestination();
+		const env = envelopeFrom(makeDestination(), [{ listKey: 'spawnLocations', index: 0 }]);
+		const out = importTriggerDataBulk({
+			envelope: env,
+			destination: dest,
+			mode: 'append',
+			startId: 5000,
+		});
+		expect(out.assignedIdRange).toBeNull();
+		expect(out.assignedRegionIndexRange).toBeNull();
+	});
+});
+
 describe('importTriggerDataBulk — replace mode', () => {
 	it('empties only the lists present in the envelope, leaving others intact', () => {
 		const dest = makeDestination();

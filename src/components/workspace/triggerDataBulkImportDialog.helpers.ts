@@ -26,6 +26,12 @@ import type {
 	TriggerDataBulkListKey,
 } from '@/lib/clipboard/triggerDataBulkExport';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
+import { parseStartingId } from './bulkImportDialog.helpers';
+
+// The Starting-ID parser is resource-agnostic (decimal / 0x hex → u32 | null).
+// Re-export the AI dialog's implementation so both import dialogs share ONE
+// parser rather than drifting.
+export { parseStartingId };
 
 const RESOURCE_KEY = 'triggerData';
 
@@ -39,6 +45,26 @@ export const TRIGGER_PREVIEW_LIST_ORDER: readonly TriggerDataBulkListKey[] = [
 	'spawnLocations',
 	'roamingLocations',
 ];
+
+/** The lists that carry a box-region mId — the only imported entries that
+ *  consume ids and can collide with a starting id. spawn / roaming carry no
+ *  mId and are excluded. */
+export const BOX_REGION_LIST_KEYS: readonly TriggerDataBulkListKey[] = [
+	'landmarks',
+	'genericRegions',
+	'blackspots',
+	'vfxBoxRegions',
+];
+
+/** Sum the four box-region list counts in a preview — the number of mIds the
+ *  import will consume, for collision detection against the starting id. */
+export function previewBoxRegionCount(preview: TriggerImportPreview): number {
+	const boxKeys = new Set<TriggerDataBulkListKey>(BOX_REGION_LIST_KEYS);
+	return preview.perList.reduce(
+		(sum, l) => (boxKeys.has(l.listKey) ? sum + l.count : sum),
+		0,
+	);
+}
 
 // Each branch carries a field absent on the other (`reason?: undefined` /
 // `envelope?: undefined`) so narrowing on `ok` works under the project's
@@ -107,15 +133,17 @@ export type TriggerImportPreview = {
 /**
  * Build the live preview for a decoded envelope against a destination + mode.
  * Runs the real import so the displayed ranges are EXACTLY what Confirm will
- * assign — no parallel math to drift out of sync.
+ * assign — no parallel math to drift out of sync. `startId`, when provided,
+ * seeds the previewed assignedIdRange to the user's chosen base mId.
  */
 export function buildTriggerImportPreview(
 	envelope: BulkEnvelope<TriggerDataBulkItem>,
 	destination: ParsedTriggerData,
 	mode: TriggerImportMode,
+	startId?: number,
 ): TriggerImportPreview {
 	try {
-		const out = importTriggerDataBulk({ envelope, destination, mode });
+		const out = importTriggerDataBulk({ envelope, destination, mode, startId });
 		const perList: TriggerPreviewListCount[] = TRIGGER_PREVIEW_LIST_ORDER.map(
 			(listKey) => ({ listKey, count: out.perListCounts[listKey] }),
 		);
@@ -140,6 +168,49 @@ export function buildTriggerImportPreview(
 			error: err instanceof Error ? err.message : String(err),
 		};
 	}
+}
+
+/** The four box-region lists that carry an mId. Only these consume mIds —
+ *  spawn / roaming locations do not, so they never collide with a starting id. */
+function boxRegionIds(destination: ParsedTriggerData): number[] {
+	return [
+		...destination.landmarks.map((r) => r.id),
+		...destination.genericRegions.map((r) => r.id),
+		...destination.blackspots.map((r) => r.id),
+		...destination.vfxBoxRegions.map((r) => r.id),
+	];
+}
+
+/** Suggest a starting mId high enough to sit above every box-region id already
+ *  in the destination: `max(existing box-region id) + 1`, or 0 when the
+ *  destination carries no box regions. Mirrors the AI dialog's default. */
+export function defaultTriggerStartId(destination: ParsedTriggerData): number {
+	let max = -1;
+	for (const id of boxRegionIds(destination)) {
+		if (id > max) max = id;
+	}
+	return (max + 1) >>> 0;
+}
+
+/** Ids in `[startId, startId + boxRegionCount - 1]` that already exist among the
+ *  destination's four box-region lists, sorted ascending. Only box regions
+ *  consume mIds, so spawn / roaming counts must be excluded from
+ *  `boxRegionCount` by the caller. */
+export function detectTriggerIdCollisions(
+	destination: ParsedTriggerData,
+	startId: number,
+	boxRegionCount: number,
+): number[] {
+	if (boxRegionCount <= 0) return [];
+	const lo = startId >>> 0;
+	const hi = (startId + boxRegionCount - 1) >>> 0;
+	const existing = new Set<number>();
+	for (const id of boxRegionIds(destination)) existing.add(id >>> 0);
+	const out: number[] = [];
+	for (let i = lo; i <= hi; i++) {
+		if (existing.has(i)) out.push(i);
+	}
+	return out;
 }
 
 /** Format a box-region id / index as a decimal+hex paired string
