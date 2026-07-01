@@ -26,8 +26,9 @@
 //
 // The BatchedRegionBoxes mesh hosts four kinds on one InstancedMesh, so it
 // can't use the `useInstancedSelection` hook (which is single-kind). Its
-// inline paint loop stays — only the theme imports are migrated. RoamingDots
-// is single-kind and uses the hook.
+// inline paint loop resolves colour via the shared `pickRegionColor` helper so
+// its precedence (primary > hover > bulk > base) can't drift from the hook.
+// RoamingDots is single-kind and uses the hook directly.
 //
 // DOM siblings: marquee bulk-select rides the WorldViewport HTML slot.
 
@@ -51,6 +52,7 @@ import {
 	useInstancedSelection,
 	type Selection,
 } from './selection';
+import { pickRegionColor, pickRegionState } from './triggerOverlayColors';
 import {
 	bulkRotateTriggerBoxes,
 	bulkTranslateTriggerBoxes,
@@ -217,6 +219,9 @@ const hovEdgeMat = new THREE.LineBasicMaterial({ color: '#66aaff' });
 const coneGeo = new THREE.ConeGeometry(3, 8, 8);
 const spawnMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.2 });
 const spawnSelMat = new THREE.MeshStandardMaterial({ color: 0xffaa33, roughness: 0.4, metalness: 0.2, emissive: 0x664400, emissiveIntensity: 0.5 });
+// Amber bulk tint — mirrors SELECTION_THEME.bulk (0xffcc66) for cones caught in
+// a multi-select but not the single-selection pick.
+const spawnBulkMat = new THREE.MeshStandardMaterial({ color: 0xffcc66, roughness: 0.4, metalness: 0.2, emissive: 0x554400, emissiveIntensity: 0.4 });
 
 const roamGeo = new THREE.SphereGeometry(2, 8, 6);
 const roamMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
@@ -231,11 +236,13 @@ const playerConeGeo = new THREE.ConeGeometry(5, 12, 8);
 // ---------------------------------------------------------------------------
 
 function BatchedRegionBoxes({
-	regions, primary, hovered, onPick, onHover,
+	regions, primary, hovered, bulk, onPick, onHover,
 }: {
 	regions: RegionEntry[];
 	primary: Selection | null;
 	hovered: Selection | null;
+	/** Bulk-selected box regions, keyed `${kind}:${index}`. */
+	bulk: ReadonlySet<string>;
 	onPick: (sel: Selection) => void;
 	onHover: (sel: Selection | null) => void;
 }) {
@@ -244,8 +251,9 @@ function BatchedRegionBoxes({
 
 	// Mixed-kind paint loop — one InstancedMesh hosts four selection kinds
 	// (landmark / generic / blackspot / vfx) so the per-kind hook doesn't fit
-	// here without expanding it to take a `kind` per-instance. The codec +
-	// theme migrate cleanly; the loop itself stays inline.
+	// here without expanding it to take a `kind` per-instance. Colour precedence
+	// (primary > hover > bulk > base) lives in `pickRegionColor` so it can't
+	// drift from useInstancedSelection.
 	useUpdateInstancedMesh(
 		meshRef,
 		count,
@@ -258,12 +266,13 @@ function BatchedRegionBoxes({
 				_dummy.updateMatrix();
 				mesh.setMatrixAt(i, _dummy.matrix);
 
-				const isSel = primary?.kind === r.kind && primary.indices[0] === r.index;
-				const isHov = hovered?.kind === r.kind && hovered.indices[0] === r.index;
-				mesh.setColorAt(i, isSel ? SELECTION_THEME.primary : isHov ? SELECTION_THEME.hover : r.color);
+				const isPrimary = primary?.kind === r.kind && primary.indices[0] === r.index;
+				const isHovered = hovered?.kind === r.kind && hovered.indices[0] === r.index;
+				const isBulk = bulk.has(`${r.kind}:${r.index}`);
+				mesh.setColorAt(i, pickRegionColor({ isPrimary, isHovered, isBulk }, r.color, SELECTION_THEME));
 			}
 		},
-		[regions, count, primary, hovered],
+		[regions, count, primary, hovered, bulk],
 	);
 
 	const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
@@ -332,10 +341,12 @@ function BoxLabel({ box, label, color }: { box: BoxRegion; label: string; color:
 }
 
 function SpawnArrows({
-	data, primary, onPick,
+	data, primary, bulk, onPick,
 }: {
 	data: ParsedTriggerData;
 	primary: Selection | null;
+	/** Bulk-selected spawn indices. */
+	bulk: ReadonlySet<number>;
 	onPick: (sel: Selection) => void;
 }) {
 	return (
@@ -343,6 +354,10 @@ function SpawnArrows({
 			{data.spawnLocations.map((sp, i) => {
 				const pos: [number, number, number] = [sp.position.x, sp.position.y, sp.position.z];
 				const isSel = primary?.kind === 'spawn' && primary.indices[0] === i;
+				// Cones can't hover-paint (no InstancedMesh hover wiring here), so
+				// hover is always false — precedence still lives in one helper.
+				const state = pickRegionState({ isPrimary: isSel, isHovered: false, isBulk: bulk.has(i) });
+				const coneMat = state === 'primary' ? spawnSelMat : state === 'bulk' ? spawnBulkMat : spawnMat;
 				const dir = new THREE.Vector3(sp.direction.x, sp.direction.y, sp.direction.z);
 				if (dir.lengthSq() > 0.001) dir.normalize();
 				const arrowEnd: [number, number, number] = [
@@ -352,11 +367,11 @@ function SpawnArrows({
 					<group key={`spawn-${i}`}>
 						<mesh
 							geometry={coneGeo}
-							material={isSel ? spawnSelMat : spawnMat}
+							material={coneMat}
 							position={pos}
 							onClick={(e) => { e.stopPropagation(); if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return; onPick({ kind: 'spawn', indices: [i] }); }}
 						/>
-						<Line points={[pos, arrowEnd]} color={isSel ? '#ffaa33' : '#ffffff'} lineWidth={2} />
+						<Line points={[pos, arrowEnd]} color={isSel ? '#ffaa33' : state === 'bulk' ? '#ffcc66' : '#ffffff'} lineWidth={2} />
 						{isSel && (
 							<Html position={pos} center distanceFactor={200} style={{ pointerEvents: 'none' }}>
 								<div style={{
@@ -652,6 +667,7 @@ export function applyDragToTriggerModel(
 // ---------------------------------------------------------------------------
 
 const EMPTY_BULK: ReadonlySet<string> = new Set();
+const EMPTY_SPAWN_BULK: ReadonlySet<number> = new Set();
 
 type Props = {
 	data: ParsedTriggerData;
@@ -693,11 +709,6 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 
 	// Translate the bulk path-key set (e.g. `'roamingLocations/3'`) into the
 	// Selection-keyed Set `useInstancedSelection` expects (`'roaming:3'`).
-	// Only the subset the hook cares about (single-kind 'roaming') needs
-	// translation; other entry kinds (landmarks/genericRegions/blackspots/
-	// vfxBoxRegions/spawnLocations) participate in the bulk Set without yet
-	// being painted in 3D — paint will land when the per-kind paint loop is
-	// extended in a follow-up.
 	const roamingBulk = useMemo<ReadonlySet<string>>(() => {
 		const keys = instanceBulk?.bulkPathKeys;
 		if (!keys || keys.size === 0) return EMPTY_BULK;
@@ -706,6 +717,37 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 			if (!k.startsWith('roamingLocations/')) continue;
 			const idx = Number(k.slice('roamingLocations/'.length));
 			if (Number.isFinite(idx)) out.add(`roaming:${idx}`);
+		}
+		return out;
+	}, [instanceBulk]);
+
+	// Box-region bulk set keyed `${kind}:${index}` so BatchedRegionBoxes can
+	// test membership against the RegionEntry it's painting. The mesh hosts all
+	// four box kinds, so the key carries the kind — mirroring the `RegionEntry`
+	// discriminator, NOT the on-disk list name.
+	const boxRegionBulk = useMemo<ReadonlySet<string>>(() => {
+		const keys = instanceBulk?.bulkPathKeys;
+		if (!keys || keys.size === 0) return EMPTY_BULK;
+		const out = new Set<string>();
+		for (const k of keys) {
+			const ref = bulkKeyToRef(k);
+			if (ref && ref.kind !== 'roaming' && ref.kind !== 'spawn') {
+				out.add(`${ref.kind}:${ref.idx}`);
+			}
+		}
+		return out;
+	}, [instanceBulk]);
+
+	// Spawn bulk set of raw indices (keys `spawnLocations/i`) — SpawnArrows
+	// renders one cone per spawn and just needs `has(i)`.
+	const spawnBulk = useMemo<ReadonlySet<number>>(() => {
+		const keys = instanceBulk?.bulkPathKeys;
+		if (!keys || keys.size === 0) return EMPTY_SPAWN_BULK;
+		const out = new Set<number>();
+		for (const k of keys) {
+			if (!k.startsWith('spawnLocations/')) continue;
+			const idx = Number(k.slice('spawnLocations/'.length));
+			if (Number.isFinite(idx)) out.add(idx);
 		}
 		return out;
 	}, [instanceBulk]);
@@ -943,6 +985,7 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 				regions={regions}
 				primary={primary}
 				hovered={hovered}
+				bulk={boxRegionBulk}
 				onPick={handlePick}
 				onHover={setHovered}
 			/>
@@ -957,7 +1000,7 @@ export const TriggerDataOverlay: WorldOverlayComponent<ParsedTriggerData> = ({
 				<BoxLabel box={hovEntry.box} label={hovEntry.label} color="#66aaff" />
 			)}
 
-			<SpawnArrows data={data} primary={primary} onPick={handlePick} />
+			<SpawnArrows data={data} primary={primary} bulk={spawnBulk} onPick={handlePick} />
 			<RoamingDots
 				data={data}
 				primary={primary}

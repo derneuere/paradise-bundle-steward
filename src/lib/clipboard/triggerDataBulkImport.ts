@@ -24,6 +24,13 @@
 //   that points at the old id could resolve to the wrong (imported) region.
 //   Fresh ids above the destination max guarantee no collision.
 //
+// An optional `startId` overrides the base mId of the first appended box
+// region only; subsequent regions increment from there. regionIndex is NOT
+// affected — it stays auto-assigned above the destination's current max
+// because it is the writer's consolidated-region-table sort key (dense +
+// unique across all four box lists), not a user-tracked id. Omitting startId
+// keeps the historical behaviour (mId base = destination max + 1).
+//
 // regionIndex is i16 on disk (writeI16 in the writer). We guard against
 // overflow past 32767 with a clear error rather than silently wrapping
 // negative — a wrapped index sorts wrong and corrupts the region table.
@@ -70,6 +77,11 @@ export type TriggerDataBulkImportInput = {
 	envelope: BulkEnvelope<TriggerDataBulkItem>;
 	destination: ParsedTriggerData;
 	mode: TriggerImportMode;
+	/** Base mId for the first appended box region. When provided and finite,
+	 *  overrides the default (destination box-region max + 1) for the mId only;
+	 *  regionIndex still auto-assigns above the destination max. Omitted →
+	 *  historical behaviour. */
+	startId?: number;
 };
 
 export type TriggerDataBulkImportResult = {
@@ -145,7 +157,7 @@ function spawnFromWire(wire: WireSpawnLocation): SpawnLocation {
 export function importTriggerDataBulk(
 	input: TriggerDataBulkImportInput,
 ): TriggerDataBulkImportResult {
-	const { envelope, destination, mode } = input;
+	const { envelope, destination, mode, startId } = input;
 
 	if (envelope.resourceKey !== RESOURCE_KEY) {
 		throw new Error(
@@ -202,7 +214,13 @@ export function importTriggerDataBulk(
 		spawnLocations,
 		roamingLocations,
 	};
-	let nextId = maxBoxRegionId(working) + 1;
+	// startId overrides the mId base only; regionIndex stays auto-assigned above
+	// the destination max (it is the writer's region-table sort key, not a
+	// user-tracked id).
+	let nextId =
+		startId !== undefined && Number.isFinite(startId)
+			? startId >>> 0
+			: maxBoxRegionId(working) + 1;
 	let nextRegionIndex = maxBoxRegionIndex(working) + 1;
 
 	const perListCounts: Record<TriggerDataBulkListKey, number> = {

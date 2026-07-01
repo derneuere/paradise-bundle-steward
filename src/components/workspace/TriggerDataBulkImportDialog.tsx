@@ -2,15 +2,13 @@
 // envelope onto a TriggerData destination.
 //
 // Mirrors BulkImportDialog (AI Sections) but is typed to ParsedTriggerData and
-// drives the TriggerData import pipeline. Two differences from the AI dialog:
+// drives the TriggerData import pipeline. One difference from the AI dialog:
 //
-//   - No "Starting ID" field. TriggerData box-region ids + regionIndices are
-//     auto-assigned by importTriggerDataBulk above the destination's current
-//     max (the writer's consolidated region table requires dense, unique
-//     regionIndices — the user can't pick them). The preview shows the ranges
-//     that WILL be assigned so there's no surprise.
 //   - Six heterogeneous lists, so the preview is a per-list count breakdown
-//     rather than a single section count.
+//     rather than a single section count. The "Starting ID" field controls the
+//     box-region mId base only — regionIndex still auto-assigns above the
+//     destination max (it is the writer's dense/unique region-table sort key,
+//     not a user-tracked id).
 //
 // The preview never re-derives assignment math — buildTriggerImportPreview runs
 // the real import so what's shown is exactly what Confirm produces.
@@ -37,8 +35,13 @@ import {
 import {
 	decodeTriggerEnvelope,
 	buildTriggerImportPreview,
+	defaultTriggerStartId,
+	detectTriggerIdCollisions,
+	parseStartingId,
+	previewBoxRegionCount,
 } from './triggerDataBulkImportDialog.helpers';
 import { TriggerImportPreviewBlock } from './TriggerImportPreviewBlock';
+import { TriggerStartIdField } from './TriggerStartIdField';
 import type { TriggerDataBulkItem } from '@/lib/clipboard/triggerDataBulkExport';
 import type { BulkEnvelope } from '@/lib/clipboard/bulkEnvelope';
 import type { ParsedTriggerData } from '@/lib/core/triggerData';
@@ -66,20 +69,38 @@ export function TriggerDataBulkImportDialog({
 	const [envelopeState, setEnvelopeState] = useState<EnvelopeState>({ kind: 'idle' });
 	const [pasteText, setPasteText] = useState('');
 	const [mode, setMode] = useState<TriggerImportMode>('append');
+	const defaultStart = useMemo(() => defaultTriggerStartId(destination), [destination]);
+	const [startIdInput, setStartIdInput] = useState<string>(() => formatIdInputDefault(defaultStart));
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+	// Blank / unparseable falls back to the default so the preview + confirm stay
+	// live while the user edits — the field never blocks the import.
+	const resolvedStartId = useMemo(() => {
+		const parsed = parseStartingId(startIdInput);
+		return parsed ?? defaultStart;
+	}, [startIdInput, defaultStart]);
 
 	const preview = useMemo(
 		() =>
 			envelopeState.kind === 'ready'
-				? buildTriggerImportPreview(envelopeState.envelope, destination, mode)
+				? buildTriggerImportPreview(envelopeState.envelope, destination, mode, resolvedStartId)
 				: null,
-		[envelopeState, destination, mode],
+		[envelopeState, destination, mode, resolvedStartId],
+	);
+
+	const collisions = useMemo(
+		() =>
+			preview && !preview.error
+				? detectTriggerIdCollisions(destination, resolvedStartId, previewBoxRegionCount(preview))
+				: [],
+		[preview, destination, resolvedStartId],
 	);
 
 	const reset = () => {
 		setEnvelopeState({ kind: 'idle' });
 		setPasteText('');
 		setMode('append');
+		setStartIdInput(formatIdInputDefault(defaultStart));
 	};
 
 	const handleClose = (next: boolean) => {
@@ -124,6 +145,7 @@ export function TriggerDataBulkImportDialog({
 			envelope: envelopeState.envelope,
 			destination,
 			mode,
+			startId: resolvedStartId,
 		});
 		onConfirm(out.result);
 		const counts = preview.perList
@@ -245,6 +267,13 @@ export function TriggerDataBulkImportDialog({
 							</p>
 						</div>
 
+						<TriggerStartIdField
+							value={startIdInput}
+							onChange={setStartIdInput}
+							placeholder={formatIdInputDefault(defaultStart)}
+							collisions={collisions}
+						/>
+
 						{preview && <TriggerImportPreviewBlock preview={preview} mode={mode} />}
 					</div>
 				)}
@@ -262,4 +291,10 @@ export function TriggerDataBulkImportDialog({
 			</DialogContent>
 		</Dialog>
 	);
+}
+
+// Hex form (no decimal suffix) for the input's pre-filled value / placeholder —
+// mirrors the AI dialog so the two Starting-ID fields read the same.
+function formatIdInputDefault(id: number): string {
+	return `0x${(id >>> 0).toString(16).toUpperCase()}`;
 }

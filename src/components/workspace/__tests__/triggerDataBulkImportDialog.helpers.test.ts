@@ -5,8 +5,13 @@ import {
 	decodeTriggerEnvelope,
 	buildTriggerImportPreview,
 	formatTriggerIdLabel,
+	defaultTriggerStartId,
+	detectTriggerIdCollisions,
+	previewBoxRegionCount,
+	parseStartingId,
 	TRIGGER_PREVIEW_LIST_ORDER,
 } from '../triggerDataBulkImportDialog.helpers';
+import { parseStartingId as aiParseStartingId } from '../bulkImportDialog.helpers';
 import { exportTriggerDataBulk } from '@/lib/clipboard/triggerDataBulkExport';
 import type {
 	TriggerDataBulkItem,
@@ -256,6 +261,24 @@ describe('buildTriggerImportPreview', () => {
 		expect(preview.profileMismatch).toBe(false);
 	});
 
+	it('seeds the previewed assignedIdRange from a supplied startId', () => {
+		const env = envelopeFrom(makeDestination(), [
+			{ listKey: 'genericRegions', index: 0 },
+			{ listKey: 'blackspots', index: 0 },
+		]);
+		const preview = buildTriggerImportPreview(env, makeDestination(), 'append', 0x90000000);
+		expect(preview.assignedIdRange).toEqual({ firstId: 0x90000000, lastId: 0x90000001 });
+		// regionIndex stays on the auto path (dest max 3 → 4..5), unaffected by startId.
+		expect(preview.assignedRegionIndexRange).toEqual({ first: 4, last: 5 });
+	});
+
+	it('falls back to the default id range when startId is omitted', () => {
+		const env = envelopeFrom(makeDestination(), [{ listKey: 'genericRegions', index: 0 }]);
+		const withStart = buildTriggerImportPreview(env, makeDestination(), 'append');
+		// Dest box max id is 400 → default base 401.
+		expect(withStart.assignedIdRange).toEqual({ firstId: 401, lastId: 401 });
+	});
+
 	it('captures the i16 overflow as an error instead of throwing', () => {
 		const dest = makeDestination({
 			genericRegions: [genericRegion({ id: 1, regionIndex: 0x7fff })],
@@ -267,6 +290,133 @@ describe('buildTriggerImportPreview', () => {
 		const preview = buildTriggerImportPreview(env, dest, 'append');
 		expect(preview.error).toMatch(/regionIndex would overflow i16/);
 		expect(preview.assignedIdRange).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// parseStartingId (re-exported from the AI dialog — one shared parser)
+// ---------------------------------------------------------------------------
+
+describe('parseStartingId re-export', () => {
+	it('is the SAME function the AI dialog uses', () => {
+		expect(parseStartingId).toBe(aiParseStartingId);
+	});
+
+	it('parses decimal and 0x hex, returning null on garbage', () => {
+		expect(parseStartingId('12345')).toBe(12345);
+		expect(parseStartingId('0x90000000')).toBe(0x90000000);
+		expect(parseStartingId('  0xFF  ')).toBe(0xff);
+		expect(parseStartingId('')).toBeNull();
+		expect(parseStartingId('nope')).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// defaultTriggerStartId
+// ---------------------------------------------------------------------------
+
+describe('defaultTriggerStartId', () => {
+	it('returns max box-region id + 1 across all four box lists', () => {
+		// makeDestination box ids: 100 / 200 / 300 / 400 → default 401.
+		expect(defaultTriggerStartId(makeDestination())).toBe(401);
+	});
+
+	it('picks the max from whichever box list holds it', () => {
+		const dest = makeDestination({
+			landmarks: [landmark({ id: 9999 })],
+			genericRegions: [genericRegion({ id: 200 })],
+			blackspots: [blackspot({ id: 300 })],
+			vfxBoxRegions: [vfxBoxRegion({ id: 400 })],
+		});
+		expect(defaultTriggerStartId(dest)).toBe(10000);
+	});
+
+	it('returns 0 when the destination has no box regions', () => {
+		const dest = makeDestination({
+			landmarks: [],
+			genericRegions: [],
+			blackspots: [],
+			vfxBoxRegions: [],
+		});
+		expect(defaultTriggerStartId(dest)).toBe(0);
+	});
+
+	it('ignores spawn / roaming lists (they carry no mId)', () => {
+		const dest = makeDestination({
+			landmarks: [],
+			genericRegions: [],
+			blackspots: [],
+			vfxBoxRegions: [],
+			spawnLocations: [spawnLocation(), spawnLocation()],
+			roamingLocations: [roamingLocation()],
+		});
+		expect(defaultTriggerStartId(dest)).toBe(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// detectTriggerIdCollisions
+// ---------------------------------------------------------------------------
+
+describe('detectTriggerIdCollisions', () => {
+	it('returns box-region ids in [startId, startId+count-1] that already exist, sorted asc', () => {
+		// Box ids present: 100 / 200 / 300 / 400. Range [200, 202] hits 200 only.
+		expect(detectTriggerIdCollisions(makeDestination(), 200, 3)).toEqual([200]);
+		// Range [98, 102] hits 100.
+		expect(detectTriggerIdCollisions(makeDestination(), 98, 5)).toEqual([100]);
+	});
+
+	it('detects multiple collisions across the four box lists', () => {
+		const dest = makeDestination({
+			landmarks: [landmark({ id: 10 })],
+			genericRegions: [genericRegion({ id: 11 })],
+			blackspots: [blackspot({ id: 12 })],
+			vfxBoxRegions: [vfxBoxRegion({ id: 20 })],
+		});
+		expect(detectTriggerIdCollisions(dest, 10, 11)).toEqual([10, 11, 12, 20]);
+	});
+
+	it('returns [] when the range clears every existing id', () => {
+		expect(detectTriggerIdCollisions(makeDestination(), 0x90000000, 4)).toEqual([]);
+	});
+
+	it('returns [] for a zero box-region count', () => {
+		expect(detectTriggerIdCollisions(makeDestination(), 100, 0)).toEqual([]);
+	});
+
+	it('does not treat spawn / roaming entries as id collisions', () => {
+		// spawn / roaming carry no mId; a starting id in their range never collides.
+		const dest = makeDestination({
+			landmarks: [],
+			genericRegions: [],
+			blackspots: [],
+			vfxBoxRegions: [],
+		});
+		expect(detectTriggerIdCollisions(dest, 0, 100)).toEqual([]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// previewBoxRegionCount
+// ---------------------------------------------------------------------------
+
+describe('previewBoxRegionCount', () => {
+	it('sums only the four box-region lists, excluding spawn / roaming', () => {
+		const env = envelopeFrom(makeDestination(), [
+			{ listKey: 'landmarks', index: 0 },
+			{ listKey: 'genericRegions', index: 0 },
+			{ listKey: 'spawnLocations', index: 0 },
+			{ listKey: 'roamingLocations', index: 0 },
+		]);
+		const preview = buildTriggerImportPreview(env, makeDestination(), 'append');
+		// 2 box regions (landmark + generic); spawn + roaming excluded.
+		expect(previewBoxRegionCount(preview)).toBe(2);
+	});
+
+	it('is 0 for a spawn-only import', () => {
+		const env = envelopeFrom(makeDestination(), [{ listKey: 'spawnLocations', index: 0 }]);
+		const preview = buildTriggerImportPreview(env, makeDestination(), 'append');
+		expect(previewBoxRegionCount(preview)).toBe(0);
 	});
 });
 
