@@ -37,6 +37,7 @@ import type { NodePath } from '@/lib/schema/walk';
 import {
 	bundleKey,
 	buildWorkspaceFlat,
+	rowIsInBulk,
 	type BundleFlatNode,
 	type FlatNode,
 	type InstanceFlatNode,
@@ -61,33 +62,6 @@ function selectionAnchorPath(
 	if (!selection) return [];
 	if (selection.resourceKey !== resourceKey) return [];
 	return selection.path ?? [];
-}
-
-// True when `schemaPath` lives strictly underneath any bulk-member section
-// path in `bulkKeys`. Used so a sub-row of a bulk-member section (a portal
-// row, a no-go-line row) inherits the amber tint — without this the only
-// row painted amber would be the top-level `Sec N` row, which is rarely
-// visible since users tend to expand into the section they care about.
-function isPathInsideBulkSection(
-	schemaPath: NodePath,
-	bulkKeys: ReadonlySet<string>,
-): boolean {
-	for (const key of bulkKeys) {
-		const parts = key.split('/');
-		if (parts.length > schemaPath.length) continue;
-		let prefixOk = true;
-		for (let i = 0; i < parts.length; i++) {
-			const ours = schemaPath[i];
-			// Bulk keys store numbers as their stringified form; equality
-			// must compare via toString to match either side.
-			if (String(ours) !== parts[i]) {
-				prefixOk = false;
-				break;
-			}
-		}
-		if (prefixOk) return true;
-	}
-	return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -433,6 +407,8 @@ export function WorkspaceHierarchy({ onAddBundle }: WorkspaceHierarchyProps) {
 									pslBulkPathKeys={bulk?.bulkPathKeys ?? null}
 									aiBulkGetPathKeys={aiBulk?.getPathKeys ?? null}
 									aiBulkGetCount={aiBulk?.getCount ?? null}
+									triggerBulkGetPathKeys={triggerBulk?.getPathKeys ?? null}
+									triggerBulkGetCount={triggerBulk?.getCount ?? null}
 									dragSource={dragSource}
 									dropTarget={dropTarget}
 									onReorderDragStart={onReorderDragStart}
@@ -496,6 +472,14 @@ type HierarchyRowProps = {
 	/** Cheap count lookup for the resource-type-row Badge. Same null-vs-fn
 	 *  contract as `aiBulkGetPathKeys`. */
 	aiBulkGetCount: ((bundleId: string, index: number) => number) | null;
+	/** TriggerData bulk path-key lookup for `(bundleId, index)` — drives the
+	 *  amber tint on trigger schema rows. Same null-vs-fn contract as
+	 *  `aiBulkGetPathKeys`. */
+	triggerBulkGetPathKeys:
+		| ((bundleId: string, index: number) => ReadonlySet<string> | null)
+		| null;
+	/** Cheap count lookup for the trigger resource-type-row Badge. */
+	triggerBulkGetCount: ((bundleId: string, index: number) => number) | null;
 	// ---- Drag-to-reorder (record-list instance rows only) ----
 	/** The currently-dragged list item, or null when no drag is in flight.
 	 *  A row consults this to decide whether it's a valid drop target. */
@@ -632,16 +616,20 @@ function ResourceTypeRow({
 	onToggleExpansion,
 	onSelectResourceType,
 	aiBulkGetCount,
+	triggerBulkGetCount,
 }: HierarchyRowProps & { node: ResourceTypeFlatNode }) {
-	// Per-resource bulk badge. AI Sections is single-instance so the count
-	// reads directly off (bundleId, 0) — no fan-out across instances needed
-	// today. When a future resource grows multi-instance bulk support
-	// (e.g. PSL retrofitted onto the panel stack) this badge will need to
-	// sum over indices, but Slice 1 doesn't.
-	const aiCount =
-		node.resourceKey === 'aiSections' && aiBulkGetCount && !node.isMultiInstance
+	// Per-resource bulk badge. AI Sections and TriggerData are single-instance
+	// so the count reads directly off (bundleId, 0) — no fan-out across
+	// instances needed today. When a future resource grows multi-instance bulk
+	// support (e.g. PSL retrofitted onto the panel stack) this badge will need
+	// to sum over indices, but that isn't the case yet.
+	const bulkCount = node.isMultiInstance
+		? 0
+		: node.resourceKey === 'aiSections' && aiBulkGetCount
 			? aiBulkGetCount(node.bundleId, 0)
-			: 0;
+			: node.resourceKey === 'triggerData' && triggerBulkGetCount
+				? triggerBulkGetCount(node.bundleId, 0)
+				: 0;
 
 	return (
 		<div
@@ -683,13 +671,13 @@ function ResourceTypeRow({
 					<span className="text-[10px] opacity-70"> ({node.count})</span>
 				)}
 			</span>
-			{aiCount > 0 && (
+			{bulkCount > 0 && (
 				<Badge
 					variant="outline"
 					className="h-4 px-1 text-[10px] tabular-nums shrink-0 border-amber-500/60 text-amber-700"
-					title={`${aiCount} section${aiCount === 1 ? '' : 's'} in bulk`}
+					title={`${bulkCount} in bulk`}
 				>
-					{aiCount}
+					{bulkCount}
 				</Badge>
 			)}
 			{node.showVisibility && (
@@ -768,6 +756,7 @@ function SchemaRow({
 	onSelectSchema,
 	pslBulkPathKeys,
 	aiBulkGetPathKeys,
+	triggerBulkGetPathKeys,
 	dragSource,
 	dropTarget,
 	onReorderDragStart,
@@ -798,31 +787,25 @@ function SchemaRow({
 	const dropEdge =
 		dropTarget?.pathKey === node.pathKey ? dropTarget.edge : null;
 	// Resolve the right bulk-path-key set for THIS row's resource. PSL is a
-	// single global Set today (one bulk active at a time); AI sections is
-	// per-(bundleId, index) so the same row in two different bundles can be
-	// in or out of bulk independently.
+	// single global Set today (one bulk active at a time); AI sections and
+	// TriggerData are per-(bundleId, index) so the same row in two different
+	// bundles can be in or out of bulk independently.
 	const activeBulkKeys: ReadonlySet<string> | null =
 		node.resourceKey === 'polygonSoupList'
 			? pslBulkPathKeys
 			: node.resourceKey === 'aiSections' && aiBulkGetPathKeys
 				? aiBulkGetPathKeys(node.bundleId, node.index)
-				: null;
+				: node.resourceKey === 'triggerData' && triggerBulkGetPathKeys
+					? triggerBulkGetPathKeys(node.bundleId, node.index)
+					: null;
 
 	// Schema rows whose schema path is in the active bulk wear an amber
-	// border + faint amber tint — same accent as the legacy schema
-	// HierarchyTree so users coming from the per-resource page see the
-	// same cue. AI sections sub-paths normalise to their containing
-	// section path inside `onBulkToggle`, so e.g. clicking a portal row
-	// adds the section's path and the section's row goes amber — drilling
-	// deeper into the same section wears the amber too via prefix match.
-	const isInBulk =
-		activeBulkKeys != null &&
-		(activeBulkKeys.has(node.schemaPath.join('/')) ||
-			// Sub-paths inside a bulk-member section (e.g. clicking 'portals'
-			// under section 5) inherit the amber tint so the user sees the
-			// path THROUGH the bulk member, not just its top.
-			(node.resourceKey === 'aiSections' &&
-				isPathInsideBulkSection(node.schemaPath, activeBulkKeys)));
+	// border + faint amber tint — same accent as the 3D overlay's bulk
+	// colour so a curated multi-selection reads the same in the tree and the
+	// viewport. AI sections + TriggerData sub-paths normalise to their
+	// containing entry inside `onBulkToggle`, so a sub-row inherits the tint
+	// via prefix match (see rowIsInBulk).
+	const isInBulk = rowIsInBulk(node.resourceKey, node.schemaPath, activeBulkKeys);
 	return (
 		<div
 			className={cn(

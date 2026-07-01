@@ -696,3 +696,53 @@ export function buildWorkspaceFlat({
 
 	return out;
 }
+
+// ---------------------------------------------------------------------------
+// Bulk-row accent resolution
+// ---------------------------------------------------------------------------
+
+// True when `schemaPath` sits at or strictly underneath any bulk-member key.
+// aiSections and triggerData normalise a clicked sub-path (a portal row, a
+// box.position row) to its containing entry when it enters the bulk Set, so a
+// sub-row must inherit the parent entry's amber accent via prefix match —
+// otherwise only the (often-collapsed) top-level entry row would light up.
+export function isPathInsideBulkMember(
+	schemaPath: NodePath,
+	bulkKeys: ReadonlySet<string>,
+): boolean {
+	for (const key of bulkKeys) {
+		const parts = key.split('/');
+		if (parts.length > schemaPath.length) continue;
+		let prefixOk = true;
+		for (let i = 0; i < parts.length; i++) {
+			// Bulk keys store numeric indices stringified, so compare via String.
+			if (String(schemaPath[i]) !== parts[i]) {
+				prefixOk = false;
+				break;
+			}
+		}
+		if (prefixOk) return true;
+	}
+	return false;
+}
+
+// Whether a schema row should wear the bulk (amber) accent. Direct path-key
+// match applies to every bulk-eligible resource; the prefix match additionally
+// covers aiSections / triggerData, whose sub-paths collapse to a containing
+// entry in the bulk Set. PSL polygons are leaves (no sub-paths) → direct match
+// only.
+export function rowIsInBulk(
+	resourceKey: string,
+	schemaPath: NodePath,
+	activeBulkKeys: ReadonlySet<string> | null,
+): boolean {
+	if (!activeBulkKeys) return false;
+	if (activeBulkKeys.has(schemaPath.join('/'))) return true;
+	if (
+		(resourceKey === 'aiSections' || resourceKey === 'triggerData') &&
+		isPathInsideBulkMember(schemaPath, activeBulkKeys)
+	) {
+		return true;
+	}
+	return false;
+}
