@@ -306,19 +306,35 @@ function main() {
 		else console.warn(`[wheels] no target locator for header wheel ${i}; keeping donor position`);
 	}
 
-	// No glass; handling box from the target; real gfx-part count.
+	// Write the new spec into the TARGET's own bundle wrapper (keeps its
+	// attribs/audio) AND adopt the target's own physics-positioning fields.
+	const targetAtAb = abOf(TARGET_AT!);
+	const targetAtBundle = parseBundle(targetAtAb);
+	const targetDsRes = targetAtBundle.resources.find((r) => r.resourceTypeId === DEFORMATION_SPEC_TYPE_ID);
+	if (!targetDsRes) throw new Error('target _AT has no DeformationSpec slot to overwrite');
+	const targetSpec = parseDeformationSpecData(extractResourceRaw(targetAtAb, targetAtBundle, targetDsRes));
+
+	// Preserve the TARGET's physics config: the handling-body box, the
+	// COM/mesh/rigid-body/collision offsets, the inertia tensor and the
+	// model->handling transform. These set the car's rest height and collision
+	// and are tuned per vehicle — using the donor's would sink or float a
+	// differently-proportioned body (an over-tall handling box sinks the car
+	// into the road). Only the deformation content (IK parts, tags, sensors)
+	// comes from the donor; the graphics AABB is used only to place those points.
+	model.handlingBodyDimensions = targetSpec.handlingBodyDimensions;
+	model.currentCOMOffset = targetSpec.currentCOMOffset;
+	model.meshOffset = targetSpec.meshOffset;
+	model.rigidBodyOffset = targetSpec.rigidBodyOffset;
+	model.collisionOffset = targetSpec.collisionOffset;
+	model.inertiaTensor = targetSpec.inertiaTensor;
+	model.carModelSpaceToHandlingBodySpace = targetSpec.carModelSpaceToHandlingBodySpace;
+
+	// No glass; real gfx-part count.
 	model.glassPanes = [];
-	model.handlingBodyDimensions = [tHalf[0], tHalf[1], tHalf[2], donor.handlingBodyDimensions[3]] as Vec4;
 	model.numGraphicsParts = geom.numGfxParts;
 	model.numVehicleBodies = 1;
 	model.numDeformationSensors = 20;
 
-	// Write the new spec into the TARGET's own bundle wrapper (keeps its attribs/audio).
-	const targetAtAb = abOf(TARGET_AT!);
-	const targetAtBundle = parseBundle(targetAtAb);
-	if (!targetAtBundle.resources.some((r) => r.resourceTypeId === DEFORMATION_SPEC_TYPE_ID)) {
-		throw new Error('target _AT has no DeformationSpec slot to overwrite');
-	}
 	const newSpecBytes = writeDeformationSpecData(model);
 	const outAb = writeBundleFresh(targetAtBundle, targetAtAb, { overrides: { resources: { [DEFORMATION_SPEC_TYPE_ID]: newSpecBytes } } });
 	fs.writeFileSync(OUT!, Buffer.from(outAb));
