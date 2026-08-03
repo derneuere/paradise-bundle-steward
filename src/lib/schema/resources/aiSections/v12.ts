@@ -230,7 +230,6 @@ const v12Registry: SchemaRegistry = {
 };
 
 export const aiSectionsV12ResourceSchema: ResourceSchema = {
-	key: 'aiSections',
 	name: 'AI Sections',
 	rootType: 'ParsedAISections',
 	registry: v12Registry,

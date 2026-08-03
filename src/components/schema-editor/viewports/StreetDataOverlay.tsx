@@ -1,35 +1,34 @@
 // StreetDataOverlay — WorldViewport overlay for the StreetData resource.
 //
-// Renders roads as spheres, streets as speed-coloured cubes, and junctions
-// as octahedrons — all batched through InstancedMesh so the per-type cost
-// stays at one draw call regardless of count. Selection currency (the public
-// contract per ADR-0001) is the schema NodePath: this overlay matches
-// `['roads', i]`, `['streets', i]`, `['junctions', i]` directly.
+// Selection currency (the public contract per ADR-0001) is the schema NodePath:
+// this overlay matches `['roads', i]`, `['streets', i]`, `['junctions', i]`
+// directly. The path↔Selection codec is `streetSelectionCodec` below.
 //
-// Internally each InstancedMesh now uses the shared `useInstancedSelection`
-// hook from `./selection/`, so the per-instance paint + click + hover code
-// lives in exactly one place across overlays. The path↔Selection codec is
-// `streetSelectionCodec` below.
+// The markers themselves (instanced spheres/cubes/octahedrons and the hover
+// label) live in `./StreetDataMarkers`; what stays here is the codec plus the
+// edit path.
 //
-// `onChange` is forwarded for in-scene edits but the StreetData scene has
-// no drag handles today (the source viewport never invoked it either). The
-// prop is preserved so future drag-to-move work plugs in without a contract
-// change.
+// `onChange` is forwarded for in-scene edits: a selected road gets a
+// BulkTransformGizmo whose gesture runs through the shared transform core
+// (`@/lib/core/transform`) rather than any street-specific op.
 //
 // The grid stays here rather than in the WorldViewport chrome — AI sections
 // and ZoneList both deliberately omit it (z-fights with their dense polys),
 // so it's a StreetData-specific decoration, not chrome default.
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Grid, Html } from '@react-three/drei';
+import { Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ParsedStreetData } from '@/lib/core/streetData';
 import {
-	STREET_REF_POSITION_AXES,
-	bulkTranslateRoadRefs,
-	streetDataSelectionPivot,
-	type StreetDataEntityRef,
-} from '@/lib/core/streetDataOps';
+	resolverAxes,
+	selectionPivot,
+	streetDataResolver,
+	toTransformDelta,
+	transform,
+	type Point,
+	type StreetDataRef,
+} from '@/lib/core/transform';
 import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
 import {
 	type BulkTransformDelta,
@@ -38,10 +37,12 @@ import {
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayComponent } from './WorldViewport.types';
 import {
-	defineSelectionCodec,
-	useInstancedSelection,
-	type Selection,
-} from './selection';
+	JunctionInstances,
+	RoadInstances,
+	SelectedLabel,
+	StreetInstances,
+} from './StreetDataMarkers';
+import { defineSelectionCodec, type Selection } from './selection';
 
 // ---------------------------------------------------------------------------
 // Path ↔ Selection codec (exported for tests)
@@ -79,40 +80,6 @@ export const streetMarkerPath = (sel: Selection | null): NodePath =>
 	sel ? streetSelectionCodec.selectionToPath(sel) : [];
 
 // ---------------------------------------------------------------------------
-// Constants — shared geometries / materials kept module-scope so all overlay
-// instances reuse the same GPU buffers.
-// ---------------------------------------------------------------------------
-
-// Marker sizes — sized to be legible from the WorldViewport chrome's fixed
-// camera at ~15000 units up (roughly 10× the original tight-AutoFit values).
-// Burnout-world spans ~10000 units across, so markers in the 50-80 range
-// read clearly without crowding.
-const ROAD_RADIUS = 80;
-const STREET_SIZE = 50;
-const JUNCTION_RADIUS = 60;
-
-const roadGeo = new THREE.SphereGeometry(ROAD_RADIUS, 16, 12);
-const streetGeo = new THREE.BoxGeometry(STREET_SIZE, STREET_SIZE, STREET_SIZE);
-const junctionGeo = new THREE.OctahedronGeometry(JUNCTION_RADIUS);
-
-const roadMat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.2 });
-const streetMat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.15 });
-const junctionMat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.2 });
-
-const ROAD_COLOR = new THREE.Color(0x4488ff);
-const JUNCTION_COLOR = new THREE.Color(0xeecc33);
-
-/** Green→Red lerp based on speed 0-255. */
-function speedColor(maxSpeed: number): THREE.Color {
-	const t = Math.min(maxSpeed / 255, 1);
-	return new THREE.Color().setRGB(t, 1 - t, 0.15);
-}
-
-// StreetData has no bulk-select use case yet — share one frozen empty Set so
-// every Instances child below references the same identity (stable hook deps).
-const EMPTY_BULK: ReadonlySet<string> = new Set();
-
-// ---------------------------------------------------------------------------
 // Scene bounds — kept overlay-local so the grid sizes itself sensibly. The
 // chrome's camera is fixed (ADR-0003); this is purely for the grid extent.
 // ---------------------------------------------------------------------------
@@ -126,169 +93,6 @@ function computeBounds(data: ParsedStreetData): { center: THREE.Vector3; radius:
 	const sphere = new THREE.Sphere();
 	box.getBoundingSphere(sphere);
 	return { center: sphere.center, radius: Math.max(sphere.radius, 20) };
-}
-
-// ---------------------------------------------------------------------------
-// Instanced markers
-// ---------------------------------------------------------------------------
-
-type InstancesProps = {
-	data: ParsedStreetData;
-	primary: Selection | null;
-	hovered: Selection | null;
-	onPick: (sel: Selection) => void;
-	onHover: (sel: Selection | null) => void;
-};
-
-function RoadInstances({ data, primary, hovered, onPick, onHover }: InstancesProps) {
-	const meshRef = useRef<THREE.InstancedMesh>(null!);
-	const count = data.roads.length;
-
-	const setMatrix = useCallback((i: number, dummy: THREE.Object3D) => {
-		const r = data.roads[i];
-		dummy.position.set(r.mReferencePosition.x, r.mReferencePosition.y, r.mReferencePosition.z);
-	}, [data.roads]);
-
-	const baseColorFor = useCallback(() => ROAD_COLOR, []);
-
-	const handlers = useInstancedSelection(meshRef, {
-		kind: 'road',
-		count,
-		primary,
-		bulk: EMPTY_BULK,
-		hovered,
-		setMatrix,
-		baseColorFor,
-		onPick,
-		onHover,
-	});
-
-	if (count === 0) return null;
-	return <instancedMesh ref={meshRef} args={[roadGeo, roadMat, count]} {...handlers} />;
-}
-
-function StreetInstances({ data, primary, hovered, onPick, onHover }: InstancesProps) {
-	const meshRef = useRef<THREE.InstancedMesh>(null!);
-	const count = data.streets.length;
-
-	const setMatrix = useCallback((i: number, dummy: THREE.Object3D) => {
-		const street = data.streets[i];
-		const road = data.roads[street.superSpanBase.miRoadIndex];
-		if (road) {
-			dummy.position.set(
-				road.mReferencePosition.x + ROAD_RADIUS + STREET_SIZE * 0.8,
-				road.mReferencePosition.y + (i % 3) * STREET_SIZE * 1.2,
-				road.mReferencePosition.z,
-			);
-		} else {
-			dummy.position.set(0, -9999, 0); // hide invalid
-		}
-	}, [data.streets, data.roads]);
-
-	const baseColorFor = useCallback(
-		(i: number) => speedColor(data.streets[i].mAiInfo.muMaxSpeedMPS),
-		[data.streets],
-	);
-
-	const handlers = useInstancedSelection(meshRef, {
-		kind: 'street',
-		count,
-		primary,
-		bulk: EMPTY_BULK,
-		hovered,
-		setMatrix,
-		baseColorFor,
-		onPick,
-		onHover,
-	});
-
-	if (count === 0) return null;
-	return <instancedMesh ref={meshRef} args={[streetGeo, streetMat, count]} {...handlers} />;
-}
-
-function JunctionInstances({ data, primary, hovered, onPick, onHover }: InstancesProps) {
-	const meshRef = useRef<THREE.InstancedMesh>(null!);
-	const count = data.junctions.length;
-
-	const setMatrix = useCallback((i: number, dummy: THREE.Object3D) => {
-		const junc = data.junctions[i];
-		const road = data.roads[junc.superSpanBase.miRoadIndex];
-		if (road) {
-			dummy.position.set(
-				road.mReferencePosition.x - ROAD_RADIUS - JUNCTION_RADIUS * 0.8,
-				road.mReferencePosition.y,
-				road.mReferencePosition.z + (i % 3) * JUNCTION_RADIUS * 1.5,
-			);
-		} else {
-			dummy.position.set(0, -9999, 0);
-		}
-	}, [data.junctions, data.roads]);
-
-	const baseColorFor = useCallback(() => JUNCTION_COLOR, []);
-
-	const handlers = useInstancedSelection(meshRef, {
-		kind: 'junction',
-		count,
-		primary,
-		bulk: EMPTY_BULK,
-		hovered,
-		setMatrix,
-		baseColorFor,
-		onPick,
-		onHover,
-	});
-
-	if (count === 0) return null;
-	return <instancedMesh ref={meshRef} args={[junctionGeo, junctionMat, count]} {...handlers} />;
-}
-
-// ---------------------------------------------------------------------------
-// Selected / hovered label
-// ---------------------------------------------------------------------------
-
-function SelectedLabel({
-	data, primary, hovered,
-}: {
-	data: ParsedStreetData;
-	primary: Selection | null;
-	hovered: Selection | null;
-}) {
-	const pick = primary ?? hovered;
-	if (!pick) return null;
-	const idx = pick.indices[0];
-
-	let pos: [number, number, number] | null = null;
-	let label = '';
-	let color = '#fff';
-
-	if (pick.kind === 'road') {
-		const road = data.roads[idx];
-		if (!road) return null;
-		pos = [road.mReferencePosition.x, road.mReferencePosition.y + ROAD_RADIUS + 3, road.mReferencePosition.z];
-		label = `${road.macDebugName.replace(/\0+$/, '')} #${idx}`;
-		color = '#4488ff';
-	} else if (pick.kind === 'junction') {
-		const junc = data.junctions[idx];
-		if (!junc) return null;
-		const road = data.roads[junc.superSpanBase.miRoadIndex];
-		if (!road) return null;
-		pos = [road.mReferencePosition.x - ROAD_RADIUS - JUNCTION_RADIUS, road.mReferencePosition.y + JUNCTION_RADIUS + 3, road.mReferencePosition.z];
-		label = `${junc.macName.replace(/\0+$/, '')} #${idx}`;
-		color = '#eecc33';
-	}
-
-	if (!pos || !label) return null;
-
-	return (
-		<Html position={pos} center distanceFactor={200} style={{ pointerEvents: 'none' }}>
-			<div style={{
-				background: 'rgba(0,0,0,0.75)', color, padding: '2px 6px',
-				borderRadius: 4, fontSize: 11, whiteSpace: 'nowrap', fontFamily: 'monospace',
-			}}>
-				{label}
-			</div>
-		</Html>
-	);
 }
 
 // ---------------------------------------------------------------------------
@@ -324,12 +128,16 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 	// =========================================================================
 	// Bulk-transform gizmo (issue #79)
 	//
-	// Single-road selection only in this slice — the gizmo's translate arrows
-	// move `Road.mReferencePosition` (Vector3, full 3D). Rotation is disabled
-	// for a single point (orbit around itself is a no-op); multi-road bulks
-	// will re-enable yaw rings via the workspace bulk Set in a later slice.
+	// Single-road selection only in this slice — the gizmo moves
+	// `Road.mReferencePosition` (Vector3, full 3D) through the shared transform
+	// core. Multi-road bulks arrive via the workspace bulk Set in a later slice
+	// and need no change here: `bulkRefs` just gets longer.
+	//
+	// All three rotate rings are live even for a single road. A point orbiting
+	// its own position would be a no-op, but the pivot is drag-repositionable,
+	// so the road orbits wherever the user put it.
 	// =========================================================================
-	const bulkRefs = useMemo<readonly StreetDataEntityRef[]>(() => {
+	const bulkRefs = useMemo<readonly StreetDataRef[]>(() => {
 		if (primary?.kind !== 'road') return [];
 		const idx = primary.indices[0];
 		if (idx < 0 || idx >= data.roads.length) return [];
@@ -337,13 +145,23 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 	}, [primary, data.roads.length]);
 
 	const bulkPivotLive = useMemo(
-		() => (bulkRefs.length > 0 ? streetDataSelectionPivot(data, bulkRefs) : null),
+		() => selectionPivot(data, bulkRefs, streetDataResolver),
 		[data, bulkRefs],
+	);
+	const bulkAxes = useMemo(
+		() => resolverAxes(bulkRefs, streetDataResolver),
+		[bulkRefs],
 	);
 	const [dragDelta, setDragDelta] = useState<BulkTransformDelta | null>(null);
 
+	// Gesture-start pivot snapshot. Latched on the first `onTransform` frame and
+	// reused for every later frame and for the commit: re-deriving the pivot
+	// from already-moved positions turns a rigid rotate into a spiral.
+	const pivotAtDragStart = useRef<Point | null>(null);
+
 	const gizmoPosition = useMemo<[number, number, number] | null>(() => {
 		if (!bulkPivotLive) return null;
+		// Rotation orbits the pivot, so only the translate moves the gizmo itself.
 		const dx = dragDelta?.translate.x ?? 0;
 		const dy = dragDelta?.translate.y ?? 0;
 		const dz = dragDelta?.translate.z ?? 0;
@@ -351,19 +169,24 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 	}, [bulkPivotLive, dragDelta]);
 
 	const handleGizmoTransform = useCallback((delta: BulkTransformDelta) => {
+		if (!pivotAtDragStart.current) pivotAtDragStart.current = bulkPivotLive;
 		setDragDelta(delta);
-	}, []);
+	}, [bulkPivotLive]);
 
 	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
+		// Fall back to the live pivot when a commit arrives with no preceding
+		// frame, rather than dropping the rotation on the floor.
+		const pivot = pivotAtDragStart.current ?? bulkPivotLive;
+		pivotAtDragStart.current = null;
 		setDragDelta(null);
 		if (!onChange) return;
-		if (bulkRefs.length === 0) return;
 		if (isIdentityDelta(delta)) return;
-		const next = bulkTranslateRoadRefs(data, bulkRefs, delta.translate);
+		const next = transform(data, bulkRefs, toTransformDelta(delta, pivot), streetDataResolver);
 		if (next !== data) onChange(next);
-	}, [data, onChange, bulkRefs]);
+	}, [data, onChange, bulkRefs, bulkPivotLive]);
 
 	const handleGizmoCancel = useCallback(() => {
+		pivotAtDragStart.current = null;
 		setDragDelta(null);
 	}, []);
 
@@ -383,10 +206,10 @@ export const StreetDataOverlay: WorldOverlayComponent<ParsedStreetData> = ({
 			<StreetInstances data={data} primary={primary} hovered={hovered} onPick={handlePick} onHover={setHovered} />
 			<JunctionInstances data={data} primary={primary} hovered={hovered} onPick={handlePick} onHover={setHovered} />
 			<SelectedLabel data={data} primary={primary} hovered={hovered} />
-			{onChange && gizmoPosition && (
+			{onChange && gizmoPosition && bulkAxes && (
 				<BulkTransformGizmo
 					position={gizmoPosition}
-					axes={STREET_REF_POSITION_AXES}
+					axes={bulkAxes}
 					onTransform={handleGizmoTransform}
 					onCommit={handleGizmoCommit}
 					onCancel={handleGizmoCancel}

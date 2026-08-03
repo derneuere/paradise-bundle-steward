@@ -294,7 +294,6 @@ const registry: SchemaRegistry = {
 };
 
 export const propInstanceDataResourceSchema: ResourceSchema = {
-	key: 'propInstanceData',
 	name: 'Prop Instance Data',
 	rootType: 'ParsedPropInstanceData',
 	registry,

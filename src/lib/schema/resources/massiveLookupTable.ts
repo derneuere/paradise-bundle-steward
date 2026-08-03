@@ -148,7 +148,6 @@ const registry: SchemaRegistry = {
 };
 
 export const massiveLookupTableResourceSchema: ResourceSchema = {
-	key: 'massiveLookupTable',
 	name: 'Massive Lookup Table',
 	rootType: 'ParsedMassiveLookupTable',
 	registry,

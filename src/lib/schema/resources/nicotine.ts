@@ -346,7 +346,6 @@ const registry: SchemaRegistry = {
 };
 
 export const nicotineResourceSchema: ResourceSchema = {
-	key: 'nicotine',
 	name: 'Nicotine Map',
 	rootType: 'ParsedNicotine',
 	registry,

@@ -16,7 +16,7 @@ import { useWorkspaceUndoRedoShortcuts } from '@/hooks/useWorkspaceUndoRedoShort
 import { useSchemaEditor } from './context';
 
 export function SchemaEditor() {
-	const { resource } = useSchemaEditor();
+	const { resourceKey } = useSchemaEditor();
 	// Wire ⌘Z / ⌘⇧Z / ⌘Y at the legacy single-Bundle page level so the
 	// shortcut still flows into the Workspace's global undo stack
 	// (ADR-0006) when a per-resource page is active.
@@ -37,7 +37,7 @@ export function SchemaEditor() {
 							    header keeps it close to the model navigation, which is
 							    where the user is when they realise something needs
 							    undoing. */}
-							<UndoRedoControls resourceKey={resource.key} />
+							<UndoRedoControls resourceKey={resourceKey} />
 						</div>
 						<div className="flex-1 min-h-0">
 							<HierarchyTree />

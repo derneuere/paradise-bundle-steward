@@ -307,7 +307,6 @@ const registry: SchemaRegistry = {
 };
 
 export const splicerResourceSchema: ResourceSchema = {
-	key: 'splicer',
 	name: 'Splicer',
 	rootType: 'ParsedSplicer',
 	registry,

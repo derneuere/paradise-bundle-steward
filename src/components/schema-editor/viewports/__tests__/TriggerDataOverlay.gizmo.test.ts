@@ -3,25 +3,23 @@
 // Pins the *pure-function* contract the overlay exposes for the unified
 // Bulk-transform gizmo:
 //
-//   - `bulkKeyToRef` decodes workspace bulk path-keys to entity refs.
-//   - `selectionToRef` decodes the inspector pick to an entity ref.
-//   - `applyDragToTriggerModel` is the single dispatcher that maps a
-//     (target, delta) gesture onto the matching no-cascade op.
+//   - `bulkKeyToRef` decodes workspace bulk path-keys to `TriggerDataRef`s.
+//   - `selectionToRef` decodes the inspector pick to a `TriggerDataRef`.
+//   - both feed the shared transform core unchanged.
 //
-// The repo's vitest env is `node` (no jsdom) so we don't mount the
-// overlay; we only test the pure helpers. The single-gesture-equals-
-// single-onChange invariant from `handleGizmoCommit` lives in the
-// overlay component itself — its observable behaviour is "one onChange
-// call per gesture", which we verify here by spying that the dispatch
-// runs once and returns a single new model object.
+// The overlay no longer owns a translate/rotate dispatcher: the gesture goes
+// straight to `transform(data, refs, delta, triggerDataResolver)`. What that
+// gesture does to the model is pinned once, in
+// `src/lib/core/transform/__tests__/resolvers/triggerData.test.ts`; what is
+// left here is the ref plumbing plus one end-to-end check that the refs this
+// overlay produces are the refs the resolver accepts.
+//
+// The repo's vitest env is `node` (no jsdom) so we don't mount the overlay.
 
 import { describe, expect, it } from 'vitest';
-import {
-	applyDragToTriggerModel,
-	bulkKeyToRef,
-	selectionToRef,
-	type ActiveDrag,
-} from '../TriggerDataOverlay';
+import { bulkKeyToRef, selectionToRef } from '../TriggerDataOverlay';
+import { transform } from '@/lib/core/transform';
+import { triggerDataResolver } from '@/lib/core/transform/resolvers/triggerData';
 import type {
 	Landmark,
 	GenericRegion,
@@ -168,8 +166,10 @@ describe('selectionToRef', () => {
 		}
 	});
 
-	it('returns null for player-start (singleton, not bulk-eligible)', () => {
-		expect(selectionToRef({ kind: 'playerStart', indices: [0] })).toBeNull();
+	it('decodes player-start to its own (non-transformable) ref kind', () => {
+		// The gold cone is selectable; it just expands to zero slots, so the
+		// resolver — not this codec — is where "no gizmo" is decided.
+		expect(selectionToRef({ kind: 'playerStart', indices: [0] })).toEqual({ kind: 'playerStart' });
 	});
 
 	it('returns null for null Selection', () => {
@@ -177,155 +177,43 @@ describe('selectionToRef', () => {
 	});
 });
 
-// applyDragToTriggerModel — the dispatcher both preview and commit run.
-describe('applyDragToTriggerModel — single dispatcher', () => {
-	const baseDelta = {
-		translate: { x: 0, y: 0, z: 0 },
-		rotate: { x: 0, y: 0, z: 0 },
-		cascade: false,
-	};
-
-	it('landmark: translate then yaw around the post-translate position', () => {
+// The overlay's refs must be exactly what the shared resolver consumes — a
+// mismatch here would show up as a gizmo that moves nothing.
+describe('overlay refs feed the shared transform', () => {
+	it('translates the entities addressed by decoded bulk keys and the inspector pick', () => {
 		const model = emptyTriggerData({
-			landmarks: [makeLandmark(v3(0, 0, 0), v3(0, 0, 0))],
-		});
-		const drag: ActiveDrag = {
-			target: { kind: 'landmark', idx: 0 },
-			delta: {
-				...baseDelta,
-				translate: { x: 5, y: 0, z: 0 },
-				rotate: { x: 0, y: Math.PI / 4, z: 0 },
-			},
-		};
-		const next = applyDragToTriggerModel(model, drag);
-		// Position is at (5, 0, 0); rotate around own position → position unchanged.
-		expect(next.landmarks[0].box.position.x).toBeCloseTo(5, 5);
-		expect(next.landmarks[0].box.position.z).toBeCloseTo(0, 5);
-		expect(next.landmarks[0].box.rotation.y).toBeCloseTo(Math.PI / 4, 5);
-	});
-
-	it('roaming: only translate participates (no rotation field)', () => {
-		const model = emptyTriggerData({
+			landmarks: [makeLandmark(v3(0, 0, 0)), makeLandmark(v3(100, 0, 0))],
 			roamingLocations: [makeRoaming(v4(0, 0, 0, 42))],
 		});
-		const drag: ActiveDrag = {
-			target: { kind: 'roaming', idx: 0 },
-			delta: {
-				...baseDelta,
-				translate: { x: 3, y: 1, z: 2 },
-				rotate: { x: 0, y: Math.PI / 2, z: 0 },
-			},
-		};
-		const next = applyDragToTriggerModel(model, drag);
-		// .w padding preserved.
-		expect(next.roamingLocations[0].position).toEqual(v4(3, 1, 2, 42));
+		const refs = [
+			bulkKeyToRef('landmarks/0')!,
+			bulkKeyToRef('roamingLocations/0')!,
+			// The inspector pick duplicates a bulk entry — the overlay unions the
+			// two sources, so the same entity routinely arrives twice.
+			selectionToRef({ kind: 'landmark', indices: [0] })!,
+		];
+		const next = transform(
+			model,
+			refs,
+			{ translate: { x: 5, y: 0, z: 0 }, rotate: { x: 0, y: 0, z: 0 }, pivot: null },
+			triggerDataResolver,
+		);
+		expect(next.landmarks[0].box.position.x).toBe(5);
+		expect(next.landmarks[1]).toBe(model.landmarks[1]);
+		expect(next.roamingLocations[0].position).toEqual(v4(5, 0, 0, 42));
 	});
 
-	it('bulk: every entity orbits the snapshot pivot AND each box composes own Euler', () => {
-		const model = emptyTriggerData({
-			landmarks: [makeLandmark(v3(10, 0, 0))],
-			genericRegions: [makeGeneric(v3(0, 0, 10))],
-			vfxBoxRegions: [makeVfx(v3(-10, 0, 0))],
-		});
-		const drag: ActiveDrag = {
-			target: {
-				kind: 'bulk',
-				entities: [
-					{ kind: 'landmark', idx: 0 },
-					{ kind: 'generic', idx: 0 },
-					{ kind: 'vfx', idx: 0 },
-				],
-				pivot: { x: 0, y: 0, z: 0 },
-			},
-			delta: {
-				...baseDelta,
-				rotate: { x: 0, y: Math.PI / 2, z: 0 },
-			},
-		};
-		const next = applyDragToTriggerModel(model, drag);
-		// 90° yaw around origin maps +X→-Z and +Z→+X (three.js right-hand).
-		expect(next.landmarks[0].box.position.z).toBeCloseTo(-10, 5);
-		expect(next.genericRegions[0].box.position.x).toBeCloseTo(10, 5);
-		expect(next.vfxBoxRegions[0].box.position.z).toBeCloseTo(10, 5);
-		// Each box's Euler picks up +π/2 yaw.
-		expect(next.landmarks[0].box.rotation.y).toBeCloseTo(Math.PI / 2, 5);
-		expect(next.genericRegions[0].box.rotation.y).toBeCloseTo(Math.PI / 2, 5);
-		expect(next.vfxBoxRegions[0].box.rotation.y).toBeCloseTo(Math.PI / 2, 5);
-	});
-
-	it('bulk: combined translate + rotate composes around the post-translate pivot', () => {
-		// Three boxes form an equilateral triangle in XZ; rigid translate
-		// then rotate must preserve pairwise distances and shift the centroid
-		// by the translate delta.
-		const positions = [
-			v3(10, 0, 0),
-			v3(-5, 0, 5),
-			v3(-5, 0, -5),
-		];
-		const model = emptyTriggerData({
-			landmarks: positions.map((p) => makeLandmark(p)),
-		});
-		const pivot = { x: 0, y: 0, z: 0 };
-		const drag: ActiveDrag = {
-			target: {
-				kind: 'bulk',
-				entities: positions.map((_, i) => ({ kind: 'landmark', idx: i })) as {
-					kind: 'landmark';
-					idx: number;
-				}[],
-				pivot,
-			},
-			delta: {
-				...baseDelta,
-				translate: { x: 20, y: 0, z: 0 },
-				rotate: { x: 0, y: Math.PI, z: 0 },
-			},
-		};
-		const next = applyDragToTriggerModel(model, drag);
-		// Pairwise distances preserved.
-		const distBefore = [
-			dist(positions[0], positions[1]),
-			dist(positions[1], positions[2]),
-			dist(positions[0], positions[2]),
-		];
-		const distAfter = [
-			dist(next.landmarks[0].box.position, next.landmarks[1].box.position),
-			dist(next.landmarks[1].box.position, next.landmarks[2].box.position),
-			dist(next.landmarks[0].box.position, next.landmarks[2].box.position),
-		];
-		for (let i = 0; i < 3; i++) {
-			expect(distAfter[i]).toBeCloseTo(distBefore[i], 4);
-		}
-	});
-
-	it('returns the input model reference on an identity delta', () => {
+	it('renders no gesture at all for a player-start-only selection', () => {
 		const model = emptyTriggerData({ landmarks: [makeLandmark(v3(0, 0, 0))] });
-		const drag: ActiveDrag = {
-			target: { kind: 'landmark', idx: 0 },
-			delta: baseDelta,
-		};
-		// translateLandmarkRigid + rotateLandmarkRigid both short-circuit on
-		// identity ⇒ next === model.
-		expect(applyDragToTriggerModel(model, drag)).toBe(model);
-	});
-
-	it('blackspot + spawn: dispatcher routes correctly', () => {
-		const model = emptyTriggerData({
-			blackspots: [makeBlackspot(v3(0, 0, 0))],
-			spawnLocations: [makeSpawn(v4(0, 0, 0, 3))],
-		});
-		const t1 = applyDragToTriggerModel(model, {
-			target: { kind: 'blackspot', idx: 0 },
-			delta: { ...baseDelta, translate: { x: 1, y: 0, z: 0 } },
-		});
-		expect(t1.blackspots[0].box.position.x).toBe(1);
-
-		const t2 = applyDragToTriggerModel(model, {
-			target: { kind: 'spawn', idx: 0 },
-			delta: { ...baseDelta, translate: { x: 0, y: 0, z: 5 } },
-		});
-		expect(t2.spawnLocations[0].position.z).toBe(5);
-		expect(t2.spawnLocations[0].position.w).toBe(3); // .w preserved
+		const refs = [selectionToRef({ kind: 'playerStart', indices: [0] })!];
+		expect(triggerDataResolver.axes(refs)).toBeNull();
+		const next = transform(
+			model,
+			refs,
+			{ translate: { x: 5, y: 5, z: 5 }, rotate: { x: 0, y: 0, z: 0 }, pivot: null },
+			triggerDataResolver,
+		);
+		expect(next).toBe(model);
 	});
 });
 

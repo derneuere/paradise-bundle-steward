@@ -73,7 +73,6 @@ const registry: SchemaRegistry = {
 };
 
 export const attribSysVaultResourceSchema: ResourceSchema = {
-	key: 'attribSysVault',
 	name: 'AttribSys Vault',
 	rootType: 'AttribSysVault',
 	registry,

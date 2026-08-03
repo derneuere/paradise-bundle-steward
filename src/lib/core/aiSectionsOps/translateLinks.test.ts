@@ -427,21 +427,22 @@ describe('rotateSectionWithLinksYaw', () => {
 
 	it('rotates the source section around its centroid like the rigid op', () => {
 		const model = makePair();
-		// Source centroid is (5, 5); π/2 rotates (0, 0) → centroid offset
-		// (-5, -5) → (5, -5) → (10, 0).
+		// Source centroid is (5, 5). Under the true right-hand rule about +Y
+		// (+X → -Z) an offset (ox, oz) becomes (oz, -ox), so π/2 rotates
+		// (0, 0) → centroid offset (-5, -5) → (-5, 5) → (0, 10).
 		const next = rotateSectionWithLinksYaw(model, 0, Math.PI / 2);
-		expect(next.sections[0].corners[0].x).toBeCloseTo(10, 6);
-		expect(next.sections[0].corners[0].y).toBeCloseTo(0, 6);
+		expect(next.sections[0].corners[0].x).toBeCloseTo(0, 6);
+		expect(next.sections[0].corners[0].y).toBeCloseTo(10, 6);
 	});
 
 	it("rotates the neighbour's reverse portal around the source centroid", () => {
 		const model = makePair();
 		// Pre-rotate portal anchor is at (10, 5). Source centroid is (5, 5).
-		// π/2 rotation: offset (5, 0) → (0, 5) → world (5, 10).
+		// π/2 rotation: offset (5, 0) → (0, -5) → world (5, 0).
 		const next = rotateSectionWithLinksYaw(model, 0, Math.PI / 2);
 		expect(next.sections[1].portals[0].position.x).toBeCloseTo(5, 6);
 		expect(next.sections[1].portals[0].position.y).toBe(0); // y unchanged
-		expect(next.sections[1].portals[0].position.z).toBeCloseTo(10, 6);
+		expect(next.sections[1].portals[0].position.z).toBeCloseTo(0, 6);
 	});
 
 	it('keeps source and neighbour portal positions equal after the rotate (lockstep)', () => {
@@ -458,18 +459,18 @@ describe('rotateSectionWithLinksYaw', () => {
 		const model = makePair();
 		// Shared corners are (10, 0) and (10, 10) — they were on the source's
 		// right edge and ARE the neighbour's left edge. After π/2 around
-		// (5, 5): (10, 0) → (5, -5)+(5,5) → (10, 0)? wait. Let's compute:
-		// offset (5, -5) → π/2 → (5, 5) → world (10, 10). And (10, 10) →
-		// offset (5, 5) → π/2 → (-5, 5) → world (0, 10).
+		// (5, 5), with (ox, oz) → (oz, -ox):
+		//   (10, 0)  → offset (5, -5) → (-5, -5) → world (0, 0)
+		//   (10, 10) → offset (5,  5) → ( 5, -5) → world (10, 0)
 		const next = rotateSectionWithLinksYaw(model, 0, Math.PI / 2);
 		const s1 = next.sections[1];
 		// Pre-rotate s1 corners were [(10,0),(20,0),(20,10),(10,10)]. The
 		// shared corners at indexes 0 and 3 spin; the non-shared ones at
 		// indexes 1 and 2 stay put.
-		expect(s1.corners[0].x).toBeCloseTo(10, 6);
-		expect(s1.corners[0].y).toBeCloseTo(10, 6);
-		expect(s1.corners[3].x).toBeCloseTo(0, 6);
-		expect(s1.corners[3].y).toBeCloseTo(10, 6);
+		expect(s1.corners[0].x).toBeCloseTo(0, 6);
+		expect(s1.corners[0].y).toBeCloseTo(0, 6);
+		expect(s1.corners[3].x).toBeCloseTo(10, 6);
+		expect(s1.corners[3].y).toBeCloseTo(0, 6);
 		// Non-shared corners unchanged.
 		expect(s1.corners[1]).toEqual({ x: 20, y: 0 });
 		expect(s1.corners[2]).toEqual({ x: 20, y: 10 });

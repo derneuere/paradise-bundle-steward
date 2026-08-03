@@ -58,7 +58,6 @@ const registry: SchemaRegistry = {
 };
 
 export const colourCubeResourceSchema: ResourceSchema = {
-	key: 'colourCube',
 	name: 'Colour Cube',
 	rootType: 'ParsedColourCube',
 	registry,

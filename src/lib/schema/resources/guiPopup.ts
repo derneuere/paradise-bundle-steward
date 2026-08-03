@@ -257,7 +257,6 @@ const registry: SchemaRegistry = {
 };
 
 export const guiPopupResourceSchema: ResourceSchema = {
-	key: 'guiPopup',
 	name: 'GUI Popup',
 	rootType: 'ParsedGuiPopup',
 	registry,

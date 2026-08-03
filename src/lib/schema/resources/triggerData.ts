@@ -713,7 +713,6 @@ const registry: SchemaRegistry = {
 };
 
 export const triggerDataResourceSchema: ResourceSchema = {
-	key: 'triggerData',
 	name: 'Trigger Data',
 	rootType: 'TriggerData',
 	registry,

@@ -281,7 +281,6 @@ const registry: SchemaRegistry = {
 };
 
 export const environmentKeyframeResourceSchema: ResourceSchema = {
-	key: 'environmentKeyframe',
 	name: 'Environment Keyframe',
 	rootType: 'ParsedEnvironmentKeyframe',
 	registry,

@@ -22,7 +22,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 type Props = {
 	/**
 	 * Optional placement context — present so call sites that pass it (the
-	 * schema editor mounts it as `resourceKey={resource.key}`) keep
+	 * schema editor passes the editor context's `resourceKey`) keep
 	 * compiling. The Workspace stack is global, so the value is unused.
 	 */
 	resourceKey?: string;

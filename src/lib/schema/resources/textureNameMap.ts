@@ -83,7 +83,6 @@ const registry: SchemaRegistry = {
 };
 
 export const textureNameMapResourceSchema: ResourceSchema = {
-	key: 'textureNameMap',
 	name: 'Texture Name Map',
 	rootType: 'ParsedTextureNameMap',
 	registry,

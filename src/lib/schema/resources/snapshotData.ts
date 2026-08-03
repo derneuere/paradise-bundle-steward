@@ -149,7 +149,6 @@ const registry: SchemaRegistry = {
 };
 
 export const snapshotDataResourceSchema: ResourceSchema = {
-	key: 'snapshotData',
 	name: 'Snapshot Data',
 	rootType: 'ParsedSnapshotData',
 	registry,

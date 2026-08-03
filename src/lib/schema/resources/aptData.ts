@@ -281,7 +281,6 @@ const registry: SchemaRegistry = {
 };
 
 export const aptDataResourceSchema: ResourceSchema = {
-	key: 'aptData',
 	name: 'Apt Data',
 	rootType: 'ParsedAptData',
 	registry,

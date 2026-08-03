@@ -164,7 +164,6 @@ const registry: SchemaRegistry = {
 };
 
 export const environmentTimeLineResourceSchema: ResourceSchema = {
-	key: 'environmentTimeLine',
 	name: 'Environment Timeline',
 	rootType: 'ParsedEnvironmentTimeLine',
 	registry,

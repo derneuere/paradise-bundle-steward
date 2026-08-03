@@ -26,16 +26,23 @@ One or more focused **Resources** or sub-paths within them. In single-resource f
 **Tools**:
 The editing affordances available for the current **Selection**. Two kinds, dispatched on different axes:
 - **Type-driven Tools** — type-specific edits (snap toggles, format-specific controls, "Add Portal" etc.). Driven by the type of a single-entity **Selection**, not by which **Bundle** it lives in: every AI section everywhere uses the same AI-section **Tools**, regardless of which **Bundle** holds it.
-- **Selection-shape Tools** — affordances that work on any spatial **Selection** regardless of resource type. The **Bulk transform** is the canonical case: one universal translate/rotate affordance in the **WorldViewport**, used for both single-entity and multi-entity **Selections**.
+- **Selection-shape Tools** — affordances that work on any spatial **Selection** regardless of resource type. The **Transform** is the canonical case: one universal translate/rotate affordance in the **WorldViewport**, used for both single-entity and multi-entity **Selections**.
 
-**Bulk transform**:
-A translate and/or rotate applied to the current **WorldViewport** **Selection** as one **Workspace**-undo step (one undo entry per gesture, not per drag-frame). Replaces today's per-entity drag affordances in the **WorldViewport**. The on-canvas affordance is a single translate/rotate handle anchored at the **Selection**'s **Pivot** — exactly one on screen at any time, regardless of **Selection** cardinality. Rotation around X and Z is auto-disabled when the **Selection** contains any resource whose spatial data is XZ-packed 2D (AI section corners, boundary/no-go lines, zone points, traffic yaw-packed boxes) — those resources have no Y-component to tip out of the plane. Cross-**Bundle** **Selections** apply the same delta per-**Bundle**, dirtying each affected **Bundle** for its own save.
+**Transform**:
+A translate and/or rotate applied to the current **WorldViewport** **Selection** as one **Workspace**-undo step (one undo entry per gesture, not per drag-frame). Replaces the per-entity drag affordances the **WorldViewport** used to carry. The on-canvas affordance is a single translate/rotate handle anchored at the **Selection**'s **Pivot** — exactly one on screen at any time, regardless of **Selection** cardinality. Rotation around X and Z is auto-disabled when the **Selection** contains any resource whose spatial data is XZ-packed 2D (AI section corners, boundary/no-go lines, zone points, traffic yaw-packed boxes) — those resources have no Y-component to tip out of the plane. Cross-**Bundle** **Selections** apply the same delta per-**Bundle**, dirtying each affected **Bundle** for its own save.
+_Was_: **Bulk transform**, which implied cardinality > 1. Cardinality 1 is not a special case — one corner and a cross-**Bundle** stadium run the same code (see ADR-0013), so the word "bulk" was misleading. ADRs 0009–0011 predate the rename and still say "Bulk transform"; they mean this.
+
+**Ref**:
+An address for one spatial sub-entity inside a **Resource** — an AI-section corner, a portal anchor, a boundary-line endpoint, a trigger box, a traffic lane rung. What a **Selection** is made of, as far as a **Transform** is concerned. A **Ref** may name a container (a whole AI section, a whole zone); it then *expands* to the leaf data underneath it, which is what keeps a container rotate rigid instead of merely sliding its anchor.
+
+**Resolver**:
+The per-**Resource** half of a **Transform**: how to expand a **Ref** into leaf spatial data, read a position from it, write one back, and report the axis profile. The only thing a **Resource** contributes — the pivot arithmetic, compose order, dedupe and rotation convention are shared. A new **Resource** joins the gizmo by gaining a **Resolver**, not by gaining its own op module (ADR-0012).
 
 **Pivot**:
-The centre of a **Bulk transform**. Defaults to the median of the **Selection**'s positions; drag-repositionable on the transform handle before the user commits the gesture. Polygon soups have no world-space placement field and are excluded from **Bulk transforms** entirely (the handle refuses if a soup is in the **Selection**).
+The centre of a **Transform**. Defaults to the per-component median of every position the **Selection** addresses — computed over the same deduped leaf data the **Transform** writes, so a **Selection** holding a duplicate **Ref** (or a whole section plus one of its own portals) does not skew toward the doubled entity. Drag-repositionable on the transform handle before the user commits the gesture, and latched at gesture start: re-deriving it per frame from already-moved positions turns a rigid rotate into a spiral. Polygon soups have no world-space placement field and are excluded from **Transforms** entirely (the handle refuses if a soup is in the **Selection**).
 
 **Cascade**:
-Propagation of a transform from the **Selection** to topologically connected entities *outside* the **Selection** — for AI sections this means dragging neighbour sections' reverse-portal anchors, shared corners on the boundary edge, and mirror-portal positions so connections stay geometrically coherent. Off by default for any **Bulk transform** (including single-entity **Selections**), opt-in via a held modifier. The legacy `translateSectionWithLinks` algorithm is the cascade-on implementation; its automatic-on behaviour was load-bearing in the per-resource viewports but is now explicit. The trade-off: with cascade off, moving a "stadium"-style island across the map leaves dangling outside-portal anchors that the user must re-wire — the alternative (cascade-on by default) would drag surrounding districts along with the stadium.
+Propagation of a transform from the **Selection** to topologically connected entities *outside* the **Selection** — for AI sections this means dragging neighbour sections' reverse-portal anchors, shared corners on the boundary edge, and mirror-portal positions so connections stay geometrically coherent. Off by default for any **Transform** (including single-entity **Selections**), opt-in via a held modifier. Implemented as a **Ref** expansion applied *above* the **Transform** — it adds the mirrored portal anchors and shared-edge corners to the **Ref** set, which then move like any other **Ref** — so the shared transform stays cascade-blind and the AI-specific graph knowledge lives in one place. The trade-off: with cascade off, moving a "stadium"-style island across the map leaves dangling outside-portal anchors that the user must re-wire — the alternative (cascade-on by default) would drag surrounding districts along with the stadium.
 
 **Resource**:
 A single typed entry inside a **Bundle** (e.g. StreetData, TrafficData, Texture). Identified by a numeric type ID and a string key.
@@ -87,6 +94,8 @@ The single new top-level page that hosts a multi-**Bundle** **Workspace**. Combi
 - A **Schema** may have zero or more **Extensions**
 - A **Resource** belongs to at most one **Viewport** family; many **Resources** can share a family
 - A **Resource** is **CLI-validated** before its UI (**Schema-driven page** or **Bespoke page**) is built
+- A **Resource** that appears in the **World viewport** has at most one **Resolver**; without one it cannot take part in a **Transform**
+- A **Selection** is a set of **Refs**; a **Transform** applies one delta to every leaf datum those **Refs** expand to
 
 ## Workflow
 

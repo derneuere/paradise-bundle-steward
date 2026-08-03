@@ -25,7 +25,7 @@ describe('shader editor profile (workspace migration)', () => {
 		expect(byId).toBeDefined();
 		expect(byKey).toBeDefined();
 		expect(byKey).toBe(byId);
-		expect(byKey?.schema.key).toBe('shader');
+		expect(byKey?.schema).toBe(shaderResourceSchema);
 	});
 
 	it('uses the ParsedShader root schema (matches the single-resource data the workspace passes)', () => {

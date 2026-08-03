@@ -228,7 +228,6 @@ const registry: SchemaRegistry = {
 };
 
 export const iceTakeDictionaryResourceSchema: ResourceSchema = {
-	key: 'iceTakeDictionary',
 	name: 'ICE Take Dictionary',
 	rootType: 'IceTakeDictionary',
 	registry,

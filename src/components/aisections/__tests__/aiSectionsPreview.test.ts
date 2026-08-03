@@ -20,6 +20,26 @@ import {
 } from '../aiSectionsPreview';
 import type { ActiveDrag } from '../aiSectionsDrag.types';
 import { makeModel, makeSection } from '@/lib/core/aiSectionsOps/_testHelpers';
+import {
+	createAISectionsResolver,
+	expandAISectionsCascade,
+	type AISectionRef,
+} from '@/lib/core/transform';
+import type { ParsedAISectionsV12 } from '@/lib/core/aiSections';
+
+/**
+ * Build the drag the overlay would hand the preview. Cascade is applied HERE,
+ * not inside `derivePreviewModel` — it expands the ref set before the transform
+ * ever runs, so preview and commit see the identical refs.
+ */
+function dragFor(
+	model: ParsedAISectionsV12,
+	refs: readonly AISectionRef[],
+	d: ReturnType<typeof delta>,
+): ActiveDrag {
+	const expanded = d.cascade ? expandAISectionsCascade(model, refs) : refs;
+	return { refs: expanded, anchor: refs[0] ?? null, pivot: null, isBulk: false, delta: d };
+}
 
 function delta(translate: { x?: number; y?: number; z?: number } = {}, rotateY = 0, cascade = false) {
 	return {
@@ -32,36 +52,27 @@ function delta(translate: { x?: number; y?: number; z?: number } = {}, rotateY =
 describe('derivePreviewModel', () => {
 	it('returns null when no drag is active', () => {
 		const model = makeModel([makeSection({})]);
-		expect(derivePreviewModel(model, null)).toBeNull();
+		expect(derivePreviewModel(model, null, createAISectionsResolver(model))).toBeNull();
 	});
 
 	it('returns null when the drag delta is identity (no movement)', () => {
 		const model = makeModel([makeSection({})]);
-		const drag: ActiveDrag = {
-			target: { kind: 'section', sectionIdx: 0 },
-			delta: delta(),
-		};
-		expect(derivePreviewModel(model, drag)).toBeNull();
+		const drag = dragFor(model, [{ kind: 'section', sectionIdx: 0 }], delta());
+		expect(derivePreviewModel(model, drag, createAISectionsResolver(model))).toBeNull();
 	});
 
 	it('returns the next model when the drag has a non-identity translate', () => {
 		const model = makeModel([makeSection({})]);
-		const drag: ActiveDrag = {
-			target: { kind: 'section', sectionIdx: 0 },
-			delta: delta({ x: 4, z: 5 }),
-		};
-		const preview = derivePreviewModel(model, drag);
+		const drag = dragFor(model, [{ kind: 'section', sectionIdx: 0 }], delta({ x: 4, z: 5 }));
+		const preview = derivePreviewModel(model, drag, createAISectionsResolver(model));
 		expect(preview).not.toBeNull();
 		expect(preview!.sections[0].corners[0]).toEqual({ x: 4, y: 5 });
 	});
 
 	it('round-trips through derivePreviewSection + derivePreviewCorners', () => {
 		const model = makeModel([makeSection({}), makeSection({ id: 0xB })]);
-		const drag: ActiveDrag = {
-			target: { kind: 'section', sectionIdx: 0 },
-			delta: delta({ x: 2, z: 0 }),
-		};
-		const preview = derivePreviewModel(model, drag);
+		const drag = dragFor(model, [{ kind: 'section', sectionIdx: 0 }], delta({ x: 2, z: 0 }));
+		const preview = derivePreviewModel(model, drag, createAISectionsResolver(model));
 		const previewSection = derivePreviewSection(model.sections[0], preview, 0);
 		const corners = derivePreviewCorners(previewSection);
 		expect(corners).not.toBeNull();
@@ -109,11 +120,8 @@ describe('deriveAffectedNeighbours', () => {
 			}],
 		});
 		const model = makeModel([s0, s1]);
-		const drag: ActiveDrag = {
-			target: { kind: 'section', sectionIdx: 0 },
-			delta: delta({ x: 4 }, 0, true),
-		};
-		const preview = derivePreviewModel(model, drag);
+		const drag = dragFor(model, [{ kind: 'section', sectionIdx: 0 }], delta({ x: 4 }, 0, true));
+		const preview = derivePreviewModel(model, drag, createAISectionsResolver(model));
 		const out = deriveAffectedNeighbours(preview, 0, new Set(), model);
 		expect(out.map((n) => n.idx)).toEqual([1]);
 	});
@@ -142,11 +150,8 @@ describe('deriveAffectedNeighbours', () => {
 			}],
 		});
 		const model = makeModel([s0, s1]);
-		const drag: ActiveDrag = {
-			target: { kind: 'section', sectionIdx: 0 },
-			delta: delta({ x: 4 }, 0, true),
-		};
-		const preview = derivePreviewModel(model, drag);
+		const drag = dragFor(model, [{ kind: 'section', sectionIdx: 0 }], delta({ x: 4 }, 0, true));
+		const preview = derivePreviewModel(model, drag, createAISectionsResolver(model));
 		// Without the bulk filter the neighbour at idx 1 would show. With
 		// idx 1 in the bulk it disappears (the bulk-member render loop is
 		// responsible for painting it).

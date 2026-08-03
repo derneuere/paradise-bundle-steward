@@ -455,7 +455,7 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 					selectedSectionIndex={selectedSectionIndex}
 					data={data}
 					previewModel={t.previewModel}
-					dragKind={t.drag?.target.kind ?? null}
+					dragKind={t.drag ? (t.drag.isBulk ? 'bulk' : 'single') : null}
 					sections={data.sections}
 					cornersOf={v12Corners}
 					accessor={detailAccessor}
@@ -544,16 +544,10 @@ export const AISectionsOverlay: WorldOverlayComponent<ParsedAISectionsV12> = ({
 				onDuplicateThroughEdge={handleDuplicateThroughEdge}
 				onCloseEdgeMenu={() => t.setEdgeMenu(null)}
 				// Cascade hint renders for in-flight gestures whose effective
-				// cascade is ON — section-scope and bulk only (sub-entity
-				// gizmo paths don't dispatch cascade-on ops yet). Reads
-				// `drag.target.kind` (the discriminator lives on the target,
-				// not on `drag` — earlier code shipped with `drag?.kind`
-				// which silently never matched).
-				cascadeActive={
-					t.drag != null &&
-					t.drag.delta.cascade === true &&
-					(t.drag.target.kind === 'section' || t.drag.target.kind === 'bulk')
-				}
+				// cascade is ON and whose refs actually contain a whole
+				// section — cascade only reaches out through portals, so a
+				// sub-entity gesture has nothing to extend to.
+				cascadeActive={t.cascadeActive}
 				skippedSoupCount={skippedSoupCount}
 				showSkippedSoupHint={t.gizmoPosition != null && skippedSoupCount > 0}
 			/>
