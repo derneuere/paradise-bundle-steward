@@ -195,22 +195,23 @@ describe('rotateSectionAroundCentroidYaw', () => {
 
 	it('rotates corners by 90° around the centroid (rigid body)', () => {
 		// Centroid of the unit square is (5, 5). Rotate +π/2 (90° yaw).
-		// Following the right-hand rule with thumb +Y: +X → +Z, +Z → -X.
-		// Corner (0, 0) → centroid offset (-5, -5) → after rot (5, -5) → (10, 0)
-		// Corner (10, 0) → offset (5, -5) → after rot (5, 5) → (10, 10)
-		// Corner (10, 10) → offset (5, 5) → after rot (-5, 5) → (0, 10)
-		// Corner (0, 10) → offset (-5, 5) → after rot (-5, -5) → (0, 0)
+		// True right-hand rule with thumb +Y: +X → -Z, +Z → +X, so an offset
+		// (ox, oz) becomes (oz, -ox).
+		// Corner (0, 0) → centroid offset (-5, -5) → after rot (-5, 5) → (0, 10)
+		// Corner (10, 0) → offset (5, -5) → after rot (-5, -5) → (0, 0)
+		// Corner (10, 10) → offset (5, 5) → after rot (5, -5) → (10, 0)
+		// Corner (0, 10) → offset (-5, 5) → after rot (5, 5) → (10, 10)
 		const model = makeRect();
 		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 2);
 		const corners = next.sections[0].corners;
-		expect(corners[0].x).toBeCloseTo(10, 6);
-		expect(corners[0].y).toBeCloseTo(0, 6);
-		expect(corners[1].x).toBeCloseTo(10, 6);
-		expect(corners[1].y).toBeCloseTo(10, 6);
-		expect(corners[2].x).toBeCloseTo(0, 6);
-		expect(corners[2].y).toBeCloseTo(10, 6);
-		expect(corners[3].x).toBeCloseTo(0, 6);
-		expect(corners[3].y).toBeCloseTo(0, 6);
+		expect(corners[0].x).toBeCloseTo(0, 6);
+		expect(corners[0].y).toBeCloseTo(10, 6);
+		expect(corners[1].x).toBeCloseTo(0, 6);
+		expect(corners[1].y).toBeCloseTo(0, 6);
+		expect(corners[2].x).toBeCloseTo(10, 6);
+		expect(corners[2].y).toBeCloseTo(0, 6);
+		expect(corners[3].x).toBeCloseTo(10, 6);
+		expect(corners[3].y).toBeCloseTo(10, 6);
 	});
 
 	it('preserves relative distances (rigid-body invariant)', () => {
@@ -234,39 +235,39 @@ describe('rotateSectionAroundCentroidYaw', () => {
 	it('rotates portal positions on XZ but preserves portal Y', () => {
 		const model = makeRect();
 		// Portal sat at (10, 3, 5) — centroid offset on XZ is (5, 0). Rotate
-		// +π/2: offset becomes (0, 5), so position lands at (5, 3, 10). Y
+		// +π/2: offset becomes (0, -5), so position lands at (5, 3, 0). Y
 		// must be untouched (yaw doesn't tip vertically).
 		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 2);
 		const p = next.sections[0].portals[0].position;
 		expect(p.x).toBeCloseTo(5, 6);
 		expect(p.y).toBe(3); // exact, untouched
-		expect(p.z).toBeCloseTo(10, 6);
+		expect(p.z).toBeCloseTo(0, 6);
 	});
 
 	it('rotates portal boundary line endpoints', () => {
 		// BL was (10, 0) → (10, 10). Centroid (5, 5).
-		// Start offset (5, -5) → after π/2 (5, 5) → (10, 10).
-		// End   offset (5, 5)  → after π/2 (-5, 5) → (0, 10).
+		// Start offset (5, -5) → after π/2 (-5, -5) → (0, 0).
+		// End   offset (5, 5)  → after π/2 (5, -5) → (10, 0).
 		const model = makeRect();
 		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 2);
 		const bl = next.sections[0].portals[0].boundaryLines[0].verts;
-		expect(bl.x).toBeCloseTo(10, 6);
-		expect(bl.y).toBeCloseTo(10, 6);
-		expect(bl.z).toBeCloseTo(0, 6);
-		expect(bl.w).toBeCloseTo(10, 6);
+		expect(bl.x).toBeCloseTo(0, 6);
+		expect(bl.y).toBeCloseTo(0, 6);
+		expect(bl.z).toBeCloseTo(10, 6);
+		expect(bl.w).toBeCloseTo(0, 6);
 	});
 
 	it('rotates noGo line endpoints', () => {
 		// NoGo was (2, 2) → (8, 8) — diagonal across the square. Centroid (5, 5).
-		// Start offset (-3, -3) → π/2 (3, -3) → (8, 2).
-		// End   offset (3, 3)   → π/2 (-3, 3) → (2, 8).
+		// Start offset (-3, -3) → π/2 (-3, 3) → (2, 8).
+		// End   offset (3, 3)   → π/2 (3, -3) → (8, 2).
 		const model = makeRect();
 		const next = rotateSectionAroundCentroidYaw(model, 0, Math.PI / 2);
 		const ng = next.sections[0].noGoLines[0].verts;
-		expect(ng.x).toBeCloseTo(8, 6);
-		expect(ng.y).toBeCloseTo(2, 6);
-		expect(ng.z).toBeCloseTo(2, 6);
-		expect(ng.w).toBeCloseTo(8, 6);
+		expect(ng.x).toBeCloseTo(2, 6);
+		expect(ng.y).toBeCloseTo(8, 6);
+		expect(ng.z).toBeCloseTo(8, 6);
+		expect(ng.w).toBeCloseTo(2, 6);
 	});
 
 	it('rotation by 2π equals identity geometry (full revolution returns to start, modulo float epsilon)', () => {
@@ -353,9 +354,9 @@ describe('translateSectionRigid + rotateSectionAroundCentroidYaw composition', (
 		// Post-translate centroid is (105, 205). Rotate π/2 around it.
 		const r = rotateSectionAroundCentroidYaw(t, 0, Math.PI / 2);
 		// Pre-translate corner (0,0) → post-translate (100, 200) → centroid
-		// offset (-5, -5) → π/2 → (5, -5) → (110, 200).
-		expect(r.sections[0].corners[0].x).toBeCloseTo(110, 6);
-		expect(r.sections[0].corners[0].y).toBeCloseTo(200, 6);
+		// offset (-5, -5) → π/2 (+X → -Z) → (-5, 5) → (100, 210).
+		expect(r.sections[0].corners[0].x).toBeCloseTo(100, 6);
+		expect(r.sections[0].corners[0].y).toBeCloseTo(210, 6);
 	});
 });
 

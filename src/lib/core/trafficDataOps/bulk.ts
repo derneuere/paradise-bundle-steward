@@ -377,8 +377,9 @@ export function bulkTranslateTrafficEntities(
  *     delta doesn't touch them).
  *
  * Yaw direction follows the right-hand rule with thumb along world +Y, so
- * positive `theta` rotates +X towards +Z — same convention as the AI
- * sections bulk and three.js's `Object3D.rotation.y`.
+ * positive `theta` rotates +X towards **-Z** — the same convention as
+ * `THREE.Matrix4.makeRotationFromEuler` (and therefore as the static-vehicle
+ * Matrix44 path in this same file, which used to counter-rotate against it).
  *
  * Returns the original `model` reference on `theta === 0` OR an empty refs
  * list.
@@ -401,9 +402,9 @@ export function bulkRotateTrafficEntitiesYaw(
 		const ox = v.x - cx;
 		const oz = v.z - cz;
 		return {
-			x: ox * cosT - oz * sinT + cx,
+			x: ox * cosT + oz * sinT + cx,
 			y: v.y,
-			z: ox * sinT + oz * cosT + cz,
+			z: -ox * sinT + oz * cosT + cz,
 			w: addToW ? v.w + theta : v.w,
 		};
 	};
@@ -561,9 +562,9 @@ export function bulkRotateTrafficEntitiesMatrix44(
 		const ox = v.x - cx;
 		const oz = v.z - cz;
 		return {
-			x: ox * cosT - oz * sinT + cx,
+			x: ox * cosT + oz * sinT + cx,
 			y: v.y,
-			z: ox * sinT + oz * cosT + cz,
+			z: -ox * sinT + oz * cosT + cz,
 			w: addToW ? v.w + theta : v.w,
 		};
 	};

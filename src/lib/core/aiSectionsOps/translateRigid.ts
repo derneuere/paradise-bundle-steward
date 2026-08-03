@@ -328,9 +328,10 @@ export function translateNoGoLineEndpointRigid(
  * Returns the original `model` reference when `theta === 0` so byte-for-byte
  * BND2 writeback is preserved on a no-op gesture.
  *
- * Yaw direction follows the right-hand rule with thumb along world +Y, so a
- * positive `theta` rotates the +X axis towards +Z (the same convention
- * three.js uses for `Object3D.rotation.y`).
+ * Yaw direction follows the true right-hand rule with thumb along world +Y,
+ * so a positive `theta` rotates the +X axis towards **-Z** (the same
+ * convention `THREE.Matrix4.makeRotationFromEuler` uses, and the one
+ * `rotatePointAboutPivot` in `@/lib/core/transform` implements).
  *
  * @throws RangeError if `srcIdx` is out of range.
  */
@@ -356,15 +357,15 @@ export function rotateSectionAroundCentroidYaw(
 	const cosT = Math.cos(theta);
 	const sinT = Math.sin(theta);
 
-	// Yaw around world +Y: with thumb along +Y, +X rotates towards +Z.
-	//   x' = (x - cx) cos − (z - cz) sin + cx
-	//   z' = (x - cx) sin + (z - cz) cos + cz
+	// Yaw around world +Y under the true right-hand rule: +X rotates towards -Z.
+	//   x' =  (x - cx) cos + (z - cz) sin + cx
+	//   z' = -(x - cx) sin + (z - cz) cos + cz
 	const rotXZ = (x: number, z: number): { x: number; z: number } => {
 		const ox = x - cx;
 		const oz = z - cz;
 		return {
-			x: ox * cosT - oz * sinT + cx,
-			z: ox * sinT + oz * cosT + cz,
+			x: ox * cosT + oz * sinT + cx,
+			z: -ox * sinT + oz * cosT + cz,
 		};
 	};
 

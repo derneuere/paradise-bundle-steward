@@ -326,7 +326,10 @@ describe('bulkTranslateTrafficEntities', () => {
 describe('bulkRotateTrafficEntitiesYaw', () => {
 	it('yaw-packed box: position orbits AND .w increments by theta (rigid composition)', () => {
 		// Junction at (10, 0, 0) with initial yaw .w = 0.0. Rotate +π/2
-		// around origin. Expected: position → (0, 0, 10), yaw → π/2.
+		// around origin. Expected: position → (0, 0, -10), yaw → π/2.
+		// +X → -Z is the true right-hand rule, matching
+		// `THREE.Matrix4.makeRotationFromEuler` — and therefore matching the
+		// static-vehicle Matrix44 path below, which this used to fight.
 		const model = makeModel({
 			hulls: [makeHull({ junctions: [makeJunction(vec4(10, 0, 0, 0))] })],
 		});
@@ -339,7 +342,7 @@ describe('bulkRotateTrafficEntitiesYaw', () => {
 		const p = next.hulls[0].junctions[0].mPosition;
 		expect(p.x).toBeCloseTo(0, 5);
 		expect(p.y).toBe(0);
-		expect(p.z).toBeCloseTo(10, 5);
+		expect(p.z).toBeCloseTo(-10, 5);
 		// Critical: .w accumulates the gesture's yaw delta.
 		expect(p.w).toBeCloseTo(Math.PI / 2, 6);
 	});
@@ -361,8 +364,8 @@ describe('bulkRotateTrafficEntitiesYaw', () => {
 
 	it('lane rung: both endpoints orbit the pivot AND rung remains a single segment', () => {
 		// A rung from (10, 0) to (20, 0) — segment length 10. Rotate +π/2
-		// around origin. Both endpoints should land in the +Z half-plane and
-		// the segment length is preserved.
+		// around origin. Under the right-hand rule (+X → -Z) both endpoints
+		// land in the -Z half-plane and the segment length is preserved.
 		const model = makeModel({
 			hulls: [
 				makeHull({
@@ -378,9 +381,9 @@ describe('bulkRotateTrafficEntitiesYaw', () => {
 		);
 		const rung = next.hulls[0].rungs[0];
 		expect(rung.maPoints[0].x).toBeCloseTo(0, 5);
-		expect(rung.maPoints[0].z).toBeCloseTo(10, 5);
+		expect(rung.maPoints[0].z).toBeCloseTo(-10, 5);
 		expect(rung.maPoints[1].x).toBeCloseTo(0, 5);
-		expect(rung.maPoints[1].z).toBeCloseTo(20, 5);
+		expect(rung.maPoints[1].z).toBeCloseTo(-20, 5);
 		// .w on lane rung endpoints is opaque, preserved verbatim.
 		expect(rung.maPoints[0].w).toBe(0.7);
 		expect(rung.maPoints[1].w).toBe(0.8);
@@ -680,6 +683,38 @@ describe('bulkRotateTrafficEntitiesYaw — static vehicles take the same yaw del
 		// same as the trigger-box adapter (issue #77).
 		expect(m[12]).toBeCloseTo(0, 5);
 		expect(m[14]).toBeCloseTo(-10, 5);
+	});
+
+	it('a junction and a static vehicle in ONE selection orbit the same way (no counter-rotation)', () => {
+		// Traffic data is the only resource that mixes the two rotation
+		// families in a single gesture: yaw-packed `.w` boxes (junctions,
+		// light triggers, coronas) and Matrix44 static vehicles. They used to
+		// disagree on the sign of a +Y rotation — the boxes swung +X → +Z, the
+		// vehicles +X → -Z — so a mixed selection visibly tore itself apart.
+		// Both now follow the true right-hand rule, so identical start
+		// positions must produce identical end positions.
+		const sv = makeStaticVehicle({ x: 10, y: 0, z: 0 });
+		const model = makeModel({
+			hulls: [
+				makeHull({
+					junctions: [makeJunction(vec4(10, 0, 0, 0))],
+					staticVehicles: [sv],
+				}),
+			],
+		});
+		const next = bulkRotateTrafficEntitiesYaw(
+			model,
+			[
+				{ kind: 'junction', hullIdx: 0, junctionIdx: 0 },
+				{ kind: 'staticVehicle', hullIdx: 0, vehicleIdx: 0 },
+			],
+			{ x: 0, z: 0 },
+			Math.PI / 3,
+		);
+		const j = next.hulls[0].junctions[0].mPosition;
+		const m = next.hulls[0].staticTrafficVehicles[0].mTransform;
+		expect(j.x).toBeCloseTo(m[12], 5);
+		expect(j.z).toBeCloseTo(m[14], 5);
 	});
 
 	it('static vehicle yaw rotate is identical to the Matrix44 path with delta.y only', () => {

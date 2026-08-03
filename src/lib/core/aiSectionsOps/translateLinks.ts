@@ -297,14 +297,15 @@ export function rotateSectionWithLinksYaw(
 	const cosT = Math.cos(theta);
 	const sinT = Math.sin(theta);
 
-	// Yaw around world +Y: with thumb along +Y, +X rotates towards +Z. Mirrors
-	// the rigid yaw op exactly so combined gestures compose deterministically.
+	// Yaw around world +Y under the true right-hand rule: +X rotates towards
+	// -Z. Mirrors the rigid yaw op exactly so combined gestures compose
+	// deterministically.
 	const rotXZ = (x: number, z: number): { x: number; z: number } => {
 		const ox = x - cx;
 		const oz = z - cz;
 		return {
-			x: ox * cosT - oz * sinT + cx,
-			z: ox * sinT + oz * cosT + cz,
+			x: ox * cosT + oz * sinT + cx,
+			z: -ox * sinT + oz * cosT + cz,
 		};
 	};
 

@@ -153,9 +153,10 @@ export function bulkTranslateZoneEntities(
  * orbits the single shared pivot, so relative distances within the bulk
  * are preserved exactly.
  *
- * Yaw direction follows the right-hand rule with thumb along world +Y
- * (positive `theta` rotates +X towards +Z) — same convention as
- * `bulkRotateEntitiesYaw` for AI sections.
+ * Yaw direction follows the true right-hand rule with thumb along world +Y,
+ * so positive `theta` rotates +X towards **-Z** — identical to
+ * `THREE.Matrix4.makeRotationFromEuler` and to `rotatePointAboutPivot` in
+ * `@/lib/core/transform`, which is the editor's single rotation convention.
  *
  * Returns the original `model` reference on `theta === 0` OR an empty
  * refs list.
@@ -178,8 +179,8 @@ export function bulkRotateZoneEntitiesYaw(
 		const ox = x - cx;
 		const oz = z - cz;
 		return {
-			x: ox * cosT - oz * sinT + cx,
-			z: ox * sinT + oz * cosT + cz,
+			x: ox * cosT + oz * sinT + cx,
+			z: -ox * sinT + oz * cosT + cz,
 		};
 	};
 

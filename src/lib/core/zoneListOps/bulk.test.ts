@@ -180,7 +180,10 @@ describe('bulkTranslateZoneEntities', () => {
 
 describe('bulkRotateZoneEntitiesYaw', () => {
 	it('rotates a point 90° around the world origin', () => {
-		// A single point at (10, 0) → (0, 10) after +π/2 yaw around origin.
+		// A single point at (10, 0) → (0, -10) after +π/2 yaw around origin.
+		// +X → -Z is the true right-hand rule (and what
+		// `THREE.Matrix4.makeRotationFromEuler` computes); the editor's one
+		// rotation convention, shared with `@/lib/core/transform`.
 		const model = makeModel([
 			makeZone({ id: 1n, points: [{ x: 10, y: 0 }] }),
 		]);
@@ -192,7 +195,7 @@ describe('bulkRotateZoneEntitiesYaw', () => {
 		);
 		const r = next.zones[0].points[0];
 		expect(r.x).toBeCloseTo(0, 5);
-		expect(r.y).toBeCloseTo(10, 5);
+		expect(r.y).toBeCloseTo(-10, 5);
 	});
 
 	it('preserves relative distances within the bulk after rotation', () => {

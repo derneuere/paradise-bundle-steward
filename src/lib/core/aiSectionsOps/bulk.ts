@@ -159,12 +159,14 @@ export function rotateSelectionWithLinksYaw(
 	const cz = pivot.z;
 	const cosT = Math.cos(theta);
 	const sinT = Math.sin(theta);
+	// Yaw around world +Y under the true right-hand rule: +X -> -Z. Matches
+	// `rotatePointAboutPivot` in `@/lib/core/transform` exactly.
 	const rotXZ = (x: number, z: number): { x: number; z: number } => {
 		const ox = x - cx;
 		const oz = z - cz;
 		return {
-			x: ox * cosT - oz * sinT + cx,
-			z: ox * sinT + oz * cosT + cz,
+			x: ox * cosT + oz * sinT + cx,
+			z: -ox * sinT + oz * cosT + cz,
 		};
 	};
 
@@ -510,9 +512,10 @@ export function bulkTranslateEntities(
  * (XZ rotated, Y untouched) + every portal boundary-line endpoint + every
  * no-go line endpoint. Sub-entity refs rotate only the addressed coordinate.
  *
- * Yaw direction follows the right-hand rule with thumb along world +Y, so
- * positive `theta` rotates +X towards +Z — same convention as
- * `rotateSectionAroundCentroidYaw` and three.js's `Object3D.rotation.y`.
+ * Yaw direction follows the true right-hand rule with thumb along world +Y,
+ * so positive `theta` rotates +X towards **-Z** — the same convention as
+ * `THREE.Matrix4.makeRotationFromEuler` and `rotatePointAboutPivot` in
+ * `@/lib/core/transform`, which is the editor's single rotation convention.
  *
  * Returns the original `model` reference on `theta === 0` OR an empty refs
  * list so byte-for-byte BND2 writeback is preserved on a no-op gesture.
@@ -535,8 +538,8 @@ export function bulkRotateEntitiesYaw(
 		const ox = x - cx;
 		const oz = z - cz;
 		return {
-			x: ox * cosT - oz * sinT + cx,
-			z: ox * sinT + oz * cosT + cz,
+			x: ox * cosT + oz * sinT + cx,
+			z: -ox * sinT + oz * cosT + cz,
 		};
 	};
 

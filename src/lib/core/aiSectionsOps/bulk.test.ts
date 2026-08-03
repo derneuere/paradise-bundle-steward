@@ -193,12 +193,13 @@ describe('rotateSelectionWithLinksYaw', () => {
 		const model = makePair();
 		// Pivot at the s0/s1 shared edge midpoint (10, 5). Rotate π/2.
 		const next = rotateSelectionWithLinksYaw(model, [0, 1], { x: 10, z: 5 }, Math.PI / 2);
-		// s0 corner (0, 0): offset (-10, -5) → π/2 → (5, -10) → world (15, -5).
-		expect(next.sections[0].corners[0].x).toBeCloseTo(15, 6);
-		expect(next.sections[0].corners[0].y).toBeCloseTo(-5, 6);
-		// s1 corner (20, 0): offset (10, -5) → π/2 → (5, 10) → world (15, 15).
-		expect(next.sections[1].corners[1].x).toBeCloseTo(15, 6);
-		expect(next.sections[1].corners[1].y).toBeCloseTo(15, 6);
+		// Right-hand rule about +Y (+X → -Z): (ox, oz) → (oz, -ox).
+		// s0 corner (0, 0): offset (-10, -5) → π/2 → (-5, 10) → world (5, 15).
+		expect(next.sections[0].corners[0].x).toBeCloseTo(5, 6);
+		expect(next.sections[0].corners[0].y).toBeCloseTo(15, 6);
+		// s1 corner (20, 0): offset (10, -5) → π/2 → (-5, -10) → world (5, -5).
+		expect(next.sections[1].corners[1].x).toBeCloseTo(5, 6);
+		expect(next.sections[1].corners[1].y).toBeCloseTo(-5, 6);
 	});
 
 	it('cascades to outside neighbours but not to inside-Selection members', () => {
@@ -514,25 +515,26 @@ describe('bulkRotateEntitiesYaw', () => {
 	});
 
 	it('rotates corners by 90° around the single bulk pivot (rigid body)', () => {
-		// Pivot = (15, 5). For 90° yaw (right-hand-rule around +Y, +X → +Z):
-		// Section 0 corner (0,0)  → offset (-15,-5)  → rot (5,-15)  → (20,-10)
-		// Section 0 corner (10,0) → offset (-5,-5)   → rot (5,-5)   → (20, 0)
-		// Section 1 corner (20,0) → offset (5,-5)    → rot (5, 5)   → (20, 10)
-		// Section 1 corner (30,0) → offset (15,-5)   → rot (5,15)   → (20, 20)
+		// Pivot = (15, 5). For 90° yaw under the true right-hand rule around
+		// +Y (+X → -Z, i.e. (ox,oz) → (oz, -ox)):
+		// Section 0 corner (0,0)  → offset (-15,-5)  → rot (-5, 15) → (10, 20)
+		// Section 0 corner (10,0) → offset (-5,-5)   → rot (-5,  5) → (10, 10)
+		// Section 1 corner (20,0) → offset (5,-5)    → rot (-5, -5) → (10,  0)
+		// Section 1 corner (30,0) → offset (15,-5)   → rot (-5,-15) → (10,-10)
 		const model = makeTwoOffset();
 		const refs: AISectionEntityRef[] = [
 			{ kind: 'section', sectionIdx: 0 },
 			{ kind: 'section', sectionIdx: 1 },
 		];
 		const next = bulkRotateEntitiesYaw(model, refs, { x: 15, z: 5 }, Math.PI / 2);
-		expect(next.sections[0].corners[0].x).toBeCloseTo(20, 6);
-		expect(next.sections[0].corners[0].y).toBeCloseTo(-10, 6);
-		expect(next.sections[0].corners[1].x).toBeCloseTo(20, 6);
-		expect(next.sections[0].corners[1].y).toBeCloseTo(0, 6);
-		expect(next.sections[1].corners[0].x).toBeCloseTo(20, 6);
-		expect(next.sections[1].corners[0].y).toBeCloseTo(10, 6);
-		expect(next.sections[1].corners[1].x).toBeCloseTo(20, 6);
-		expect(next.sections[1].corners[1].y).toBeCloseTo(20, 6);
+		expect(next.sections[0].corners[0].x).toBeCloseTo(10, 6);
+		expect(next.sections[0].corners[0].y).toBeCloseTo(20, 6);
+		expect(next.sections[0].corners[1].x).toBeCloseTo(10, 6);
+		expect(next.sections[0].corners[1].y).toBeCloseTo(10, 6);
+		expect(next.sections[1].corners[0].x).toBeCloseTo(10, 6);
+		expect(next.sections[1].corners[0].y).toBeCloseTo(0, 6);
+		expect(next.sections[1].corners[1].x).toBeCloseTo(10, 6);
+		expect(next.sections[1].corners[1].y).toBeCloseTo(-10, 6);
 	});
 
 	it('preserves all pairwise distances inside the bulk (rigid-body invariant)', () => {
@@ -593,7 +595,8 @@ describe('bulkRotateEntitiesYaw', () => {
 			portals: [portal],
 		});
 		const model = makeModel([sec]);
-		// Pivot at (5, 5). For 90°: portal (30,12,5) → offset (25,0) → rot (0,25) → (5,12,30).
+		// Pivot at (5, 5). For 90° (+X → -Z): portal (30,12,5) → offset (25,0)
+		// → rot (0,-25) → (5,12,-20). Y is untouched — yaw is XZ-only.
 		const next = bulkRotateEntitiesYaw(
 			model,
 			[{ kind: 'section', sectionIdx: 0 }],
@@ -602,7 +605,7 @@ describe('bulkRotateEntitiesYaw', () => {
 		);
 		expect(next.sections[0].portals[0].position.x).toBeCloseTo(5, 6);
 		expect(next.sections[0].portals[0].position.y).toBe(12); // untouched
-		expect(next.sections[0].portals[0].position.z).toBeCloseTo(30, 6);
+		expect(next.sections[0].portals[0].position.z).toBeCloseTo(-20, 6);
 	});
 
 	it('rotates only a portal anchor when only that sub-entity is in the bulk', () => {
@@ -719,9 +722,9 @@ describe('bulkTranslateEntities + bulkRotateEntitiesYaw composition', () => {
 		const t = bulkTranslateEntities(model, refs, { x: 100, y: 0, z: 200 });
 		const r = bulkRotateEntitiesYaw(t, refs, { x: 115, z: 205 }, Math.PI / 2);
 		// Pre-translate corner (0,0) → post-translate (100, 200) → offset
-		// from pivot (-15, -5) → 90° → (5, -15) → (120, 190).
-		expect(r.sections[0].corners[0].x).toBeCloseTo(120, 6);
-		expect(r.sections[0].corners[0].y).toBeCloseTo(190, 6);
+		// from pivot (-15, -5) → 90° (+X → -Z) → (-5, 15) → (110, 220).
+		expect(r.sections[0].corners[0].x).toBeCloseTo(110, 6);
+		expect(r.sections[0].corners[0].y).toBeCloseTo(220, 6);
 		// Distances inside the bulk are preserved.
 		const before = model.sections[0].corners[0];
 		const before2 = model.sections[1].corners[0];

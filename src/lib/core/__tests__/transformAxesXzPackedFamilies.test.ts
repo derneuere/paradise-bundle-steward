@@ -14,9 +14,9 @@ import {
 	type AISectionEntityRef,
 } from '../aiSectionsOps';
 import {
-	bulkStreetDataAxes,
-	type StreetDataEntityRef,
-} from '../streetDataOps';
+	streetDataResolver,
+	type StreetDataRef,
+} from '../transform';
 import {
 	bulkTrafficDataAxes,
 	type TrafficDataEntityRef,
@@ -60,15 +60,15 @@ describe('auto-disable rule — XZ-packed contributor in Selection forces yaw-on
 	});
 
 	it('street ref alone: full 3-axis rotate (pure 3D, no veto)', () => {
-		const refs: StreetDataEntityRef[] = [{ kind: 'road', roadIdx: 0 }];
-		const axes = bulkStreetDataAxes(refs);
+		const refs: StreetDataRef[] = [{ kind: 'road', roadIdx: 0 }];
+		const axes = streetDataResolver.axes(refs);
 		expect(axes?.rotate.x).toBe(true);
 		expect(axes?.rotate.y).toBe(true);
 		expect(axes?.rotate.z).toBe(true);
 	});
 
 	it('mixed: street ref + zone point → yaw-only (zone vetoes pitch/roll)', () => {
-		const streetAxes = bulkStreetDataAxes([{ kind: 'road', roadIdx: 0 }]);
+		const streetAxes = streetDataResolver.axes([{ kind: 'road', roadIdx: 0 }]);
 		const zoneAxes = bulkZoneListAxes([{ kind: 'zone', zoneIdx: 0 }]);
 		expect(streetAxes).not.toBeNull();
 		expect(zoneAxes).not.toBeNull();
