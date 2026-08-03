@@ -280,7 +280,6 @@ const registry: SchemaRegistry = {
 };
 
 export const deformationSpecResourceSchema: ResourceSchema = {
-	key: 'deformationSpec',
 	name: 'Deformation Spec',
 	rootType: 'DeformationSpec',
 	registry,

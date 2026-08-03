@@ -77,7 +77,6 @@ const registry: SchemaRegistry = {
 };
 
 export const iceListResourceSchema: ResourceSchema = {
-	key: 'iceList',
 	name: 'ICE List',
 	rootType: 'ParsedIceList',
 	registry,

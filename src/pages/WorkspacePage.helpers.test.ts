@@ -41,7 +41,6 @@ function makeSchema(
 ): ResourceSchema {
 	const root: RecordSchema = { name: rootType, fields: rootFields };
 	return {
-		key: 'test',
 		name: 'Test Schema',
 		rootType,
 		registry: { [rootType]: root, ...registryExtra },
@@ -61,7 +60,6 @@ describe('hasNavigableSchemaDepth', () => {
 		// rootType references a record that the registry never declared. The
 		// helper must guard so the page renders nothing instead of crashing.
 		const orphan: ResourceSchema = {
-			key: 'orphan',
 			name: 'Orphan',
 			rootType: 'Missing',
 			registry: {},

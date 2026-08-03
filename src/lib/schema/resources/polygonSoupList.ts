@@ -214,7 +214,6 @@ const registry: SchemaRegistry = {
 };
 
 export const polygonSoupListResourceSchema: ResourceSchema = {
-	key: 'polygonSoupList',
 	name: 'Polygon Soup List',
 	rootType: 'PolygonSoupList',
 	registry,

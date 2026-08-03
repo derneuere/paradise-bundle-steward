@@ -264,8 +264,13 @@ export type SchemaRegistry = Record<string, RecordSchema>;
 
 // Resource schema — pairs a SchemaRegistry with a root type name. This is
 // what the editor loads when a resource is opened.
+// A schema has no key of its own. Identity belongs to the registration entry
+// in `src/lib/editor/registry.ts`, which names the Handler the schema is
+// registered under; one schema can also serve several variants of a type. A
+// self-declared `key` was free to disagree with the entry that registered it,
+// and ViewportPane picked its render binding off the schema's copy — so a
+// mismatch silently blanked the viewport instead of failing anywhere visible.
 export type ResourceSchema = {
-	key: string;           // matches ResourceHandler.key (e.g., "trafficData")
 	name: string;          // display name
 	rootType: string;      // top-level record type in `registry`
 	registry: SchemaRegistry;

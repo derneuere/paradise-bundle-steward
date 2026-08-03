@@ -470,7 +470,6 @@ const registry: SchemaRegistry = {
 };
 
 export const registryResourceSchema: ResourceSchema = {
-	key: 'registry',
 	name: 'Registry',
 	rootType: 'ParsedRegistry',
 	registry,

@@ -67,7 +67,6 @@ const registry: SchemaRegistry = {
 };
 
 export const iceDataResourceSchema: ResourceSchema = {
-	key: 'iceData',
 	name: 'ICE Data',
 	rootType: 'ParsedIceData',
 	registry,

@@ -257,7 +257,6 @@ const registry: SchemaRegistry = {
 };
 
 export const staticSoundMapResourceSchema: ResourceSchema = {
-	key: 'staticSoundMap',
 	name: 'Static Sound Map',
 	rootType: 'ParsedStaticSoundMap',
 	registry,

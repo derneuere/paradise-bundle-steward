@@ -17,7 +17,6 @@ import type { EditorProfile } from './types';
 import type { ResourceSchema } from '@/lib/schema/types';
 
 const stubSchema: ResourceSchema = {
-	key: 'stub',
 	name: 'Stub',
 	rootType: 'Stub',
 	registry: { Stub: { name: 'Stub', fields: {} } },

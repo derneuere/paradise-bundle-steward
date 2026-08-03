@@ -196,7 +196,6 @@ const registry: SchemaRegistry = {
 };
 
 export const aemsBankResourceSchema: ResourceSchema = {
-	key: 'aemsBank',
 	name: 'AEMS Bank',
 	rootType: 'ParsedAemsBank',
 	registry,

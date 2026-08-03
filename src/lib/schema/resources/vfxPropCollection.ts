@@ -431,7 +431,6 @@ const registry: SchemaRegistry = {
 };
 
 export const vfxPropCollectionResourceSchema: ResourceSchema = {
-	key: 'vfxPropCollection',
 	name: 'VFX Prop Collection',
 	rootType: 'ParsedVFXPropCollection',
 	registry,

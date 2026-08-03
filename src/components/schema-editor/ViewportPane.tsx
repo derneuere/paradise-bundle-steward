@@ -23,13 +23,14 @@ import { pickRenderBinding } from '@/lib/editor/bindings';
 // ---------------------------------------------------------------------------
 
 export function ViewportPane() {
-	const { resource, data, selectedPath, selectPath, setAtPath } = useSchemaEditor();
+	const { resourceKey, resource, data, selectedPath, selectPath, setAtPath } = useSchemaEditor();
 
 	// Error boundary resets when the user switches resource — otherwise a
 	// crash on one resource would wedge the pane until a full page reload.
 	return (
-		<ViewportErrorBoundary resetKey={resource.key}>
+		<ViewportErrorBoundary resetKey={resourceKey}>
 			<ViewportPaneInner
+				resourceKey={resourceKey}
 				resource={resource}
 				data={data}
 				selectedPath={selectedPath}
@@ -41,12 +42,14 @@ export function ViewportPane() {
 }
 
 function ViewportPaneInner({
+	resourceKey,
 	resource,
 	data,
 	selectedPath,
 	selectPath,
 	setAtPath,
 }: {
+	resourceKey: string;
 	resource: ResourceSchema;
 	data: unknown;
 	selectedPath: NodePath;
@@ -56,7 +59,7 @@ function ViewportPaneInner({
 	// Renderable / Texture own bespoke viewport surfaces — neither is a
 	// WorldViewport overlay, so resolve those before consulting the
 	// editor profile's `overlay`.
-	if (resource.key === 'renderable') {
+	if (resourceKey === 'renderable') {
 		// Renderable's 3D preview is the main user-facing value of the resource
 		// — a full three.js scene that decodes every 0xC record in the selected
 		// bundle. The decode context (RenderableDecodedProvider) is mounted once
@@ -64,7 +67,7 @@ function ViewportPaneInner({
 		// "Materials & Textures" tab share it; here we just consume it.
 		return <RenderableViewport />;
 	}
-	if (resource.key === 'shader') {
+	if (resourceKey === 'shader') {
 		// Shader's 3D preview translates its DXBC programs to GLSL and renders
 		// them on a test mesh. Self-contained (reads the selected Shader from
 		// the workspace + resolves its program-buffer imports), so it mounts
@@ -72,13 +75,13 @@ function ViewportPaneInner({
 		// overlay.
 		return <ShaderViewport />;
 	}
-	if (resource.key === 'texture') {
+	if (resourceKey === 'texture') {
 		// 2D preview: the schema's root is just the ParsedTextureHeader, but
 		// TextureViewport pulls decoded RGBA pixels from TextureContext
 		// (provided by TexturePage) so the center pane can show the image.
 		return <TextureViewport />;
 	}
-	if (resource.key === 'iceTakeDictionary' || resource.key === 'iceData') {
+	if (resourceKey === 'iceTakeDictionary' || resourceKey === 'iceData') {
 		// ICE takes are camera paths, not level-space data — preview them by
 		// flying the take's (car-relative) camera along a jump arc through a
 		// loaded track unit. Self-contained: reads the selected take from the
@@ -86,7 +89,7 @@ function ViewportPaneInner({
 		return <IceTakePreviewViewport />;
 	}
 
-	const binding = pickRenderBinding(resource.key, data);
+	const binding = pickRenderBinding(resourceKey, data);
 	const Overlay = binding?.overlay;
 	if (!Overlay) {
 		return (

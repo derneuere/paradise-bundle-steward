@@ -117,7 +117,6 @@ const registry: SchemaRegistry = {
 };
 
 export const wheelListResourceSchema: ResourceSchema = {
-	key: 'wheelList',
 	name: 'Wheel List',
 	rootType: 'ParsedWheelList',
 	registry,

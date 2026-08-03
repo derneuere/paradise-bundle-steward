@@ -5,14 +5,19 @@
 // schema-editor's tab adapters; the metadata registry (`./registry.ts`)
 // stays React-free so non-rendering callers (tree-label suffix, helper
 // modules under `src/components/workspace/`) can resolve schema + suffix
-// without dragging three.js / leaflet through their import graph.
+// without dragging three.js / leaflet through their import graph. That
+// split is deliberate — do not merge this file back into the registry.
 //
-// Entries are addressed by `(resourceKey, profileKind)` so the same
-// resource type can register different overlays for different variants
-// (e.g. AISections registers a V12 overlay for retail and a separate
-// `AISectionsLegacyOverlay` for the V4 prototype's read-only 3D viewer).
+// Entries are keyed on the EditorProfile OBJECT, not on a
+// `(resourceKey, profileKind)` string pair. Strings let a binding drift
+// onto a resource/variant that doesn't exist: the lookup just missed and
+// the user got "No viewport available for X" at runtime. Naming the profile
+// means a typo is an unresolved import, and `bind()`'s shared type
+// parameter ties the overlay's model type to the profile's — pairing the
+// V12 overlay with the V4 profile is now a compile error rather than a
+// prop-shape mismatch discovered in the scene.
 
-import type { ProfileRenderBinding } from './types';
+import type { EditorProfile, ProfileRenderBinding } from './types';
 import { aiSectionsExtensions } from '@/components/schema-editor/extensions/aiSectionsExtensions';
 import { attribSysVaultExtensions } from '@/components/schema-editor/extensions/attribSysVaultExtensions';
 import { challengeListExtensions } from '@/components/schema-editor/extensions/challengeListExtensions';
@@ -33,106 +38,117 @@ import { StreetDataOverlay } from '@/components/schema-editor/viewports/StreetDa
 import { TrafficDataOverlay } from '@/components/schema-editor/viewports/TrafficDataOverlay';
 import { TriggerDataOverlay } from '@/components/schema-editor/viewports/TriggerDataOverlay';
 import { ZoneListOverlay } from '@/components/schema-editor/viewports/ZoneListOverlay';
-import { pickProfileByKey } from './registry';
+import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
+import { attribSysVaultProfile } from './profiles/attribSysVault';
+import { challengeListProfile } from './profiles/challengeList';
+import { iceDataProfile } from './profiles/iceData';
+import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
+import { polygonSoupListProfile } from './profiles/polygonSoupList';
+import { propInstanceDataProfile } from './profiles/propInstanceData';
+import { renderableProfile } from './profiles/renderable';
+import { staticSoundMapProfile } from './profiles/staticSoundMap';
+import { streetDataProfile } from './profiles/streetData';
+import { trafficDataV44Profile, trafficDataV45Profile } from './profiles/trafficData';
+import { triggerDataProfile } from './profiles/triggerData';
+import { vehicleListProfile } from './profiles/vehicleList';
+import { zoneListProfile } from './profiles/zoneList';
+import { pickProfileByKey, resourceKeyForProfile } from './registry';
 
-// Outer key: resource key (matches ResourceHandler.key). Inner key: profile
-// kind (matches EditorProfile.kind). Lookup falls through to `undefined`
-// when no binding exists — the render site renders an empty state then.
-const BINDINGS: Record<string, Record<string, ProfileRenderBinding<unknown>>> = {
-	aiSections: {
-		v12: {
-			overlay: AISectionsOverlay as ProfileRenderBinding['overlay'],
-			extensions: aiSectionsExtensions,
-		},
-		// V4 prototype: read-only 3D viewer — no edit ops (no gizmo, no
-		// corner handles, no edge menu, no snap toggle). Edit affordances
-		// land incrementally in the "Legacy edit op:" follow-up issues.
-		v4: {
-			overlay: AISectionsLegacyOverlay as ProfileRenderBinding['overlay'],
-		},
-		// V6 prototype: same overlay component as V4 (the LegacyOverlay
-		// already accepts the V4 | V6 union). The schema editor's right
-		// pane gets the V6 schema with spanIndex / district fields the V4
-		// schema doesn't have. Same read-only treatment as V4.
-		v6: {
-			overlay: AISectionsLegacyOverlay as ProfileRenderBinding['overlay'],
-		},
-	},
-	trafficData: {
-		// V45 retail: the full editor surface — 3D overlay + every Phase-1/2
-		// tab as a schema-editor extension.
-		v45: {
-			overlay: TrafficDataOverlay as ProfileRenderBinding['overlay'],
-			extensions: trafficDataExtensions,
-		},
-		// V44 retail (Paradise PS3 era): same shape as V45, same overlay /
-		// extensions — only the tree-row suffix differs.
-		v44: {
-			overlay: TrafficDataOverlay as ProfileRenderBinding['overlay'],
-			extensions: trafficDataExtensions,
-		},
-		// V22 prototype: read-only inspector — no overlay (no fixture has
-		// hull internals decoded yet) and no extensions (the retail tabs all
-		// assume retail-shape arrays).
-	},
-	streetData: {
-		default: {
-			overlay: StreetDataOverlay as ProfileRenderBinding['overlay'],
-			extensions: streetDataExtensions,
-		},
-	},
-	triggerData: {
-		default: {
-			overlay: TriggerDataOverlay as ProfileRenderBinding['overlay'],
-			extensions: triggerDataExtensions,
-		},
-	},
-	zoneList: {
-		default: {
-			overlay: ZoneListOverlay as ProfileRenderBinding['overlay'],
-		},
-	},
-	polygonSoupList: {
-		default: {
-			overlay: PolygonSoupListOverlay as ProfileRenderBinding['overlay'],
-			extensions: polygonSoupListExtensions,
-		},
-	},
-	propInstanceData: {
-		default: {
-			overlay: PropInstanceDataOverlay as ProfileRenderBinding['overlay'],
-		},
-	},
-	staticSoundMap: {
-		default: {
-			overlay: StaticSoundMapOverlay as ProfileRenderBinding['overlay'],
-		},
-	},
-	challengeList: { default: { extensions: challengeListExtensions } },
-	vehicleList: { default: { extensions: vehicleListExtensions } },
-	renderable: { default: { extensions: renderableExtensions } },
+type BoundProfile = readonly [EditorProfile<any>, ProfileRenderBinding<any>];
+
+/** Pair a profile with its render binding. The shared `M` is the whole
+ *  point: it forces the overlay to speak the same parsed-model type the
+ *  profile claims, which is what the old `as ProfileRenderBinding['overlay']`
+ *  casts were suppressing. */
+function bind<M>(profile: EditorProfile<M>, binding: ProfileRenderBinding<M>): BoundProfile {
+	return [profile, binding];
+}
+
+// Lookup falls through to `undefined` when a profile has no binding — the
+// render site shows an empty state then. V22 TrafficData is deliberately
+// absent (read-only inspector: no fixture has hull internals decoded, and
+// the retail tabs all assume retail-shape arrays).
+const BINDINGS = new Map<EditorProfile<any>, ProfileRenderBinding<any>>([
+	bind(aiSectionsV12Profile, {
+		overlay: AISectionsOverlay,
+		extensions: aiSectionsExtensions,
+	}),
+	// V4 prototype: read-only 3D viewer — no edit ops (no gizmo, no corner
+	// handles, no edge menu, no snap toggle). Edit affordances land
+	// incrementally in the "Legacy edit op:" follow-up issues.
+	bind(aiSectionsV4Profile, { overlay: AISectionsLegacyOverlay }),
+	// V6 prototype: same overlay component as V4 (the LegacyOverlay already
+	// accepts the V4 | V6 union). The schema editor's right pane gets the V6
+	// schema with spanIndex / district fields the V4 schema doesn't have.
+	// Same read-only treatment as V4.
+	bind(aiSectionsV6Profile, { overlay: AISectionsLegacyOverlay }),
+	// V45 retail: the full editor surface — 3D overlay + every Phase-1/2 tab
+	// as a schema-editor extension.
+	bind(trafficDataV45Profile, {
+		overlay: TrafficDataOverlay,
+		extensions: trafficDataExtensions,
+	}),
+	// V44 retail (Paradise PS3 era): same shape as V45, same overlay /
+	// extensions — only the tree-row suffix differs.
+	bind(trafficDataV44Profile, {
+		overlay: TrafficDataOverlay,
+		extensions: trafficDataExtensions,
+	}),
+	bind(streetDataProfile, {
+		overlay: StreetDataOverlay,
+		extensions: streetDataExtensions,
+	}),
+	bind(triggerDataProfile, {
+		overlay: TriggerDataOverlay,
+		extensions: triggerDataExtensions,
+	}),
+	bind(zoneListProfile, { overlay: ZoneListOverlay }),
+	bind(polygonSoupListProfile, {
+		overlay: PolygonSoupListOverlay,
+		extensions: polygonSoupListExtensions,
+	}),
+	bind(propInstanceDataProfile, { overlay: PropInstanceDataOverlay }),
+	bind(staticSoundMapProfile, { overlay: StaticSoundMapOverlay }),
+	bind(challengeListProfile, { extensions: challengeListExtensions }),
+	bind(vehicleListProfile, { extensions: vehicleListExtensions }),
+	bind(renderableProfile, { extensions: renderableExtensions }),
 	// AttribSys Vault's per-attribute typed `fields` are a custom field; the
 	// extension resolves the right per-class schema by classHash.
-	attribSysVault: { default: { extensions: attribSysVaultExtensions } },
+	bind(attribSysVaultProfile, { extensions: attribSysVaultExtensions }),
 	// ICE Take Dictionary's per-take `runs` are a custom field; the extension
 	// renders the typed per-channel keyframe editor.
-	iceTakeDictionary: { default: { extensions: iceTakeDictionaryExtensions } },
+	bind(iceTakeDictionaryProfile, { extensions: iceTakeDictionaryExtensions }),
 	// ICE Data is a single standalone take; it reuses the same channel editor,
 	// but rooted at the resource's `take` rather than entries[i].take.
-	iceData: { default: { extensions: iceDataExtensions } },
+	bind(iceDataProfile, { extensions: iceDataExtensions }),
 	// playerCarColours / texture have no overlay or extensions; the schema
 	// editor's default form is enough.
-};
+]);
 
 /** Look up the render binding for the variant of `model` parsed for
  *  `resourceKey`. Returns `undefined` when no profile matches the model
- *  OR when no binding is registered for the profile's kind (e.g. V4
- *  prototype — read-only inspector but no 3D overlay yet). */
+ *  OR when the matched profile has no binding (e.g. V22 TrafficData —
+ *  read-only inspector but no 3D overlay yet). */
 export function pickRenderBinding(
 	resourceKey: string,
 	model: unknown,
 ): ProfileRenderBinding<unknown> | undefined {
 	const profile = pickProfileByKey(resourceKey, model);
 	if (!profile) return undefined;
-	return BINDINGS[resourceKey]?.[profile.kind];
+	return BINDINGS.get(profile);
+}
+
+/** Handler keys with at least one overlay-bearing binding — i.e. the
+ *  resources that actually draw something into a WorldViewport. Pinned
+ *  against `WORLD_VIEWPORT_FAMILY_KEYS` by the contract test so the family
+ *  list and the bindings can't drift apart. A key whose profile isn't
+ *  registered in `./registry.ts` (an orphan binding) is reported as
+ *  `undefined` and skipped — the contract test asserts there are none. */
+export function overlayBoundResourceKeys(): (string | undefined)[] {
+	const keys: (string | undefined)[] = [];
+	for (const [profile, binding] of BINDINGS) {
+		if (!binding.overlay) continue;
+		keys.push(resourceKeyForProfile(profile));
+	}
+	return keys;
 }

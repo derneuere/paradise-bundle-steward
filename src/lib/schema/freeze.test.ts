@@ -8,7 +8,6 @@ import { freezeSchema } from './freeze';
 import type { ResourceSchema } from './types';
 
 const makeSchema = (): ResourceSchema => ({
-	key: 'sample',
 	name: 'Sample',
 	rootType: 'Root',
 	registry: {

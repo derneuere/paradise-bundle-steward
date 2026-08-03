@@ -304,7 +304,6 @@ const registry: SchemaRegistry = {
 };
 
 export const hudMessageResourceSchema: ResourceSchema = {
-	key: 'hudMessage',
 	name: 'HUD Message',
 	rootType: 'ParsedHudMessage',
 	registry,

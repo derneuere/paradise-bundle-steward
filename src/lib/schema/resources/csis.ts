@@ -189,7 +189,6 @@ const registry: SchemaRegistry = {
 };
 
 export const csisResourceSchema: ResourceSchema = {
-	key: 'csis',
 	name: 'CSIS',
 	rootType: 'ParsedCsis',
 	registry,

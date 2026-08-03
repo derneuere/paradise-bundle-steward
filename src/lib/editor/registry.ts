@@ -12,6 +12,38 @@
 // an existing type), add its profile here and the rest is automatic. Other
 // editor sites (`WorkspacePage`, `WorldViewportComposition`, `ViewportPane`)
 // only see the lookup helpers — never the registration array directly.
+//
+// Identity comes from the Handler, never from this file: an entry names the
+// core `ResourceHandler` object and `typeId` / `key` are read through it.
+// The previous shape re-declared both by hand, and a wrong `typeId` was
+// silent — every editor lookup goes through `key`, so the whole UI kept
+// working while `pickProfile(typeId, model)` (the export planner's entry
+// point, `src/lib/conversion/exportPlan.ts`) missed and quietly dropped the
+// Resource from the export plan. Eleven such typos shipped that way, one of
+// them parking playerCarColours on vehicleList's real id. Reading the pair
+// off the Handler makes that whole class of bug unrepresentable.
+//
+// The Handlers come from the core registry's index, never from their
+// individual files: parsers import `bundle`, which imports the index, so
+// entering that graph at a leaf handler would leave the index's own handler
+// bindings uninitialised when the cycle closes.
+
+import type { ResourceHandler } from '@/lib/core/registry/handler';
+import {
+	aemsBankHandler, aiSectionsHandler, aptDataHandler, attribSysVaultHandler,
+	challengeListHandler, colourCubeHandler, commsToolListDefinitionHandler, commsToolListHandler,
+	csisHandler, deformationSpecHandler, environmentDictionaryHandler, environmentKeyframeHandler,
+	environmentTimeLineHandler, flaptFileHandler, fontHandler, genericRwacWaveContentHandler,
+	guiPopupHandler, hudMessageHandler, hudMessageSequenceDictionaryHandler, hudMessageSequenceHandler,
+	iceDataHandler, iceListHandler, iceTakeDictionaryHandler, idListHandler,
+	instanceListHandler, languageHandler, massiveLookupTableHandler, nicotineHandler,
+	particleDescriptionCollectionHandler, particleDescriptionHandler, playerCarColoursHandler, polygonSoupListHandler,
+	propGraphicsListHandler, propInstanceDataHandler, propPhysicsHandler, registryHandler,
+	renderableHandler, shaderHandler, snapshotDataHandler, splicerHandler,
+	staticSoundMapHandler, streetDataHandler, textureHandler, textureNameMapHandler,
+	trafficDataHandler, triggerDataHandler, vehicleListHandler, vfxMeshCollectionHandler,
+	vfxPropCollectionHandler, wheelListHandler, worldPainter2DHandler, zoneListHandler,
+} from '@/lib/core/registry';
 
 import { aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile } from './profiles/aiSections';
 import { aemsBankProfile } from './profiles/aemsBank';
@@ -34,6 +66,7 @@ import { hudMessageProfile } from './profiles/hudMessage';
 import { hudMessageSequenceProfile } from './profiles/hudMessageSequence';
 import { hudMessageSequenceDictionaryProfile } from './profiles/hudMessageSequenceDictionary';
 import { iceTakeDictionaryProfile } from './profiles/iceTakeDictionary';
+import { instanceListProfile } from './profiles/instanceList';
 import { iceListProfile } from './profiles/iceList';
 import { iceDataProfile } from './profiles/iceData';
 import { idListProfile } from './profiles/idList';
@@ -75,22 +108,18 @@ import {
 	suffixFromList,
 } from './resolver';
 
-/** Per-typeId profile sets. Each entry is { typeId, profiles } and the
- *  resolver picks the first profile whose `matches` returns true. List
- *  variant-specific profiles before any catch-all default for the same
- *  typeId. */
+/** Per-Handler profile sets. The Handler carries the entry's identity
+ *  (`typeId`, `key`); the resolver picks the first profile whose `matches`
+ *  returns true. List variant-specific profiles before any catch-all default
+ *  for the same Handler. */
 type RegistryEntry = {
-	typeId: number;
-	/** Stable handler key — e.g. 'aiSections'. Mirrors the core registry's
-	 *  key so the workspace can look up a profile set by `resourceKey`. */
-	key: string;
+	handler: ResourceHandler;
 	profiles: EditorProfile<any>[];
 };
 
 const ENTRIES: RegistryEntry[] = [
 	{
-		typeId: 0x10001,
-		key: 'aiSections',
+		handler: aiSectionsHandler,
 		// Order matters: the FIRST profile is treated as the type's "primary"
 		// variant by `profileSuffixFor` (V12 retail stays bare; V4 + V6
 		// prototypes get `(v4 prototype)` / `(v6 prototype)` suffixes on the
@@ -98,283 +127,91 @@ const ENTRIES: RegistryEntry[] = [
 		profiles: [aiSectionsV12Profile, aiSectionsV4Profile, aiSectionsV6Profile],
 	},
 	{
-		// 0x10002 — matches the core registry handler (`trafficDataHandler`).
-		// The previous 0x10003 was a typo from the initial profile scaffold
-		// that masked tree-row suffix lookups; resolved while wiring the
-		// V22/V44/V45 split per issue #45.
-		typeId: 0x10002,
-		key: 'trafficData',
+		handler: trafficDataHandler,
 		// Order matters: the FIRST profile is treated as the type's "primary"
 		// variant by `profileSuffixFor` (V45 retail stays bare; V44 gets the
 		// `(v44 Paradise PS3 era)` suffix on the tree row, V22 gets the
 		// `(v22 prototype)` suffix).
 		profiles: [trafficDataV45Profile, trafficDataV44Profile, trafficDataV22Profile],
 	},
-	// The ten typeIds below were corrected in one sweep against the core
-	// registry (the declared source of truth) — the same scaffold-typo class
-	// the trafficData 0x10003→0x10002 fix above documents. They matter to
-	// `pickProfile(typeId, model)` callers (exportPlan); the old values made
-	// those lookups miss — and playerCarColours sat on vehicleList's REAL id
-	// (0x10005), resolving the wrong profile for vehicleList resources.
+	{ handler: streetDataHandler, profiles: [streetDataProfile] },
+	{ handler: triggerDataHandler, profiles: [triggerDataProfile] },
+	{ handler: zoneListHandler, profiles: [zoneListProfile] },
+	{ handler: polygonSoupListHandler, profiles: [polygonSoupListProfile] },
+	{ handler: propInstanceDataHandler, profiles: [propInstanceDataProfile] },
+	{ handler: propGraphicsListHandler, profiles: [propGraphicsListProfile] },
 	{
-		typeId: 0x10018,
-		key: 'streetData',
-		profiles: [streetDataProfile],
+		// Sibling of propInstanceData — a flat array of world transforms. It had
+		// a schema but no profile, so the tree expanded its subtree through the
+		// old schema-barrel fallback while the inspector (profile-only) rendered
+		// empty. Registering it makes both surfaces agree.
+		handler: instanceListHandler,
+		profiles: [instanceListProfile],
 	},
-	{
-		typeId: 0x10003,
-		key: 'triggerData',
-		profiles: [triggerDataProfile],
-	},
-	{
-		typeId: 0xb000,
-		key: 'zoneList',
-		profiles: [zoneListProfile],
-	},
-	{
-		typeId: 0x43,
-		key: 'polygonSoupList',
-		profiles: [polygonSoupListProfile],
-	},
-	{
-		typeId: 0x10011,
-		key: 'propInstanceData',
-		profiles: [propInstanceDataProfile],
-	},
-	{
-		typeId: 0x10010,
-		key: 'propGraphicsList',
-		profiles: [propGraphicsListProfile],
-	},
-	{
-		typeId: 0x10016,
-		key: 'staticSoundMap',
-		profiles: [staticSoundMapProfile],
-	},
-	{
-		typeId: 0x1000f,
-		key: 'propPhysics',
-		profiles: [propPhysicsProfile],
-	},
-	{
-		typeId: 0x27,
-		key: 'language',
-		profiles: [languageProfile],
-	},
-	{
-		typeId: 0x2c,
-		key: 'hudMessage',
-		profiles: [hudMessageProfile],
-	},
-	{
-		typeId: 0x2e,
-		key: 'hudMessageSequence',
-		profiles: [hudMessageSequenceProfile],
-	},
-	{
-		typeId: 0x2f,
-		key: 'hudMessageSequenceDictionary',
-		profiles: [hudMessageSequenceDictionaryProfile],
-	},
-	{
-		typeId: 0x1f,
-		key: 'guiPopup',
-		profiles: [guiPopupProfile],
-	},
-	{
-		typeId: 0x30,
-		key: 'worldPainter2D',
-		profiles: [worldPainter2DProfile],
-	},
-	{
-		typeId: 0x10012,
-		key: 'environmentKeyframe',
-		profiles: [environmentKeyframeProfile],
-	},
-	{
-		typeId: 0x10013,
-		key: 'environmentTimeLine',
-		profiles: [environmentTimeLineProfile],
-	},
-	{
-		typeId: 0x10014,
-		key: 'environmentDictionary',
-		profiles: [environmentDictionaryProfile],
-	},
-	{
-		typeId: 0x2b,
-		key: 'colourCube',
-		profiles: [colourCubeProfile],
-	},
-	{
-		typeId: 0x21,
-		key: 'font',
-		profiles: [fontProfile],
-	},
-	{
-		typeId: 0x1001a,
-		key: 'massiveLookupTable',
-		profiles: [massiveLookupTableProfile],
-	},
-	{
-		typeId: 0xa000,
-		key: 'registry',
-		profiles: [registryProfile],
-	},
-	{
-		typeId: 0x1001d,
-		key: 'particleDescription',
-		profiles: [particleDescriptionProfile],
-	},
-	{
-		typeId: 0x10008,
-		key: 'particleDescriptionCollection',
-		profiles: [particleDescriptionCollectionProfile],
-	},
-	{
-		typeId: 0x1000b,
-		key: 'textureNameMap',
-		profiles: [textureNameMapProfile],
-	},
-	{
-		typeId: 0x10019,
-		key: 'vfxMeshCollection',
-		profiles: [vfxMeshCollectionProfile],
-	},
-	{
-		typeId: 0x1001b,
-		key: 'vfxPropCollection',
-		profiles: [vfxPropCollectionProfile],
-	},
-	{
-		typeId: 0x10009,
-		key: 'wheelList',
-		profiles: [wheelListProfile],
-	},
-	{
-		typeId: 0x25,
-		key: 'idList',
-		profiles: [idListProfile],
-	},
-	{
-		typeId: 0x1e,
-		key: 'aptData',
-		profiles: [aptDataProfile],
-	},
-	{
-		typeId: 0xa020,
-		key: 'genericRwacWaveContent',
-		profiles: [genericRwacWaveContentProfile],
-	},
-	{
-		typeId: 0xa022,
-		key: 'aemsBank',
-		profiles: [aemsBankProfile],
-	},
-	{
-		typeId: 0xa023,
-		key: 'csis',
-		profiles: [csisProfile],
-	},
-	{
-		typeId: 0xa024,
-		key: 'nicotine',
-		profiles: [nicotineProfile],
-	},
-	{
-		typeId: 0xa025,
-		key: 'splicer',
-		profiles: [splicerProfile],
-	},
-	{
-		typeId: 0xa029,
-		key: 'snapshotData',
-		profiles: [snapshotDataProfile],
-	},
-	{
-		typeId: 0x10020,
-		key: 'flaptFile',
-		profiles: [flaptFileProfile],
-	},
-	{
-		typeId: 0x45,
-		key: 'commsToolListDefinition',
-		profiles: [commsToolListDefinitionProfile],
-	},
-	{
-		typeId: 0x46,
-		key: 'commsToolList',
-		profiles: [commsToolListProfile],
-	},
-	{
-		typeId: 0x1001f,
-		key: 'challengeList',
-		profiles: [challengeListProfile],
-	},
-	{
-		typeId: 0x10005,
-		key: 'vehicleList',
-		profiles: [vehicleListProfile],
-	},
-	{
-		typeId: 0x1001e,
-		key: 'playerCarColours',
-		profiles: [playerCarColoursProfile],
-	},
-	{
-		typeId: 0x41,
-		key: 'iceTakeDictionary',
-		profiles: [iceTakeDictionaryProfile],
-	},
-	{
-		typeId: 0x1000c,
-		key: 'iceList',
-		profiles: [iceListProfile],
-	},
-	{
-		typeId: 0x1000d,
-		key: 'iceData',
-		profiles: [iceDataProfile],
-	},
-	{
-		typeId: 0xc,
-		key: 'renderable',
-		profiles: [renderableProfile],
-	},
-	{
-		typeId: 0x32,
-		key: 'shader',
-		profiles: [shaderProfile],
-	},
-	{
-		typeId: 0x0,
-		key: 'texture',
-		profiles: [textureProfile],
-	},
-	{
-		typeId: 0x1c,
-		key: 'attribSysVault',
-		profiles: [attribSysVaultProfile],
-	},
-	{
-		typeId: 0x1001c,
-		key: 'deformationSpec',
-		profiles: [deformationSpecProfile],
-	},
+	{ handler: staticSoundMapHandler, profiles: [staticSoundMapProfile] },
+	{ handler: propPhysicsHandler, profiles: [propPhysicsProfile] },
+	{ handler: languageHandler, profiles: [languageProfile] },
+	{ handler: hudMessageHandler, profiles: [hudMessageProfile] },
+	{ handler: hudMessageSequenceHandler, profiles: [hudMessageSequenceProfile] },
+	{ handler: hudMessageSequenceDictionaryHandler, profiles: [hudMessageSequenceDictionaryProfile] },
+	{ handler: guiPopupHandler, profiles: [guiPopupProfile] },
+	{ handler: worldPainter2DHandler, profiles: [worldPainter2DProfile] },
+	{ handler: environmentKeyframeHandler, profiles: [environmentKeyframeProfile] },
+	{ handler: environmentTimeLineHandler, profiles: [environmentTimeLineProfile] },
+	{ handler: environmentDictionaryHandler, profiles: [environmentDictionaryProfile] },
+	{ handler: colourCubeHandler, profiles: [colourCubeProfile] },
+	{ handler: fontHandler, profiles: [fontProfile] },
+	{ handler: massiveLookupTableHandler, profiles: [massiveLookupTableProfile] },
+	{ handler: registryHandler, profiles: [registryProfile] },
+	{ handler: particleDescriptionHandler, profiles: [particleDescriptionProfile] },
+	{ handler: particleDescriptionCollectionHandler, profiles: [particleDescriptionCollectionProfile] },
+	{ handler: textureNameMapHandler, profiles: [textureNameMapProfile] },
+	{ handler: vfxMeshCollectionHandler, profiles: [vfxMeshCollectionProfile] },
+	{ handler: vfxPropCollectionHandler, profiles: [vfxPropCollectionProfile] },
+	{ handler: wheelListHandler, profiles: [wheelListProfile] },
+	{ handler: idListHandler, profiles: [idListProfile] },
+	{ handler: aptDataHandler, profiles: [aptDataProfile] },
+	{ handler: genericRwacWaveContentHandler, profiles: [genericRwacWaveContentProfile] },
+	{ handler: aemsBankHandler, profiles: [aemsBankProfile] },
+	{ handler: csisHandler, profiles: [csisProfile] },
+	{ handler: nicotineHandler, profiles: [nicotineProfile] },
+	{ handler: splicerHandler, profiles: [splicerProfile] },
+	{ handler: snapshotDataHandler, profiles: [snapshotDataProfile] },
+	{ handler: flaptFileHandler, profiles: [flaptFileProfile] },
+	{ handler: commsToolListDefinitionHandler, profiles: [commsToolListDefinitionProfile] },
+	{ handler: commsToolListHandler, profiles: [commsToolListProfile] },
+	{ handler: challengeListHandler, profiles: [challengeListProfile] },
+	{ handler: vehicleListHandler, profiles: [vehicleListProfile] },
+	{ handler: playerCarColoursHandler, profiles: [playerCarColoursProfile] },
+	{ handler: iceTakeDictionaryHandler, profiles: [iceTakeDictionaryProfile] },
+	{ handler: iceListHandler, profiles: [iceListProfile] },
+	{ handler: iceDataHandler, profiles: [iceDataProfile] },
+	{ handler: renderableHandler, profiles: [renderableProfile] },
+	{ handler: shaderHandler, profiles: [shaderProfile] },
+	{ handler: textureHandler, profiles: [textureProfile] },
+	{ handler: attribSysVaultHandler, profiles: [attribSysVaultProfile] },
+	{ handler: deformationSpecHandler, profiles: [deformationSpecProfile] },
 ];
 
 const byTypeId = new Map<number, RegistryEntry>();
 const byKey = new Map<string, RegistryEntry>();
+// Reverse index: which entry does a given profile object belong to. Lets
+// `bindings.ts` name the resource behind a profile without re-declaring a
+// key of its own — the same de-duplication of identity that the entries
+// themselves get from the Handler.
+const entryByProfile = new Map<EditorProfile<any>, RegistryEntry>();
 for (const entry of ENTRIES) {
-	if (byTypeId.has(entry.typeId)) {
-		throw new Error(`Duplicate editor registry typeId 0x${entry.typeId.toString(16)}: ${entry.key}`);
+	const { typeId, key } = entry.handler;
+	if (byTypeId.has(typeId)) {
+		throw new Error(`Duplicate editor registry typeId 0x${typeId.toString(16)}: ${key}`);
 	}
-	if (byKey.has(entry.key)) {
-		throw new Error(`Duplicate editor registry key: ${entry.key}`);
+	if (byKey.has(key)) {
+		throw new Error(`Duplicate editor registry key: ${key}`);
 	}
-	assertUniqueKinds(entry.key, entry.profiles);
-	byTypeId.set(entry.typeId, entry);
-	byKey.set(entry.key, entry);
+	assertUniqueKinds(key, entry.profiles);
+	byTypeId.set(typeId, entry);
+	byKey.set(key, entry);
+	for (const profile of entry.profiles) entryByProfile.set(profile, entry);
 }
 
 /** Pick the EditorProfile that matches a parsed model.
@@ -406,6 +243,46 @@ export function pickProfileByKey(key: string, model: unknown): EditorProfile | u
  *  bespoke editor opt in via the handler's `capabilityOverrides.editor`). */
 export function hasEditorProfile(key: string): boolean {
 	return byKey.has(key);
+}
+
+/** The Handler key a profile is registered under, or `undefined` when the
+ *  profile object was never registered here (an orphan). Consumed by
+ *  `bindings.ts` to report which resources own a render binding. */
+export function resourceKeyForProfile(profile: EditorProfile<any>): string | undefined {
+	return entryByProfile.get(profile)?.handler.key;
+}
+
+/** Flat summary of one registered Handler — the kinds its profiles claim and
+ *  the union of every kind those profiles can convert TO. */
+export type RegisteredTypeSummary = {
+	typeId: number;
+	key: string;
+	kinds: string[];
+	conversionTargets: string[];
+};
+
+/** Enumerate the registry as data.
+ *
+ *  Exists so `src/lib/conversion/targets.ts` can be contract-tested against it:
+ *  `exportPlan` skips any typeId a preset leaves unconstrained, so a type that
+ *  HAS a registered migration but no preset entry exports unmigrated and
+ *  silently — the failure mode is wrong bytes on disk, not an error. The test
+ *  turns that into a build-time failure the moment a conversion is added. */
+export function listRegisteredTypes(): RegisteredTypeSummary[] {
+	return ENTRIES.map((entry) => {
+		const conversionTargets = new Set<string>();
+		for (const profile of entry.profiles) {
+			for (const target of Object.keys(profile.conversions ?? {})) {
+				conversionTargets.add(target);
+			}
+		}
+		return {
+			typeId: entry.handler.typeId,
+			key: entry.handler.key,
+			kinds: entry.profiles.map((p) => p.kind),
+			conversionTargets: [...conversionTargets],
+		};
+	});
 }
 
 /** Convenience for the Workspace tree-row label: surfaces a

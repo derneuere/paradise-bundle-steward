@@ -269,7 +269,6 @@ const registry: SchemaRegistry = {
 };
 
 export const fontResourceSchema: ResourceSchema = {
-	key: 'font',
 	name: 'Font',
 	rootType: 'ParsedFont',
 	registry,

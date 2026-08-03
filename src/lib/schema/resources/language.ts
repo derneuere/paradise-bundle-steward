@@ -133,7 +133,6 @@ const registry: SchemaRegistry = {
 };
 
 export const languageResourceSchema: ResourceSchema = {
-	key: 'language',
 	name: 'Language',
 	rootType: 'ParsedLanguage',
 	registry,

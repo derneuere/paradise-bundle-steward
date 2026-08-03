@@ -282,7 +282,6 @@ const registry: SchemaRegistry = {
 };
 
 export const zoneListResourceSchema: ResourceSchema = {
-	key: 'zoneList',
 	name: 'Zone List',
 	rootType: 'ParsedZoneList',
 	registry,

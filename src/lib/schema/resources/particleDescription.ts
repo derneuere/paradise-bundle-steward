@@ -387,7 +387,6 @@ const registry: SchemaRegistry = {
 };
 
 export const particleDescriptionResourceSchema: ResourceSchema = {
-	key: 'particleDescription',
 	name: 'Particle Description',
 	rootType: 'ParsedParticleDescription',
 	registry,

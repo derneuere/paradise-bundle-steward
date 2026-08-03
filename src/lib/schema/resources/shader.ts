@@ -164,7 +164,6 @@ const registry: SchemaRegistry = {
 };
 
 export const shaderResourceSchema: ResourceSchema = {
-	key: 'shader',
 	name: 'Shader',
 	rootType: 'ParsedShader',
 	registry,

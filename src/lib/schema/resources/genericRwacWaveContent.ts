@@ -181,7 +181,6 @@ const registry: SchemaRegistry = {
 };
 
 export const genericRwacWaveContentResourceSchema: ResourceSchema = {
-	key: 'genericRwacWaveContent',
 	name: 'Generic RWAC Wave Content',
 	rootType: 'ParsedGenericRwacWaveContent',
 	registry,
