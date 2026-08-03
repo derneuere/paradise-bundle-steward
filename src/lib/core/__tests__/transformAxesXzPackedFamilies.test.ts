@@ -10,21 +10,24 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-	bulkAISectionsAxes,
-	type AISectionEntityRef,
-} from '../aiSectionsOps';
-import {
+	createAISectionsResolver,
 	streetDataResolver,
+	type AISectionRef,
 	type StreetDataRef,
 } from '../transform';
+import type { ParsedAISectionsV12 } from '../aiSections';
+
+// `axes()` is a pure function of the ref KINDS — it never reads the model — so
+// an empty one is enough to obtain the AI-sections profile here.
+const EMPTY_AI = { sections: [] } as unknown as ParsedAISectionsV12;
 import {
-	bulkTrafficDataAxes,
-	type TrafficDataEntityRef,
-} from '../trafficDataOps';
+	zoneListResolver,
+	type ZoneListRef,
+} from '../transform/resolvers/zoneList';
 import {
-	bulkZoneListAxes,
-	type ZoneListEntityRef,
-} from '../zoneListOps';
+	trafficDataResolver,
+	type TrafficDataRef,
+} from '../transform/resolvers/trafficData';
 import {
 	intersectTransformAxes,
 	TRANSFORM_AXES_FULL_3D,
@@ -32,28 +35,28 @@ import {
 
 describe('auto-disable rule — XZ-packed contributor in Selection forces yaw-only', () => {
 	it('zone point alone: yaw-only', () => {
-		const refs: ZoneListEntityRef[] = [{ kind: 'zone', zoneIdx: 0 }];
-		const axes = bulkZoneListAxes(refs);
+		const refs: ZoneListRef[] = [{ kind: 'zone', zoneIdx: 0 }];
+		const axes = zoneListResolver.axes(refs);
 		expect(axes?.rotate.x).toBe(false);
 		expect(axes?.rotate.y).toBe(true);
 		expect(axes?.rotate.z).toBe(false);
 	});
 
 	it('traffic yaw box alone: yaw-only', () => {
-		const refs: TrafficDataEntityRef[] = [
+		const refs: TrafficDataRef[] = [
 			{ kind: 'junction', hullIdx: 0, junctionIdx: 0 },
 		];
-		const axes = bulkTrafficDataAxes(refs);
+		const axes = trafficDataResolver.axes(refs);
 		expect(axes?.rotate.x).toBe(false);
 		expect(axes?.rotate.y).toBe(true);
 		expect(axes?.rotate.z).toBe(false);
 	});
 
 	it('traffic lane rung alone: yaw-only', () => {
-		const refs: TrafficDataEntityRef[] = [
+		const refs: TrafficDataRef[] = [
 			{ kind: 'laneRung', hullIdx: 0, rungIdx: 0 },
 		];
-		const axes = bulkTrafficDataAxes(refs);
+		const axes = trafficDataResolver.axes(refs);
 		expect(axes?.rotate.x).toBe(false);
 		expect(axes?.rotate.y).toBe(true);
 		expect(axes?.rotate.z).toBe(false);
@@ -69,7 +72,7 @@ describe('auto-disable rule — XZ-packed contributor in Selection forces yaw-on
 
 	it('mixed: street ref + zone point → yaw-only (zone vetoes pitch/roll)', () => {
 		const streetAxes = streetDataResolver.axes([{ kind: 'road', roadIdx: 0 }]);
-		const zoneAxes = bulkZoneListAxes([{ kind: 'zone', zoneIdx: 0 }]);
+		const zoneAxes = zoneListResolver.axes([{ kind: 'zone', zoneIdx: 0 }]);
 		expect(streetAxes).not.toBeNull();
 		expect(zoneAxes).not.toBeNull();
 		const intersected = intersectTransformAxes([streetAxes!, zoneAxes!]);
@@ -82,7 +85,7 @@ describe('auto-disable rule — XZ-packed contributor in Selection forces yaw-on
 		// Until trigger boxes (issue #77) land we use TRANSFORM_AXES_FULL_3D
 		// as the trigger-box stand-in. Once #77 merges this test stands as
 		// the auto-disable regression for the cross-resource case.
-		const zoneAxes = bulkZoneListAxes([{ kind: 'zone', zoneIdx: 0 }]);
+		const zoneAxes = zoneListResolver.axes([{ kind: 'zone', zoneIdx: 0 }]);
 		const intersected = intersectTransformAxes([TRANSFORM_AXES_FULL_3D, zoneAxes!]);
 		expect(intersected.rotate.x).toBe(false);
 		expect(intersected.rotate.y).toBe(true);
@@ -90,15 +93,15 @@ describe('auto-disable rule — XZ-packed contributor in Selection forces yaw-on
 	});
 
 	it('mixed: traffic yaw box + zone point + AI section + lane rung → yaw-only', () => {
-		const aiRefs: AISectionEntityRef[] = [{ kind: 'section', sectionIdx: 0 }];
-		const zoneRefs: ZoneListEntityRef[] = [{ kind: 'zone', zoneIdx: 0 }];
-		const trafficRefs: TrafficDataEntityRef[] = [
+		const aiRefs: AISectionRef[] = [{ kind: 'section', sectionIdx: 0 }];
+		const zoneRefs: ZoneListRef[] = [{ kind: 'zone', zoneIdx: 0 }];
+		const trafficRefs: TrafficDataRef[] = [
 			{ kind: 'junction', hullIdx: 0, junctionIdx: 0 },
 			{ kind: 'laneRung', hullIdx: 0, rungIdx: 0 },
 		];
-		const aiAxes = bulkAISectionsAxes(aiRefs)!;
-		const zoneAxes = bulkZoneListAxes(zoneRefs)!;
-		const trafficAxes = bulkTrafficDataAxes(trafficRefs)!;
+		const aiAxes = createAISectionsResolver(EMPTY_AI).axes(aiRefs)!;
+		const zoneAxes = zoneListResolver.axes(zoneRefs)!;
+		const trafficAxes = trafficDataResolver.axes(trafficRefs)!;
 		const intersected = intersectTransformAxes([aiAxes, zoneAxes, trafficAxes]);
 		expect(intersected.rotate.x).toBe(false);
 		expect(intersected.rotate.y).toBe(true);

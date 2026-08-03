@@ -23,7 +23,7 @@ export type ResolvedSlot<S> = { slot: S; point: Point };
  */
 export function resolveSlots<M, R, S>(
 	model: M,
-	refs: readonly R[],
+	refs: readonly NoInfer<R>[],
 	resolver: Resolver<M, R, S>,
 ): ResolvedSlot<S>[] {
 	const seen = new Set<string>();
@@ -52,7 +52,7 @@ export function resolveSlots<M, R, S>(
  */
 export function selectionPivot<M, R, S>(
 	model: M,
-	refs: readonly R[],
+	refs: readonly NoInfer<R>[],
 	resolver: Resolver<M, R, S>,
 ): Point | null {
 	return medianPoint(resolveSlots(model, refs, resolver).map((s) => s.point));
@@ -81,7 +81,7 @@ export function selectionPivot<M, R, S>(
  */
 export function transform<M, R, S>(
 	model: M,
-	refs: readonly R[],
+	refs: readonly NoInfer<R>[],
 	delta: TransformDelta,
 	resolver: Resolver<M, R, S>,
 ): M {

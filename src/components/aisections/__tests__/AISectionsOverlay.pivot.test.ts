@@ -40,10 +40,16 @@ import * as THREE from 'three';
 import type { AISection, ParsedAISectionsV12 } from '@/lib/core/aiSections';
 import { SectionSpeed } from '@/lib/core/aiSections';
 import {
-	bulkRotateEntitiesYaw,
-	bulkSelectionPivot,
-	type AISectionEntityRef,
-} from '@/lib/core/aiSectionsOps';
+	createAISectionsResolver,
+	selectionPivot,
+	transform,
+	type AISectionRef,
+} from '@/lib/core/transform';
+
+/** Section Ys are derived from portal anchors in production; these fixtures are
+ *  partial models, so pin them flat and keep the test about the pivot. */
+const ZERO_T = { x: 0, y: 0, z: 0 };
+const flatYs = (n: number) => new Array<number>(n).fill(0);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -72,7 +78,7 @@ function makeSection(
  */
 function makeTwoSectionFixture(): {
 	model: ParsedAISectionsV12;
-	refs: AISectionEntityRef[];
+	refs: AISectionRef[];
 	medianPivot: { x: number; y: number; z: number };
 	overridePivot: { x: number; y: number; z: number };
 } {
@@ -85,14 +91,13 @@ function makeTwoSectionFixture(): {
 	const model: ParsedAISectionsV12 = {
 		sections: [a, b],
 		// The overlay never reads these other fields in the rotate path —
-		// `bulkRotateEntitiesYaw` walks `model.sections` only.
+		// the rotate path walks `model.sections` only.
 	} as unknown as ParsedAISectionsV12;
-	const refs: AISectionEntityRef[] = [
+	const refs: AISectionRef[] = [
 		{ kind: 'section', sectionIdx: 0 },
 		{ kind: 'section', sectionIdx: 1 },
 	];
-	const sectionY = () => 0;
-	const median = bulkSelectionPivot(model, refs, sectionY);
+	const median = selectionPivot(model, refs, createAISectionsResolver(model, flatYs(2)));
 	if (!median) throw new Error('test fixture: median pivot must be defined');
 	return {
 		model,
@@ -111,18 +116,8 @@ describe('AISectionsOverlay pivot drag-reposition (issue #76)', () => {
 		const { model, refs, medianPivot, overridePivot } = makeTwoSectionFixture();
 		const theta = Math.PI / 2; // 90° CCW yaw
 
-		const rotatedAtMedian = bulkRotateEntitiesYaw(
-			model,
-			refs,
-			{ x: medianPivot.x, z: medianPivot.z },
-			theta,
-		);
-		const rotatedAtOverride = bulkRotateEntitiesYaw(
-			model,
-			refs,
-			{ x: overridePivot.x, z: overridePivot.z },
-			theta,
-		);
+		const rotatedAtMedian = transform(model, refs, { translate: ZERO_T, rotate: { x: 0, y: theta, z: 0 }, pivot: medianPivot }, createAISectionsResolver(model, flatYs(model.sections.length)));
+		const rotatedAtOverride = transform(model, refs, { translate: ZERO_T, rotate: { x: 0, y: theta, z: 0 }, pivot: overridePivot }, createAISectionsResolver(model, flatYs(model.sections.length)));
 
 		// Same Selection, same theta, two different pivots — section 0's
 		// first corner ends up at two different world positions. We compute
@@ -147,12 +142,7 @@ describe('AISectionsOverlay pivot drag-reposition (issue #76)', () => {
 		const { model, refs, overridePivot } = makeTwoSectionFixture();
 		const theta = Math.PI; // 180° — easiest to eyeball
 
-		const rotated = bulkRotateEntitiesYaw(
-			model,
-			refs,
-			{ x: overridePivot.x, z: overridePivot.z },
-			theta,
-		);
+		const rotated = transform(model, refs, { translate: ZERO_T, rotate: { x: 0, y: theta, z: 0 }, pivot: overridePivot }, createAISectionsResolver(model, flatYs(model.sections.length)));
 
 		// Section 0's first corner was at (45, -5). After 180° rotation
 		// around (200, 200) it lands at (2·200 − 45, 2·200 − (−5)) =
@@ -187,12 +177,12 @@ describe('AISectionsOverlay pivot drag-reposition (issue #76)', () => {
 			...model,
 			sections: [...model.sections, c],
 		};
-		const extendedRefs: AISectionEntityRef[] = [
+		const extendedRefs: AISectionRef[] = [
 			...refs,
 			{ kind: 'section', sectionIdx: 2 },
 		];
 		const sectionY = () => 0;
-		const newMedian = bulkSelectionPivot(extendedModel, extendedRefs, sectionY);
+		const newMedian = selectionPivot(extendedModel, extendedRefs, createAISectionsResolver(extendedModel, flatYs(extendedModel.sections.length)));
 
 		expect(newMedian).not.toBeNull();
 		// The new median should NOT equal the old median — adding the
@@ -207,17 +197,12 @@ describe('AISectionsOverlay pivot drag-reposition (issue #76)', () => {
 		// `applyDragToModel`. The overlay's pivot wiring stops at
 		// `setBulkPivotOverride` (pure UI state) — there is no commit
 		// path that pushes to undo history. We assert this structurally
-		// by exercising `bulkRotateEntitiesYaw` with theta=0: even with a
+		// by exercising `transform` with theta=0: even with a
 		// non-default pivot, the no-op gesture returns the original model
 		// reference unchanged (preserving the byte-for-byte BND2 writeback
 		// invariant that the rest of the bulk ops rely on).
 		const { model, refs, overridePivot } = makeTwoSectionFixture();
-		const result = bulkRotateEntitiesYaw(
-			model,
-			refs,
-			{ x: overridePivot.x, z: overridePivot.z },
-			0,
-		);
+		const result = transform(model, refs, { translate: ZERO_T, rotate: { x: 0, y: 0, z: 0 }, pivot: overridePivot }, createAISectionsResolver(model, flatYs(model.sections.length)));
 		expect(result).toBe(model);
 	});
 });

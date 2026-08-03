@@ -25,15 +25,63 @@ import {
 	type HistoryStack,
 } from '@/lib/history';
 import {
-	bulkRotateEntitiesYaw,
-	bulkSelectionPivot,
-	bulkTranslateEntities,
-	rotateSectionAroundCentroidYaw,
 	rotateSectionWithLinksYaw,
-	translateSectionRigid,
 	translateSectionWithLinks,
-	type AISectionEntityRef,
 } from '@/lib/core/aiSectionsOps';
+import {
+	createAISectionsResolver,
+	selectionPivot,
+	transform,
+	type AISectionRef,
+} from '@/lib/core/transform';
+
+// This file is a spec for the Workspace UNDO STACK, not for the transform
+// math — it only needs some way to produce a "next model" from a gesture.
+// These shims are the old per-resource ops re-expressed on the shared
+// Transform module so every HistoryCommit assertion below carries over
+// unchanged. Transform correctness itself lives in
+// lib/core/transform/__tests__/.
+const ZERO = { x: 0, y: 0, z: 0 };
+
+function bulkPivot(m: ParsedAISectionsV12, refs: readonly AISectionRef[]) {
+	return selectionPivot(m, refs, createAISectionsResolver(m));
+}
+
+function bulkTranslateEntities(
+	m: ParsedAISectionsV12,
+	refs: readonly AISectionRef[],
+	translate: { x: number; y: number; z: number },
+) {
+	return transform(m, refs, { translate, rotate: ZERO, pivot: null }, createAISectionsResolver(m));
+}
+
+function bulkRotateEntitiesYaw(
+	m: ParsedAISectionsV12,
+	refs: readonly AISectionRef[],
+	pivotXZ: { x: number; z: number },
+	theta: number,
+) {
+	return transform(
+		m,
+		refs,
+		{ translate: ZERO, rotate: { x: 0, y: theta, z: 0 }, pivot: { x: pivotXZ.x, y: 0, z: pivotXZ.z } },
+		createAISectionsResolver(m),
+	);
+}
+
+function translateSectionRigid(
+	m: ParsedAISectionsV12,
+	idx: number,
+	translate: { x: number; y: number; z: number },
+) {
+	return bulkTranslateEntities(m, [{ kind: 'section', sectionIdx: idx }], translate);
+}
+
+function rotateSectionAroundCentroidYaw(m: ParsedAISectionsV12, idx: number, theta: number) {
+	const refs: AISectionRef[] = [{ kind: 'section', sectionIdx: idx }];
+	const p = bulkPivot(m, refs);
+	return bulkRotateEntitiesYaw(m, refs, { x: p?.x ?? 0, z: p?.z ?? 0 }, theta);
+}
 import type {
 	EditableBundle,
 	HistoryCommit,
@@ -314,7 +362,7 @@ describe('Multi-Selection bulk gesture → Workspace undo stack', () => {
 		// regardless of bulk size".
 		const initial = makeInitialState();
 		const ai = getAI(initial, 'AI.DAT');
-		const refs: AISectionEntityRef[] = [
+		const refs: AISectionRef[] = [
 			{ kind: 'section', sectionIdx: 0 },
 			{ kind: 'section', sectionIdx: 1 },
 			{ kind: 'section', sectionIdx: 2 },
@@ -328,12 +376,12 @@ describe('Multi-Selection bulk gesture → Workspace undo stack', () => {
 	it('one bulk-rotate gesture pushes exactly ONE HistoryCommit (regardless of cardinality)', () => {
 		const initial = makeInitialState();
 		const ai = getAI(initial, 'AI.DAT');
-		const refs: AISectionEntityRef[] = [
+		const refs: AISectionRef[] = [
 			{ kind: 'section', sectionIdx: 0 },
 			{ kind: 'section', sectionIdx: 1 },
 			{ kind: 'section', sectionIdx: 2 },
 		];
-		const pivot = bulkSelectionPivot(ai, refs, () => 0);
+		const pivot = bulkPivot(ai, refs);
 		expect(pivot).not.toBeNull();
 		const next = bulkRotateEntitiesYaw(ai, refs, { x: pivot!.x, z: pivot!.z }, 0.3);
 		const after = setResource(initial, 'AI.DAT', 'aiSections', next);
@@ -346,11 +394,11 @@ describe('Multi-Selection bulk gesture → Workspace undo stack', () => {
 		// though two ops produce the new model, only one setResource fires.
 		const initial = makeInitialState();
 		const ai = getAI(initial, 'AI.DAT');
-		const refs: AISectionEntityRef[] = [
+		const refs: AISectionRef[] = [
 			{ kind: 'section', sectionIdx: 0 },
 			{ kind: 'section', sectionIdx: 1 },
 		];
-		const pivot = bulkSelectionPivot(ai, refs, () => 0);
+		const pivot = bulkPivot(ai, refs);
 		const t = bulkTranslateEntities(ai, refs, { x: 50, y: 0, z: -30 });
 		const r = bulkRotateEntitiesYaw(t, refs, { x: pivot!.x + 50, z: pivot!.z - 30 }, 0.2);
 		const after = setResource(initial, 'AI.DAT', 'aiSections', r);
@@ -364,7 +412,7 @@ describe('Multi-Selection bulk gesture → Workspace undo stack', () => {
 		// across the entire preview phase.
 		const initial = makeInitialState();
 		const ai = getAI(initial, 'AI.DAT');
-		const refs: AISectionEntityRef[] = [
+		const refs: AISectionRef[] = [
 			{ kind: 'section', sectionIdx: 0 },
 			{ kind: 'section', sectionIdx: 1 },
 		];
@@ -380,7 +428,7 @@ describe('Multi-Selection bulk gesture → Workspace undo stack', () => {
 	it('bulk gesture round-trips: undo restores every entity in the bulk to its pre-gesture state', () => {
 		const initial = makeInitialState();
 		const ai = getAI(initial, 'AI.DAT');
-		const refs: AISectionEntityRef[] = [
+		const refs: AISectionRef[] = [
 			{ kind: 'section', sectionIdx: 0 },
 			{ kind: 'section', sectionIdx: 1 },
 		];
@@ -407,7 +455,7 @@ describe('Multi-Selection bulk gesture → Workspace undo stack', () => {
 		// writeback safety on a cancelled gesture.
 		const initial = makeInitialState();
 		const ai = getAI(initial, 'AI.DAT');
-		const refs: AISectionEntityRef[] = [
+		const refs: AISectionRef[] = [
 			{ kind: 'section', sectionIdx: 0 },
 			{ kind: 'section', sectionIdx: 1 },
 		];

@@ -1,29 +1,30 @@
-// Discriminated-union shapes the V12 overlay uses to describe a gizmo
-// gesture. A gesture is one (target, delta) pair: the target tells the
-// dispatcher which no-cascade op to run; the delta is the staged
-// translate / rotate the gizmo is currently emitting.
+// The shape the V12 overlay uses to describe one in-flight gizmo gesture.
 //
-// `bulk` carries the flattened `AISectionEntityRef[]` and the Pivot
-// captured at gesture start (snapshot prevents drift mid-rotate). Per
-// ADR-0009 none of these cascade by default — `delta.cascade` opts in
-// for section / bulk (sub-entity cascade is not wired in this slice).
+// A gesture is a ref list, a Pivot snapshot and the staged delta — exactly the
+// three things `transform(model, refs, delta, resolver)` consumes. There is no
+// per-target dispatcher any more: whole sections, sub-entities and multi-entity
+// bulks differ only in which refs are in the list.
+//
+// `refs` is already **Cascade**-expanded when the modifier is on, because
+// cascade widens the ref list rather than changing the maths (ADR-0009). The
+// expansion happens once, against the pre-gesture model, at the moment the
+// gesture frame is built — so preview and commit cannot disagree.
 
-import type { AISectionEntityRef } from '@/lib/core/aiSectionsOps';
+import type { Point } from '@/lib/core/transform';
+import type { AISectionRef } from '@/lib/core/transform/resolvers/aiSections';
 import type { BulkTransformDelta } from '@/hooks/useBulkTransformDrag';
 
-export type DragTarget =
-	| { kind: 'section'; sectionIdx: number }
-	| {
-			kind: 'bulk';
-			entities: readonly AISectionEntityRef[];
-			pivot: { x: number; y: number; z: number };
-		}
-	| { kind: 'corner'; sectionIdx: number; cornerIdx: number }
-	| { kind: 'portalAnchor'; sectionIdx: number; portalIdx: number }
-	| { kind: 'boundaryLineEndpoint'; sectionIdx: number; portalIdx: number; lineIdx: number; endIdx: number }
-	| { kind: 'noGoLineEndpoint'; sectionIdx: number; lineIdx: number; endIdx: number };
-
 export type ActiveDrag = {
-	target: DragTarget;
+	/** Everything the gesture moves, cascade included. */
+	refs: readonly AISectionRef[];
+	/** The single entity the gizmo hangs off, or null for a multi-entity bulk
+	 *  (whose gizmo hangs off the Pivot). Drives the visual Y lift only. */
+	anchor: AISectionRef | null;
+	/** Pivot latched at gesture start. Re-deriving it per frame from already-
+	 *  moved positions turns a rigid rotate into a spiral. */
+	pivot: Point | null;
+	/** True for the multi-entity / cross-Bundle path — the bulk render layers
+	 *  key off it. */
+	isBulk: boolean;
 	delta: BulkTransformDelta;
 };

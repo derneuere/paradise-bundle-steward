@@ -14,18 +14,22 @@
 // drag the gizmo to move/rotate the whole set) is identical. The selected set is
 // outlined so the user can see what will move.
 //
-// Edits flow through propInstanceDataOps (translate then rotate, rotate-around-
-// pivot premultiply) and out via onChange. One gesture = one onChange = one undo
-// entry (commit on pointer release; the live drag only moves the gizmo).
+// Edits flow through the shared Bulk transform (`transform()` + the prop
+// resolver, which owns the Matrix44Affine packing and composes the gesture's
+// rotation into each prop's basis) and out via onChange. One gesture = one
+// onChange = one undo entry (commit on pointer release; the live drag only
+// moves the gizmo).
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { ParsedPropInstanceData } from '@/lib/core/propInstanceData';
+import { selectionPivot, toTransformDelta, transform, type Point } from '@/lib/core/transform';
+// The prop resolver imports three, so it is deliberately absent from the
+// transform barrel (the CLI and the node runner pull that in) — direct path.
 import {
-	propInstancesPivot,
-	translatePropInstances,
-	rotatePropInstances,
-} from '@/lib/core/propInstanceDataOps';
+	propInstanceResolver,
+	type PropInstanceRef,
+} from '@/lib/core/transform/resolvers/propInstanceData';
 import { TRANSFORM_AXES_FULL_3D } from '@/lib/core/transformAxes';
 import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
@@ -99,7 +103,7 @@ export const PropTransformOverlay: WorldOverlayComponent<ParsedPropInstanceData>
 	const cameraBridge = useRef<CameraBridgeData | null>(null);
 	// Snapshot the pivot at gesture start so a rotate doesn't drift as the
 	// translate part of the same gesture moves the median (mirrors TrafficData).
-	const pivotRef = useRef<{ x: number; y: number; z: number } | null>(null);
+	const pivotRef = useRef<Point | null>(null);
 
 	// Transform set = inspector selection ∪ marqueed indices, clamped to range.
 	const targets = useMemo(() => {
@@ -110,7 +114,13 @@ export const PropTransformOverlay: WorldOverlayComponent<ParsedPropInstanceData>
 		return [...set].sort((a, b) => a - b);
 	}, [marquee, selectedPath, count]);
 
-	const livePivot = useMemo(() => propInstancesPivot(data, targets), [data, targets]);
+	// The outline geometry wants raw indices; the transform wants refs.
+	const refs = useMemo<PropInstanceRef[]>(
+		() => targets.map((instanceIdx) => ({ kind: 'propInstance', instanceIdx })),
+		[targets],
+	);
+
+	const livePivot = useMemo(() => selectionPivot(data, refs, propInstanceResolver), [data, refs]);
 
 	const outlineGeo = useMemo(() => buildTargetOutline(data, targets), [data, targets]);
 	// Built imperatively + handed to R3F by reference, so R3F won't auto-dispose
@@ -153,23 +163,13 @@ export const PropTransformOverlay: WorldOverlayComponent<ParsedPropInstanceData>
 		setDragDelta(null);
 		const pivot = pivotRef.current;
 		pivotRef.current = null;
-		if (!onChange || targets.length === 0 || isIdentityDelta(delta)) return;
-		let next = data;
-		if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
-			next = translatePropInstances(next, targets, delta.translate);
-		}
-		const hasRotate = delta.rotate.x !== 0 || delta.rotate.y !== 0 || delta.rotate.z !== 0;
-		if (hasRotate && pivot) {
-			// Rotate applies after translate, so the pivot rides the translate delta.
-			const rotatedPivot = {
-				x: pivot.x + delta.translate.x,
-				y: pivot.y + delta.translate.y,
-				z: pivot.z + delta.translate.z,
-			};
-			next = rotatePropInstances(next, targets, rotatedPivot, delta.rotate);
-		}
+		if (!onChange || refs.length === 0 || isIdentityDelta(delta)) return;
+		// translate-then-rotate-about-the-translate-adjusted-pivot lives in
+		// transform() now; a commit arriving with no preceding onTransform frame
+		// falls back to the live median instead of silently dropping the rotate.
+		const next = transform(data, refs, toTransformDelta(delta, pivot ?? livePivot), propInstanceResolver);
 		if (next !== data) onChange(next);
-	}, [data, onChange, targets]);
+	}, [data, onChange, refs, livePivot]);
 
 	const handleCancel = useCallback(() => {
 		setDragDelta(null);

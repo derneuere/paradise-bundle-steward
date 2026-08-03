@@ -27,16 +27,18 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { ParsedTrafficDataRetail } from '@/lib/core/trafficData';
 import {
-	TRAFFIC_LANE_RUNG_AXES,
-	TRAFFIC_STATIC_VEHICLE_AXES,
-	TRAFFIC_YAW_PACKED_AXES,
-	bulkRotateTrafficEntitiesMatrix44,
-	bulkRotateTrafficEntitiesYaw,
-	bulkTrafficDataAxes,
-	bulkTranslateTrafficEntities,
-	trafficDataSelectionPivot,
-	type TrafficDataEntityRef,
-} from '@/lib/core/trafficDataOps';
+	TRANSFORM_AXES_XZ_PACKED,
+	selectionPivot,
+	toTransformDelta,
+	transform,
+} from '@/lib/core/transform';
+// Direct path, not the barrel: this resolver imports three, and the barrel is
+// pulled in by the CLI and the node test runner, neither of which wants a
+// scene graph.
+import {
+	trafficDataResolver,
+	type TrafficDataRef,
+} from '@/lib/core/transform/resolvers/trafficData';
 import { BulkTransformGizmo } from '@/components/common/three/BulkTransformGizmo';
 import {
 	type BulkTransformDelta,
@@ -267,26 +269,17 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 	// Bulk-transform gizmo (issues #78 + #79)
 	//
 	// Maps the schema-Selection (junction / lightTrigger / rung / static
-	// vehicle) to a `TrafficDataEntityRef` list and folds in any
-	// marquee-selected static vehicles from the schema bulk context, then
-	// anchors the gizmo at the median pivot. On commit:
-	//
-	//   - Translate: every entity's position shifts by the same delta —
-	//     yaw-packed boxes shift the XYZ slots of their Vec4, lane rungs
-	//     shift both endpoints, static vehicles shift the translation
-	//     column of their `mTransform`.
-	//   - Rotate: composition depends on the Selection's axis profile.
-	//     A pure-static-vehicle Selection (issue #78) rotates with the
-	//     full-3D Matrix44 path — pre-multiplying each vehicle's
-	//     `mTransform` by `T(P) · R(delta) · T(-P)`. Any Selection
-	//     containing a yaw-packed sibling collapses to yaw-only (ADR-0011)
-	//     and runs the legacy yaw rotate (`bulkRotateTrafficEntitiesYaw`),
-	//     which orbits positions in XZ AND adds the yaw delta to each
-	//     box's stored `.w` (or pre-multiplies the static vehicle's matrix
-	//     by a Y-axis rotation, if a vehicle happens to be in the mix).
+	// vehicle) to a `TrafficDataRef` list and folds in any marquee-selected
+	// static vehicles from the schema bulk context, then anchors the gizmo at
+	// the median pivot and hands the whole gesture to the shared transform.
+	// There is no per-representation dispatch here any more: the resolver
+	// knows that a yaw-packed box takes the yaw in its `.w`, a lane rung has
+	// two endpoints, and a static vehicle's Matrix44 basis takes the full
+	// delta — and all three orbit through one piece of math, so they cannot
+	// counter-rotate.
 	// =========================================================================
-	const bulkRefs = useMemo<readonly TrafficDataEntityRef[]>(() => {
-		const out: TrafficDataEntityRef[] = [];
+	const bulkRefs = useMemo<readonly TrafficDataRef[]>(() => {
+		const out: TrafficDataRef[] = [];
 		const seen = new Set<string>();
 
 		const addStaticVehicle = (hullIdx: number, vehicleIdx: number) => {
@@ -338,42 +331,16 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 	// the AISectionsOverlay comment for the rationale.
 	const bulkPivotRef = useRef<{ x: number; y: number; z: number } | null>(null);
 	const bulkPivotLive = useMemo(
-		() => (bulkRefs.length > 0 ? trafficDataSelectionPivot(data, bulkRefs) : null),
+		() => selectionPivot(data, bulkRefs, trafficDataResolver),
 		[data, bulkRefs],
 	);
 	const [dragDelta, setDragDelta] = useState<BulkTransformDelta | null>(null);
 
-	const gizmoAxes = useMemo(() => {
-		if (bulkRefs.length === 0) return TRAFFIC_YAW_PACKED_AXES;
-		// Pure-static-vehicle Selection → full 3-axis (Matrix44). Anything
-		// else falls into the AND-intersection — a yaw-packed sibling
-		// vetoes pitch/roll per ADR-0011. The single-entity static-vehicle
-		// case is a one-element list of kind 'staticVehicle' so it short-
-		// circuits to the full-3D constant.
-		if (bulkRefs.every((r) => r.kind === 'staticVehicle')) {
-			return TRAFFIC_STATIC_VEHICLE_AXES;
-		}
-		// Lane rung vs yaw-packed share the same axis profile today, but we
-		// dispatch through the canonical constant for each so a future
-		// differentiation lands without re-wiring. When a static vehicle is
-		// mixed with a yaw-only sibling, the AND-intersection in
-		// `bulkTrafficDataAxes` collapses to yaw-only.
-		const mixed = bulkTrafficDataAxes(bulkRefs);
-		if (mixed) return mixed;
-		return bulkRefs[0].kind === 'laneRung'
-			? TRAFFIC_LANE_RUNG_AXES
-			: TRAFFIC_YAW_PACKED_AXES;
-	}, [bulkRefs]);
-
-	// Selections containing a static vehicle take the full-3D Matrix44
-	// rotate path on commit, because that's the only op that knows how to
-	// pre-multiply a `mTransform`. For mixed Selections the gizmo's
-	// rotation rings will already be greyed down to yaw-only by
-	// `gizmoAxes` above, so the matrix-44 path just composes a yaw delta
-	// (`{x: 0, y: theta, z: 0}`) — same result as the legacy yaw rotate,
-	// but it covers the static-vehicle case too.
-	const usesMatrix44Rotate = useMemo(
-		() => bulkRefs.some((r) => r.kind === 'staticVehicle'),
+	// A pure static-vehicle Selection gets all three rotate rings; any
+	// yaw-packed sibling AND-collapses pitch and roll off (ADR-0011). The
+	// empty-Selection fallback never renders — `gizmoPosition` is null then.
+	const gizmoAxes = useMemo(
+		() => trafficDataResolver.axes(bulkRefs) ?? TRANSFORM_AXES_XZ_PACKED,
 		[bulkRefs],
 	);
 
@@ -395,42 +362,21 @@ export const TrafficDataOverlay: WorldOverlayComponent<ParsedTrafficDataRetail> 
 
 	const handleGizmoCommit = useCallback((delta: BulkTransformDelta) => {
 		setDragDelta(null);
-		const pivot = bulkPivotRef.current;
+		// Gesture-start snapshot, or the live median if the commit arrived with
+		// no preceding frame — the old code dropped the rotation outright in
+		// that case while still applying the translate.
+		const pivot = bulkPivotRef.current ?? bulkPivotLive;
 		bulkPivotRef.current = null;
 		if (!onChange) return;
-		if (bulkRefs.length === 0) return;
 		if (isIdentityDelta(delta)) return;
-		let next = data;
-		if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
-			next = bulkTranslateTrafficEntities(next, bulkRefs, delta.translate);
-		}
-		const hasRotate = delta.rotate.x !== 0 || delta.rotate.y !== 0 || delta.rotate.z !== 0;
-		if (hasRotate && pivot) {
-			// The translated pivot — bulk rotate is applied AFTER translate, so
-			// the pivot has to move with the gesture's translate delta.
-			const rotatedPivot = {
-				x: pivot.x + delta.translate.x,
-				y: pivot.y + delta.translate.y,
-				z: pivot.z + delta.translate.z,
-			};
-			if (usesMatrix44Rotate) {
-				next = bulkRotateTrafficEntitiesMatrix44(
-					next,
-					bulkRefs,
-					rotatedPivot,
-					delta.rotate,
-				);
-			} else if (delta.rotate.y !== 0) {
-				next = bulkRotateTrafficEntitiesYaw(
-					next,
-					bulkRefs,
-					{ x: rotatedPivot.x, z: rotatedPivot.z },
-					delta.rotate.y,
-				);
-			}
-		}
+		const next = transform(
+			data,
+			bulkRefs,
+			toTransformDelta(delta, pivot),
+			trafficDataResolver,
+		);
 		if (next !== data) onChange(next);
-	}, [data, onChange, bulkRefs, usesMatrix44Rotate]);
+	}, [data, onChange, bulkRefs, bulkPivotLive]);
 
 	const handleGizmoCancel = useCallback(() => {
 		setDragDelta(null);

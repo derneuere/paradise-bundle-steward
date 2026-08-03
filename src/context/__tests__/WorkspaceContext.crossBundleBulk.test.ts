@@ -528,10 +528,10 @@ describe('Cross-Bundle bulk transform (issue #80)', () => {
 // `buildCrossBundleWrites` produces a model that matches what the
 // single-Bundle `bulkTranslateEntities` would produce directly.
 
-import { bulkTranslateEntities } from '@/lib/core/aiSectionsOps';
+import { createAISectionsResolver, transform } from '@/lib/core/transform';
 
-describe('Cross-Bundle dispatch — single-Bundle slice agrees with single-Bundle op', () => {
-	it('single-slice translate matches `bulkTranslateEntities` byte-for-byte', () => {
+describe('Cross-Bundle dispatch — single-Bundle slice agrees with a direct transform', () => {
+	it('single-slice translate matches a direct `transform` byte-for-byte', () => {
 		const state = makeMultiBundleState();
 		const slices = buildCrossBundleSlices(
 			summariesFor({ 'A.DAT': [0, 1, 2] }),
@@ -547,14 +547,16 @@ describe('Cross-Bundle dispatch — single-Bundle slice agrees with single-Bundl
 		);
 		expect(writes.length).toBe(1);
 		const dispatchResult = writes[0].value as ParsedAISectionsV12;
-		const directResult = bulkTranslateEntities(
-			getAI(state, 'A.DAT'),
+		const directModel = getAI(state, 'A.DAT');
+		const directResult = transform(
+			directModel,
 			[
 				{ kind: 'section', sectionIdx: 0 },
 				{ kind: 'section', sectionIdx: 1 },
 				{ kind: 'section', sectionIdx: 2 },
 			],
-			{ x: 5, y: 0, z: -3 },
+			{ translate: { x: 5, y: 0, z: -3 }, rotate: { x: 0, y: 0, z: 0 }, pivot: null },
+			createAISectionsResolver(directModel),
 		);
 		// Compare the changed sections — section 5 (not in bulk) stays
 		// === between both since the op short-circuits per-section.
