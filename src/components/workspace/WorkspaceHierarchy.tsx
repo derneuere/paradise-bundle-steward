@@ -17,8 +17,6 @@ import { useScrollToVirtualRow } from '@/hooks/useScrollToVirtualRow';
 import {
 	ChevronDown,
 	ChevronRight,
-	Eye,
-	EyeOff,
 	FileText,
 	Folder,
 	Plus,
@@ -29,7 +27,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import type { VisibilityNode, WorkspaceSelection } from '@/context/WorkspaceContext.types';
+import type { WorkspaceSelection } from '@/context/WorkspaceContext.types';
+import { VisibilityControls } from './VisibilityControls';
 import { useWorkspacePSLBulk } from './PSLBulkProvider';
 import { useWorkspaceAISectionsBulk } from './AISectionsBulkProvider';
 import { useWorkspaceTriggerDataBulk } from './TriggerDataBulkProvider';
@@ -62,47 +61,6 @@ function selectionAnchorPath(
 	if (!selection) return [];
 	if (selection.resourceKey !== resourceKey) return [];
 	return selection.path ?? [];
-}
-
-// ---------------------------------------------------------------------------
-// Visibility toggle button
-// ---------------------------------------------------------------------------
-
-function VisibilityToggle({
-	node,
-	label,
-}: {
-	node: VisibilityNode;
-	label: string;
-}) {
-	const { isVisible, setVisibility, soloVisibility } = useWorkspace();
-	const visible = isVisible(node);
-	// Alt+click solos this node within its Bundle — second alt-press on the
-	// already-soloed eye restores full visibility (see issue #26). Plain click
-	// stays as the per-node visibility toggle.
-	const onClick = useCallback(
-		(e: React.MouseEvent) => {
-			e.stopPropagation();
-			if (e.altKey) {
-				soloVisibility(node);
-				return;
-			}
-			setVisibility(node, !visible);
-		},
-		[node, visible, setVisibility, soloVisibility],
-	);
-	return (
-		<button
-			type="button"
-			onClick={onClick}
-			className="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-			title={`${visible ? `Hide ${label}` : `Show ${label}`} — alt+click to solo`}
-			aria-label={visible ? `Hide ${label}` : `Show ${label}`}
-			aria-pressed={visible}
-		>
-			{visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3 opacity-60" />}
-		</button>
-	);
 }
 
 // ---------------------------------------------------------------------------
@@ -578,7 +536,7 @@ function BundleRow({
 				</span>
 			)}
 			{node.showVisibility && (
-				<VisibilityToggle node={{ bundleId: bundle.id }} label={bundle.id} />
+				<VisibilityControls node={{ bundleId: bundle.id }} label={bundle.id} />
 			)}
 			<button
 				type="button"
@@ -634,7 +592,7 @@ function ResourceTypeRow({
 	return (
 		<div
 			className={cn(
-				'flex items-center gap-1.5 py-0.5 cursor-pointer',
+				'flex items-center gap-1.5 py-0.5 cursor-pointer group',
 				node.isSelected
 					? 'bg-primary/15 text-primary font-medium'
 					: 'text-muted-foreground hover:bg-muted/40',
@@ -681,7 +639,7 @@ function ResourceTypeRow({
 				</Badge>
 			)}
 			{node.showVisibility && (
-				<VisibilityToggle
+				<VisibilityControls
 					node={
 						node.isMultiInstance
 							? { bundleId: node.bundleId, resourceKey: node.resourceKey }
@@ -714,7 +672,7 @@ function InstanceRow({
 	return (
 		<div
 			className={cn(
-				'flex items-center gap-1.5 py-0.5 cursor-pointer',
+				'flex items-center gap-1.5 py-0.5 cursor-pointer group',
 				node.isSelected
 					? 'bg-primary/15 text-primary font-medium'
 					: 'text-muted-foreground hover:bg-muted/40',
@@ -733,7 +691,7 @@ function InstanceRow({
 			<FileText className="h-3 w-3 shrink-0" />
 			<span className="truncate flex-1 min-w-0">{node.label}</span>
 			{node.showVisibility && (
-				<VisibilityToggle
+				<VisibilityControls
 					node={{
 						bundleId: node.bundleId,
 						resourceKey: node.resourceKey,

@@ -15,12 +15,21 @@ import type { PickerEntry, ResourceHandler } from '../handler';
 // compares resource names.
 const NATURAL_NAME = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
+// Memoised per model: the Workspace tree relabels all 428 WORLDCOL instances
+// on every edit, and the triangle sort calls this from its comparator, so an
+// uncached count walks ~921k polygons many times over. Edits replace the
+// model object, which is what invalidates an entry.
+const triangleCounts = new WeakMap<ParsedPolygonSoupList, number>();
+
 function countTriangles(model: ParsedPolygonSoupList | null): number {
 	if (model == null) return 0;
+	const cached = triangleCounts.get(model);
+	if (cached !== undefined) return cached;
 	let tris = 0;
 	for (const s of model.soups) {
 		for (const p of s.polygons) tris += p.vertexIndices[3] === 0xFF ? 1 : 2;
 	}
+	triangleCounts.set(model, tris);
 	return tris;
 }
 
