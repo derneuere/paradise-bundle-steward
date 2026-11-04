@@ -1,9 +1,9 @@
 // Build the canonical vehicle-part taxonomy across a whole VEHICLES/ folder by
 // joining every car's DeformationSpec IK parts (0x1001C) to its real GraphicsSpec
 // part locators (0x10006). For each partType it aggregates presence, position
-// centroid, hinge axis, fold angle, detach behaviour and tag/joint counts — the
-// template the deform-rig-mvp.ts auto-rigger relies on (which partType is the
-// root, the body shell, the wheels, etc.). Writes a JSON summary + per-car rows.
+// centroid (mesh frame, +x = right, +z = forward), hinge axis, fold angle,
+// detach behaviour and tag/joint counts. This is the evidence behind the slot
+// names in lib/deform-rig/parts.ts. Writes a JSON summary + per-car rows.
 //
 // Run:  npx tsx scripts/parts-taxonomy.ts --veh <VEHICLES dir> [--out parts-taxonomy.json]
 import * as fs from 'node:fs';
@@ -12,6 +12,7 @@ import { parseBundle } from '../src/lib/core/bundle';
 import { extractResourceRaw } from '../src/lib/core/registry';
 import { parseGraphicsSpecData } from '../src/lib/core/graphicsSpec';
 import { parseDeformationSpecData, DEFORMATION_SPEC_TYPE_ID } from '../src/lib/core/deformationSpec';
+import { PART_NAMES, TOUGHENED_PARTS } from './lib/deform-rig/parts';
 
 const arg = (name: string): string | undefined => {
 	const i = process.argv.indexOf(`--${name}`);
@@ -83,6 +84,8 @@ const spread = (v: number[][]) => { if (!v.length) return null; const c = cen(v)
 const nCars = perCar.length;
 const template = Object.entries(byType).map(([t, s]) => ({
   partType: +t,
+  name: PART_NAMES[+t] ?? null,
+  toughened: TOUGHENED_PARTS.has(+t),
   inCars: s.cars.size, pctCars: +(100 * s.cars.size / nCars).toFixed(0),
   instances: s.n, avgPerCar: +(s.n / s.cars.size).toFixed(2),
   posCentroid: cen(s.pos), posSpread: spread(s.pos), posSamples: s.pos.length,

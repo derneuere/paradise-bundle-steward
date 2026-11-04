@@ -60,7 +60,7 @@
 //   +0x38  u32  mLightTags.ptr                    pointer (recomputed)
 //   +0x3C  u32  padding
 //   +0x40  4xf32 mHandlingBodyDimensions
-//   +0x50  4 × WheelSpec (0x30 each)              FR, FL, RR, RL order
+//   +0x50  4 × WheelSpec (0x30 each)              FL, FR, RL, RR order
 //   +0x110 20 × DeformationSensorSpec (0x40)
 //   +0x610 4x4 f32 mCarModelSpaceToHandlingBody
 //   +0x650 4 × u8 (specID, numVehicleBodies, numDeformationSensors,
@@ -102,11 +102,15 @@ export type Mat4 = [Vec4, Vec4, Vec4, Vec4];
 // Structured types
 // =============================================================================
 
-/** Per-wheel mount point. One each for FR, FL, RR, RL in that order. */
+/** Per-wheel mount point. One each for FL, FR, RL, RR in that order (+x is the
+ *  car's right). Like every point in the spec, position is in the
+ *  handling-body frame, not the mesh frame. */
 export type WheelSpec = {
 	position: Vec4;
 	direction: Vec4;
-	/** Integer slot value — small wheel-kind tag in practice. */
+	/** Index of the wheel's tag point (a root-part tag sitting exactly on the
+	 *  wheel position in every retail car). The engine reads that tag's live
+	 *  position every frame, so it must stay valid if tag points are edited. */
 	iValue: number;
 };
 

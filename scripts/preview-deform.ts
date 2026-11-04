@@ -7,21 +7,26 @@
 // deformation-sensor `initialOffset` (red) and every tag-point `initialPosition`
 // (cyan), in the same body-local model space the meshes assemble in. If the spec
 // is well-aligned the markers hug the bodywork; if a bundle is mis-rigged (e.g.
-// a P12-positioned spec dropped onto an Alien body) the markers float off in
-// empty space — which is exactly what this tool makes visible.
+// one car's spec dropped onto a differently-shaped body) the markers float off
+// in empty space — which is exactly what this tool makes visible.
 //
 // Each GraphicsSpec part is tinted a distinct golden-angle HSL colour so the
 // part breakdown stays legible without textures (textures are deliberately OFF
 // here — this is a geometry/alignment check, not a paint check).
 //
+// --explode <metres> instead shows which meshes can come off in a crash: every
+// part driven by an IK part that flies off or breaks off its hinge is pushed
+// outward and tinted, everything else stays in place in grey. Use it on a
+// deform-rig-full.ts output to confirm doors come off where doors are.
+//
 // Like render-car.ts this needs headless-gl built for the node-22 ABI and MUST
 // run under node 22 (system node 16 can't load gl):
 //
 //   fnm exec --using=22 node node_modules/tsx/dist/cli.mjs scripts/preview-deform.ts \
-//     --gr  D:/.../VEHICLES/VEH_ALIEN_GR.BIN \
-//     --at  D:/.../VEHICLES/VEH_ALIEN_AT.BIN \
+//     --gr  D:/.../VEHICLES/VEH_<car>_GR.BIN \
+//     --at  D:/.../VEHICLES/VEH_<car>_AT.BIN \
 //     --tex D:/.../VEHICLES/VEHICLETEX.BIN \
-//     --out /tmp/alien-deform --size 900x600
+//     --out /tmp/deform --size 900x600 [--explode 0.9]
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
@@ -33,7 +38,11 @@ import type { TextureSourceBundle } from '../src/lib/core/materialChain';
 import { decodeAllRenderables, locatorToMatrix4, type DecodedMesh } from '../src/lib/core/renderableDecode';
 import { extractResourceRaw } from '../src/lib/core/registry/extract';
 import { parseDeformationSpecData, DEFORMATION_SPEC_TYPE_ID, type Vec3 } from '../src/lib/core/deformationSpec';
+import { parseGraphicsSpecData, resolveGraphicsSpecParts, GRAPHICS_SPEC_TYPE_ID } from '../src/lib/core/graphicsSpec';
 import type { ParsedBundle } from '../src/lib/core/types';
+import { canLeaveCar, crashBehaviour, partName } from './lib/deform-rig/parts';
+import { toMeshSpace } from './lib/deform-rig/spec';
+import { indexedBox } from './lib/deform-rig/geometry';
 
 // --- args -------------------------------------------------------------------
 function arg(name: string, def?: string): string | undefined {
@@ -45,8 +54,9 @@ const AT = arg('at')!;
 const TEX = arg('tex')!;
 const OUT = arg('out', '/tmp/deform')!;
 const [W, H] = (arg('size', '900x600')!).split('x').map(Number);
+const EXPLODE = arg('explode') !== undefined ? Number(arg('explode')) : null;
 if (!GR || !AT || !TEX) {
-	throw new Error('usage: --gr <_GR.BIN> --at <_AT.BIN> --tex <VEHICLETEX.BIN> --out <dir> [--size WxH]');
+	throw new Error('usage: --gr <_GR.BIN> --at <_AT.BIN> --tex <VEHICLETEX.BIN> --out <dir> [--size WxH] [--explode m]');
 }
 mkdirSync(OUT, { recursive: true });
 
@@ -144,9 +154,27 @@ function main() {
 	if (!dsResource) throw new Error(`no DeformationSpec (0x${DEFORMATION_SPEC_TYPE_ID.toString(16)}) resource in ${AT}`);
 	const dsRaw = extractResourceRaw(at.arrayBuffer, at.bundle, dsResource);
 	const ds = parseDeformationSpecData(dsRaw, true);
-	const sensorPts: Vec3[] = ds.sensors.map((s) => s.initialOffset);
-	const tagPts: Vec3[] = ds.tagPoints.map((t) => t.initialPosition);
-	console.log(`deformation spec: ${sensorPts.length} sensors, ${tagPts.length} tag points`);
+	// Spec points are in the handling-body frame; shift them onto the meshes.
+	const sensorPts: Vec3[] = EXPLODE === null
+		? ds.sensors.slice(0, ds.numDeformationSensors).map((s) => toMeshSpace(ds, s.initialOffset)) : [];
+	const tagPts: Vec3[] = EXPLODE === null ? ds.tagPoints.map((t) => toMeshSpace(ds, t.initialPosition)) : [];
+	console.log(`deformation spec: ${ds.numDeformationSensors} live sensors, ${ds.tagPoints.length} tag points`);
+
+	// Decoded renderables skip parts without a mesh, so map them back to their
+	// GraphicsSpec part index (the index IK parts' partGraphics refer to).
+	const gfxIndexOf = new Map<bigint, number>();
+	const gsRes = primary.bundle.resources.find((r) => r.resourceTypeId === GRAPHICS_SPEC_TYPE_ID);
+	if (gsRes) {
+		const gs = parseGraphicsSpecData(extractResourceRaw(primary.arrayBuffer, primary.bundle, gsRes));
+		resolveGraphicsSpecParts(primary.arrayBuffer, primary.bundle, gs).forEach((p, i) => {
+			if (p.renderableId != null && !gfxIndexOf.has(p.renderableId)) gfxIndexOf.set(p.renderableId, i);
+		});
+	}
+	const leaving = new Map<number, string>();
+	for (const p of ds.ikParts) {
+		const b = crashBehaviour(p, ds.tagPoints);
+		if (canLeaveCar(b)) leaving.set(p.partGraphics, `${partName(p.partType)}, ${b}`);
+	}
 
 	// ---- GL setup ----
 	const gl = createGL(W, H, { preserveDrawingBuffer: true });
@@ -165,12 +193,37 @@ function main() {
 	const frames: { c: THREE.Vector3; r: number }[] = [];
 
 	// ---- Body parts: golden-angle tint per GraphicsSpec part ----
+	// In explode mode the parts that can come off are pushed out from the body
+	// centre (lifted a touch so roof-level panels clear) and the rest go grey.
+	const centroids = decoded.renderables.map((r) => {
+		const world = r.partLocator ? locatorToMatrix4(r.partLocator) : new THREE.Matrix4();
+		const box = new THREE.Box3();
+		for (const m of r.meshes) box.union(indexedBox(m.geometry, world));
+		return box.isEmpty() ? null : box.getCenter(new THREE.Vector3());
+	});
+	const present = centroids.filter((c): c is THREE.Vector3 => c !== null);
+	const bodyCenter = present.reduce((s, c) => s.add(c), new THREE.Vector3()).multiplyScalar(1 / Math.max(1, present.length));
+	const GREY: [number, number, number] = [0.32, 0.34, 0.4];
 	const legend: { idx: number; name: string; hex: string }[] = [];
 	for (let i = 0; i < decoded.renderables.length; i++) {
 		const r = decoded.renderables[i];
-		const world = r.partLocator ? locatorToMatrix4(r.partLocator) : new THREE.Matrix4();
-		const tint = hslToRgb(i * 137.508, 0.62, 0.55);
-		legend.push({ idx: i, name: r.debugName ?? '(unnamed)', hex: toHex(tint) });
+		const gfx = gfxIndexOf.get(r.resourceId) ?? -1;
+		let world = r.partLocator ? locatorToMatrix4(r.partLocator) : new THREE.Matrix4();
+		let tint = hslToRgb(i * 137.508, 0.62, 0.55);
+		let name = r.debugName ?? '(unnamed)';
+		if (EXPLODE !== null) {
+			if (leaving.has(gfx) && centroids[i]) {
+				const out = centroids[i]!.clone().sub(bodyCenter);
+				out.y = Math.max(out.y, 0.05);
+				if (out.lengthSq() < 1e-4) out.set(0, 1, 0);
+				out.normalize().multiplyScalar(EXPLODE);
+				world = new THREE.Matrix4().makeTranslation(out.x, out.y, out.z).multiply(world);
+				name = leaving.get(gfx)!;
+			} else {
+				tint = GREY;
+			}
+		}
+		legend.push({ idx: gfx, name, hex: toHex(tint) });
 		for (const m of r.meshes) {
 			const g = m.geometry;
 			draws.push({
@@ -265,7 +318,7 @@ function main() {
 	}
 
 	// ---- Legend + summary ----
-	console.log('\n--- part legend (idx -> debugName -> colour) ---');
+	console.log('\n--- part legend (gfx index -> name -> colour) ---');
 	for (const l of legend) console.log(`  [${String(l.idx).padStart(2)}] ${l.hex}  ${l.name}`);
 	console.log('\n--- overlay summary ---');
 	console.log(`markers: ${allMarkers.length} total (${sensorPts.length} sensors red, ${tagPts.length} tag points cyan)`);
