@@ -338,23 +338,25 @@ function computeRotateDelta(
 
 /**
  * Match the rotation direction to the cursor's screen motion regardless of
- * which side of the rotation axis the camera sits on. Three.js's positive
- * rotation around `+axisWorld` maps the next-axis-in-RH-order onto the
- * following one (e.g. `+Y` rotation maps `+X → +Z`); from a camera **looking
- * down** `-axisWorld`, that motion reads as clockwise on screen and matches
- * a positive `atan2(dy, dx)` from `(dx, dy)` measured in screen pixels.
+ * which side of the rotation axis the camera sits on.
  *
- * Concretely for the typical top-down map view: camera at `(_, +y, _)`,
- * pivot at origin, `axisWorld = (0, 1, 0)`. `cam → pivot = pivot - camera`
- * has `y < 0`, so `axisWorld · camToPivot < 0` ⇒ **no flip** (sign = +1).
- * The user drags the ring right, raw θ is positive, the geometry rotates
- * clockwise on screen — direction matches.
+ * The premise this helper used to document was wrong, and the correction is
+ * the whole reason the sign here is what it is. A right-handed rotation about
+ * `+Y` does **not** map `+X → +Z`; it maps `+X → −Z` (equivalently `+Z → +X`).
+ * That is what `THREE.Matrix4.makeRotationFromEuler` computes, and it is what
+ * `rotatePointAboutPivot` in `@/lib/core/transform` computes, so it is the one
+ * convention every spatial resource now shares.
  *
- * When the camera is on the `+axisWorld` side instead (looking *up* the
- * axis from below), screen motion mirrors, so we flip the sign. The same
- * predicate generalises to pitch (X) and roll (Z) for cameras that ever
- * orbit there — though for AI sections in this codebase, pitch and roll
- * rings are auto-disabled per ADR-0011 and only yaw is exercisable.
+ * Concretely for the typical top-down map view: camera at `(_, +y, _)`, pivot
+ * at origin, `axisWorld = (0, 1, 0)`. `cam → pivot = pivot − camera` has
+ * `y < 0`, so `axisWorld · camToPivot < 0`. Dragging the ring rightwards gives
+ * a positive raw `atan2(dy, dx)` in screen pixels, and on a top-down view
+ * "clockwise on screen" is `+X → +Z` — i.e. `Ry(−θ)`. So the raw angle must be
+ * **negated** (sign = −1) for the geometry to follow the cursor.
+ *
+ * When the camera is on the `+axisWorld` side instead (looking *up* the axis
+ * from below), screen motion mirrors and the raw angle is used as-is. The same
+ * predicate generalises to pitch (X) and roll (Z).
  *
  * Pure function so the gizmo's sign convention can be regression-tested
  * without mounting an R3F context.
@@ -365,7 +367,7 @@ export function rotationSignForCameraSide(
 	pivot: THREE.Vector3,
 ): 1 | -1 {
 	const camToPivot = pivot.clone().sub(cameraPosition);
-	return axisWorld.dot(camToPivot) >= 0 ? -1 : 1;
+	return axisWorld.dot(camToPivot) >= 0 ? 1 : -1;
 }
 
 export function identityDelta(cascade = false): BulkTransformDelta {

@@ -60,7 +60,13 @@ export const TARGET_PRESETS: readonly TargetPreset[] = [
 		// AI Sections (typeId 0x10001): retail uses the v12 layout. V4/V6
 		// prototype variants will be migrated to v12 via the EditorProfile's
 		// `conversions.v12` entry (issue #36 wires V4→V12).
-		kinds: { 0x10001: 'v12' },
+		//
+		// TrafficData (typeId 0x10002): retail uses the v45 layout. Every
+		// typeId with a registered conversion MUST appear here — `exportPlan`
+		// skips unconstrained typeIds entirely, so a missing entry exports the
+		// source variant's bytes without ever consulting its migration. The
+		// contract test in `__tests__/targets.test.ts` enforces that.
+		kinds: { 0x10001: 'v12', 0x10002: 'v45' },
 	},
 ];
 

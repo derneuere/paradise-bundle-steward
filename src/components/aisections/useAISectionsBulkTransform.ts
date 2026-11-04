@@ -1,17 +1,19 @@
 // useAISectionsBulkTransform — one-stop V12 transform domain.
 //
-// The V12 AISections overlay's editing surface has grown into a tight
-// little state machine: drag preview, bulk membership flattening, pivot
-// snapshot, gizmo target selection, cross-Bundle commit routing, and
-// numeric-panel session publish all interact. This hook owns the whole
-// machine in one place — the overlay just renders the JSX with the
-// returned state.
+// The V12 AISections overlay's editing surface is a tight little state
+// machine: drag preview, bulk membership flattening, pivot snapshot, gizmo
+// anchoring, cross-Bundle commit routing, and numeric-panel session publish
+// all interact. This hook owns the whole machine in one place — the overlay
+// just renders the JSX with the returned state.
 //
-// We accepted "one fat hook" over splitting because the pieces are too
-// coupled to live apart without a forest of refs threading state across.
-// If it grows past ~600 lines, the user's open question is whether to
-// split into 2–3 narrower hooks (e.g. bulk-only, gesture-only, session-
-// only). For now it's one place.
+// The maths does NOT live here. Every gesture — one corner, one whole section,
+// a marquee spanning Bundles — is the same call: expand the Cascade if the
+// modifier is on, then `transform(data, refs, delta, resolver)` from
+// `@/lib/core/transform`. The old per-target dispatcher (`applyDragToModel`)
+// and the seven AI-section-specific ops it routed to are gone.
+//
+// We accepted "one fat hook" over splitting because the pieces are too coupled
+// to live apart without a forest of refs threading state across.
 //
 // Effects: the session publish to `BulkTransformGizmoSessionProvider` is
 // extracted into `useGizmoSessionPublish` (file-local) per CLAUDE.md
@@ -24,9 +26,20 @@ import { useResetOnChange } from '@/hooks/useResetOnChange';
 import { useToggleHotkey } from '@/hooks/useToggleHotkey';
 import type { ParsedAISectionsV12 } from '@/lib/core/aiSections';
 import {
-	bulkSelectionPivot,
-	type AISectionEntityRef,
-} from '@/lib/core/aiSectionsOps';
+	TRANSFORM_AXES_FULL_3D,
+	resolverAxes,
+	selectionPivot,
+	toTransformDelta,
+	transform,
+	type Point,
+	type TransformAxes,
+} from '@/lib/core/transform';
+import {
+	aiSectionRefKey,
+	createAISectionsResolver,
+	type AISectionRef,
+} from '@/lib/core/transform/resolvers/aiSections';
+import { expandAISectionsCascade } from '@/lib/core/transform/resolvers/aiSectionsCascade';
 import {
 	type BulkTransformDelta,
 	identityDelta,
@@ -40,23 +53,15 @@ import type { AISectionsBulkInstanceValue } from '@/components/workspace/AISecti
 import type { CrossBundleBulkController } from '@/components/workspace/useCrossBundleBulkController';
 import type { AISectionMarker, Corner } from '@/components/aisections/shared';
 import type { NodePath } from '@/lib/schema/walk';
-import type { ActiveDrag, DragTarget } from './aiSectionsDrag.types';
-import { applyDragToModel } from './applyDragToModel';
+import type { ActiveDrag } from './aiSectionsDrag.types';
+import { markerToAISectionRef } from './aiSectionsRefs';
 import {
 	deriveAffectedNeighbours,
 	derivePreviewCorners,
 	derivePreviewModel,
 	derivePreviewSection,
-	v12Corners,
 } from './aiSectionsPreview';
-import {
-	BULK_GIZMO_Y_OFFSET,
-	deriveGizmoAxes,
-	deriveGizmoPosition,
-} from './aiSectionsGizmoGeometry';
-import type { TransformAxes } from '@/lib/core/transformAxes';
-
-type Vec3 = { x: number; y: number; z: number };
+import { BULK_GIZMO_Y_OFFSET, deriveGizmoPosition } from './aiSectionsGizmoGeometry';
 
 export type UseAISectionsBulkTransformOpts = {
 	data: ParsedAISectionsV12;
@@ -81,8 +86,11 @@ export type UseAISectionsBulkTransformResult = {
 	toggleSnap: () => void;
 	cascadeEnabled: boolean;
 	toggleCascade: () => void;
+	/** True while an in-flight gesture's effective cascade is ON and there is
+	 *  something for it to cascade from. Drives the DOM hint. */
+	cascadeActive: boolean;
 	// bulk derivations
-	bulkRefs: readonly AISectionEntityRef[];
+	bulkRefs: readonly AISectionRef[];
 	bulkEntityCount: number;
 	isBulkActive: boolean;
 	bulkSectionIndices: ReadonlySet<number>;
@@ -92,14 +100,14 @@ export type UseAISectionsBulkTransformResult = {
 	previewCorners: Corner[] | null;
 	affectedNeighbours: { idx: number; corners: Corner[] }[];
 	// gizmo geometry
-	gizmoTarget: DragTarget | null;
+	gizmoAnchor: AISectionRef | null;
 	gizmoPosition: [number, number, number] | null;
 	gizmoAxes: TransformAxes;
 	gizmoPixelSize: number;
 	// pivot
-	bulkPivotLive: Vec3 | null;
-	handlePivotMove: (world: Vec3) => void;
-	handlePivotCommit: (world: Vec3) => void;
+	bulkPivotLive: Point | null;
+	handlePivotMove: (world: Point) => void;
+	handlePivotCommit: (world: Point) => void;
 	handlePivotCancel: () => void;
 	// gesture
 	handleGizmoTransform: (delta: BulkTransformDelta) => void;
@@ -155,12 +163,20 @@ export function useAISectionsBulkTransform(
 	const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
 	const [edgeMenu, setEdgeMenu] = useState<EdgeMenuState | null>(null);
 
+	// The resolver is a FACTORY bound to the pre-gesture model, because
+	// corner / line-endpoint Y is derived (`resolveSectionYs`) rather than
+	// stored. `data` never changes mid-gesture — the drag renders against a
+	// derived preview — so the derived Ys stay coherent for the whole gesture.
+	const resolver = useMemo(() => createAISectionsResolver(data, sectionYs), [data, sectionYs]);
+
 	// =========================================================================
-	// Bulk flattening (marquee bulkSet + inspector pick → AISectionEntityRef[])
+	// Ref flattening (marquee bulkSet + inspector pick → AISectionRef[])
 	// =========================================================================
 
-	const bulkRefs = useMemo<readonly AISectionEntityRef[]>(() => {
-		const out: AISectionEntityRef[] = [];
+	const markerRef = useMemo(() => markerToAISectionRef(marker), [marker]);
+
+	const bulkRefs = useMemo<readonly AISectionRef[]>(() => {
+		const out: AISectionRef[] = [];
 		const seen = new Set<string>();
 		if (sectionBulk) {
 			for (const key of sectionBulk.bulkSet) {
@@ -168,44 +184,48 @@ export function useAISectionsBulkTransform(
 				if (parts[0] !== 'section') continue;
 				const idx = Number(parts[1]);
 				if (!Number.isFinite(idx) || idx < 0 || idx >= data.sections.length) continue;
-				const k = `section:${idx}`;
+				const ref: AISectionRef = { kind: 'section', sectionIdx: idx };
+				const k = aiSectionRefKey(ref);
 				if (seen.has(k)) continue;
 				seen.add(k);
-				out.push({ kind: 'section', sectionIdx: idx });
+				out.push(ref);
 			}
 		}
-		// Fold the inspector pick if it's a sub-entity of a section not
-		// already in the bulk — mixed-bulk support (whole section + a
-		// portal anchor on a different section).
-		if (marker && marker.kind !== 'section') {
-			const sIdx = marker.sectionIndex;
-			if (sIdx >= 0 && sIdx < data.sections.length && !seen.has(`section:${sIdx}`)) {
-				if (marker.kind === 'portal') {
-					out.push({ kind: 'portal', sectionIdx: sIdx, portalIdx: marker.portalIndex });
-				}
-				// boundary/no-go line *endpoints* aren't yet representable in
-				// the bulk-ops `AISectionEntityRef` set introduced by issue
-				// #74; #73 added the per-endpoint sub-entity selection. The
-				// follow-up to unify is tracked in the cleanup pass.
+		// Fold the inspector pick in when it is a sub-entity of a section not
+		// already in the bulk — mixed-bulk support (whole section + a portal
+		// anchor, corner or line endpoint on a different section). Every
+		// sub-entity kind is representable now that the three naming families
+		// have collapsed into one ref union.
+		if (markerRef && markerRef.kind !== 'section') {
+			const sIdx = markerRef.sectionIdx;
+			if (sIdx >= 0 && sIdx < data.sections.length && !seen.has(`s:${sIdx}`)) {
+				out.push(markerRef);
 			}
 		}
 		return out;
-	}, [data, sectionBulk, marker]);
+	}, [data.sections.length, sectionBulk, markerRef]);
 
 	const bulkEntityCount = useMemo(() => {
 		const seen = new Set<string>();
-		for (const r of bulkRefs) {
-			const key =
-				r.kind === 'section' ? `s:${r.sectionIdx}`
-				: r.kind === 'portal' ? `p:${r.sectionIdx}:${r.portalIdx}`
-				: r.kind === 'boundaryLineEndpoint' ? `bl:${r.sectionIdx}:${r.portalIdx}:${r.lineIdx}`
-				: `ng:${r.sectionIdx}:${r.lineIdx}`;
-			seen.add(key);
-		}
+		for (const r of bulkRefs) seen.add(aiSectionRefKey(r));
 		return seen.size;
 	}, [bulkRefs]);
 
 	const isBulkActive = bulkEntityCount >= 2 || crossBundle.isCrossBundle;
+
+	// What the gizmo actually transforms. A bulk moves its whole ref list; a
+	// single pick moves just itself. Whole-line markers land here too and
+	// expand to zero slots, which is what suppresses their gizmo.
+	const gestureRefs = useMemo<readonly AISectionRef[]>(() => {
+		if (isBulkActive) return bulkRefs;
+		return markerRef ? [markerRef] : [];
+	}, [isBulkActive, bulkRefs, markerRef]);
+
+	/** The entity the gizmo hangs off; null for a bulk (it hangs off the Pivot). */
+	const gizmoAnchor = useMemo<AISectionRef | null>(
+		() => (isBulkActive ? null : markerRef),
+		[isBulkActive, markerRef],
+	);
 
 	// Flat set of section indices in the local-Bundle bulk. Used to dedupe
 	// the affectedNeighbours render (every bulk member is otherwise painted
@@ -220,115 +240,44 @@ export function useAISectionsBulkTransform(
 	}, [bulkRefs]);
 
 	// =========================================================================
-	// Pivot state — issue #76 (drag) + #81 (numeric panel)
+	// Pivot — issue #76 (drag) + #81 (numeric panel)
 	// =========================================================================
 
-	// Bulk Pivot — median of every selected entity position. Computed
-	// against the live data (NOT the preview model). Snapshotted at gesture
-	// start in `bulkPivotRef` so it doesn't drift mid-rotate.
-	const bulkPivotRef = useRef<Vec3 | null>(null);
-	const bulkPivotMedian = useMemo<Vec3 | null>(() => {
-		if (!isBulkActive) return null;
-		// Cross-Bundle bulks anchor at the median across every slice's
-		// spatial samples — the cross-Bundle Pivot the controller exposes
-		// (issue #80 / CONTEXT.md / "Pivot").
+	// Median of every slot the Selection addresses, against the live data (NOT
+	// the preview model). Snapshotted at gesture start in `pivotRef` so it
+	// doesn't drift mid-rotate.
+	const pivotRef = useRef<Point | null>(null);
+	const pivotMedian = useMemo<Point | null>(() => {
+		// Cross-Bundle bulks anchor at the median across every slice's spatial
+		// samples — the cross-Bundle Pivot the controller exposes (issue #80).
 		if (useCrossBundlePath) return crossBundle.pivot;
-		const yResolver = (idx: number) => (idx < sectionYs.length ? sectionYs[idx] : 0);
-		return bulkSelectionPivot(data, bulkRefs, yResolver);
-	}, [isBulkActive, useCrossBundlePath, crossBundle.pivot, bulkRefs, data, sectionYs]);
+		return selectionPivot(data, gestureRefs, resolver);
+	}, [useCrossBundlePath, crossBundle.pivot, data, gestureRefs, resolver]);
 
 	// Pivot drag-reposition / numeric-panel pivot edit share one slot.
-	const [bulkPivotOverride, setBulkPivotOverride] = useState<Vec3 | null>(null);
-	const [bulkPivotDragging, setBulkPivotDragging] = useState<Vec3 | null>(null);
+	const [bulkPivotOverride, setBulkPivotOverride] = useState<Point | null>(null);
+	const [bulkPivotDragging, setBulkPivotDragging] = useState<Point | null>(null);
 
-	// Selection-change reset. Keyed by bulkRefs membership so adding /
-	// removing an entity from the bulk drops the manual override.
-	const bulkMembershipKey = useMemo(() => {
-		return bulkRefs
-			.map((r) => {
-				switch (r.kind) {
-					case 'section':
-						return `s:${r.sectionIdx}`;
-					case 'portal':
-						return `p:${r.sectionIdx}:${r.portalIdx}`;
-					case 'boundaryLineEndpoint':
-						return `bl:${r.sectionIdx}:${r.portalIdx}:${r.lineIdx}:${r.end}`;
-					case 'noGoLineEndpoint':
-						return `ng:${r.sectionIdx}:${r.lineIdx}:${r.end}`;
-				}
-			})
-			.sort()
-			.join('|');
-	}, [bulkRefs]);
-	useResetOnChange(bulkMembershipKey, () => {
+	// Selection-change reset. Keyed by membership so adding / removing an
+	// entity from the Selection drops the manual override.
+	const membershipKey = useMemo(
+		() => gestureRefs.map(aiSectionRefKey).sort().join('|'),
+		[gestureRefs],
+	);
+	useResetOnChange(membershipKey, () => {
 		setBulkPivotOverride(null);
 		setBulkPivotDragging(null);
 	});
 
 	// Effective pivot. Dragging > committed override > median.
-	const bulkPivotLive = useMemo<Vec3 | null>(() => {
-		if (!isBulkActive) return null;
-		return bulkPivotDragging ?? bulkPivotOverride ?? bulkPivotMedian;
-	}, [isBulkActive, bulkPivotDragging, bulkPivotOverride, bulkPivotMedian]);
-
-	// =========================================================================
-	// Gizmo target — bulk > single-entity (ADR-0010)
-	// =========================================================================
-
-	const gizmoTarget = useMemo<DragTarget | null>(() => {
-		if (isBulkActive) {
-			// During a drag, the gizmoTarget's pivot is whatever the gesture
-			// snapshotted (`bulkPivotRef.current`). Between gestures, the
-			// override wins if set (issue #81 numeric pivot edit), otherwise
-			// the live-derived bulk median. Pivot edits between gestures
-			// thereby move the rotation centre for the next gesture.
-			const pivot = bulkPivotRef.current ?? bulkPivotOverride ?? bulkPivotLive;
-			if (!pivot) return null;
-			return { kind: 'bulk', entities: bulkRefs, pivot };
-		}
-		if (!marker) return null;
-		switch (marker.kind) {
-			case 'section':
-				return { kind: 'section', sectionIdx: marker.sectionIndex };
-			case 'corner':
-				return {
-					kind: 'corner',
-					sectionIdx: marker.sectionIndex,
-					cornerIdx: marker.cornerIndex,
-				};
-			case 'portal':
-				return {
-					kind: 'portalAnchor',
-					sectionIdx: marker.sectionIndex,
-					portalIdx: marker.portalIndex,
-				};
-			case 'boundaryLineEndpoint':
-				return {
-					kind: 'boundaryLineEndpoint',
-					sectionIdx: marker.sectionIndex,
-					portalIdx: marker.portalIndex,
-					lineIdx: marker.lineIndex,
-					endIdx: marker.endIndex,
-				};
-			case 'noGoLineEndpoint':
-				return {
-					kind: 'noGoLineEndpoint',
-					sectionIdx: marker.sectionIndex,
-					lineIdx: marker.lineIndex,
-					endIdx: marker.endIndex,
-				};
-			// `boundaryLine` / `noGoLine` (whole-line selection) intentionally
-			// excluded — no rigid-body sub-op for a whole line yet (issue #73
-			// ships per-endpoint translates).
-			default:
-				return null;
-		}
-	}, [isBulkActive, bulkRefs, bulkPivotLive, marker, bulkPivotOverride]);
+	const bulkPivotLive = useMemo<Point | null>(
+		() => bulkPivotDragging ?? bulkPivotOverride ?? pivotMedian,
+		[bulkPivotDragging, bulkPivotOverride, pivotMedian],
+	);
 
 	// Snap is intentionally not applied on any bulk-transform path (ADR-
 	// 0009 / CONTEXT.md). State + hotkey are kept for muscle memory but
-	// the value is never consulted in the commit path. Issue #75
-	// reconsiders snap once cascade is opt-in.
+	// the value is never consulted in the commit path.
 	useToggleHotkey('s', setSnapEnabled);
 	useToggleHotkey('c', setCascadeEnabled);
 
@@ -337,12 +286,11 @@ export function useAISectionsBulkTransform(
 	// =========================================================================
 
 	const selSection = selectedSectionIndex != null ? data.sections[selectedSectionIndex] ?? null : null;
-	const selectedSectionY =
-		selectedSectionIndex != null && selectedSectionIndex < sectionYs.length
-			? sectionYs[selectedSectionIndex]
-			: 0;
 
-	const previewModel = useMemo(() => derivePreviewModel(data, drag), [data, drag]);
+	const previewModel = useMemo(
+		() => derivePreviewModel(data, drag, resolver),
+		[data, drag, resolver],
+	);
 	const previewSection = useMemo(
 		() => derivePreviewSection(selSection, previewModel, selectedSectionIndex),
 		[selSection, previewModel, selectedSectionIndex],
@@ -354,94 +302,90 @@ export function useAISectionsBulkTransform(
 	);
 
 	const gizmoPosition = useMemo(
-		() => deriveGizmoPosition(gizmoTarget, previewSection, data, selectedSectionY, bulkPivotOverride, drag),
-		[gizmoTarget, previewSection, data, selectedSectionY, bulkPivotOverride, drag],
+		() => deriveGizmoPosition(bulkPivotLive, gizmoAnchor, drag?.delta.translate ?? null),
+		[bulkPivotLive, gizmoAnchor, drag],
 	);
-	const gizmoAxes = useMemo(() => deriveGizmoAxes(gizmoTarget), [gizmoTarget]);
+	const gizmoAxes = useMemo(
+		() => resolverAxes(gestureRefs, resolver) ?? TRANSFORM_AXES_FULL_3D,
+		[gestureRefs, resolver],
+	);
 
 	// =========================================================================
-	// Gesture handlers (cascade XOR is folded here so downstream consumers
-	// see the effective cascade verbatim)
+	// Gesture handlers
+	//
+	// The cascade XOR is folded here so `drag.refs` is already the widened
+	// list — preview and commit consume the identical refs, and the orange
+	// "cascade-affected neighbour" highlight falls out of the reference
+	// identity of the sections `transform` left alone.
 	// =========================================================================
+
+	const buildFrame = useCallback(
+		(delta: BulkTransformDelta, pivot: Point | null): ActiveDrag => {
+			const cascade = cascadeEnabled !== !!delta.cascade;
+			const refs = cascade ? expandAISectionsCascade(data, gestureRefs) : gestureRefs;
+			return {
+				refs,
+				anchor: gizmoAnchor,
+				pivot,
+				isBulk: isBulkActive,
+				delta: { ...delta, cascade },
+			};
+		},
+		[cascadeEnabled, data, gestureRefs, gizmoAnchor, isBulkActive],
+	);
 
 	const handleGizmoTransform = useCallback(
 		(delta: BulkTransformDelta) => {
-			if (!gizmoTarget) return;
-			const resolvedDelta = {
-				...delta,
-				cascade: cascadeEnabled !== !!delta.cascade,
-			};
-			if (gizmoTarget.kind === 'bulk') {
-				// Snapshot the Pivot on the first frame so it doesn't drift
-				// as we drag (re-deriving the median against moving positions
-				// every frame produces a spiral instead of a rigid rotate).
-				if (!bulkPivotRef.current) bulkPivotRef.current = gizmoTarget.pivot;
-				setDrag({
-					target: { ...gizmoTarget, pivot: bulkPivotRef.current },
-					delta: resolvedDelta,
-				});
-				return;
-			}
-			setDrag({ target: gizmoTarget, delta: resolvedDelta });
+			if (gestureRefs.length === 0) return;
+			// Snapshot the Pivot on the first frame so it doesn't drift as we
+			// drag (re-deriving the median against moving positions every frame
+			// produces a spiral instead of a rigid rotate).
+			if (!pivotRef.current) pivotRef.current = bulkPivotLive;
+			setDrag(buildFrame(delta, pivotRef.current));
 		},
-		[gizmoTarget, cascadeEnabled],
+		[gestureRefs.length, bulkPivotLive, buildFrame],
 	);
 
 	const handleGizmoCommit = useCallback(
 		(delta: BulkTransformDelta) => {
 			setDrag(null);
-			const snapshotPivot = bulkPivotRef.current;
-			bulkPivotRef.current = null;
-			if (!gizmoTarget) return;
+			// Fall back to the live pivot when a commit arrives with no
+			// preceding frame, rather than dropping the rotation on the floor.
+			const snapshotPivot = pivotRef.current ?? bulkPivotLive;
+			pivotRef.current = null;
+			if (gestureRefs.length === 0) return;
 			if (isIdentityDelta(delta)) return;
-			const effectiveDelta = {
-				...delta,
-				cascade: cascadeEnabled !== !!delta.cascade,
-			};
+			const frame = buildFrame(delta, snapshotPivot);
 			// Cross-Bundle bulk gesture (issue #80): route through the
 			// workspace-level controller so every affected Bundle is
 			// independently dirtied and one multi-Bundle HistoryCommit
 			// covers the whole gesture. The active overlay's own bundle is
 			// included as one slice among many — the single-Bundle `onChange`
 			// path is intentionally skipped here to avoid double-writing.
-			if (gizmoTarget.kind === 'bulk' && useCrossBundlePath && snapshotPivot) {
-				const written = crossBundle.commitDelta(
+			if (isBulkActive && useCrossBundlePath && snapshotPivot) {
+				// `written === 0` means every slice resolved to a no-op, so no
+				// history entry is pushed.
+				void crossBundle.commitDelta(
 					{ x: snapshotPivot.x, z: snapshotPivot.z },
-					{
-						translate: effectiveDelta.translate,
-						rotateY: effectiveDelta.rotate.y,
-					},
+					{ translate: frame.delta.translate, rotateY: frame.delta.rotate.y },
 				);
-				// `written === 0` means every slice resolved to a no-op
-				// (the model-reference identity guard in
-				// `buildCrossBundleWrites`). No history entry.
-				void written;
 				return;
 			}
 			// Single-Bundle path — one setResourceAt → one HistoryCommit.
 			if (!onChange) return;
-			const committedTarget =
-				gizmoTarget.kind === 'bulk' && snapshotPivot
-					? { ...gizmoTarget, pivot: snapshotPivot }
-					: gizmoTarget;
-			let next: ParsedAISectionsV12;
-			try {
-				next = applyDragToModel(data, { target: committedTarget, delta: effectiveDelta });
-			} catch {
-				return;
-			}
+			const next = transform(data, frame.refs, toTransformDelta(frame.delta, frame.pivot), resolver);
 			if (next === data) return;
-			// Single onChange call ⇒ single setResourceAt ⇒ single
-			// HistoryCommit pushed onto the Workspace-undo stack. Cascade-on
-			// paths preserve this invariant (one resulting model, one commit).
 			onChange(next);
 		},
-		[data, gizmoTarget, onChange, useCrossBundlePath, crossBundle, cascadeEnabled],
+		[
+			bulkPivotLive, buildFrame, crossBundle, data, gestureRefs.length,
+			isBulkActive, onChange, resolver, useCrossBundlePath,
+		],
 	);
 
 	const handleGizmoCancel = useCallback(() => {
 		setDrag(null);
-		bulkPivotRef.current = null;
+		pivotRef.current = null;
 	}, []);
 
 	// =========================================================================
@@ -450,17 +394,17 @@ export function useAISectionsBulkTransform(
 
 	// The stored pivot uses underlying-data coordinates, NOT the visualised
 	// gizmo position — subtract BULK_GIZMO_Y_OFFSET on incoming gizmo-world
-	// positions. Keeps the stored pivot bit-identical to the median
-	// computed by `bulkSelectionPivot`.
+	// positions. Pivot handles are bulk-only, and the bulk lift IS
+	// BULK_GIZMO_Y_OFFSET, so this round-trips exactly.
 	const handlePivotMove = useCallback(
-		(world: Vec3) => {
+		(world: Point) => {
 			if (!isBulkActive) return;
 			setBulkPivotDragging({ x: world.x, y: world.y - BULK_GIZMO_Y_OFFSET, z: world.z });
 		},
 		[isBulkActive],
 	);
 	const handlePivotCommit = useCallback(
-		(world: Vec3) => {
+		(world: Point) => {
 			setBulkPivotDragging(null);
 			if (!isBulkActive) return;
 			setBulkPivotOverride({ x: world.x, y: world.y - BULK_GIZMO_Y_OFFSET, z: world.z });
@@ -475,88 +419,32 @@ export function useAISectionsBulkTransform(
 	// Session publish (issue #81) — typed pivot + delta companion
 	// =========================================================================
 
-	// Session pivot — the gizmo's anchor projected to "absolute world
-	// coords" (the issue's terminology). Bulk uses the snapshotted bulk
-	// pivot; sub-entity uses the anchor itself. No +1.5 lift — that's a
-	// visual nudge, not part of the typed value the user cares about.
-	const sessionPivot = useMemo<Vec3 | null>(() => {
-		if (bulkPivotOverride) return bulkPivotOverride;
-		if (!gizmoTarget) return null;
-		if (gizmoTarget.kind === 'bulk') return gizmoTarget.pivot;
-		const liveSection = data.sections[gizmoTarget.sectionIdx];
-		if (!liveSection) return null;
-		switch (gizmoTarget.kind) {
-			case 'section': {
-				if (liveSection.corners.length === 0) return null;
-				let sx = 0;
-				let sz = 0;
-				for (const c of liveSection.corners) {
-					sx += c.x;
-					sz += c.y;
-				}
-				const n = liveSection.corners.length;
-				return { x: sx / n, y: selectedSectionY, z: sz / n };
-			}
-			case 'corner': {
-				const c = liveSection.corners[gizmoTarget.cornerIdx];
-				if (!c) return null;
-				return { x: c.x, y: selectedSectionY, z: c.y };
-			}
-			case 'portalAnchor': {
-				const p = liveSection.portals[gizmoTarget.portalIdx];
-				if (!p) return null;
-				return { x: p.position.x, y: p.position.y, z: p.position.z };
-			}
-			case 'boundaryLineEndpoint': {
-				const p = liveSection.portals[gizmoTarget.portalIdx];
-				if (!p) return null;
-				const line = p.boundaryLines[gizmoTarget.lineIdx];
-				if (!line) return null;
-				const v = line.verts;
-				const x = gizmoTarget.endIdx === 0 ? v.x : v.z;
-				const z = gizmoTarget.endIdx === 0 ? v.y : v.w;
-				return { x, y: p.position.y, z };
-			}
-			case 'noGoLineEndpoint': {
-				const line = liveSection.noGoLines[gizmoTarget.lineIdx];
-				if (!line) return null;
-				const v = line.verts;
-				const x = gizmoTarget.endIdx === 0 ? v.x : v.z;
-				const z = gizmoTarget.endIdx === 0 ? v.y : v.w;
-				return { x, y: selectedSectionY, z };
-			}
-		}
-	}, [gizmoTarget, bulkPivotOverride, data, selectedSectionY]);
-
 	const handleSessionSetDelta = useCallback(
 		(next: BulkTransformDelta) => {
-			if (!gizmoTarget) return;
+			if (gestureRefs.length === 0) return;
 			if (isIdentityDelta(next)) {
 				setDrag(null);
 				return;
 			}
-			// Same shape as a live drag-frame, but the pivot for a bulk
-			// gesture uses whatever the gizmoTarget already carries
-			// (override-aware via the memo above). No need to snapshot
-			// bulkPivotRef — a typed commit is a one-shot, not a multi-
-			// frame gesture, so pivot drift can't happen.
-			setDrag({ target: gizmoTarget, delta: next });
+			// A typed commit is a one-shot, not a multi-frame gesture, so pivot
+			// drift can't happen and there is nothing to snapshot.
+			setDrag(buildFrame(next, bulkPivotLive));
 		},
-		[gizmoTarget],
+		[gestureRefs.length, buildFrame, bulkPivotLive],
 	);
 
 	const handleSessionCommit = useCallback(
 		(typed: BulkTransformDelta) => {
-			// Drop any in-flight preview before the commit so the next
-			// session state has delta = identity (the "reset to zero after
-			// every commit" rule per issue #81 / Blender N panel idiom).
+			// Drop any in-flight preview before the commit so the next session
+			// state has delta = identity (the "reset to zero after every commit"
+			// rule per issue #81 / Blender N panel idiom).
 			setDrag(null);
 			handleGizmoCommit(typed);
 		},
 		[handleGizmoCommit],
 	);
 
-	const handleSessionSetPivot = useCallback((world: Vec3) => {
+	const handleSessionSetPivot = useCallback((world: Point) => {
 		// Typed pivot edit — same `bulkPivotOverride` slot the pivot-drag
 		// handle uses. No undo entry: pivot is part of the Tools surface,
 		// not the Workspace history.
@@ -565,8 +453,15 @@ export function useAISectionsBulkTransform(
 
 	useGizmoSessionPublish({
 		isActive,
-		gizmoTarget,
-		sessionPivot,
+		// The session pivot is the gizmo's anchor in absolute world coords —
+		// the pivot itself, with no +1.5 lift (that's a visual nudge, not part
+		// of the typed value the user cares about).
+		sessionPivot: gestureRefs.length > 0 ? bulkPivotLive : null,
+		sessionKey: isBulkActive
+			? `bulk:${bulkEntityCount}`
+			: gizmoAnchor
+				? aiSectionRefKey(gizmoAnchor)
+				: null,
 		gizmoAxes,
 		drag,
 		bundleId,
@@ -598,6 +493,10 @@ export function useAISectionsBulkTransform(
 		toggleSnap,
 		cascadeEnabled,
 		toggleCascade,
+		// Cascade only reaches out through whole-section refs; a sub-entity
+		// gesture is deliberately the "tear it off the join" one.
+		cascadeActive:
+			drag != null && drag.delta.cascade === true && drag.refs.some((r) => r.kind === 'section'),
 		bulkRefs,
 		bulkEntityCount,
 		isBulkActive,
@@ -606,7 +505,7 @@ export function useAISectionsBulkTransform(
 		previewSection,
 		previewCorners,
 		affectedNeighbours,
-		gizmoTarget,
+		gizmoAnchor,
 		gizmoPosition,
 		gizmoAxes,
 		gizmoPixelSize: 90,
@@ -640,21 +539,22 @@ export function useAISectionsBulkTransform(
 
 function useGizmoSessionPublish(opts: {
 	isActive: boolean;
-	gizmoTarget: DragTarget | null;
-	sessionPivot: Vec3 | null;
+	sessionPivot: Point | null;
+	/** Identity of what the gizmo is on, so the panel resets between picks. */
+	sessionKey: string | null;
 	gizmoAxes: TransformAxes;
 	drag: ActiveDrag | null;
 	bundleId: string | undefined;
 	index: number | undefined;
 	setDelta: (next: BulkTransformDelta) => void;
 	commit: (typed: BulkTransformDelta) => void;
-	setPivot: (world: Vec3) => void;
+	setPivot: (world: Point) => void;
 }) {
 	const setSession = useSetBulkTransformGizmoSession();
 	const {
 		isActive,
-		gizmoTarget,
 		sessionPivot,
+		sessionKey,
 		gizmoAxes,
 		drag,
 		bundleId,
@@ -665,24 +565,12 @@ function useGizmoSessionPublish(opts: {
 	} = opts;
 
 	useEffect(() => {
-		if (!isActive || !gizmoTarget || !sessionPivot) {
+		if (!isActive || !sessionKey || !sessionPivot) {
 			setSession(null);
 			return;
 		}
-		const markerKey =
-			gizmoTarget.kind === 'bulk'
-				? `bulk:${gizmoTarget.entities.length}`
-				: gizmoTarget.kind === 'section'
-					? `s:${gizmoTarget.sectionIdx}`
-					: gizmoTarget.kind === 'corner'
-						? `c:${gizmoTarget.sectionIdx}:${gizmoTarget.cornerIdx}`
-						: gizmoTarget.kind === 'portalAnchor'
-							? `pa:${gizmoTarget.sectionIdx}:${gizmoTarget.portalIdx}`
-							: gizmoTarget.kind === 'boundaryLineEndpoint'
-								? `ble:${gizmoTarget.sectionIdx}:${gizmoTarget.portalIdx}:${gizmoTarget.lineIdx}:${gizmoTarget.endIdx}`
-								: `nge:${gizmoTarget.sectionIdx}:${gizmoTarget.lineIdx}:${gizmoTarget.endIdx}`;
 		const session: GizmoSession = {
-			id: `aiSections::${bundleId ?? '?'}::${index ?? '?'}::${markerKey}`,
+			id: `aiSections::${bundleId ?? '?'}::${index ?? '?'}::${sessionKey}`,
 			delta: drag?.delta ?? identityDelta(),
 			pivot: sessionPivot,
 			axes: gizmoAxes,
@@ -693,7 +581,7 @@ function useGizmoSessionPublish(opts: {
 		setSession(session);
 	}, [
 		isActive,
-		gizmoTarget,
+		sessionKey,
 		sessionPivot,
 		gizmoAxes,
 		drag,

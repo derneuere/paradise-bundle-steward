@@ -178,7 +178,6 @@ const registry: SchemaRegistry = {
 };
 
 export const vfxMeshCollectionResourceSchema: ResourceSchema = {
-	key: 'vfxMeshCollection',
 	name: 'VFX Mesh Collection',
 	rootType: 'ParsedVFXMeshCollection',
 	registry,

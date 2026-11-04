@@ -151,7 +151,6 @@ const registry: SchemaRegistry = {
 };
 
 export const textureResourceSchema: ResourceSchema = {
-	key: 'texture',
 	name: 'Texture',
 	rootType: 'Texture',
 	registry,

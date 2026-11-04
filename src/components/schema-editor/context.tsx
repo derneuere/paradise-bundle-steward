@@ -81,6 +81,11 @@ export type ExtensionRegistry = Record<string, SchemaExtension>;
 // ---------------------------------------------------------------------------
 
 export type SchemaEditorContextValue = {
+	/** Handler key of the resource being edited ('trafficData', 'shader', …).
+	 *  Comes from the registration entry that resolved `resource` — never from
+	 *  the schema itself, which has no identity of its own (one schema can be
+	 *  registered under more than one variant). */
+	resourceKey: string;
 	resource: ResourceSchema;
 	data: unknown;
 	// Selection
@@ -107,6 +112,10 @@ const SchemaEditorContext = createContext<SchemaEditorContextValue | null>(null)
 // ---------------------------------------------------------------------------
 
 type ProviderProps = {
+	/** Handler key the `resource` schema was registered under. Supplied by the
+	 *  caller (which already resolved the profile by key) rather than read off
+	 *  the schema — see `SchemaEditorContextValue.resourceKey`. */
+	resourceKey: string;
 	resource: ResourceSchema;
 	data: unknown;
 	onChange: (next: unknown) => void;
@@ -136,6 +145,7 @@ type ProviderProps = {
 };
 
 export function SchemaEditorProvider({
+	resourceKey,
 	resource,
 	data,
 	onChange,
@@ -256,6 +266,7 @@ export function SchemaEditorProvider({
 
 	const value = useMemo<SchemaEditorContextValue>(
 		() => ({
+			resourceKey,
 			resource,
 			data,
 			selectedPath,
@@ -269,6 +280,7 @@ export function SchemaEditorProvider({
 			getExtension,
 		}),
 		[
+			resourceKey,
 			resource,
 			data,
 			selectedPath,

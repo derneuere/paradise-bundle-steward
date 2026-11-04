@@ -271,7 +271,7 @@ const ParsedRenderable: RecordSchema = {
 		// the user just wants to see "which textures does this part use".
 		{ title: 'Materials & Textures', component: 'RenderableCard' },
 	],
-	label: (value, index) => renderableItemLabel(value, index ?? 0, { root: value, resource: { key: '', name: '', rootType: '', registry: {} } }),
+	label: (value, index) => renderableItemLabel(value, index ?? 0, { root: value, resource: { name: '', rootType: '', registry: {} } }),
 };
 
 // Hidden RenderableItemMeta record — kept declared so the walker doesn't
@@ -319,7 +319,6 @@ const registry: SchemaRegistry = {
 };
 
 export const renderableResourceSchema: ResourceSchema = {
-	key: 'renderable',
 	name: 'Renderable',
 	rootType: 'RenderableCollection',
 	registry,

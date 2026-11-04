@@ -208,7 +208,7 @@ through `pickRenderBinding` + the profile overlay):
   (`data`, `selectedPath`, `onSelect`, `onChange`) and mount inside
   `<WorldViewport>`.
 - Wire the overlay to the resource through the editor binding
-  (`src/lib/editor/bindings.ts`) so `pickRenderBinding(resource.key, data)`
+  (`src/lib/editor/bindings.ts`) so `pickRenderBinding(resourceKey, data)`
   resolves it. `ViewportPane` then mounts it automatically.
 - If the overlay needs access to something outside the schema-editor
   context (multi-resource models, `loadedBundle`, selection callbacks),
@@ -612,7 +612,7 @@ schema editor lets users inspect mesh / material / vertex descriptor
 metadata in the right sidebar while the 3D viewer fills the center pane.
 
 **3D viewport:** `RenderableViewport` is special-cased in `ViewportPane.tsx`
-(`resource.key === 'renderable'`) — it runs a full three.js scene driven
+(`resourceKey === 'renderable'`) — it runs a full three.js scene driven
 by `RenderableDecodedProvider`.
 
 **Tree labels:**
@@ -648,7 +648,7 @@ count, flags) + the pixel data blob.
 are trivially schema-driven (enums for format, u16 for width/height,
 flags for texture flags). The pixel data is NOT editable through the
 schema — it's `hidden`, and `TextureViewport` (special-cased in
-`ViewportPane.tsx` as `resource.key === 'texture'`) renders the 2D preview
+`ViewportPane.tsx` as `resourceKey === 'texture'`) renders the 2D preview
 from `TextureContext`.
 
 **Tree labels:**

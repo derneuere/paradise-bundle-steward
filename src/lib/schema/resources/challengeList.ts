@@ -541,7 +541,6 @@ const registry: SchemaRegistry = {
 };
 
 export const challengeListResourceSchema: ResourceSchema = {
-	key: 'challengeList',
 	name: 'Challenge List',
 	rootType: 'ChallengeList',
 	registry,

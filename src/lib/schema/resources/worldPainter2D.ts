@@ -108,7 +108,6 @@ const registry: SchemaRegistry = {
 };
 
 export const worldPainter2DResourceSchema: ResourceSchema = {
-	key: 'worldPainter2D',
 	name: 'World Painter 2D',
 	rootType: 'ParsedWorldPainter2D',
 	registry,

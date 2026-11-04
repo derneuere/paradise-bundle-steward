@@ -136,7 +136,6 @@ const ParsedCommsToolListDefinition: RecordSchema = {
 };
 
 export const commsToolListDefinitionResourceSchema: ResourceSchema = {
-	key: 'commsToolListDefinition',
 	name: 'Comms Tool List Definition',
 	rootType: 'ParsedCommsToolListDefinition',
 	registry: {

@@ -193,7 +193,6 @@ const v22Registry: SchemaRegistry = {
 };
 
 export const trafficDataV22ResourceSchema: ResourceSchema = {
-	key: 'trafficData',
 	name: 'Traffic Data (v22 prototype)',
 	rootType: 'ParsedTrafficDataV22',
 	registry: v22Registry,

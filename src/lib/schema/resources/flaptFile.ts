@@ -360,7 +360,6 @@ const registry: SchemaRegistry = {
 };
 
 export const flaptFileResourceSchema: ResourceSchema = {
-	key: 'flaptFile',
 	name: 'Flapt File',
 	rootType: 'ParsedFlaptFile',
 	registry,

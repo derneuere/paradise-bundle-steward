@@ -405,7 +405,6 @@ const registry: SchemaRegistry = {
 };
 
 export const vehicleListResourceSchema: ResourceSchema = {
-	key: 'vehicleList',
 	name: 'Vehicle List',
 	rootType: 'VehicleList',
 	registry,

@@ -181,7 +181,6 @@ const registry: SchemaRegistry = {
 };
 
 export const environmentDictionaryResourceSchema: ResourceSchema = {
-	key: 'environmentDictionary',
 	name: 'Environment Dictionary',
 	rootType: 'ParsedEnvironmentDictionary',
 	registry,

@@ -219,7 +219,6 @@ const v6Registry: SchemaRegistry = {
 };
 
 export const aiSectionsV6ResourceSchema: ResourceSchema = {
-	key: 'aiSections',
 	name: 'AI Sections',
 	rootType: 'ParsedAISectionsV6',
 	registry: v6Registry,

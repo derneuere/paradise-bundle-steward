@@ -83,7 +83,6 @@ const registry: SchemaRegistry = {
 };
 
 export const idListResourceSchema: ResourceSchema = {
-	key: 'idList',
 	name: 'ID List',
 	rootType: 'ParsedIdList',
 	registry,

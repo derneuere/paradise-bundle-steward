@@ -218,7 +218,6 @@ const registry: SchemaRegistry = {
 };
 
 export const playerCarColoursResourceSchema: ResourceSchema = {
-	key: 'playerCarColours',
 	name: 'Player Car Colours',
 	rootType: 'PlayerCarColours',
 	registry,

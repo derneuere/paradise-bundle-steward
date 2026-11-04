@@ -439,7 +439,12 @@ describe('buildWorkspaceFlat — Schema rows', () => {
 		// (no separate Instance row, no schema-root row). The first-level
 		// schema rows render at depth 2 — one indent below the ResourceType
 		// row at depth 1.
-		const bundles = [makeBundle('A.BUN', { aiSections: [{ sections: [] }] })];
+		// `kind` is what the editor registry narrows on to pick a schema — a
+		// real parsed AI Sections model always carries it, so a stub that wants
+		// schema rows has to as well.
+		const bundles = [
+			makeBundle('A.BUN', { aiSections: [{ kind: 'v12', sections: [] }] }),
+		];
 		const selection: WorkspaceSelection = {
 			bundleId: 'A.BUN',
 			resourceKey: 'aiSections',
@@ -507,7 +512,7 @@ describe('buildWorkspaceFlat — two-Bundle drill flow (acceptance)', () => {
 		// Mirrors the issue #24 HITL scenario: two bundles, click a PSL row,
 		// schema subtree appears beneath that instance.
 		const trk = makeBundle('TRK_UNIT_07.BUN', {
-			aiSections: [{ sections: [] }],
+			aiSections: [{ kind: 'v12', sections: [] }],
 			streetData: [{ streets: [] }],
 		});
 		const wcol = makeBundle('WORLDCOL.BIN', {
@@ -613,7 +618,7 @@ describe('Selection round-trips per row kind', () => {
 
 	it('Schema row → selection { bundleId, resourceKey, index, path: [...non-empty] }', () => {
 		const bundles = [
-			makeBundle('A.BUN', { aiSections: [{ sections: [{}, {}] }] }),
+			makeBundle('A.BUN', { aiSections: [{ kind: 'v12', sections: [{}, {}] }] }),
 		];
 		const sel: WorkspaceSelection = {
 			bundleId: 'A.BUN',
@@ -790,7 +795,9 @@ describe('eye icon (Visibility) per row kind', () => {
 		// The SchemaFlatNode shape doesn't even carry a `showVisibility` field;
 		// the row component never renders an eye for kind === 'schema'. Sanity-
 		// check by walking every schema row and asserting no such field.
-		const bundles = [makeBundle('A.BUN', { aiSections: [{ sections: [] }] })];
+		const bundles = [
+			makeBundle('A.BUN', { aiSections: [{ kind: 'v12', sections: [] }] }),
+		];
 		const sel: WorkspaceSelection = {
 			bundleId: 'A.BUN',
 			resourceKey: 'aiSections',

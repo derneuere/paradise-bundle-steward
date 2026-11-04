@@ -10,32 +10,28 @@
 // `WorkspaceContext.types.ts`).
 //
 // Design decision (a) vs (b) from the issue brief: we picked **(b) —
-// group refs by Bundle in the dispatch layer**. The AISectionEntityRef
-// shape stays single-Bundle (no `bundleId` field on every variant), the
-// existing single-Bundle ops (`bulkTranslateEntities`,
-// `bulkRotateEntitiesYaw`, `bulkSelectionPivot`) keep working unchanged,
-// and the cross-Bundle plumbing collects N per-Bundle ref lists, calls
-// the existing op once per Bundle, then dispatches every result as ONE
-// `setResourcesMulti` to the workspace. That call pushes one multi-Bundle
-// HistoryCommit so undo reverts the whole gesture atomically.
+// group refs by Bundle in the dispatch layer**. `AISectionRef` stays
+// single-Bundle (no `bundleId` field on every variant); the cross-Bundle
+// plumbing collects N per-Bundle ref lists, runs the shared `transform`
+// once per Bundle, then dispatches every result as ONE `setResourcesMulti`
+// to the workspace. That call pushes one multi-Bundle HistoryCommit so undo
+// reverts the whole gesture atomically.
 //
 // What this module owns:
 //   - Walking the workspace bulks + filtering by visibility to produce
 //     a per-Bundle `(bundleId, index, refs)` triple list.
-//   - Computing the cross-Bundle pivot — the per-axis median of every
-//     spatial point every ref addresses, across every affected Bundle.
-//   - Building the `setResourcesMulti` write list from a delta: one
-//     write per (bundleId, index) with the new model produced by running
-//     the existing bulk ops against that Bundle's per-Bundle refs.
+//   - Computing the cross-Bundle pivot — one median over every slice's
+//     spatial samples concatenated, via the shared `bindingsPivot`.
+//   - Building the `setResourcesMulti` write list from a delta: one write
+//     per (bundleId, index) with the model the shared `transform` produced
+//     for that Bundle's refs.
 
+import { bindTransform, bindingsPivot, transform, type Point } from '@/lib/core/transform';
 import {
-	bulkRotateEntitiesYaw,
-	bulkSelectionPivot,
-	bulkTranslateEntities,
-	type AISectionEntityRef,
-} from '@/lib/core/aiSectionsOps';
+	createAISectionsResolver,
+	type AISectionRef,
+} from '@/lib/core/transform/resolvers/aiSections';
 import type { ParsedAISectionsV12 } from '@/lib/core/aiSections';
-import { resolveSectionYs } from '@/lib/core/aiSectionY';
 import type { BundleId, VisibilityNode } from '@/context/WorkspaceContext.types';
 import { parseSectionPathKey } from './aiSectionsBulk';
 
@@ -45,15 +41,14 @@ import { parseSectionPathKey } from './aiSectionsBulk';
 
 /**
  * One Bundle's slice of a cross-Bundle bulk Selection — the (bundleId,
- * index) addressing plus the flat per-Bundle `AISectionEntityRef[]` the
- * existing single-Bundle bulk ops consume. The cross-Bundle dispatch
- * iterates these and runs the same op per slice.
+ * index) addressing plus that Bundle's flat `AISectionRef[]`. The dispatch
+ * iterates these and runs the same `transform` per slice.
  */
 export type CrossBundleBulkSlice = {
 	bundleId: BundleId;
 	index: number;
 	model: ParsedAISectionsV12;
-	refs: readonly AISectionEntityRef[];
+	refs: readonly AISectionRef[];
 };
 
 // ---------------------------------------------------------------------------
@@ -88,8 +83,8 @@ export type ResolveModel = (
  *
  * Only V12 sections are emitted today; legacy V4/V6 bulks (variant
  * `legacy`) are silently skipped because the legacy overlay is read-only
- * and `bulkTranslateEntities` / `bulkRotateEntitiesYaw` only accept
- * V12-shaped roots. Adding a legacy editable path is a separate issue.
+ * and the AI-sections resolver only accepts V12-shaped roots. Adding a
+ * legacy editable path is a separate issue.
  */
 export function buildCrossBundleSlices(
 	summaries: readonly WorkspaceBulkSummaryInput[],
@@ -111,7 +106,7 @@ export function buildCrossBundleSlices(
 		if (!visible) continue;
 		const model = resolveModel(summary.bundleId, summary.index);
 		if (!model) continue;
-		const refs: AISectionEntityRef[] = [];
+		const refs: AISectionRef[] = [];
 		for (const key of summary.pathKeys) {
 			const addr = parseSectionPathKey(key);
 			if (!addr) continue;
@@ -135,81 +130,26 @@ export function buildCrossBundleSlices(
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the cross-Bundle bulk Pivot — the per-axis median of every
+ * Compute the cross-Bundle bulk **Pivot** — the per-axis median of every
  * spatial point every selected entity addresses, across every slice.
  *
- * Implementation note: we re-derive the per-slice section Ys here because
- * the existing `bulkSelectionPivot` takes a `sectionY` resolver scoped to
- * a single model. For the cross-Bundle case we walk each slice with its
- * own Y-resolver, concatenate the spatial samples, and take the per-axis
- * median across the union. Same median (not centroid) convention as the
- * single-Bundle pivot — CONTEXT.md / "Pivot".
+ * The median is taken over the CONCATENATION of every slice's samples, not
+ * over the per-slice medians, so a Bundle contributing twenty sections weighs
+ * twenty times a Bundle contributing one. Each slice binds its own resolver
+ * (AI-section corner Y is derived per model), and the shared `bindingsPivot`
+ * does the rest — the hand-rolled sampler and its private `median` that used
+ * to live here were a verbatim copy of the single-Bundle one and drifted.
  *
- * Returns `null` when there are no slices, or when every slice's refs
- * point at out-of-range entities (defensive — shouldn't happen if
- * buildCrossBundleSlices filtered range).
+ * Returns `null` when there are no slices, or when every slice's refs point at
+ * out-of-range entities.
  */
 export function crossBundleBulkPivot(
 	slices: readonly CrossBundleBulkSlice[],
-): { x: number; y: number; z: number } | null {
-	const xs: number[] = [];
-	const ys: number[] = [];
-	const zs: number[] = [];
-	for (const slice of slices) {
-		const sectionYs = resolveSectionYs(slice.model);
-		const yResolver = (idx: number) => (idx < sectionYs.length ? sectionYs[idx] : 0);
-		// `bulkSelectionPivot` returns the *median per axis* of the slice's
-		// samples — but we need the union median across all slices, so we
-		// re-walk the refs here (a partial duplicate of bulkSelectionPivot,
-		// kept here so the helper stays self-contained — extracting a
-		// "samples-only" helper from the aiSectionsOps module is a
-		// separate, lower-stakes refactor).
-		for (const ref of slice.refs) {
-			const sec = slice.model.sections[ref.sectionIdx];
-			if (!sec) continue;
-			const y = yResolver(ref.sectionIdx);
-			if (ref.kind === 'section') {
-				for (const c of sec.corners) {
-					xs.push(c.x); ys.push(y); zs.push(c.y);
-				}
-				for (const p of sec.portals) {
-					xs.push(p.position.x); ys.push(p.position.y); zs.push(p.position.z);
-				}
-				continue;
-			}
-			if (ref.kind === 'portal') {
-				const p = sec.portals[ref.portalIdx];
-				if (!p) continue;
-				xs.push(p.position.x); ys.push(p.position.y); zs.push(p.position.z);
-				continue;
-			}
-			if (ref.kind === 'boundaryLineEndpoint') {
-				const p = sec.portals[ref.portalIdx];
-				const bl = p?.boundaryLines[ref.lineIdx];
-				if (!bl) continue;
-				if (ref.end === 0) { xs.push(bl.verts.x); ys.push(y); zs.push(bl.verts.y); }
-				else { xs.push(bl.verts.z); ys.push(y); zs.push(bl.verts.w); }
-				continue;
-			}
-			if (ref.kind === 'noGoLineEndpoint') {
-				const bl = sec.noGoLines[ref.lineIdx];
-				if (!bl) continue;
-				if (ref.end === 0) { xs.push(bl.verts.x); ys.push(y); zs.push(bl.verts.y); }
-				else { xs.push(bl.verts.z); ys.push(y); zs.push(bl.verts.w); }
-				continue;
-			}
-		}
-	}
-	if (xs.length === 0) return null;
-	return { x: median(xs), y: median(ys), z: median(zs) };
-}
-
-function median(values: number[]): number {
-	const sorted = values.slice().sort((a, b) => a - b);
-	const n = sorted.length;
-	if (n === 0) return 0;
-	const mid = n >> 1;
-	return n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+): Point | null {
+	return bindingsPivot(
+		slices.map((slice) =>
+			bindTransform(createAISectionsResolver(slice.model), slice.model, slice.refs, () => {})),
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -255,25 +195,24 @@ export function buildCrossBundleWrites(
 		value: unknown;
 	}[] = [];
 	for (const slice of slices) {
-		let next: ParsedAISectionsV12 = slice.model;
-		if (delta.translate.x !== 0 || delta.translate.y !== 0 || delta.translate.z !== 0) {
-			next = bulkTranslateEntities(next, slice.refs, delta.translate);
-		}
-		if (delta.rotateY !== 0) {
-			next = bulkRotateEntitiesYaw(
-				next,
-				slice.refs,
-				{
-					x: pivot.x + delta.translate.x,
-					z: pivot.z + delta.translate.z,
-				},
-				delta.rotateY,
-			);
-		}
-		// Skip slices whose op returned the same model reference — the
-		// op short-circuits to `===` on no-op deltas, so this filters out
-		// any slice that didn't actually change. Avoids dirtying a Bundle
-		// for a zero-op transform.
+		// One `transform` per slice, with the SAME gesture-start pivot for
+		// every Bundle — that is what makes a marquee spanning two track units
+		// turn as one rigid body instead of two.
+		const next = transform(
+			slice.model,
+			slice.refs,
+			{
+				translate: delta.translate,
+				rotate: { x: 0, y: delta.rotateY, z: 0 },
+				// `pivot.y` is irrelevant to a yaw and cancels out of the
+				// orbit; AI sections expose no other rotate axis (ADR-0011).
+				pivot: { x: pivot.x, y: 0, z: pivot.z },
+			},
+			createAISectionsResolver(slice.model),
+		);
+		// Skip slices whose transform returned the same model reference — the
+		// resolver reports "nothing actually changed" by identity, so this
+		// avoids dirtying a Bundle for a zero-op gesture.
 		if (next === slice.model) continue;
 		writes.push({
 			bundleId: slice.bundleId,
@@ -284,6 +223,3 @@ export function buildCrossBundleWrites(
 	}
 	return writes;
 }
-
-// Re-export so tests can construct a slice via the same helper API.
-export { bulkSelectionPivot };

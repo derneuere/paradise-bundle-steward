@@ -193,6 +193,7 @@ function SelectedSchemaEditorProvider({
 
 	return (
 		<SchemaEditorProvider
+			resourceKey={selection.resourceKey}
 			resource={schema}
 			data={data}
 			onChange={onChange}

@@ -311,7 +311,6 @@ const registry: SchemaRegistry = {
 };
 
 export const propPhysicsResourceSchema: ResourceSchema = {
-	key: 'propPhysics',
 	name: 'Prop Physics',
 	rootType: 'ParsedPropPhysics',
 	registry,

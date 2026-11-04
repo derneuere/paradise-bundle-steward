@@ -374,7 +374,6 @@ const registry: SchemaRegistry = {
 };
 
 export const streetDataResourceSchema: ResourceSchema = {
-	key: 'streetData',
 	name: 'Street Data',
 	rootType: 'StreetData',
 	registry,

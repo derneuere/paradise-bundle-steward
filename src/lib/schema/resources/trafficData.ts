@@ -825,7 +825,6 @@ const registry: SchemaRegistry = {
 };
 
 export const trafficDataResourceSchema: ResourceSchema = {
-	key: 'trafficData',
 	name: 'Traffic Data',
 	rootType: 'TrafficData',
 	registry,

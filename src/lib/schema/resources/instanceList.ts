@@ -175,7 +175,6 @@ const registry: SchemaRegistry = {
 };
 
 export const instanceListResourceSchema: ResourceSchema = {
-	key: 'instanceList',
 	name: 'Instance List',
 	rootType: 'ParsedInstanceList',
 	registry,

@@ -35,7 +35,6 @@ import type {
 	PickerResourceCtx,
 	ResourceHandler,
 } from '@/lib/core/registry/handler';
-import { getSchemaByKey } from '@/lib/schema/resources';
 import { pickProfileByKey, profileSuffixFor } from '@/lib/editor/registry';
 import type {
 	FieldSchema,
@@ -629,10 +628,11 @@ export function buildWorkspaceFlat({
 					const data = entry.instances[i];
 					// Per-instance schema lookup so each instance can resolve to
 					// its own variant (e.g., a future bundle that mixes V4 and
-					// V12 AI Sections in the same resource list). Falls back to
-					// the legacy schema lookup when no profile is registered
-					// for the key — keeps ad-hoc / non-versioned types working.
-					const schema = pickProfileByKey(entry.key, data)?.schema ?? getSchemaByKey(entry.key);
+					// V12 AI Sections in the same resource list). The editor
+					// registry is the ONLY schema source — a key with no profile
+					// gets no subtree here, matching the empty inspector the
+					// same key produces.
+					const schema = pickProfileByKey(entry.key, data)?.schema;
 					const expandThisInstance = instanceSelected;
 					const instanceLabel = deriveInstanceLabel(
 						handler,
@@ -673,7 +673,7 @@ export function buildWorkspaceFlat({
 				// Single-instance: schema subtree hangs directly under the row.
 				const instanceSelected = isSelected;
 				const data = entry.instances[0];
-				const schema = pickProfileByKey(entry.key, data)?.schema ?? getSchemaByKey(entry.key);
+				const schema = pickProfileByKey(entry.key, data)?.schema;
 				if (instanceSelected && schema && data != null) {
 					out.push(
 						...buildSchemaFlat(

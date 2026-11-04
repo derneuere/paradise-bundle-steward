@@ -7,8 +7,9 @@
 // math itself becomes node-testable.
 //
 // Helpers:
-//   - `derivePreviewModel(data, drag)` — runs `applyDragToModel` on a
-//     non-identity drag, returns null when no drag or identity delta.
+//   - `derivePreviewModel(data, drag, resolver)` — runs the shared
+//     `transform` on a non-identity drag, returns null when there is no drag,
+//     an identity delta, or a gesture that resolved to no change at all.
 //   - `derivePreviewSection(previewModel, selSection, selIdx)` — picks the
 //     selected section out of the preview model (or falls back to the
 //     unmodified one if the preview isn't producing a change for it).
@@ -20,10 +21,11 @@
 //     the orange "cascade-affected" outlines drawn during a drag.
 
 import type { AISection, ParsedAISectionsV12 } from '@/lib/core/aiSections';
+import { toTransformDelta, transform } from '@/lib/core/transform';
+import type { AISectionsResolverT } from '@/lib/core/transform/resolvers/aiSections';
 import { isIdentityDelta } from '@/hooks/useBulkTransformDrag';
 import type { Corner } from '@/components/aisections/shared';
 import type { ActiveDrag } from './aiSectionsDrag.types';
-import { applyDragToModel } from './applyDragToModel';
 
 // V12 stores corners as `Vector2` where `y` is the world Z axis.
 export function v12Corners(section: AISection): Corner[] {
@@ -33,13 +35,16 @@ export function v12Corners(section: AISection): Corner[] {
 export function derivePreviewModel(
 	data: ParsedAISectionsV12,
 	drag: ActiveDrag | null,
+	resolver: AISectionsResolverT,
 ): ParsedAISectionsV12 | null {
 	if (!drag || isIdentityDelta(drag.delta)) return null;
-	try {
-		return applyDragToModel(data, drag);
-	} catch {
-		return null;
-	}
+	// Preview and commit call the SAME `transform` with the same refs, pivot
+	// and delta, so what the user sees during the drag is bit-for-bit what
+	// lands in the model on release. `transform` returns the input reference
+	// on a no-op, which we surface as "no preview" so the render layers fall
+	// back to `data` instead of re-keying every frame.
+	const next = transform(data, drag.refs, toTransformDelta(drag.delta, drag.pivot), resolver);
+	return next === data ? null : next;
 }
 
 export function derivePreviewSection(

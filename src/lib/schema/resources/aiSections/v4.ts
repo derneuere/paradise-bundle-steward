@@ -195,7 +195,6 @@ const v4Registry: SchemaRegistry = {
 };
 
 export const aiSectionsV4ResourceSchema: ResourceSchema = {
-	key: 'aiSections',
 	name: 'AI Sections',
 	rootType: 'ParsedAISectionsV4',
 	registry: v4Registry,

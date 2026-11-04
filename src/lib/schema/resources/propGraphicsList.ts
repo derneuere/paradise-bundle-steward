@@ -178,7 +178,6 @@ const registry: SchemaRegistry = {
 };
 
 export const propGraphicsListResourceSchema: ResourceSchema = {
-	key: 'propGraphicsList',
 	name: 'Prop Graphics List',
 	rootType: 'ParsedPropGraphicsList',
 	registry,
