@@ -37,9 +37,10 @@ export function CrashObstacle({ simRef }: { simRef: MutableRefObject<CrashSim | 
 	});
 	return (
 		<group ref={root} visible={false}>
+			{/* The simulated wall is endless; a long one keeps a glancing car beside it. */}
 			<mesh ref={wall}>
-				<boxGeometry args={[4, 2, 0.3]} />
-				<meshStandardMaterial color="#6b7280" transparent opacity={0.35} />
+				<boxGeometry args={[24, 2, 0.3]} />
+				<meshStandardMaterial color="#6b7280" transparent opacity={0.35} depthWrite={false} />
 			</mesh>
 			<mesh ref={pole}>
 				<cylinderGeometry args={[0.15, 0.15, 3, 20]} />

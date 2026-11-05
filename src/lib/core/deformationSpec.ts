@@ -200,17 +200,22 @@ export type IKPart = {
 	jointSpecs: JointSpec[];           // length = on-disk numJoints
 };
 
-/** Glass pane — shatters on impact. Layout notes:
+/** Glass pane — cracks and smashes as its corners are pushed. Layout notes:
  *
- *   +0x00  Vec4         normal + distance (plane form)
- *   +0x10  Mat4         pane→world transform
- *   +0x50  4 × i16      tag-point indices at the corners
- *   +0x58  4 × u8
- *   +0x5C  i16
- *   +0x5E  i16
- *   +0x60  i16
+ *   +0x00  Vec4         pane normal (xyz; w unused)
+ *   +0x10  4 × Vec4     per-corner offset (xyz) from the corner's control
+ *                       point to the glass corner, one row per corner (the
+ *                       field is stored as `matrix`)
+ *   +0x50  4 × i16      control-point index per corner
+ *   +0x58  4 × u8       per corner: 1 = the index is a tag point, 0 = a
+ *                       driven point
+ *   +0x5C  i16          (not read by the game)
+ *   +0x5E  i16          (not read by the game)
+ *   +0x60  i16          (not read by the game)
  *   +0x62  2 bytes padding
- *   +0x64  i32          mePartType (enum)
+ *   +0x64  i32          mePartType: 16 + the pane's render slot; the body's
+ *                       window meshes carry bit (partType - 16) in their mesh
+ *                       flags
  *   +0x68  8 bytes padding
  */
 export type GlassPane = {

@@ -15,6 +15,7 @@ import { pickTwin } from './crashSetup';
 import { CrashControls } from './CrashControls';
 import { CrashSimScene } from './CrashSimScene';
 import { useCrashSession } from './useCrashSession';
+import { particleTextures } from './particleTextures';
 
 const BACKGROUND = '#15171c';
 
@@ -32,6 +33,7 @@ export function CrashSimViewport() {
 	);
 	const specBundle = bundles.find((b) => b.id === selection?.bundleId);
 	const session = useCrashSession(spec, specBundle?.parsedResources.get('attribSysVault'), { flat: true });
+	const textures = useMemo(() => particleTextures(bundles), [bundles]);
 
 	if (!body) {
 		return (
@@ -59,7 +61,7 @@ export function CrashSimViewport() {
 					<directionalLight position={[6, 10, 4]} intensity={1.2} />
 					<directionalLight position={[-6, 6, -8]} intensity={0.5} />
 					<Grid args={[40, 40]} position={[0, session.sim?.groundMesh ?? 0, 0]} cellSize={0.5} sectionSize={2.5} fadeDistance={30} infiniteGrid />
-					<CrashSimScene body={body} session={session} />
+					<CrashSimScene body={body} session={session} textures={textures} />
 					<OrbitControls target={center} enableDamping dampingFactor={0.1} makeDefault />
 				</Canvas>
 			</div>

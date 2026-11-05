@@ -1,11 +1,12 @@
 // Everything a crash view keeps between frames and clicks: the simulator for
-// one DeformationSpec, the rows / damage-map uniforms its materials read, and
-// the controls' state. Shared by the Deformation Spec's Crash Preview and the
+// one DeformationSpec, its particle effects, the rows / damage-map uniforms
+// its materials read, and the controls' state. Shared by the Deformation Spec's Crash Preview and the
 // Renderable view's crash test so both behave the same.
 
 import { useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { AbsorptionSet, applyImpact, createCrashSim, resetCrashSim, setAbsorptionSet, type CrashSim } from '@/lib/core/deformationSim';
 import type { ParsedDeformationSpec, Vec3 } from '@/lib/core/deformationSpec';
+import { createCrashEffects, resetCrashEffects, type CrashEffects } from '@/lib/core/crashEffects';
 import { carAttribs } from './crashSetup';
 import { makeRowsUniform, type HeatUniform, type RowsUniform } from './deformMaterial';
 
@@ -30,6 +31,16 @@ export type CrashSession = {
 	showPoints: boolean; togglePoints: () => void;
 	showHeat: boolean; toggleHeat: () => void;
 	flat: boolean; toggleFlat: () => void;
+	// Crash particles, stepped with the simulator (see crashEffects).
+	effects: CrashEffects;
+	showParticles: boolean; toggleParticles: () => void;
+	// Simulated seconds per real second: 1, slow motion, or 0 = paused.
+	timeScale: number; setTimeScale: (v: number) => void;
+	// Written by the stepper every frame: how far real time has run past the
+	// last simulator step (lead, simulated seconds), and steps queued while
+	// paused (the "step" button).
+	clock: { lead: number; pendingSteps: number };
+	stepOnce: () => void;
 	hits: number;
 	// "hinged: ... · knocked off: ..." readout, set by the stepper.
 	parts: string; setParts: (s: string) => void;
@@ -53,6 +64,12 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 	const [showPoints, setShowPoints] = useState(false);
 	const [showHeat, setShowHeat] = useState(false);
 	const [flat, setFlat] = useState(opts.flat);
+	const [showParticles, setShowParticles] = useState(true);
+	const [timeScale, setTimeScale] = useState(1);
+	// A fresh effects state for every simulator.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	const effects = useMemo(() => createCrashEffects(), [sim]);
+	const clock = useMemo(() => ({ lead: 0, pendingSteps: 0 }), []);
 	// Counted per simulator, so a different car or spec starts at zero.
 	const [hitLog, setHitLog] = useState<{ sim: CrashSim | null; n: number }>({ sim: null, n: 0 });
 	const hits = hitLog.sim === sim ? hitLog.n : 0;
@@ -65,6 +82,8 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 		showPoints, togglePoints: () => setShowPoints((s) => !s),
 		showHeat, toggleHeat: () => setShowHeat((s) => !s),
 		flat, toggleFlat: () => setFlat((s) => !s),
+		effects, showParticles, toggleParticles: () => setShowParticles((s) => !s),
+		timeScale, setTimeScale, clock, stepOnce: () => { clock.pendingSteps++; },
 		hits, parts, setParts,
 		hit: (pointMesh, normalMesh) => {
 			if (!sim) return;
@@ -74,6 +93,7 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 		},
 		reset: () => {
 			if (sim) resetCrashSim(sim);
+			resetCrashEffects(effects);
 			setHitLog({ sim, n: 0 });
 		},
 	};

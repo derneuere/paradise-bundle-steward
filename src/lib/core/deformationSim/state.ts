@@ -3,6 +3,8 @@
 
 import type { ParsedDeformationSpec, Vec3 } from '../deformationSpec';
 import { AbsorptionSet } from './tables';
+import type { CrashEvents } from './events';
+import type { PaneState } from './glass';
 
 export const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 export const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -59,4 +61,6 @@ export type SimState = {
 	deformedThisStep: boolean;
 	rows: Float32Array;      // 128 x vec4 skin offsets, the renderer's deformation rows
 	time: number;
+	glass: PaneState[];      // per spec glass pane
+	events: CrashEvents;     // this step's contacts, loosened parts and glass breaks
 };

@@ -2,6 +2,8 @@
 // positions across the retail cars (+x = the car's right, +z = forward).
 export const PART_NAMES: Record<number, string> = {
 	1: 'front bumper', 2: 'rear bumper', 3: 'bonnet', 4: 'boot', 5: 'boot spoiler', 6: 'front grille',
+	16: 'window R', 17: 'window L', 18: 'rear side window R', 19: 'rear side window L', 20: 'windscreen', 21: 'rear window',
+	22: 'glass 22', 23: 'glass 23',
 	8: 'door R', 10: 'door L', 9: 'mirror R', 11: 'mirror L', 12: 'rear door R', 13: 'rear door L',
 	24: 'sill R', 25: 'sill L', 26: 'front wing R', 27: 'front wing L', 28: 'rear quarter L', 29: 'rear quarter R',
 	40: 'headlight R', 41: 'headlight L', 42: 'tail light R', 43: 'tail light L', 46: 'body shell',

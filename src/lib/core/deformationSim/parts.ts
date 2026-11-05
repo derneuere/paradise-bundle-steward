@@ -51,6 +51,11 @@ function detachPart(s: SimState, p: number, hingeTag: number): void {
 	if (part.partGraphics === -1 || s.physicalParts >= MAX_PHYSICAL_PARTS) return;
 	if (s.attachedExhausts <= 1 && EXHAUSTS.has(part.partType) && !hinge) return;
 	s.physicalParts++;
+	const origin: Vec3 = [part.graphicsTransform[3][0], part.graphicsTransform[3][1], part.graphicsTransform[3][2]];
+	s.events.parts.push({
+		part: p, gfx: part.partGraphics, partType: part.partType, state: hinge ? 'hinged' : 'detached',
+		pos: add(s.carPos, mul3(s.carRot, origin)), vel: [...s.carVel] as Vec3,
+	});
 	if (hinge) {
 		s.partState[p] = PartState.Hinged;
 		s.hinges.set(p, { joint: s.spec.tagPoints[hingeTag].jointIndex, tag: hingeTag, rot: 0, vel: 0, storedVel: carLocalVelocity(s) });
@@ -58,7 +63,6 @@ function detachPart(s: SimState, p: number, hingeTag: number): void {
 	}
 	s.partState[p] = PartState.Detached;
 	if (EXHAUSTS.has(part.partType)) s.attachedExhausts--;
-	const origin: Vec3 = [part.graphicsTransform[3][0], part.graphicsTransform[3][1], part.graphicsTransform[3][2]];
 	s.free.set(p, { pos: [...origin], origin, vel: carLocalVelocity(s), spin: [0, 0, 0], rotation: identity3() });
 }
 

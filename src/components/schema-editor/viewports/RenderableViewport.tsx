@@ -575,7 +575,7 @@ function RenderableMeshes({
 						<mesh
 							// Remount on crash on/off so a posed mesh returns to its locator.
 							key={deform ? `crash-${key}` : key}
-							ref={deform && mat && r.partIndex !== undefined ? deform.poser.ref(`${ri}-${mi}`, r.partIndex, mat) : undefined}
+							ref={deform && mat && r.partIndex !== undefined ? deform.poser.ref(`${ri}-${mi}`, r.partIndex, mat, m.meshFlags) : undefined}
 							geometry={m.geometry}
 							material={meshMaterial}
 							matrixAutoUpdate={mat === null}
@@ -873,7 +873,7 @@ export function RenderableViewport() {
 								deform={crash.deform}
 							/>
 						)}
-						<RenderableCrashRig crash={crash} />
+						<RenderableCrashRig crash={crash} paint={paintColor ? [paintColor.r, paintColor.g, paintColor.b] : null} />
 					</Suspense>
 					<OrbitControls
 						target={[center.x, center.y, center.z]}

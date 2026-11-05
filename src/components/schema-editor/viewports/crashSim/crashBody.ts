@@ -12,6 +12,7 @@ export type CrashBodyPart = {
 	gfx: number;
 	locator: THREE.Matrix4;
 	geometries: THREE.BufferGeometry[];
+	meshFlags: number[];   // per geometry (window meshes carry their pane bit)
 };
 
 export type CrashBody = {
@@ -58,10 +59,11 @@ export function crashBodyFromDecoded(renderables: readonly DecodedRenderable[]):
 		if (r.partIndex === undefined) continue;
 		let part = byGfx.get(r.partIndex);
 		if (!part) {
-			part = { gfx: r.partIndex, locator: locatorToMatrix4(r.partLocator), geometries: [] };
+			part = { gfx: r.partIndex, locator: locatorToMatrix4(r.partLocator), geometries: [], meshFlags: [] };
 			byGfx.set(r.partIndex, part);
 		}
 		part.geometries.push(...r.meshes.map((m) => m.geometry));
+		part.meshFlags.push(...r.meshes.map((m) => m.meshFlags ?? 0));
 	}
 	const parts = [...byGfx.values()].sort((a, b) => a.gfx - b.gfx);
 	const box = new THREE.Box3();

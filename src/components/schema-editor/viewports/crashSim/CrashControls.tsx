@@ -1,6 +1,7 @@
 // The crash controls both crash views share: speed, obstacle, crash vs knock,
-// absorption table, presets, reset, markers / damage map / flat shading, the
-// skin-row mismatch warning and the hinged / knocked-off readout.
+// absorption table, presets, reset, markers / damage map / flat shading,
+// particles, slow motion / pause, the skin-row mismatch warning and the
+// hinged / knocked-off / broken-glass readout.
 
 import type { ReactNode } from 'react';
 import type * as THREE from 'three';
@@ -14,6 +15,7 @@ type Box = { min: Vec3; max: Vec3; center: Vec3 };
 type Preset = { name: string; at: (b: Box) => { point: Vec3; normal: Vec3 } };
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const GLANCES = [-60, -45, -30, -15, 0, 15, 30, 45, 60];
+const TIME_SCALES: [number, string][] = [[1, 'real time'], [0.25, '¼ speed'], [0.1, '⅒ speed'], [0, 'paused']];
 const PRESETS: Preset[] = [
 	{ name: 'front', at: (b) => ({ point: [b.center[0], lerp(b.min[1], b.max[1], 0.35), b.max[2]], normal: [0, 0, 1] }) },
 	{ name: 'front-left', at: (b) => ({ point: [lerp(b.center[0], b.min[0], 0.7), lerp(b.min[1], b.max[1], 0.35), b.max[2]], normal: [0, 0, 1] }) },
@@ -70,6 +72,11 @@ export function CrashControls({ session: s, spec, box: b3, skinRows, title, chil
 					<Button variant={s.showPoints ? 'default' : 'outline'} size="sm" onClick={s.togglePoints}>points</Button>
 					<Button variant={s.showHeat ? 'default' : 'outline'} size="sm" onClick={s.toggleHeat} title="Colour each vertex by how far it has been pushed (white = 0.3 m)">damage map</Button>
 					<Button variant={s.flat ? 'default' : 'outline'} size="sm" onClick={s.toggleFlat} title="The game keeps the undamaged normals, so dents barely shade; flat shading makes them readable">flat shading</Button>
+					<Button variant={s.showParticles ? 'default' : 'outline'} size="sm" onClick={s.toggleParticles} title="Sparks, debris, glass, dust and smoke, fired by the crash the way the game fires them">particles</Button>
+					<select value={s.timeScale} onChange={(e) => s.setTimeScale(Number(e.target.value))} className="bg-muted rounded px-1 py-0.5" title="Slow the crash down or pause it">
+						{TIME_SCALES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+					</select>
+					{s.timeScale === 0 && <Button variant="outline" size="sm" onClick={s.stepOnce} title="Advance one 1/60 s simulator step">step</Button>}
 				</div>
 				<div className="flex flex-row flex-wrap items-center gap-2">
 					<span className="font-medium">hit:</span>

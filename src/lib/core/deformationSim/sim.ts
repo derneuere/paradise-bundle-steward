@@ -17,11 +17,15 @@ import { checkForDetachment, hingePoint, initialPartState, jointRotation, mul3, 
 import { applySensorImpulse, driveTimeBox, updateDeformedBox } from './sensors';
 import { drivenNormal, updateIK, updateSkinRows } from './ik';
 import { scratchSensor } from './scratch';
+import { clearEvents, emptyEvents, type CrashEvents } from './events';
+import { freshPanes, updateGlass } from './glass';
 import { add, cross, dot, length, normalize, scale, sub, type CarAttribs, type Obstacle, type SimState } from './state';
 import { AbsorptionSet, IMPULSE_SHAPING, STEP } from './tables';
 
 export { AbsorptionSet } from './tables';
 export type { CarAttribs } from './state';
+export { GlassState } from './events';
+export type { ContactEvent, CrashEvents, GlassEvent, PartEvent } from './events';
 
 export type Impact = {
 	pointMesh: Vec3;        // hit point on the body, mesh frame
@@ -43,6 +47,11 @@ export type CrashSim = {
 	readonly sensorCount: number;
 	readonly tagCount: number;
 	readonly groundMesh: number;
+	// Handling frame minus mesh frame: subtract it from a sim position to get
+	// the body mesh's frame.
+	readonly meshShift: Vec3;
+	// What the last step produced (see events.ts).
+	readonly events: CrashEvents;
 	sensorPositionsMesh(): Vec3[];
 	tagPositionsMesh(): Vec3[];
 	obstacleMesh(): (Obstacle & { point: Vec3 }) | null;
@@ -56,7 +65,7 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
 export const transpose = (m: number[]) => [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
 
-function meshShift(spec: ParsedDeformationSpec): Vec3 {
+export function meshShift(spec: ParsedDeformationSpec): Vec3 {
 	const t = spec.carModelSpaceToHandlingBodySpace[3];
 	return [t[0], t[1], t[2]];
 }
@@ -82,7 +91,9 @@ function freshState(spec: ParsedDeformationSpec, attribs: CarAttribs, absorption
 		attachedExhausts: spec.ikParts.filter((p) => p.partType === 84 || p.partType === 85).length,
 		carPos: [0, 0, 0], carRot: [...IDENTITY], carVel: [0, 0, 0], carSpin: [0, 0, 0],
 		obstacle: null, deformedThisStep: false, rows: new Float32Array(512), time: 0,
+		glass: [], events: emptyEvents(),
 	};
+	s.glass = freshPanes(s);
 	s.drivenNormal = spec.drivenPoints.map((_, i) => drivenNormal(s, i));
 	s.partState = spec.ikParts.map((_, p) => initialPartState(s, p));
 	updateDeformedBox(s);
@@ -103,6 +114,8 @@ export function createCrashSim(
 		sensorCount: spec.numDeformationSensors,
 		tagCount: spec.tagPoints.length,
 		groundMesh: Number.isFinite(wheelBottom) ? wheelBottom - shift[1] : -0.5,
+		meshShift: shift,
+		get events() { return this.state.events; },
 		get rows() { return this.state.rows; },
 		sensorPositionsMesh() { return this.state.sensors.slice(0, spec.numDeformationSensors).map(toMesh); },
 		tagPositionsMesh() { return this.state.tags.map(toMesh); },
@@ -220,7 +233,11 @@ function resolveContacts(s: SimState, dt: number): void {
 		const rest = applySensorImpulse(s, {
 			sensor: c.sensor, direction: mul3(toLocal, c.n), magnitude, closingSpeed: Math.abs(vn), invMass: k, dt,
 		});
-		scratchSensor(s, c.sensor, relVel, c.n, magnitude, dt);
+		const scratch = scratchSensor(s, c.sensor, relVel, c.n, magnitude, dt);
+		s.events.contacts.push({
+			sensor: c.sensor, point: c.point, normal: c.n, impulse: magnitude, closingSpeed: Math.abs(vn),
+			slide: sub(s.carVel, scale(c.n, dot(s.carVel, c.n))), scratch,
+		});
 		const J = scale(c.n, magnitude);
 		solveVel = add(solveVel, scale(J, invMass));
 		solveSpin = add(solveSpin, invI(cross(arm, J)));
@@ -264,11 +281,13 @@ function solvePenetration(s: SimState): void {
 
 export function stepCrashSim(sim: CrashSim, dt = STEP): void {
 	const s = sim.state;
+	clearEvents(s.events, s.carPos, s.carVel);
 	if (length(s.carVel) > 0) resolveContacts(s, dt);
 	if (s.deformedThisStep) {
 		checkForDetachment(s);
 		updateIK(s);
 		updateSkinRows(s);
+		updateGlass(s);
 		updateDeformedBox(s);
 	}
 	updateHinges(s, dt);

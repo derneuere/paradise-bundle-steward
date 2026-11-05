@@ -1,6 +1,6 @@
 // The Crash Preview's car: the body parts in flat paint, deformed by the
 // sim's rows, posed and tinted by their hinge/detach state, plus the shared
-// obstacle and markers.
+// obstacle, markers and crash particles.
 
 import { useMemo } from 'react';
 import * as THREE from 'three';
@@ -9,12 +9,16 @@ import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
 import type { CrashBody } from './crashBody';
 import { isSkinned, makeDeformMaterial } from './deformMaterial';
 import { CrashMarkers, CrashObstacle } from './crashStage';
+import { CrashParticles } from './CrashParticles';
+import type { ParticleTextures } from './particleTextures';
 import { crashHitHandler, makePartPoser, useCrashStepper } from './crashStepper';
 import type { CrashSession } from './useCrashSession';
 
+const IDENTITY = new THREE.Matrix4();
 const COLORS = { paint: '#c8352b', hinged: '#e8b23a', detached: '#3ab0e8' };
+const PAINT = new THREE.Color(COLORS.paint).toArray() as [number, number, number];
 
-export function CrashSimScene({ body, session }: { body: CrashBody; session: CrashSession }) {
+export function CrashSimScene({ body, session, textures }: { body: CrashBody; session: CrashSession; textures: ParticleTextures }) {
 	const { rows, heat, flat } = session;
 	const materials = useMemo(() => ({
 		paint: makeDeformMaterial(rows, COLORS.paint, heat, flat),
@@ -50,13 +54,22 @@ export function CrashSimScene({ body, session }: { body: CrashBody; session: Cra
 						ref={(g) => { pose(g); if (g) groups.set(part.gfx, g); else groups.delete(part.gfx); }}
 					>
 						{part.geometries.map((geometry, i) => (
-							<mesh key={i} geometry={geometry} material={isSkinned(geometry) ? materials.paint : materials.plain} onClick={hit} />
+							<mesh
+								key={i}
+								geometry={geometry}
+								material={isSkinned(geometry) ? materials.paint : materials.plain}
+								onClick={hit}
+								// Windows: posed with their part's group, hidden on their own once smashed.
+								ref={part.meshFlags[i] & 0xff ? poser.ref(`${part.gfx}:${i}`, -1, IDENTITY, part.meshFlags[i]) : undefined}
+								matrixAutoUpdate={!(part.meshFlags[i] & 0xff)}
+							/>
 						))}
 					</group>
 				);
 			})}
 			<CrashObstacle simRef={session.simRef} />
 			{session.showPoints && session.sim && <CrashMarkers sim={session.sim} />}
+			<CrashParticles session={session} paint={PAINT} textures={textures} />
 		</group>
 	);
 }

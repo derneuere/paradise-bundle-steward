@@ -61,6 +61,10 @@ export type DecodedMesh = {
 	primitiveType: number;
 	resolvedMaterial: ResolvedMaterial | null;
 	vertexLayout: { type: number; offset: number; stride: number }[] | null;
+	/** The mesh's flag byte. On a vehicle body, bit n marks a window mesh of
+	 *  glass pane slot n (pane body-part type - 16): the game stops drawing
+	 *  it once that pane breaks. */
+	meshFlags: number;
 };
 
 export type DecodedRenderable = {
@@ -205,6 +209,7 @@ export function decodeOneRenderable(
 				primitiveType: mesh.primitiveType,
 				resolvedMaterial: resolved,
 				vertexLayout,
+				meshFlags: mesh.meshFlags,
 			});
 		}
 
