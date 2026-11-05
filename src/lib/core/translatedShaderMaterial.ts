@@ -73,6 +73,10 @@ export type BuildOptions = {
 	side?: THREE.Side;
 	/** Forwarded to `ShaderMaterial.transparent`. */
 	transparent?: boolean;
+	/** Keep the shader's own alpha through the output transform (blended or
+	 *  alpha-to-coverage draws); otherwise alpha is forced to 1 so a stray
+	 *  alpha from an opaque shader can't punch through the canvas. */
+	keepAlpha?: boolean;
 	/** Attribute names the drawn geometry carries (skinIndex, tangent, uv1...);
 	 *  the vertex inputs that map to them read the real stream instead of the
 	 *  translator's constant stub. */
@@ -94,7 +98,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		heuristicDefaults, pickFallbackTexture, decodedToDataTexture, materialConstants,
 		applyPreviewTonemap = false, displayWhiteLevel,
 		pickFallbackCubeTexture = defaultReflectionCube,
-		side = THREE.DoubleSide, transparent = false,
+		side = THREE.DoubleSide, transparent = false, keepAlpha = false,
 		vertexAttributes = new Set<string>(),
 	} = opts;
 
@@ -109,7 +113,8 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 	// Optional preview safety net + exposure-scaled display transform on
 	// gl_FragColor (the game's, or a Reinhard tonemap). `uExposure` is driven
 	// live by the viewport's exposure knob.
-	const outputSuffix = displayWhiteLevel != null ? GAME_DISPLAY_SUFFIX : applyPreviewTonemap ? PREVIEW_TONEMAP_SUFFIX : null;
+	const outputAlpha = keepAlpha ? 'clamp(gl_FragColor.a, 0.0, 1.0)' : '1.0';
+	const outputSuffix = displayWhiteLevel != null ? gameDisplaySuffix(outputAlpha) : applyPreviewTonemap ? previewTonemapSuffix(outputAlpha) : null;
 	const exposureScale = displayWhiteLevel != null ? 1 / displayWhiteLevel : 1;
 	const finalPs = outputSuffix
 		? harmonizedPs
@@ -370,22 +375,24 @@ function attributeAliasPrefix(vs: string): string {
 
 // The game's post-process scales the scene by 1 / white level into an 8-bit,
 // non-sRGB target: no tonemap curve, just the clamp.
-const GAME_DISPLAY_SUFFIX = `
+const gameDisplaySuffix = (alpha: string) => `
 	{
 		vec3 _c = gl_FragColor.rgb * uExposure;
+		float _a = ${alpha};
 		bool _nan = (_c.r != _c.r) || (_c.g != _c.g) || (_c.b != _c.b);
 		if (_nan) gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
-		else gl_FragColor = vec4(clamp(_c, 0.0, 1.0), 1.0);
+		else gl_FragColor = vec4(clamp(_c, 0.0, 1.0), _a);
 	}
 }`;
 
-const PREVIEW_TONEMAP_SUFFIX = `
+const previewTonemapSuffix = (alpha: string) => `
 	{
 		vec3 _c = gl_FragColor.rgb * uExposure;
+		float _a = ${alpha};
 		bool _nan = (_c.r != _c.r) || (_c.g != _c.g) || (_c.b != _c.b);
 		bool _inf = (abs(_c.r) > 1e10) || (abs(_c.g) > 1e10) || (abs(_c.b) > 1e10);
 		if (_nan) gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
 		else if (_inf) gl_FragColor = vec4(0.0, 1.0, 1.0, 1.0);
-		else { vec3 a = abs(_c); gl_FragColor = vec4(a / (a + vec3(1.0)), 1.0); }
+		else { vec3 a = abs(_c); gl_FragColor = vec4(a / (a + vec3(1.0)), _a); }
 	}
 }`;

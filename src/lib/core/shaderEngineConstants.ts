@@ -34,7 +34,8 @@ export const engineKnobs: EngineKnobs = { ...DEFAULT_ENGINE_KNOBS };
 
 /** Which knob group (if any) scales a given engine constant by name. */
 export function knobGroupForConstant(name: string): Exclude<keyof EngineKnobs, 'exposure'> | null {
-	if (/^KeyLight/.test(name)) return 'keyLight';
+	// The key light's colours, not its direction.
+	if (/^KeyLight/.test(name) && !/Direction/.test(name)) return 'keyLight';
 	if (/^Irradiance/.test(name)) return 'ambient';
 	if (/^FogColour/.test(name)) return 'fog';
 	return null;

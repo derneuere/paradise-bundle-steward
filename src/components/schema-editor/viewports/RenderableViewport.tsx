@@ -46,6 +46,7 @@ import { translateDxbc, type TranslatedShader } from '@/lib/core/dxbc';
 import { buildTextureCatalog, type TextureCatalogEntry } from '@/lib/core/textureCatalog';
 import { buildMaterialIndex, pickBestMaterial } from '@/lib/core/materialBinding';
 import { buildTranslatedShaderMaterial, type TranslatedMaterial } from '@/lib/core/translatedShaderMaterial';
+import { applyMaterialState, usesAlpha } from '@/lib/core/materialRenderState';
 import { pickEngineSamplerFallback } from '@/lib/core/engineSamplerFallback';
 import { inferCbLayout, engineKnobs, DEFAULT_ENGINE_KNOBS, type EngineKnobs } from '@/lib/core/shaderEngineConstants';
 import { previewEnvironment } from '@/lib/core/environmentLighting/previewEnvironment';
@@ -256,8 +257,10 @@ function decodedToDataTextureRV(entry: TextureCatalogEntry): THREE.DataTexture |
 	try { dt = entry.decode(); } catch { return null; }
 	const tex = new THREE.DataTexture(dt.pixels, dt.header.width, dt.header.height, THREE.RGBAFormat);
 	tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-	tex.minFilter = THREE.LinearFilter;
+	// Trilinear: the tiled scratch / crumple maps shimmer without mips.
+	tex.minFilter = THREE.LinearMipmapLinearFilter;
 	tex.magFilter = THREE.LinearFilter;
+	tex.generateMipmaps = true;
 	tex.flipY = false;
 	tex.needsUpdate = true;
 	return tex;
@@ -270,7 +273,7 @@ function decodedToDataTextureRV(entry: TextureCatalogEntry): THREE.DataTexture |
  * programs. Returns null if the bundle layout doesn't match (no block 1,
  * broken import chain, etc.).
  */
-function translateShaderById(shaderId: bigint, sources: Source[]): { vs: TranslatedShader; ps: TranslatedShader; shaderName: string; constants: any[] } | null {
+function translateShaderById(shaderId: bigint, sources: Source[]): { vs: TranslatedShader; ps: TranslatedShader; shaderName: string; constants: any[]; technique: number } | null {
 	for (const s of sources) {
 		for (let i = 0; i < s.bundle.resources.length; i++) {
 			const r = s.bundle.resources[i];
@@ -299,7 +302,7 @@ function translateShaderById(shaderId: bigint, sources: Source[]): { vs: Transla
 				} catch { /* try next */ }
 			}
 			if (!vs || !ps) return null;
-			return { vs, ps, shaderName: parsed.name, constants: parsed.constants };
+			return { vs, ps, shaderName: parsed.name, constants: parsed.constants, technique: first / 2 };
 		}
 	}
 	return null;
@@ -508,7 +511,8 @@ function RenderableMeshes({
 				const matBinding = materialIndex.get(shaderIdHex)?.find((b) => b.materialId === matIdHex)
 					?? pickBestMaterial(shaderIdHex, [], materialIndex);
 				const layout = inferCbLayout(translated.vs.source, translated.vs.parsed);
-				out.set(key, buildTranslatedShaderMaterial({
+				const renderState = m.resolvedMaterial?.materialStates[translated.technique] ?? null;
+				const mat = buildTranslatedShaderMaterial({
 					vsSource: translated.vs.source,
 					psSource: translated.ps.source,
 					vsParsed: translated.vs.parsed,
@@ -525,8 +529,11 @@ function RenderableMeshes({
 					displayWhiteLevel: environment.lighting.whiteLevel,
 					pickFallbackCubeTexture: () => environment.reflectionCube,
 					side: THREE.DoubleSide,
+					keepAlpha: usesAlpha(renderState),
 					vertexAttributes: new Set(streamsOf(m)),
-				}));
+				});
+				applyMaterialState(mat, renderState);
+				out.set(key, mat);
 			}
 		}
 		return out;

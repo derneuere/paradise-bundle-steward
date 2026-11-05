@@ -59,6 +59,23 @@ export function parseMaterialShaderConstants(raw: Uint8Array): MaterialShaderCon
 	return out;
 }
 
+/** The hash the game stores for a constant name: CRC-32 (reflected, poly
+ *  0xEDB88320, initial ~0) without the final inversion. */
+export function constantNameHash(name: string): number {
+	let c = ~0;
+	for (let i = 0; i < name.length; i++) {
+		c ^= name.charCodeAt(i) & 0xff;
+		for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1));
+	}
+	return c >>> 0;
+}
+
+/** A material's value for a constant, by name, without the Shader resource. */
+export function materialConstant(constants: readonly MaterialShaderConstant[], name: string): number[] | null {
+	const hash = constantNameHash(name);
+	return constants.find((c) => c.hash >>> 0 === hash)?.values ?? null;
+}
+
 /** Resolve hashed constants to RDEF names via the shader's own (name, hash) table. */
 export function materialConstantsByName(
 	constants: readonly MaterialShaderConstant[],
