@@ -139,15 +139,23 @@ export function integrate(b: RigidBody, dt: number): void {
 
 // The engine's orthonormalisation: normalise the rows, keep the row least
 // out of square with the other two as the pivot, rebuild the others from it.
+// A zero-length row is never the pivot: the length checks come first, in the
+// engine's order (row 0 dead -> pivot 1, row 1 dead -> pivot 2, row 2 dead ->
+// pivot 0), and only a basis with three live rows compares the dot products.
+// Two dead rows leave nothing to rebuild from; the result is then zero rows.
 export function orthonormalize(rows: [Vec3, Vec3, Vec3]): [Vec3, Vec3, Vec3] {
-	const lens = rows.map(length);
-	const n = rows.map((r, i) => (lens[i] > 0 ? scale(r, 1 / lens[i]) : r)) as [Vec3, Vec3, Vec3];
-	const a = Math.abs(dot(n[1], n[2])), bb = Math.abs(dot(n[2], n[0])), c = Math.abs(dot(n[0], n[1]));
-	let p = bb > a ? (c > a ? 1 : 0) : (c > bb ? 2 : 0);
-	if (lens[p] === 0) p = lens.findIndex((l) => l > 0);
-	if (p < 0) return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-	const next = (p + 1) % 3, prev = (p + 2) % 3;
 	const unit = (v: Vec3) => { const l = length(v); return l > 0 ? scale(v, 1 / l) : v; };
+	const lens = rows.map(length);
+	const n = rows.map(unit) as [Vec3, Vec3, Vec3];
+	let p: number;
+	if (!(lens[0] > 0)) p = 1;
+	else if (!(lens[1] > 0)) p = 2;
+	else if (!(lens[2] > 0)) p = 0;
+	else {
+		const a = Math.abs(dot(n[1], n[2])), bb = Math.abs(dot(n[2], n[0])), c = Math.abs(dot(n[0], n[1]));
+		p = bb > a ? (c > a ? 1 : 0) : (c > bb ? 2 : 0);
+	}
+	const next = (p + 1) % 3, prev = (p + 2) % 3;
 	n[prev] = unit(cross(n[p], n[next]));
 	n[next] = unit(cross(n[prev], n[p]));
 	return n;

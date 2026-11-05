@@ -14,6 +14,7 @@ export * from './tyres';
 export * from './wheels';
 export * from './aero';
 export * from './vehicle';
+export * from './inAir';
 export * from './crash';
 export * from './step';
 export * from './driver';

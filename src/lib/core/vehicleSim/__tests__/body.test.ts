@@ -71,6 +71,14 @@ describe('rigid body', () => {
 		expect(Math.abs(dot(out[0], out[1]))).toBeLessThan(1e-9);
 	});
 
+	it('orthonormalize never pivots on a zero-length row', () => {
+		// Row 1 is dead: the engine pivots on row 2 whatever the dot products say.
+		const out = orthonormalize([[1, 0, 0], [0, 0, 0], [0.6, 0, 0.8]]);
+		close(out[2], [0.6, 0, 0.8]);
+		close(out[1], [0, 1, 0]);
+		close(out[0], [0.8, 0, -0.6]);
+	});
+
 	it('dampPitchYawRoll removes the whole component at k=1 and nothing at k=0', () => {
 		const b = createBody(1500, [1, 0.5, 2]);
 		b.w = [1, 2, 3];

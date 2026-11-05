@@ -32,15 +32,13 @@ export function updateDownForce(v: VehicleState): void {
 	addWorldForce(b, [0, -downForce(v) * s, 0]);
 }
 
-// F = -d |v| v, driving and on the ground only; a surface's own drag adds in
-// when all four wheels are down.
+// F = -d |v| v, driving and on the ground only; when all four wheels are
+// down, the drag of the surface under the centre of mass (the above-ground
+// ray's, not the wheels') adds in.
 export function applyLinearDrag(v: VehicleState): void {
 	const b = v.body, P = v.params;
 	let d = P.base.linearDrag;
-	if (v.allWheelsOnGround) {
-		const surf = v.wheels.reduce((s, w) => s + w.contact.surface.linearDrag, 0) / 4;
-		d += surf * P.base.surfaceDrag;
-	}
+	if (v.allWheelsOnGround) d += v.aboveGround.surface.linearDrag * P.base.surfaceDrag;
 	const speed = length(b.v);
 	if (Math.abs(speed) > EPS) addWorldForce(b, scale(b.v, -d * speed));
 }

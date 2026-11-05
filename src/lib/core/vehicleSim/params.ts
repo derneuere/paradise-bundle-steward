@@ -15,7 +15,7 @@
 
 import type { ParsedAttribSys } from '../attribSys';
 import type { ParsedDeformationSpec, Vec3 } from '../deformationSpec';
-import { sub } from '../deformationSim/state';
+import { add, dot, scale, sub } from '../deformationSim/state';
 import { boxInvInertia } from './body';
 
 export type GripCurve = { peakSlip: number; floorSlip: number; peakCo: number; fallCo: number };
@@ -39,10 +39,15 @@ export type VehicleParams = {
 	halfExtent: Vec3;
 	invILocal: Vec3;
 	comSpec: Vec3;         // centre of mass in the deformation spec frame
-	aabb: Box;             // sensor-sphere box, body frame; the crash arm's front-face test
+	// The car's rest deformable box, which a crash entry snaps the live box
+	// back to. The game boxes the sensors before it centres them on the centre
+	// of mass, so this box sits off the body frame it is read in by the centre
+	// of mass (see specFrames).
+	aabb: Box;
 	wheels: [WheelParams, WheelParams, WheelParams, WheelParams];
 	base: {
 		maxSpeedMph: number; linearDrag: number; highSpeedAngularDamping: number; lowSpeedDrivingMph: number;
+		pitchDampingOnTakeOff: number; rollLimitOnTakeOff: number;   // share removed; turns per second
 		downForce: number; downForceLiftCo: number; powerToRear: number; powerToFront: number;
 		tractionLineLength: number; invTimeForFullBrake: number; brakeCurve: Vec3;
 		magicBrakeStraight: number; magicBrakeTurning: number; handbrakeYawDamping: number;
@@ -114,13 +119,12 @@ export function paramsFromClasses(classes: AttribClasses, spec: ParsedDeformatio
 	const com = base.vec('CoMOffset');
 	const hd = spec.handlingBodyDimensions;
 	const halfExtent: Vec3 = [hd[0], hd[1], hd[2]];
-	const mean = spec.wheels.reduce<Vec3>((m, w) => [m[0] + w.position[0] / 4, m[1] + w.position[1] / 4, m[2] + w.position[2] / 4], [0, 0, 0]);
-	const comSpec: Vec3 = [mean[0], mean[1] + com[1], mean[2] + com[2]];
+	const frames = specFrames(spec, [0, com[1], com[2]]);
 
 	const up = susp.num('UpwardMovement'), down = Math.max(susp.num('DownwardMovement'), MIN_DOWN_TRAVEL);
 	const frontHeight = susp.num('FrontHeight'), rearHeight = susp.num('RearHeight');
 	const streamed = spec.wheels.map((w, i) =>
-		sub([w.position[0], w.position[1] + (i < 2 ? frontHeight : rearHeight), w.position[2]], comSpec));
+		sub([w.position[0], w.position[1] + (i < 2 ? frontHeight : rearHeight), w.position[2]], frames.wheelCom));
 	// Static load split: each corner's share from its distance to the other
 	// axle and the other side (exactly 1/4 for a centred car).
 	const SIDE = [1, 0, 3, 2], AXLE = [2, 3, 0, 1];
@@ -153,11 +157,12 @@ export function paramsFromClasses(classes: AttribClasses, spec: ParsedDeformatio
 	const angScale = coll.vec('BodyBox')[1];
 
 	const p: VehicleParams = {
-		mass, halfExtent, invILocal: boxInvInertia(halfExtent, mass), comSpec,
-		aabb: sensorBox(spec, comSpec), wheels,
+		mass, halfExtent, invILocal: boxInvInertia(halfExtent, mass), comSpec: frames.comSpec,
+		aabb: frames.restBox, wheels,
 		base: {
 			maxSpeedMph: base.num('MaxSpeed'), linearDrag: base.num('LinearDrag'),
 			highSpeedAngularDamping: base.num('HighSpeedAngularDamping'), lowSpeedDrivingMph: base.num('LowSpeedDrivingSpeed'),
+			pitchDampingOnTakeOff: base.num('PitchDampingOnTakeOff'), rollLimitOnTakeOff: base.num('RollLimitOnTakeOff'),
 			downForce: base.num('DownForce'), downForceLiftCo: drift.num('WheelSlip'),
 			powerToRear: base.num('PowerToRear'), powerToFront: base.num('PowerToFront'),
 			tractionLineLength: Math.max(base.num('TractionLineLength'), 0), invTimeForFullBrake: 1 / base.num('TimeForFullBrake'),
@@ -207,8 +212,37 @@ export function paramsFromClasses(classes: AttribClasses, spec: ParsedDeformatio
 	return p;
 }
 
-// The box over the deformation sensor spheres, in the body frame. The game
-// grows it from zero, so it always contains the centre of mass.
+const COM_MOVE_EPS = 1.1920929e-7;
+
+// Where the game puts the spec's points relative to the centre of mass. A
+// spec stores the offset its points were last centred on (zero on retail
+// cars). Creating the car, the game first re-centres the points (sensors,
+// tags, driven points, joints: not the wheels) from that stored offset onto
+// the authored CoMOffset, boxes the sensors as they then are (the rest box),
+// adds the wheel mean to the offset, and finally re-centres the points onto
+// minus that sum. Each re-centring is skipped when it would move less than
+// a float epsilon (squared). The authored offset cancels out of the points,
+// so sensors and wheels share the frame unless the stored offset is non-zero.
+export function specFrames(spec: ParsedDeformationSpec, authored: Vec3): { comSpec: Vec3; wheelCom: Vec3; restBox: Box } {
+	const mean = spec.wheels.reduce<Vec3>((m, w) => [m[0] + w.position[0] / 4, m[1] + w.position[1] / 4, m[2] + w.position[2] / 4], [0, 0, 0]);
+	const wheelCom = add(mean, authored);
+	const stored = spec.currentCOMOffset ?? [0, 0, 0];
+	let current: Vec3 = [stored[0], stored[1], stored[2]];
+	let shift: Vec3 = [0, 0, 0];
+	const recentre = (next: Vec3) => {
+		const d = sub(next, current);
+		if (!(dot(d, d) > COM_MOVE_EPS)) return;
+		shift = add(shift, d);
+		current = next;
+	};
+	recentre(authored);
+	const restBox = sensorBox(spec, scale(shift, -1));
+	recentre(scale(wheelCom, -1));
+	return { comSpec: scale(shift, -1), wheelCom, restBox };
+}
+
+// The box over the deformation sensor spheres, centred on `comSpec`. The game
+// grows it from zero, so it always contains the origin.
 export function sensorBox(spec: ParsedDeformationSpec, comSpec: Vec3): Box {
 	const min: Vec3 = [0, 0, 0], max: Vec3 = [0, 0, 0];
 	for (let i = 0; i < spec.numDeformationSensors; i++) {

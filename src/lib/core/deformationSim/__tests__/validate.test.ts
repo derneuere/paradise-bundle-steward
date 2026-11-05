@@ -22,7 +22,7 @@ function driving(kmh: number) {
 	v.speedMag = speed;
 	v.speedMph = speed * MPS_TO_MPH;
 	v.wheelPlane = { valid: true, pos: [s.body.pos[0], 0, s.body.pos[2]], height: 0 };
-	v.aboveGround = { valid: true, pos: [s.body.pos[0], 0, s.body.pos[2]], normal: [0, 1, 0], verticalDistance: s.body.pos[1] };
+	v.aboveGround = { valid: true, pos: [s.body.pos[0], 0, s.body.pos[2]], normal: [0, 1, 0], verticalDistance: s.body.pos[1], surface: { grip: 1, roughness: 0, linearDrag: 0 } };
 	return s;
 }
 

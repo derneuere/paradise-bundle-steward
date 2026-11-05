@@ -1,5 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { Vec3 } from '../../deformationSpec';
+import type { ParsedDeformationSpec, Vec3 } from '../../deformationSpec';
+import { createCrashSim } from '../../deformationSim/sim';
+import { add, sub } from '../../deformationSim/state';
+import { makeSpec } from '../../deformationSim/__tests__/fixture';
 import { paramsFromClasses, type VehicleParams } from '../params';
 import { hasFixture, loadCar, syntheticClasses, syntheticParams, syntheticSpec } from './carFixture';
 
@@ -52,10 +55,68 @@ describe('vehicle params from synthetic attribs', () => {
 		expect(() => paramsFromClasses(c, syntheticSpec())).toThrow(/engineattribs\.MaxRPM.*|baseattribs\.LinearDrag/);
 	});
 
-	it('boxes the sensor spheres in the body frame, always around the centre of mass', () => {
+	it('boxes the rest sensor spheres before centring them on the centre of mass', () => {
+		// The sensors sit at spec y = 0 with radius 0.5; the centre of mass is
+		// 0.31 m below them, but the rest box is taken in the spec frame.
 		const p = syntheticParams();
-		close(p.aabb.min, [-1.1, -0.19, -2.3]);
-		close(p.aabb.max, [1.1, 0.81, 2.3]);
+		close(p.aabb.min, [-1.1, -0.5, -2.3]);
+		close(p.aabb.max, [1.1, 0.5, 2.3]);
+	});
+
+	it('reads the take-off attribs', () => {
+		const p = syntheticParams();
+		expect(p.base.pitchDampingOnTakeOff).toBe(0.95);
+		expect(p.base.rollLimitOnTakeOff).toBe(1);
+	});
+});
+
+describe('spec frames with an authored centre-of-mass offset', () => {
+	const withOffset = (com: number[], stored?: number[]) => {
+		const c = syntheticClasses();
+		c.physicsvehiclebaseattribs.CoMOffset = com;
+		const spec = syntheticSpec();
+		// A sensor sitting exactly on the front-left hub.
+		spec.sensors.push({ ...spec.sensors[0], initialOffset: [...spec.wheels[0].position.slice(0, 3)] as Vec3 });
+		spec.numDeformationSensors = spec.sensors.length;
+		if (stored) spec.currentCOMOffset = stored as never;
+		return { p: paramsFromClasses(c, spec), spec };
+	};
+	const hubSensorBody = (p: VehicleParams, spec: ParsedDeformationSpec) =>
+		sub(spec.sensors[spec.numDeformationSensors - 1].initialOffset, p.comSpec);
+
+	it('moves the centre of mass by the authored y and z, sensors and wheels alike', () => {
+		const { p, spec } = withOffset([7500, 0.1, -0.2, 0]);
+		close(p.comSpec, [0, -0.21, -0.2]);
+		// The hub's rest position is the spec wheel plus FrontHeight (-0.01).
+		close(p.wheels[0].streamed, [-0.765, -0.11, 1.437]);
+		close(hubSensorBody(p, spec), [-0.765, -0.1, 1.437]);
+	});
+
+	it('boxes the rest sensors where the authored offset alone put them', () => {
+		// The corner sensors move by (0, 0.1, -0.2); the hub sensor reaches lowest.
+		const { p } = withOffset([7500, 0.1, -0.2, 0]);
+		close(p.aabb.min, [-1.265, -0.71, -2.5]);
+		close(p.aabb.max, [1.1, 0.6, 2.1]);
+	});
+
+	it("keeps a spec's stored offset in its points but not in its wheels", () => {
+		const { p, spec } = withOffset([7500, 0.1, -0.2, 0], [0, 0.05, 0.03, 0]);
+		close(p.comSpec, [0, -0.16, -0.17]);
+		close(p.wheels[0].streamed, [-0.765, -0.11, 1.437]);
+		// A sensor authored 5 cm above and 3 cm ahead of the hub lands on it.
+		close(sub(add(spec.wheels[0].position.slice(0, 3) as Vec3, [0, 0.05, 0.03]), p.comSpec), [-0.765, -0.1, 1.437]);
+		close(hubSensorBody(p, spec), [-0.765, -0.15, 1.407]);
+	});
+
+	it('gives the crash sim the same centre of mass', () => {
+		const handling = { physicsvehiclebaseattribs: { CoMOffset: [7500, 0.1, -0.2, 0] } };
+		const spec = makeSpec();
+		const sim = createCrashSim(spec, { handling });
+		const P = sim.state.vehicle.params;
+		const hubSpec = spec.wheels[0].position.slice(0, 3) as Vec3;
+		close(sim.state.com, P.comSpec);
+		// The sensor-side frame puts the spec hub where the wheel side does.
+		close(sub(hubSpec, sim.state.com), sub(P.wheels[0].streamed, [0, P.susp.frontHeight, 0]));
 	});
 });
 

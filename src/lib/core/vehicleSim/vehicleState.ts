@@ -52,7 +52,14 @@ export type VehicleState = {
 	engine: EngineState;
 	speedMph: number;              // signed forward speed, refreshed at fixed points of the step
 	speedMag: number;              // |v| cached at the end of each vehicle update
-	hasAir: boolean; timeWithoutTraction: number; timeWithTraction: number;
+	hasAir: boolean; hadAir: boolean; timeWithoutTraction: number; timeWithTraction: number;
+	// The jump in progress: the pitch, yaw and roll rates (body axes) the car
+	// left the ground with, the per-step roll bleed it set, and whether the
+	// car has rolled past the landing-assist threshold since.
+	takeOff: { rates: Vec3; rollBleed: number; rolling: boolean };
+	// How long the car has sat stopped against a wall with a wheel off the
+	// road; from half a second on, a wheel close to the road counts as on it.
+	beachedTime: number;
 	timeStandingStill: number; coolDown: number; frozen: boolean;
 	handBrake: boolean; handBrakeOnTime: number; timeSinceLastHandBrake: number;
 	brakeScale: number;
@@ -60,7 +67,7 @@ export type VehicleState = {
 	timeSinceHardLanding: number;
 	secondsSinceLastWallContact: number; contactingWall: boolean;
 	numWorldCollisions: number; numCollisions: number;
-	aboveGround: { valid: boolean; pos: Vec3; normal: Vec3; verticalDistance: number };
+	aboveGround: { valid: boolean; pos: Vec3; normal: Vec3; verticalDistance: number; surface: Surface };
 	wheelPlane: { valid: boolean; pos: Vec3; height: number };
 	allWheelsOnGround: boolean; doingBurnout: boolean;
 	crashing: boolean; crashedThisFrame: boolean; timeCrashing: number; speedOnLastCrashMph: number;
@@ -91,13 +98,14 @@ export function createVehicle(params: VehicleParams, pos: Vec3 = [0, 0, 0]): Veh
 		wheels: [0, 1, 2, 3].map((i) => createWheel(params, i)) as VehicleState['wheels'],
 		engine: { gear: 1, rpm: 0, fly: 0, clutch: 0, drive: 0, timer: 10, allowUp: true, allowDown: true, gearDownRpm: 0 },
 		speedMph: 0, speedMag: 0,
-		hasAir: false, timeWithoutTraction: 0, timeWithTraction: 0, timeStandingStill: 0, coolDown: 0, frozen: false,
+		hasAir: false, hadAir: false, takeOff: { rates: v0(), rollBleed: 0, rolling: false }, beachedTime: 0,
+		timeWithoutTraction: 0, timeWithTraction: 0, timeStandingStill: 0, coolDown: 0, frozen: false,
 		handBrake: false, handBrakeOnTime: 0, timeSinceLastHandBrake: 10000, brakeScale: 0,
 		steerAngle: 0, steering: 0, prevSteering: 0, maxSteerDeg: 0, steerDir: [0, 0, 1],
 		// Long past any landing: the landing damping only follows a real hard landing.
 		timeSinceHardLanding: 100, secondsSinceLastWallContact: 0.4, contactingWall: false,
 		numWorldCollisions: 0, numCollisions: 0,
-		aboveGround: { valid: false, pos: v0(), normal: v0(), verticalDistance: 0 },
+		aboveGround: { valid: false, pos: v0(), normal: v0(), verticalDistance: 0, surface: DEFAULT_SURFACE },
 		wheelPlane: { valid: false, pos: v0(), height: 0 },
 		allWheelsOnGround: false, doingBurnout: false,
 		crashing: false, crashedThisFrame: false, timeCrashing: 0, speedOnLastCrashMph: 0,
