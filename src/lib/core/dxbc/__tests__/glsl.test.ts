@@ -73,7 +73,7 @@ describe('emitGlsl', () => {
 		], [], [texture('DiffuseTexture', 0, 4), texture('ReflectionTexture', 13, 9)]);
 		expect(glsl).toContain('uniform sampler2D DiffuseTexture; // t0');
 		expect(glsl).toContain('uniform samplerCube ReflectionTexture; // t13');
-		expect(glsl).toMatch(/texture2D\(DiffuseTexture, r1[.\w]*\.xy\)/);
-		expect(glsl).toMatch(/textureCube\(ReflectionTexture, r3[.\w]*\.xyz\)/);
+		expect(glsl).toMatch(/texture\(DiffuseTexture, vec4\(r1[.\w]*\)\.xy\)/);
+		expect(glsl).toMatch(/texture\(ReflectionTexture, vec4\(r3[.\w]*\)\.xyz\)/);
 	});
 });

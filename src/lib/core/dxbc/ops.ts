@@ -24,6 +24,7 @@ const OP_TABLE: Record<number, { name: string; arity: number; kind?: 'alu' | 'cm
 	0x02: { name: 'break', arity: 0, kind: 'flow' },
 	0x03: { name: 'breakc',arity: 1, kind: 'flow' },
 	0x07: { name: 'continue', arity: 0, kind: 'flow' },
+	0x08: { name: 'continuec', arity: 1, kind: 'flow' },
 	0x0D: { name: 'discard', arity: 1, kind: 'flow' },
 	0x0E: { name: 'div',   arity: 3, kind: 'alu' },
 	0x0F: { name: 'dp2',   arity: 3, kind: 'alu' },
@@ -121,13 +122,15 @@ type DxbcOperandType =
 	| 'sampler'        // s0..sN
 	| 'resource'       // t0..tN (SRV)
 	| 'constant_buffer' // cbN[i]
-	| 'special_v'      // v* with SV_ semantic (vPos, vFace, ...)
-	| 'special_o'      // o* with SV_ semantic
+	| 'immediate_constant_buffer' // icb[i]
 	| 'primitive_id'
+	| 'output_depth'   // oDepth
 	| 'null'
+	| 'stream'
+	| 'function_table'
 	| 'unknown';
 
-type DxbcOperandIndex =
+export type DxbcOperandIndex =
 	/** Literal index, e.g. r4 → { kind:'immediate', value:4 } */
 	| { kind: 'immediate'; value: number }
 	/** Relative addressing (r[r0.x+3]) → { kind:'relative', base, offset } */
@@ -154,6 +157,11 @@ export type DxbcOperand = {
 	modifier: number;
 	/** Immediate values for immediate32/immediate64 operands (0..4 floats). */
 	immediates: number[];
+	/** Raw u32 bit patterns of immediate32 operands. DXBC immediates are
+	 *  untyped: `l(4)` feeding an index is the integer 4, not the float with
+	 *  those bits, and only the bits (not a round-tripped float) keep negative
+	 *  integers, whose patterns are NaNs. */
+	immediateBits?: number[];
 };
 
 // ---------------------------------------------------------------------------
@@ -174,7 +182,9 @@ type DxbcDecl =
 	| { kind: 'outputSv'; register: number; mask: number; systemValue: number }
 	| { kind: 'temps'; count: number }
 	| { kind: 'indexableTemp'; register: number; size: number; components: number }
-	| { kind: 'globalFlags'; flags: number };
+	| { kind: 'globalFlags'; flags: number }
+	/** `dcl_immediateConstantBuffer`: vec4 rows as raw u32 bits, 4 per row. */
+	| { kind: 'immediateConstantBuffer'; bits: number[] };
 
 // ---------------------------------------------------------------------------
 // Instruction model
@@ -195,6 +205,11 @@ export type DxbcInstruction = {
 	extended: number[];
 	/** Saturate flag from extended or base opcode. */
 	saturate: boolean;
+	/** For the conditional ops (if, breakc, continuec, retc, discard): true
+	 *  for the `_nz` form, false for `_z`. Undefined is read as `_nz`. */
+	testNonZero?: boolean;
+	/** Immediate texel offset of a `sample*_aoffimmi` (u, v, w), when nonzero. */
+	texelOffset?: [number, number, number];
 	/** Operands, in DXBC order (dst first, then sources). Empty for flow ops. */
 	operands: DxbcOperand[];
 	/** Populated only for `dcl_*` instructions. */
@@ -268,7 +283,7 @@ function decodeOperand(tokens: Uint32Array, ti: number): { op: DxbcOperand; cons
 	const idxDim2Rep = (head >>> 28) & 0x7;
 	const idxReps = [idxDim0Rep, idxDim1Rep, idxDim2Rep];
 
-	let immediates: number[] = [];
+	const immediates: number[] = [];
 	let modifier = 0;
 
 	// Consume extended tokens. Bit 0:5 in the extended token describes the
@@ -283,14 +298,15 @@ function decodeOperand(tokens: Uint32Array, ti: number): { op: DxbcOperand; cons
 	}
 
 	// Immediate operand payloads sit inline.
+	let immediateBits: number[] | undefined;
 	if (operandType === 4 /* immediate32 */) {
 		const n = compCount === 2 ? 4 : compCount; // 4 components when vec, else 1
+		immediateBits = [];
 		for (let i = 0; i < n; i++) {
 			const u = tokens[ti + consumed];
 			consumed++;
-			const buf = new ArrayBuffer(4);
-			new Uint32Array(buf)[0] = u;
-			immediates.push(new Float32Array(buf)[0]);
+			immediateBits.push(u >>> 0);
+			immediates.push(bitsToFloat(u));
 		}
 	} else if (operandType === 5 /* immediate64 */) {
 		const n = compCount === 2 ? 4 : compCount;
@@ -332,25 +348,9 @@ function decodeOperand(tokens: Uint32Array, ti: number): { op: DxbcOperand; cons
 		}
 	}
 
-	const typeMap: Record<number, DxbcOperandType> = {
-		0x00: 'temp',
-		0x01: 'input',
-		0x02: 'output',
-		0x03: 'indexable_temp',
-		0x04: 'immediate32',
-		0x05: 'immediate64',
-		0x06: 'sampler',
-		0x07: 'resource',
-		0x08: 'constant_buffer',
-		0x0B: 'primitive_id',
-		0x0D: 'null',
-		0x10: 'special_v',
-		0x12: 'special_o',
-	};
-
 	return {
 		op: {
-			type: typeMap[operandType] ?? 'unknown',
+			type: OPERAND_TYPES[operandType] ?? 'unknown',
 			typeRaw: operandType,
 			dimension,
 			indices,
@@ -360,9 +360,47 @@ function decodeOperand(tokens: Uint32Array, ti: number): { op: DxbcOperand; cons
 			select1,
 			modifier,
 			immediates,
+			...(immediateBits ? { immediateBits } : {}),
 		},
 		consumed,
 	};
+}
+
+// D3D10_SB_OPERAND_TYPE. The pixel shader's vFace / vPos are ordinary input
+// registers (declared with a system value), not separate operand types.
+const OPERAND_TYPES: Record<number, DxbcOperandType> = {
+	0x00: 'temp',
+	0x01: 'input',
+	0x02: 'output',
+	0x03: 'indexable_temp',
+	0x04: 'immediate32',
+	0x05: 'immediate64',
+	0x06: 'sampler',
+	0x07: 'resource',
+	0x08: 'constant_buffer',
+	0x09: 'immediate_constant_buffer',
+	0x0B: 'primitive_id',
+	0x0C: 'output_depth',
+	0x0D: 'null',
+	0x10: 'stream',
+	0x12: 'function_table',
+};
+
+function bitsToFloat(u: number): number {
+	const buf = new ArrayBuffer(4);
+	new Uint32Array(buf)[0] = u;
+	return new Float32Array(buf)[0];
+}
+
+// Extended opcode token, type 1 (sample controls): signed 4-bit texel offsets.
+function texelOffsetOf(extended: readonly number[]): [number, number, number] | undefined {
+	for (const e of extended) {
+		if ((e & 0x3F) !== 1) continue;
+		const s4 = (v: number) => ((v & 0xF) << 28) >> 28;
+		const off: [number, number, number] = [s4(e >>> 9), s4(e >>> 13), s4(e >>> 17)];
+		return off.some((v) => v !== 0) ? off : undefined;
+	}
+	return undefined;
 }
 
 function decodeInstruction(tokens: Uint32Array, ti: number): { ins: DxbcInstruction; next: number } {
@@ -372,21 +410,25 @@ function decodeInstruction(tokens: Uint32Array, ti: number): { ins: DxbcInstruct
 	const name = entry?.name ?? `OP_0x${op.toString(16)}`;
 	let length = opcodeLengthOf(head);
 
-	// `customdata` is special — total length is in the *next* dword.
+	// `customdata` is special — total length is in the *next* dword. Class 3
+	// (bits 31:11) is the immediate constant buffer, a table of vec4 rows the
+	// body reads as icb[i].
 	if (op === 0x35) {
 		length = tokens[ti + 1];
+		const icb = (head >>> 11) === 3;
 		return {
 			ins: {
 				opcode: op,
-				name,
+				name: icb ? 'dcl_immediateConstantBuffer' : name,
 				kind: 'decl',
 				tokenIndex: ti,
 				length,
 				extended: [],
 				saturate: false,
 				operands: [],
+				decl: icb ? { kind: 'immediateConstantBuffer', bits: Array.from(tokens.subarray(ti + 2, ti + length)) } : undefined,
 			},
-			next: ti + length,
+			next: ti + Math.max(length, 2),
 		};
 	}
 
@@ -493,12 +535,18 @@ function decodeInstruction(tokens: Uint32Array, ti: number): { ins: DxbcInstruct
 			length,
 			extended,
 			saturate,
+			// D3D10_SB_INSTRUCTION_TEST_BOOLEAN: bit 18 set = `_nz`.
+			...(CONDITIONAL_OPS.has(op) ? { testNonZero: ((head >>> 18) & 1) === 1 } : {}),
+			...(entry?.kind === 'tex' ? { texelOffset: texelOffsetOf(extended) } : {}),
 			operands,
 			decl,
 		},
 		next: ti + length,
 	};
 }
+
+// if, breakc, continuec, discard, retc.
+const CONDITIONAL_OPS = new Set([0x1F, 0x03, 0x08, 0x0D, 0x3F]);
 
 function regOf(o: DxbcOperand | undefined): number {
 	if (!o || o.indices.length === 0) return 0;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout } from '../shaderEngineConstants';
+import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout, seedSkinningPalettes } from '../shaderEngineConstants';
 import type { ParsedDxbc } from '../dxbc';
 
 // Build a minimal ParsedDxbc whose RDEF declares the named constants at the
@@ -26,11 +26,21 @@ describe('inferCbLayout', () => {
 		}));
 		expect(layout.worldRow0).toBe(44);
 		expect(layout.vpRow0).toBe(5);
-		expect(layout.viewRow2).toBe(7); // regex fallback (no GLSL source)
+		expect(layout.viewRow2).toBe(7);
+		expect(layout.depthEncode).toBe(8);
 		expect(layout.cameraPos).toBe(37);
 		// The two matrices that were previously never bound:
 		expect(layout.worldViewProjRow0).toBe(50);
 		expect(layout.viewProjectionRow0).toBe(54);
+	});
+
+	it('places view row 2 and the depth-encode row after a ViewProjectionModified at any slot', () => {
+		// Many world shaders (double-sided, glass, road, ZOnly passes) and the
+		// car headlight declare the block at slot 6; one Cable technique at 7.
+		for (const vp of [5, 6, 7]) {
+			const layout = inferCbLayout('', fakeParsed({ ViewProjectionModified: vp }));
+			expect([layout.vpRow0, layout.viewRow2, layout.depthEncode]).toEqual([vp, vp + 2, vp + 3]);
+		}
 	});
 
 	it('returns null matrix slots when the shader does not declare them', () => {
@@ -69,5 +79,38 @@ describe('ENGINE_CONSTANT_DEFAULTS', () => {
 		const [x, y, z] = ENGINE_CONSTANT_DEFAULTS.KeyLightDirection;
 		expect(Math.hypot(x, y, z)).toBeCloseTo(1, 6);
 		expect(y).toBeLessThan(0);
+	});
+});
+
+describe('seedSkinningPalettes', () => {
+	const palette = (type: { class: number; rows: number; columns: number }, bones: number) => {
+		const parsed = {
+			reflection: { constantBuffers: [{ variables: [{
+				name: 'boneMatrices', startOffset: 10 * 16, size: bones * type.rows * 16, type: { ...type, type: 3, elements: bones },
+			}] }], resourceBindings: [] },
+		} as unknown as ParsedDxbc;
+		const slots = new Map<number, number[]>();
+		seedSkinningPalettes(parsed, (slot, x, y, z, w) => slots.set(slot, [x, y, z, w]));
+		return slots;
+	};
+
+	it('steps a row-major float3x4 palette three registers per bone', () => {
+		// The game's boneMatrices: 60 x float3x4, 2880 bytes.
+		const slots = palette({ class: 2, rows: 3, columns: 4 }, 60);
+		expect(slots.size).toBe(180);
+		expect(slots.get(10)).toEqual([1, 0, 0, 0]);
+		expect(slots.get(11)).toEqual([0, 1, 0, 0]);
+		expect(slots.get(12)).toEqual([0, 0, 1, 0]);
+		// Bone 1 starts right after: no (0,0,0,1) row in between.
+		expect(slots.get(13)).toEqual([1, 0, 0, 0]);
+		expect(slots.get(10 + 3 * 59 + 2)).toEqual([0, 0, 1, 0]);
+	});
+
+	it('steps a 4x4 palette four registers per bone', () => {
+		const slots = palette({ class: 2, rows: 4, columns: 4 }, 2);
+		expect([...slots.values()]).toEqual([
+			[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1],
+			[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1],
+		]);
 	});
 });

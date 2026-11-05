@@ -5,19 +5,20 @@
 // The emitter is a best-effort translator targeting the opcode subset that
 // Burnout Paradise Remastered actually uses. Un-handled instructions are
 // left as `// unsupported op: <name>` comments so the shader source stays
-// readable even when compilation fails. Callers compile and display the
+// readable, and listed in `unsupported`. Callers compile and display the
 // error separately.
 
 import { parseDxbc, isDxbc, type ParsedDxbc } from './parser';
 import { decodeShex, type DecodedShader } from './ops';
-import { emitGlsl } from './glsl';
+import { emitGlslWithReport } from './glsl';
 
 export type TranslatedShader = {
 	parsed: ParsedDxbc;
 	decoded: DecodedShader;
 	/** GLSL source; always returned even when the translator bailed. */
 	source: string;
-	/** List of opcodes that showed up but weren't fully translated. */
+	/** Opcodes (and `src:` / `dst:` operand kinds) the emitter could not
+	 *  translate; empty when the GLSL is a complete translation. */
 	unsupported: string[];
 	/** Stage label (vs_5_0 / ps_5_0 / ...). */
 	programLabel: string;
@@ -28,8 +29,7 @@ export type TranslatedShader = {
 export function translateDxbc(bytes: Uint8Array): TranslatedShader {
 	const parsed = parseDxbc(bytes);
 	const decoded = decodeShex(parsed.shexTokens);
-	const source = emitGlsl(parsed, decoded);
-	const unsupported = Array.from(new Set(decoded.body.filter((i) => i.name.startsWith('OP_') || /unsupported/.test(i.name)).map((i) => i.name)));
+	const { source, unsupported } = emitGlslWithReport(parsed, decoded);
 	const programLabel =
 		(parsed.programType === 'vertex' ? 'vs_' :
 		 parsed.programType === 'pixel' ? 'ps_' :

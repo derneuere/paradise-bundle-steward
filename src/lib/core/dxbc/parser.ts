@@ -41,7 +41,7 @@ type DxbcSignatureElement = {
 	semanticIndex: number;
 	/** System-value id — non-zero for SV_* semantics (see d3dcommon.h). */
 	systemValue: number;
-	/** 0=uint, 1=int, 2=float. */
+	/** D3D_REGISTER_COMPONENT_TYPE: 0=unknown, 1=uint32, 2=sint32, 3=float32. */
 	componentType: number;
 	/** Input/output register this element is bound to. */
 	register: number;
@@ -89,8 +89,8 @@ type DxbcResourceBinding = {
 	type: number;
 	/** D3D_RESOURCE_RETURN_TYPE: 0=none, 5=float, etc. */
 	returnType: number;
-	/** D3D_SRV_DIMENSION: 0=unknown, 2=texture1d, 4=texture2d, 5=texture2darray,
-	 *  8=texture3d, 9=texturecube, 10=texturecubearray, ... */
+	/** D3D_SRV_DIMENSION: 0=unknown, 1=buffer, 2=texture1d, 4=texture2d,
+	 *  5=texture2darray, 8=texture3d, 9=texturecube, 10=texturecubearray, ... */
 	dimension: number;
 	numSamples: number;
 	bindPoint: number;
@@ -236,7 +236,7 @@ export function parseDxbc(bytes: Uint8Array): ParsedDxbc {
 //     u32 nameOffset      (offset from end of tag+size, i.e. chunk.offset+8)
 //     u32 semanticIndex
 //     u32 systemValue
-//     u32 componentType   (0=uint, 1=int, 2=float)
+//     u32 componentType   (0=unknown, 1=uint32, 2=sint32, 3=float32)
 //     u32 register
 //     u8  mask
 //     u8  rwMask

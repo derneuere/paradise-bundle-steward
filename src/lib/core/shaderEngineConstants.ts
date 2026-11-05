@@ -120,13 +120,16 @@ export function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
 	const worldMatch = vs.match(/position, 0\.0\)\.xxxx \* cb0\[(\d+)\]/);
 	const worldRow0 = slotByName('world') ?? (worldMatch ? Number(worldMatch[1]) : 44);
 
-	// viewRow2: first dp4 after the world transform feeding the o0.zw depth pair.
+	// ViewProjectionModified is a 4-row block: clip x/y rows, then view row 2
+	// (view-space z), then the depth-encode row. Its slot varies by shader
+	// (5 for vehicles, 6 or 7 for many world shaders), so when RDEF names it
+	// the whole block follows it; the regexes only cover shaders without it.
+	const vpNamed = slotByName('ViewProjectionModified');
 	const viewMatch = vs.match(/r1\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
-	const viewRow2 = viewMatch ? Number(viewMatch[1]) : 7;
-
-	// vpRow0: the ViewProjectionModified slot, or the first o0.x dp4.
 	const vpMatch = vs.match(/o0\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
-	const vpRow0 = slotByName('ViewProjectionModified') ?? (vpMatch ? Number(vpMatch[1]) : 5);
+	const vpRow0 = vpNamed ?? (vpMatch ? Number(vpMatch[1]) : 5);
+	const viewRow2 = vpNamed != null ? vpNamed + 2 : viewMatch ? Number(viewMatch[1]) : 7;
+	const depthEncode = vpNamed != null ? vpNamed + 3 : 8;
 
 	const camMatch = vs.match(/-\(r0\.xyzx\) \+ cb0\[(\d+)\]\.xyzx/);
 	const cameraPos = slotByName('ViewPosition') ?? (camMatch ? Number(camMatch[1]) : null);
@@ -135,7 +138,7 @@ export function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
 		worldRow0,
 		vpRow0,
 		viewRow2,
-		depthEncode: 8,
+		depthEncode,
 		cameraPos,
 		// Full 4-row engine matrices many shaders transform with directly.
 		worldViewProjRow0: slotByName('worldViewProj'),
@@ -149,7 +152,7 @@ export function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
 //
 // Skinned vehicle meshes (those whose VertexDescriptor carries
 // BoneIndexes/BoneWeights) transform each vertex by a bone-matrix palette
-// (`boneMatrices`, a cb0 array of 4-row matrices) blended by the per-vertex
+// (`boneMatrices`, a cb0 array of 3-row matrices) blended by the per-vertex
 // weights, then add per-vertex deformation offsets (`g_verletOffsets`). Both
 // are supplied by the runtime: the bone matrices are IDENTITY at rest (this is
 // relative/deformation skinning — vertices are stored in rest position and the
@@ -159,8 +162,8 @@ export function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
 // vanishes. Seeding the palette to identity — together with the BLENDWEIGHT=1
 // stub the GLSL emitter now uses — makes skinned meshes render at rest pose.
 
-/** cb0 array constants that are palettes of 4-row matrices whose rest value is
- *  the identity matrix. */
+/** cb0 array constants that are palettes of matrices whose rest value is the
+ *  identity matrix. */
 export const SKIN_IDENTITY_MATRIX_PALETTES = new Set(['boneMatrices']);
 
 /**
@@ -177,13 +180,21 @@ export function seedSkinningPalettes(
 		for (const v of cb.variables) {
 			if (!SKIN_IDENTITY_MATRIX_PALETTES.has(v.name)) continue;
 			const slot = Math.floor(v.startOffset / 16);
-			const nVec4 = Math.max(4, Math.floor(v.size / 16));
-			for (let m = 0; m + 4 <= nVec4; m += 4) {
-				writeVec4(slot + m + 0, 1, 0, 0, 0);
-				writeVec4(slot + m + 1, 0, 1, 0, 0);
-				writeVec4(slot + m + 2, 0, 0, 1, 0);
-				writeVec4(slot + m + 3, 0, 0, 0, 1);
+			const stride = matrixRegisters(v.type);
+			const nVec4 = Math.max(stride, Math.floor(v.size / 16));
+			for (let m = 0; m + stride <= nVec4; m += stride) {
+				for (let r = 0; r < stride; r++) writeVec4(slot + m + r, r === 0 ? 1 : 0, r === 1 ? 1 : 0, r === 2 ? 1 : 0, r === 3 ? 1 : 0);
 			}
 		}
 	}
+}
+
+// vec4 registers one matrix of a palette occupies: its rows when row-major
+// (RDEF class 2), its columns when column-major (class 3). The game's
+// `boneMatrices` is 60 x row-major float3x4, three registers per bone (the
+// skinned vertex shaders index it with `bone * 3`); identity rows or columns
+// are the unit vectors either way. Without type info, assume 4x4.
+function matrixRegisters(type: { class: number; rows: number; columns: number } | undefined): number {
+	const n = type?.class === 3 ? type.columns : type?.rows;
+	return n && n >= 1 && n <= 4 ? n : 4;
 }
