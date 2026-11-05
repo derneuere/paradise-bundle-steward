@@ -37,8 +37,11 @@ export type ParsedTextureState = {
 	magFilter: number;
 	minFilter: number;
 	mipFilter: number;
-	maxMipLevel: number;
+	/** Mip clamp range; retail states leave it open (-FLT_MAX..FLT_MAX). */
+	minLod: number;
+	maxLod: number;
 	maxAnisotropy: number;
+	/** Negative on retail vehicle states (-0.9): sharper, earlier mips. */
 	mipLodBias: number;
 	borderColor: number;
 	/** Imported Texture resource ID, resolved from the import table. */
@@ -62,11 +65,12 @@ export type ParsedTextureState = {
  *   +0x0C  u32  magFilter (D3DTEXTUREFILTERTYPE)
  *   +0x10  u32  minFilter
  *   +0x14  u32  mipFilter
- *   +0x18  u32  maxMipLevel
- *   +0x1C  u32  maxAnisotropy
- *   +0x20  f32  mipLodBias
- *   +0x24  u32  borderColor (D3DCOLOR)
- *   +0x28..0x3B  unused (game doesn't access)
+ *   +0x18  f32  minLod
+ *   +0x1C  f32  maxLod
+ *   +0x20  u32  maxAnisotropy
+ *   +0x24  f32  mipLodBias
+ *   +0x28  u32  borderColor
+ *   +0x2C..0x3B  unused (game doesn't access)
  *
  * TextureState extension:
  *   +0x3C  ptr  Texture (imported resource)
@@ -101,10 +105,11 @@ export function parseTextureState(
 		magFilter: dv.getUint32(0x0C, true),
 		minFilter: dv.getUint32(0x10, true),
 		mipFilter: dv.getUint32(0x14, true),
-		maxMipLevel: dv.getUint32(0x18, true),
-		maxAnisotropy: dv.getUint32(0x1C, true),
-		mipLodBias: dv.getFloat32(0x20, true),
-		borderColor: dv.getUint32(0x24, true),
+		minLod: dv.getFloat32(0x18, true),
+		maxLod: dv.getFloat32(0x1C, true),
+		maxAnisotropy: dv.getUint32(0x20, true),
+		mipLodBias: dv.getFloat32(0x24, true),
+		borderColor: dv.getUint32(0x28, true),
 		textureId,
 	};
 }

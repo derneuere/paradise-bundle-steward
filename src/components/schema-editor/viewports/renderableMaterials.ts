@@ -10,6 +10,8 @@ import { D3DTextureAddress } from '@/lib/core/textureState';
 import type { DecodedRenderable } from '@/lib/core/renderableDecode';
 import { paintShading, RETAIL_DEFAULT_PAINT } from '@/lib/core/vehiclePaint';
 import { applyGamePaint } from './paintMaterial';
+import { materialConstant } from '@/lib/core/materialShaderConstants';
+import { applyMaterialState } from '@/lib/core/materialRenderState';
 
 export type PaintColor = { r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } };
 
@@ -71,22 +73,13 @@ export function buildTexturedMaterials(
 			if (map.has(key)) continue;
 
 			const rm = m.resolvedMaterial;
-			const props = rm.properties;
-			let side: THREE.Side = THREE.DoubleSide;
-			if (props) {
-				if (props.cullMode === 2) side = THREE.FrontSide;
-				else if (props.cullMode === 3) side = THREE.BackSide;
-			}
-
 			const mat = new THREE.MeshStandardMaterial({
-				side,
+				side: THREE.DoubleSide,
 				metalness: 0.15,
 				roughness: 0.7,
-				transparent: props?.alphaBlendEnable ?? false,
-				alphaTest: props?.alphaTestEnable ? (props.alphaRef / 255) : 0,
-				depthWrite: !(props?.alphaBlendEnable),
 				wireframe,
 			});
+			const materialDiffuse = materialConstant(rm.shaderConstants, 'materialDiffuse');
 
 			if (rm.diffuse) {
 				const tex = makeDataTexture(rm.diffuse, rm.samplerState);
@@ -95,7 +88,14 @@ export function buildTexturedMaterials(
 
 			const sn = rm.shaderName ?? '';
 
-			if (sn.includes('Window')) {
+			if (sn.includes('Window') && materialDiffuse) {
+				// The window shader: texture x materialDiffuse (the glass tint), the
+				// texture's alpha as opacity, reflections added on top untinted.
+				mat.metalness = 0;
+				mat.roughness = 0.02;
+				mat.envMapIntensity = 2.5;
+				if (!rm.diffuse) mat.opacity = 0.35;
+			} else if (sn.includes('Window')) {
 				mat.transparent = true;
 				mat.opacity = rm.diffuse ? 0.35 : 0.25;
 				mat.color.setRGB(0.08, 0.1, 0.14);
@@ -175,6 +175,12 @@ export function buildTexturedMaterials(
 				mat.aoMap = tex;
 				mat.aoMapIntensity = 1.0;
 			}
+			// The material's own diffuse multiplier (dark trim, glass tint) beats the
+			// guessed colours above; paint shaders carry none.
+			if (materialDiffuse) mat.color.setRGB(materialDiffuse[0], materialDiffuse[1], materialDiffuse[2]);
+			// The technique the engine draws the car with is the first (Damaged on
+			// vehicle shaders, Default elsewhere): its blend, depth and cull.
+			applyMaterialState(mat, rm.materialStates[0]);
 			if (rm.scratch) scratchMaps.set(mat, makeDataTexture(rm.scratch, null, false));
 			const shading = paintShading(sn);
 			if (shading) applyGamePaint(mat, shading, carPaint);

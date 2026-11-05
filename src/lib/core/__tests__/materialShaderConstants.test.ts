@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { materialConstantsByName, parseMaterialShaderConstants } from '../materialShaderConstants';
+import { constantNameHash, materialConstant, materialConstantsByName, parseMaterialShaderConstants } from '../materialShaderConstants';
 
 // Builds a Material body with the layout retail vehicle materials use: an empty
 // block behind +0x14 and the populated block behind +0x18.
@@ -66,5 +66,22 @@ describe('materialConstantsByName', () => {
 			[{ name: 'g_fresnelRanges', hash: 0x80000001 }],
 		);
 		expect(named).toEqual({ g_fresnelRanges: [1, 2, 3, 4] });
+	});
+});
+
+describe('constantNameHash', () => {
+	it('is the CRC-32 register without the final inversion, as the Shader stores it', () => {
+		expect(constantNameHash('materialDiffuse')).toBe(0xf6e27caa);
+		expect(constantNameHash('g_fresnelRanges')).toBe(0x3859100b);
+		expect(constantNameHash('sampleCoverage')).toBe(0x37dd4229);
+		expect(constantNameHash('')).toBe(0xffffffff);
+	});
+});
+
+describe('materialConstant', () => {
+	it('finds a material value by constant name', () => {
+		const constants = [{ hash: 0xf6e27caa, values: [0, 0.28, 0.24, 1] }, { hash: 7, values: [1, 1, 1, 1] }];
+		expect(materialConstant(constants, 'materialDiffuse')).toEqual([0, 0.28, 0.24, 1]);
+		expect(materialConstant(constants, 'g_fresnelRanges')).toBeNull();
 	});
 });
