@@ -10,6 +10,8 @@
 //   - wireframe toggle
 //   - paint color + active palette
 //   - hovered mesh (mouse-move highlight, viewport-only — never escapes)
+//   - the crash test (crashSim/useRenderableCrash): a vehicle body with a
+//     DeformationSpec loaded alongside can be crashed in place, textured
 //
 // Selection is NOT local state. The highlighted mesh is DERIVED from the
 // schema editor's `selectedPath` via a useMemo. Clicks in 3D dispatch
@@ -30,13 +32,11 @@ import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
 import { useResetOnChange } from '@/hooks/useResetOnChange';
 import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
-import { useFirstLoadedBundle } from '@/context/WorkspaceContext';
 import { RENDERABLE_TYPE_ID } from '@/lib/core/renderable';
 import { extractResourceRaw } from '@/lib/core/registry/extract';
 import type { ResolvedMaterial } from '@/lib/core/materialChain';
 import { parsePlayerCarColoursData, type PlayerCarColours } from '@/lib/core/playerCarColors';
 import type { DecodedTexture } from '@/lib/core/texture';
-import { D3DTextureAddress } from '@/lib/core/textureState';
 import type { ParsedBundle, ResourceEntry } from '@/lib/core/types';
 import { SHADER_TYPE_ID, parseShaderData, SHADER_PROGRAM_BUFFER_TYPE_ID } from '@/lib/core/shader';
 import { getResourceBlocks } from '@/lib/core/resourceManager';
@@ -59,6 +59,10 @@ import {
 } from './renderableDecodedContext';
 import { useSchemaEditor } from '../context';
 import { isDragRelease } from './selection';
+import { buildTexturedMaterials, type PaintColor } from './renderableMaterials';
+import { RenderableCrashPanel, RenderableCrashRig } from './crashSim/RenderableCrash';
+import { useRenderableCrash, type CrashDeform } from './crashSim/useRenderableCrash';
+import { deformingCopy, isSkinned } from './crashSim/deformMaterial';
 
 // =============================================================================
 // Colour picker — uses PlayerCarColours from the loaded bundle if available,
@@ -230,46 +234,6 @@ function SceneEnvironment() {
 }
 
 // =============================================================================
-// Texture helpers
-// =============================================================================
-
-function makeDataTexture(
-	decoded: DecodedTexture,
-	sampler: { addressU: number; addressV: number } | null,
-	srgb = true,
-): THREE.DataTexture {
-	const tex = new THREE.DataTexture(
-		decoded.pixels,
-		decoded.header.width,
-		decoded.header.height,
-		THREE.RGBAFormat,
-	);
-	tex.flipY = false;
-	tex.magFilter = THREE.LinearFilter;
-	tex.minFilter = THREE.LinearMipmapLinearFilter;
-	tex.generateMipmaps = true;
-	if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
-	applyWrapping(tex, sampler);
-	tex.needsUpdate = true;
-	return tex;
-}
-
-function applyWrapping(
-	tex: THREE.DataTexture,
-	sampler: { addressU: number; addressV: number } | null,
-) {
-	const map: Record<number, THREE.Wrapping> = {
-		[D3DTextureAddress.WRAP]: THREE.RepeatWrapping,
-		[D3DTextureAddress.MIRROR]: THREE.MirroredRepeatWrapping,
-		[D3DTextureAddress.CLAMP]: THREE.ClampToEdgeWrapping,
-		[D3DTextureAddress.BORDER]: THREE.ClampToEdgeWrapping,
-		[D3DTextureAddress.MIRRORONCE]: THREE.MirroredRepeatWrapping,
-	};
-	tex.wrapS = map[sampler?.addressU ?? D3DTextureAddress.WRAP] ?? THREE.RepeatWrapping;
-	tex.wrapT = map[sampler?.addressV ?? D3DTextureAddress.WRAP] ?? THREE.RepeatWrapping;
-}
-
-// =============================================================================
 // Translated-shader rendering — opt-in path. When the user toggles
 // "translated shaders" in the viewport header, each unique Material seen
 // across the visible Renderables gets a real DXBC-translated ShaderMaterial
@@ -355,21 +319,23 @@ function RenderableMeshes({
 	onSelect,
 	onHover,
 	useTranslatedShaders,
+	deform,
 }: {
 	renderables: DecodedRenderable[];
 	wireframe: boolean;
-	paintColor: { r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } } | null;
+	paintColor: PaintColor | null;
 	selected: { ri: number; mi: number } | null;
 	hovered: { ri: number; mi: number } | null;
 	onSelect: (sel: { ri: number; mi: number } | null) => void;
 	onHover: (sel: { ri: number; mi: number } | null) => void;
 	useTranslatedShaders: boolean;
+	deform: CrashDeform | null;
 }) {
-	const activeBundle = useFirstLoadedBundle();
+	const decoded = useRenderableDecoded();
+	const activeBundle = decoded?.bundle ?? null;
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
 	const debugResources = activeBundle?.debugResources ?? [];
-	const decoded = useRenderableDecoded();
 
 	// Cross-bundle catalog + material index, only computed when the user
 	// actually flips to translated shaders. Sources are the primary (renderable)
@@ -417,136 +383,10 @@ function RenderableMeshes({
 		[],
 	);
 
-	const texturedMaterials = useMemo(() => {
-		const map = new Map<string, THREE.MeshStandardMaterial>();
-		for (const r of renderables) {
-			for (const m of r.meshes) {
-				if (!m.resolvedMaterial || !m.materialAssemblyId) continue;
-				const key = m.materialAssemblyId.toString(16);
-				if (map.has(key)) continue;
-
-				const rm = m.resolvedMaterial;
-				const props = rm.properties;
-				let side: THREE.Side = THREE.DoubleSide;
-				if (props) {
-					if (props.cullMode === 2) side = THREE.FrontSide;
-					else if (props.cullMode === 3) side = THREE.BackSide;
-				}
-
-				const mat = new THREE.MeshStandardMaterial({
-					side,
-					metalness: 0.15,
-					roughness: 0.7,
-					transparent: props?.alphaBlendEnable ?? false,
-					alphaTest: props?.alphaTestEnable ? (props.alphaRef / 255) : 0,
-					depthWrite: !(props?.alphaBlendEnable),
-					wireframe,
-				});
-
-				if (rm.diffuse) {
-					const tex = makeDataTexture(rm.diffuse, rm.samplerState);
-					mat.map = tex;
-				}
-
-				const sn = rm.shaderName ?? '';
-
-				if (sn.includes('Window')) {
-					mat.transparent = true;
-					mat.opacity = rm.diffuse ? 0.35 : 0.25;
-					mat.color.setRGB(0.08, 0.1, 0.14);
-					mat.metalness = 0.95;
-					mat.roughness = 0.02;
-					mat.envMapIntensity = 2.5;
-					mat.depthWrite = false;
-				} else if (sn.includes('Chrome')) {
-					mat.color.setRGB(0.35, 0.35, 0.38);
-					mat.metalness = 1.0;
-					mat.roughness = 0.08;
-					mat.envMapIntensity = 2.5;
-				} else if (sn.includes('PaintGloss')) {
-					if (paintColor) {
-						mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
-						const pearl = paintColor.pearl;
-						if (pearl) {
-							mat.emissive.setRGB(pearl.r * 0.25, pearl.g * 0.25, pearl.b * 0.25);
-						} else {
-							mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
-						}
-						mat.emissiveIntensity = 1.0;
-					} else {
-						mat.color.setRGB(0.18, 0.18, 0.20);
-					}
-					mat.metalness = 0.6;
-					mat.roughness = 0.2;
-					mat.envMapIntensity = 1.5;
-				} else if (sn.includes('Light') && sn.includes('EnvMapped')) {
-					mat.metalness = 0.8;
-					mat.roughness = 0.1;
-					mat.envMapIntensity = 2.0;
-				} else if (sn.includes('Metal') || sn.includes('SimpleMetal')) {
-					mat.metalness = 0.7;
-					mat.roughness = 0.3;
-					mat.envMapIntensity = 1.2;
-				} else if (sn.includes('Decal') && sn.includes('EnvMapped')) {
-					mat.metalness = 0.4;
-					mat.roughness = 0.3;
-					mat.envMapIntensity = 1.5;
-				} else if (sn.includes('Decal')) {
-					mat.metalness = 0.1;
-					mat.roughness = 0.6;
-				} else if (sn.includes('CarGuts') || sn.includes('Livery')) {
-					mat.metalness = 0.1;
-					mat.roughness = 0.8;
-				} else {
-					const isGlassNoTex = !rm.diffuse && !rm.diffuseFromSecondary && rm.crossBundleMisses > 0;
-					const isGlassSmallAlpha = rm.diffuse && rm.diffuseFromSecondary
-						&& rm.diffuse.header.format === 'DXT5'
-						&& rm.diffuse.header.width <= 128 && rm.diffuse.header.height <= 128;
-					const isGlass = isGlassNoTex || isGlassSmallAlpha;
-					if (isGlass) {
-						mat.transparent = true;
-						mat.opacity = 0.3;
-						mat.color.setRGB(0.15, 0.18, 0.22);
-						mat.metalness = 0.95;
-						mat.roughness = 0.02;
-						mat.envMapIntensity = 2.0;
-						mat.depthWrite = false;
-					}
-					const isBodyMaterial = !isGlass && (rm.diffuseFromSecondary || rm.anyFromSecondary || !rm.diffuse);
-					if (paintColor && isBodyMaterial) {
-						mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
-						mat.metalness = 0.6;
-						mat.roughness = 0.25;
-						mat.envMapIntensity = 1.2;
-					} else if (isBodyMaterial) {
-						mat.color.setRGB(0.18, 0.18, 0.20);
-						mat.metalness = 0.5;
-						mat.roughness = 0.3;
-						mat.envMapIntensity = 1.5;
-					}
-				}
-
-				if (rm.specular) {
-					const tex = makeDataTexture(rm.specular, rm.samplerState, false);
-					mat.metalnessMap = tex;
-				}
-				if (rm.emissive) {
-					const tex = makeDataTexture(rm.emissive, rm.samplerState);
-					mat.emissiveMap = tex;
-					mat.emissive.setRGB(1, 1, 1);
-					mat.emissiveIntensity = 2.0;
-				}
-				if (rm.ao) {
-					const tex = makeDataTexture(rm.ao, rm.samplerState, false);
-					mat.aoMap = tex;
-					mat.aoMapIntensity = 1.0;
-				}
-
-				map.set(key, mat);
-			}
-		}
-		return map;
-	}, [renderables, wireframe, paintColor]);
+	const texturedMaterials = useMemo(
+		() => buildTexturedMaterials(renderables, wireframe, paintColor),
+		[renderables, wireframe, paintColor],
+	);
 
 	useDisposeOnDepsChange(
 		() => {
@@ -561,6 +401,24 @@ function RenderableMeshes({
 			}
 		},
 		[baseMaterial, hoverMaterial, selectedMaterial, texturedMaterials],
+	);
+
+	// Crash test: skinned meshes swap to deforming copies of their own
+	// materials (same maps and paint, plus the rows step).
+	const deformRows = deform?.rows, deformHeat = deform?.heat, deformFlat = deform?.flat ?? false;
+	const deforming = useMemo(() => {
+		if (!deformRows || !deformHeat) return null;
+		const textured = new Map<string, THREE.MeshStandardMaterial>();
+		for (const [k, m] of texturedMaterials) textured.set(k, deformingCopy(m, deformRows, deformHeat, deformFlat));
+		return { textured, base: deformingCopy(baseMaterial, deformRows, deformHeat, deformFlat) };
+	}, [deformRows, deformHeat, deformFlat, texturedMaterials, baseMaterial]);
+	useDisposeOnDepsChange(
+		() => {
+			if (!deforming) return;
+			deforming.base.dispose();
+			for (const m of deforming.textured.values()) m.dispose();
+		},
+		[deforming],
 	);
 
 	// Translated-shader materials, keyed `${renderableIndex}:${materialAssemblyId}`
@@ -695,15 +553,19 @@ function RenderableMeshes({
 					const translatedMat = useTranslatedShaders && matKey
 						? translatedMaterialMap.get(`${ri}:${matKey}`) ?? null
 						: null;
+					const deformed = deforming && !translatedMat && isSkinned(m.geometry) ? deforming : null;
 					const texturedMat = !translatedMat && matKey
-						? texturedMaterials.get(matKey) ?? null
+						? (deformed?.textured ?? texturedMaterials).get(matKey) ?? null
 						: null;
-					const meshMaterial = isSelected ? selectedMaterial
-						: isHovered ? hoverMaterial
-						: (translatedMat ?? texturedMat ?? baseMaterial);
+					const meshMaterial = isSelected && !deform ? selectedMaterial
+						: isHovered && !deform ? hoverMaterial
+						: (translatedMat ?? texturedMat ?? deformed?.base ?? baseMaterial);
+					const key = `${r.resourceId.toString(16)}-${mi}`;
 					return (
 						<mesh
-							key={`${r.resourceId.toString(16)}-${mi}`}
+							// Remount on crash on/off so a posed mesh returns to its locator.
+							key={deform ? `crash-${key}` : key}
+							ref={deform && mat && r.partIndex !== undefined ? deform.poser.ref(`${ri}-${mi}`, r.partIndex, mat) : undefined}
 							geometry={m.geometry}
 							material={meshMaterial}
 							matrixAutoUpdate={mat === null}
@@ -729,14 +591,14 @@ function RenderableMeshes({
 								if (upd) upd(camera, this);
 								void _r; void _s; void _g; void _group;
 							}}
-							onClick={(e) => {
+							onClick={deform ? deform.onClick : (e) => {
 								e.stopPropagation();
 								if (isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return;
 								onSelect({ ri, mi });
 							}}
 							onPointerOver={(e) => {
 								e.stopPropagation();
-								onHover({ ri, mi });
+								if (!deform) onHover({ ri, mi });
 								document.body.style.cursor = 'pointer';
 							}}
 							onPointerOut={(e) => {
@@ -757,10 +619,10 @@ function RenderableMeshes({
 // =============================================================================
 
 export function RenderableViewport() {
-	const activeBundle = useFirstLoadedBundle();
+	const decoded = useRenderableDecoded();
+	const activeBundle = decoded?.bundle ?? null;
 	const loadedBundle = activeBundle?.parsed ?? null;
 	const originalArrayBuffer = activeBundle?.originalArrayBuffer ?? null;
-	const decoded = useRenderableDecoded();
 	const { selectPath, selectedPath } = useSchemaEditor();
 
 	// Local interaction state. Notably absent: a `selected` useState — the
@@ -769,7 +631,7 @@ export function RenderableViewport() {
 	// to ping-pong against.
 	const [wireframe, setWireframe] = useState(false);
 	const [useTranslatedShaders, setUseTranslatedShaders] = useState(false);
-	const [paintColor, setPaintColor] = useState<{ r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } } | null>(null);
+	const [paintColor, setPaintColor] = useState<PaintColor | null>(null);
 	const [activePalette, setActivePalette] = useState(0);
 	const [hovered, setHovered] = useState<{ ri: number; mi: number } | null>(null);
 
@@ -833,6 +695,8 @@ export function RenderableViewport() {
 		if (wi == null) return;
 		selectPath(['renderables', wi, 'meshes', sel.mi]);
 	}, [decoded, selectPath]);
+
+	const crash = useRenderableCrash(activeBundle, decoded?.decoded?.renderables ?? null, decoded?.decodeMode ?? 'graphics');
 
 	const sceneBounds = useMemo(() => {
 		if (!decoded?.decoded) return null;
@@ -923,6 +787,16 @@ export function RenderableViewport() {
 					>
 						translated shaders
 					</Button>
+					{crash.available && (
+						<Button
+							variant={crash.enabled ? 'default' : 'outline'}
+							size="sm"
+							onClick={() => crash.setEnabled(!crash.enabled)}
+							title="Crash the car with its DeformationSpec (loaded _AT bundle): clicks hit the car instead of selecting meshes"
+						>
+							crash test
+						</Button>
+					)}
 					{/* Textures + shaders resolve from every bundle loaded in the
 					    workspace — no separate "texture pack" step. This shows which
 					    companion bundles are contributing. */}
@@ -944,6 +818,7 @@ export function RenderableViewport() {
 				/>
 				{useTranslatedShaders && <EngineKnobsPanel />}
 			</div>
+			<RenderableCrashPanel crash={crash} setDecodeMode={decoded.setDecodeMode} translated={useTranslatedShaders} />
 
 			{/* 3D canvas — fills remaining space */}
 			<div className="flex-1 min-h-0" style={{ background: '#1a1d23' }}>
@@ -965,7 +840,7 @@ export function RenderableViewport() {
 					<directionalLight position={[-8, 5, -10]} intensity={0.6} />
 					<directionalLight position={[0, -5, 8]} intensity={0.3} />
 					<Grid
-						position={[center.x, center.y - radius, center.z]}
+						position={[center.x, crash.deform && crash.session.sim ? crash.session.sim.groundMesh : center.y - radius, center.z]}
 						args={[Math.max(radius * 4, 4), Math.max(radius * 4, 4)]}
 						cellSize={0.5}
 						cellThickness={0.5}
@@ -985,8 +860,10 @@ export function RenderableViewport() {
 								onSelect={handleSelect}
 								onHover={setHovered}
 								useTranslatedShaders={useTranslatedShaders}
+								deform={crash.deform}
 							/>
 						)}
+						<RenderableCrashRig crash={crash} />
 					</Suspense>
 					<OrbitControls
 						target={[center.x, center.y, center.z]}

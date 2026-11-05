@@ -26,6 +26,7 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 import { useLoadShaderNameMap } from '@/hooks/useLoadShaderNameMap';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import type { EditableBundle } from '@/context/WorkspaceContext.types';
 import { type ParsedRenderable } from '@/lib/core/renderable';
 import {
 	decodeAllRenderables,
@@ -48,6 +49,9 @@ export type { DecodedMesh, DecodedRenderable, DecodeMode };
 // =============================================================================
 
 export type RenderableDecodedValue = {
+	/** The bundle whose renderables are decoded: the selected one, else the
+	 *  first loaded. */
+	bundle: EditableBundle | null;
 	/** Full decoded result from the current decode pass. Null until the
 	 *  bundle is loaded and the first memo runs. */
 	decoded: { renderables: DecodedRenderable[]; totalMeshes: number; failed: number } | null;
@@ -228,6 +232,7 @@ function RenderableDecodedProviderInner({ children }: { children: React.ReactNod
 	}, [decoded]);
 
 	const value = useMemo<RenderableDecodedValue>(() => ({
+		bundle: renderableBundle,
 		decoded,
 		filteredParsed,
 		filteredDebugNames,
@@ -243,6 +248,7 @@ function RenderableDecodedProviderInner({ children }: { children: React.ReactNod
 		textureBundleNames,
 		shaderNameMap,
 	}), [
+		renderableBundle,
 		decoded,
 		filteredParsed,
 		filteredDebugNames,

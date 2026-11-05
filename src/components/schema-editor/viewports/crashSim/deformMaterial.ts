@@ -17,10 +17,11 @@ export function makeRowsUniform(): RowsUniform {
 	return { value: new Float32Array(DEFORM_ROWS * 4) };
 }
 
-export function makeDeformMaterial(rows: RowsUniform, color: THREE.ColorRepresentation, heat: HeatUniform): THREE.MeshStandardMaterial {
-	const mat = new THREE.MeshStandardMaterial({
-		color, metalness: 0.35, roughness: 0.45, side: THREE.DoubleSide, flatShading: true,
-	});
+// Adds the rows step (and the damage-map tint) to any MeshStandardMaterial
+// without touching its maps or colours. Only meshes with skinIndex /
+// skinWeight may use the result: on a geometry without them WebGL feeds the
+// default attribute (0,0,0,1), which would drag the mesh by row 0.
+export function patchDeformMaterial<M extends THREE.MeshStandardMaterial>(mat: M, rows: RowsUniform, heat: HeatUniform): M {
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.uRows = rows;
 		shader.uniforms.uHeat = heat;
@@ -53,6 +54,20 @@ export function makeDeformMaterial(rows: RowsUniform, color: THREE.ColorRepresen
 	};
 	mat.customProgramCacheKey = () => 'brn-deform';
 	return mat;
+}
+
+export function makeDeformMaterial(rows: RowsUniform, color: THREE.ColorRepresentation, heat: HeatUniform, flatShading = true): THREE.MeshStandardMaterial {
+	return patchDeformMaterial(new THREE.MeshStandardMaterial({
+		color, metalness: 0.35, roughness: 0.45, side: THREE.DoubleSide, flatShading,
+	}), rows, heat);
+}
+
+// A deforming copy of a view's own material: shares its textures (dispose
+// only the copy, never its maps).
+export function deformingCopy(mat: THREE.MeshStandardMaterial, rows: RowsUniform, heat: HeatUniform, flatShading: boolean): THREE.MeshStandardMaterial {
+	const copy = patchDeformMaterial(mat.clone(), rows, heat);
+	copy.flatShading = flatShading;
+	return copy;
 }
 
 export const isSkinned = (g: THREE.BufferGeometry) => !!g.getAttribute('skinIndex') && !!g.getAttribute('skinWeight');

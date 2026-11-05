@@ -71,6 +71,9 @@ export type DecodedRenderable = {
 	parsed: ParsedRenderable | null;
 	meshes: DecodedMesh[];
 	partLocator?: RawLocator;
+	/** GraphicsSpec part this renderable was decoded for (graphics mode only):
+	 *  the index a DeformationSpec's IK parts name in `partGraphics`. */
+	partIndex?: number;
 	error?: string;
 };
 
@@ -232,9 +235,10 @@ export function decodeAllRenderables(
 		u64ToBigInt(r.resourceId).toString(16).replace(/^0+(?=.)/, '');
 	const nameFor = (r: ResourceEntry) => debugNames.get(idKeyOf(r)) ?? null;
 	const isLodN = (name: string | null) => name !== null && /_LOD[1-9]\d*$/.test(name);
-	const decodeAndPush = (r: ResourceEntry, locator?: RawLocator) => {
+	const decodeAndPush = (r: ResourceEntry, locator?: RawLocator, partIndex?: number) => {
 		const decoded = decodeOneRenderable(buffer, bundle, r, nameFor(r), vdCache, textureCache, materialCache, secondarySources, shaderNames);
 		if (locator) decoded.partLocator = locator;
+		if (partIndex !== undefined) decoded.partIndex = partIndex;
 		if (decoded.error) failed++;
 		totalMeshes += decoded.meshes.length;
 		out.push(decoded);
@@ -249,7 +253,7 @@ export function decodeAllRenderables(
 				const gsImportIds = getImportIds(bundle.imports, bundle.resources, gsIndex);
 				const gs = parseGraphicsSpec(gsHeader, gsImportIds);
 				const parts = resolveGraphicsSpecParts(buffer, bundle, gs);
-				for (const part of parts) {
+				for (const [partIndex, part] of parts.entries()) {
 					if (!part.renderableId) continue;
 					let rEntry: ResourceEntry | null = null;
 					for (const r of bundle.resources) {
@@ -261,7 +265,7 @@ export function decodeAllRenderables(
 					if (!rEntry || rEntry.resourceTypeId !== RENDERABLE_TYPE_ID) continue;
 					if (extractResourceSize(rEntry.sizeAndAlignmentOnDisk[1]) <= 0) continue;
 					if (!includeNonLOD0 && isLodN(nameFor(rEntry))) continue;
-					decodeAndPush(rEntry, part.locator);
+					decodeAndPush(rEntry, part.locator, partIndex);
 				}
 				return { renderables: out, totalMeshes, failed };
 			} catch (err) {
