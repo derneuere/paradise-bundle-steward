@@ -63,12 +63,22 @@ export function resetWheelFlags(v: VehicleState): void {
 		w.wasOnGround = w.onGround;
 		w.onGround = w.closeToGround = w.lineValid = w.hasTraction = false;
 	}
-	v.aboveGround = { valid: false, pos: [0, 0, 0], normal: [0, 0, 0], verticalDistance: 0 };
+	v.aboveGround = { valid: false, pos: [0, 0, 0], normal: [0, 0, 0], verticalDistance: 0, surface: DEFAULT_SURFACE };
+}
+
+const BEACHED_TIME = 0.5;
+
+// A beached car (see updateBeachedTime) treats a wheel close to the road as on
+// it, so a car left hanging a wheel against a wall can drive off.
+export function addTractionPoint(v: VehicleState, i: number, hit: LineHit): void {
+	setRoadContact(v, i, hit);
+	const w = v.wheels[i];
+	if (v.beachedTime >= BEACHED_TIME && w.closeToGround) w.onGround = true;
 }
 
 // The hub reaches the road when the line hit is closer than full droop plus
 // the tyre radius; "close" allows the attrib slack on top.
-export function addTractionPoint(v: VehicleState, i: number, hit: LineHit): void {
+function setRoadContact(v: VehicleState, i: number, hit: LineHit): void {
 	const w = v.wheels[i], p = v.params.wheels[i];
 	if (w.detached) return;
 	const lineDist = length(sub(toWorld(v.body, w.pos), hit.pos));
@@ -82,7 +92,7 @@ export function addTractionPoint(v: VehicleState, i: number, hit: LineHit): void
 
 export function setAboveGround(v: VehicleState, hit: LineHit | null): void {
 	if (!hit) return;
-	v.aboveGround = { valid: true, pos: hit.pos, normal: hit.normal, verticalDistance: v.body.pos[1] - hit.pos[1] };
+	v.aboveGround = { valid: true, pos: hit.pos, normal: hit.normal, verticalDistance: v.body.pos[1] - hit.pos[1], surface: hit.surface };
 }
 
 // The lowest wheel's road point and how far the lowest airborne tyre hangs

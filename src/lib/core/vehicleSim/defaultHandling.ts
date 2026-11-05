@@ -15,6 +15,7 @@ export function defaultHandling(): AttribClasses {
 			DrivingMass: 1620, CoMOffset: v4(7500, 0, 0), MaxSpeed: 153, LinearDrag: 0.15, HighSpeedAngularDamping: 0.15,
 			LowSpeedDrivingSpeed: 50, DownForce: 15.5, PowerToRear: 1, PowerToFront: 0, TractionLineLength: 0.2,
 			TimeForFullBrake: 5, BrakeScaleToFactor: v4(4, 5, 3), MagicBrakeFactorStraightLine: 5, MagicBrakeFactorTurning: 0.5,
+			PitchDampingOnTakeOff: 0.95, RollLimitOnTakeOff: 1,
 			RollDampingOnTakeOff: 0.004, SurfaceFrontGripFactor: 0.264, SurfaceRearGripFactor: 0.85, SurfaceDragFactor: 0.2,
 			LowSpeedTyreFrictionTractionControl: 15, LowSpeedThrottleTractionControl: 10,
 			FrontTireStaticFrictionCoefficient: 3, FrontTireDynamicFrictionCoefficient: 3, FrontTireLongForceBias: 0, FrontTireAdhesiveLimit: 30000,

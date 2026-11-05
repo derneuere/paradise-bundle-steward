@@ -4,10 +4,11 @@
 // (gravity and the pose integrate come later in the frame, see step.ts).
 //
 // Driving: aero, engine, steering, high-speed yaw damping, suspension,
-// wheels and tyres, linear drag. Crashing: the same machinery with the body
-// damped 0.5% per step, each body-axis spin clamped to 6.5 rad/s, the engine
-// on half gas, aero pushing along the car's own down, the crash scrub on, and
-// no drag, no yaw damping, no airborne rules.
+// wheels and tyres, the airborne attitude control (inAir.ts), linear drag.
+// Crashing: the same machinery with the body damped 0.5% per step, each
+// body-axis spin clamped to 6.5 rad/s, the engine on half gas, aero pushing
+// along the car's own down, the crash scrub on, and no drag, no yaw damping,
+// no airborne rules.
 
 import type { Vec3 } from '../deformationSpec';
 import { dot, length, scale, sub } from '../deformationSim/state';
@@ -15,6 +16,7 @@ import { addLocalSpaceForce, drain, toBodyDir, toWorldDir, updateWorldInertia, v
 import { applyLinearDrag, downForce, updateDownForce } from './aero';
 import { engineReset, updateEngine } from './engine';
 import { calculateWheelPlane } from './ground';
+import { updateInAirBehaviour } from './inAir';
 import { steeredDirection, updateSteering } from './steering';
 import { groundDistanceCheck, updateSuspension } from './suspension';
 import { updateWheels } from './wheels';
@@ -23,6 +25,7 @@ import { MPS_TO_MPH, type Controls, type VehicleState } from './vehicleState';
 export const MAX_CRASH_ANGULAR_VELOCITY = 6.5;
 const CRASH_DAMPING = 0.995;
 const EPS = 1.1920929e-7;
+const MPH_TO_MPS = 0.447039992;
 
 const forwardMph = (v: VehicleState) => dot(v.body.v, v.body.axes[2]) * MPS_TO_MPH;
 
@@ -38,6 +41,18 @@ export function updateVehicle(v: VehicleState, ctl: Controls, dt: number): void 
 		v.speedMag = length(v.body.v);
 	}
 	v.numCollisions = 0;
+	// The race car's own tail: a frozen car still turns its front wheels.
+	if (v.frozen) updateSteering(v, ctl.steering, 0, dt);
+	updateBeachedTime(v, dt);
+}
+
+// A car stopped (or reversing) against a wall with a wheel off the road and
+// not crashing is "beached"; from half a second on, its wheels count as on
+// the road whenever they are close to it (see addTractionPoint).
+export function updateBeachedTime(v: VehicleState, dt: number): void {
+	const allTraction = v.wheels.every((w) => w.hasTraction);
+	if (v.speedMph * MPH_TO_MPS < 1 && !v.hasAir && !allTraction && v.contactingWall && !v.crashing) v.beachedTime += dt;
+	else v.beachedTime = 0;
 }
 
 // The game's only rest state: after a second with the wheels and body all
@@ -73,6 +88,7 @@ export function updateHandBrake(v: VehicleState, input: number, dt: number): voi
 // Airborne means no wheel down, moving faster than 1.8 m/s, and not resting
 // a body contact on the ground.
 export function updateInAirStats(v: VehicleState, dt: number): void {
+	v.hadAir = v.hasAir;
 	let air = !v.wheels.some((w) => w.onGround);
 	if (air && v.numWorldCollisions !== 0 && v.aboveGround.valid && v.aboveGround.verticalDistance <= groundDistanceCheck(v)) air = false;
 	if (air && !(Math.abs(v.speedMag) > 1.8)) air = false;
@@ -102,6 +118,7 @@ export function updateDriving(v: VehicleState, ctl: Controls, dt: number): void 
 	updateSuspension(v, dt);
 	v.allWheelsOnGround = v.wheels.every((w) => w.onGround);
 	updateWheels(v, ctl, dt);
+	updateInAirBehaviour(v, ctl.steering, dt);
 	drain(b, dt);
 	if (!v.hasAir) applyLinearDrag(v);
 	drain(b, dt);
@@ -166,9 +183,9 @@ export function resetVehicle(v: VehicleState, velocity: Vec3, angular: Vec3 = [0
 	engineReset(v.engine, P.engine, sum / n);
 	v.speedMph = 0; v.speedMag = 0;
 	v.crashing = false; v.crashedThisFrame = false; v.crashClock = null; v.timeCrashing = 0; v.speedOnLastCrashMph = 0;
-	v.brakeScale = 0; v.handBrake = false; v.hasAir = false; v.doingBurnout = false; v.frozen = false;
+	v.brakeScale = 0; v.handBrake = false; v.hasAir = v.hadAir = false; v.doingBurnout = false; v.frozen = false;
+	v.takeOff.rollBleed = 0;
 	v.timeStandingStill = v.coolDown = v.timeWithoutTraction = v.timeWithTraction = 0;
 	v.handBrakeOnTime = 0; v.timeSinceLastHandBrake = 10000;
 	v.numCollisions = 0; v.allWheelsOnGround = false;
-	v.aabb = { min: [...P.aabb.min] as Vec3, max: [...P.aabb.max] as Vec3 };
 }
