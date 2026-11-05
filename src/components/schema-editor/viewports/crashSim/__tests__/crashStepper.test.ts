@@ -1,19 +1,21 @@
 // Spec for how the crash views move hinged / knocked-off parts: every object
 // registered for a GraphicsSpec part is drawn at (pose delta x locator), and
 // an un-posed part sits exactly on its locator. Window meshes disappear once
-// their pane smashes, and the clock turns real time into simulator steps at
+// their pane cracks or smashes, a cracked pane shows its shattered-glass model
+// with the pane's fracture constants, and the clock turns real time into simulator steps at
 // the chosen slow-motion factor.
 
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { GlassState, type CrashSim, type PartPose } from '@/lib/core/deformationSim';
+import { GLASS_FRACTURE_UV_OFFSETS, GlassState, type CrashSim, type PartPose } from '@/lib/core/deformationSim';
 import { advanceClock, makePartPoser } from '../crashStepper';
+import { applyFracture, crackedGlassCopy } from '../crackedGlassMaterial';
 
-const simWith = (poses: [number, PartPose][], smashedPartType?: number) => ({
+const simWith = (poses: [number, PartPose][], brokenPartType?: number, state = GlassState.Smashed) => ({
 	partPoses: new Map(poses),
 	state: {
-		spec: { glassPanes: smashedPartType === undefined ? [] : [{ partType: smashedPartType }] },
-		glass: [{ state: GlassState.Smashed, crack: 0 }],
+		spec: { glassPanes: brokenPartType === undefined ? [] : [{ partType: brokenPartType }] },
+		glass: [{ state, crack: 0.5, width: 1.2, equalisation: 0.5 }],
 	},
 }) as unknown as CrashSim;
 
@@ -53,7 +55,7 @@ describe('makePartPoser', () => {
 	});
 });
 
-describe('smashed windows', () => {
+describe('broken windows', () => {
 	it('hides a mesh flagged with the bit of a smashed pane and leaves other meshes alone', () => {
 		const poser = makePartPoser();
 		const windscreen = new THREE.Object3D(), side = new THREE.Object3D(), body = new THREE.Object3D();
@@ -67,6 +69,37 @@ describe('smashed windows', () => {
 		expect(body.visible).toBe(true);
 		poser.pose(simWith([]));
 		expect(windscreen.visible).toBe(true);
+	});
+
+	it("hides a cracked pane's window meshes and shows its shattered model with the pane's fracture constants", () => {
+		const poser = makePartPoser();
+		const locator = new THREE.Matrix4();
+		const windscreen = new THREE.Mesh();
+		const material = crackedGlassCopy(new THREE.MeshStandardMaterial(), new THREE.Texture());
+		const cracked = new THREE.Mesh(new THREE.BufferGeometry(), material);
+		poser.ref('w', 20, locator, 1 << 4)(windscreen);
+		poser.ref('c', 20, locator, 1 << 4, { bodyPartType: 20, glassIndex: 2 })(cracked);
+		poser.pose(simWith([]));
+		expect(windscreen.visible).toBe(true);
+		expect(cracked.visible).toBe(false);
+		poser.pose(simWith([], 20, GlassState.Cracked));
+		expect(windscreen.visible).toBe(false);
+		expect(cracked.visible).toBe(true);
+		const u = material.userData.fracture;
+		expect(u.uFractureStrength.value.toArray()).toEqual([1, 2, 0, 0]);
+		expect(u.uFractureUvScale.value.toArray()).toEqual([1.2, 0.6, 1.2, 0.6]);
+		expect(u.uFractureUvOffsets.value.toArray()).toEqual([...GLASS_FRACTURE_UV_OFFSETS[2]]);
+		poser.pose(simWith([], 20, GlassState.Smashed));
+		expect(windscreen.visible).toBe(false);
+		expect(cracked.visible).toBe(false);
+	});
+
+	it("writes the fracture constants into a translated window shader's cb0 slots", () => {
+		const cb0 = Array.from({ length: 4 }, () => new THREE.Vector4());
+		const material = new THREE.ShaderMaterial({ uniforms: { cb0: { value: cb0 } } });
+		material.userData.cbSlots = new Map([['g_glassFractureStrength', 1], ['g_glassFractureUVOffsets', 2], ['g_glassFractureFresnelRanges', 3]]);
+		applyFracture(material, { strength: [1, 2, 0, 0], uvOffsets: [0.1, 0.2, 0.3, 0.4], uvScale: [5, 6, 7, 8] });
+		expect(cb0.map((v) => v.toArray())).toEqual([[0, 0, 0, 1], [1, 2, 0, 0], [0.1, 0.2, 0.3, 0.4], [5, 6, 7, 8]]);
 	});
 });
 

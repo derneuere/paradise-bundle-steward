@@ -130,6 +130,10 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 	// shadow constants etc.). Tracks any "Time"-named slots so __updateCb0
 	// can refresh them per-frame.
 	const timeSlots = new Set<number>();
+	// cb0 slot of every named constant, for callers that feed per-draw engine
+	// values the material doesn't know about (e.g. glass fracture).
+	const cbSlots = new Map<string, number>();
+	m.userData.cbSlots = cbSlots;
 	const writeScalars = (arr: THREE.Vector4[], slot: number, comp: number, src: ArrayLike<number>, n: number) => {
 		const v = arr[slot]; if (!v) return;
 		const c: [number, number, number, number] = [v.x, v.y, v.z, v.w];
@@ -150,6 +154,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 				const comp = (v.startOffset % 16) / 4;
 				const nFloats = Math.max(1, Math.min(4 - comp, Math.floor(v.size / 4)));
 				if (/time/i.test(v.name)) timeSlots.add(slot);
+				cbSlots.set(v.name, slot);
 				// g_verletOffsets is the per-vertex deformation array — zero at rest
 				// (the engine fills it per-vehicle at draw time). Its baked default can
 				// be a non-zero placeholder (e.g. (1,1,1,0) on PaintGloss); seeding that

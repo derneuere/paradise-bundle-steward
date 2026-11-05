@@ -6,6 +6,9 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { useRenderableDecoded } from '../renderableDecodedContext';
+import { decodeShatteredGlass } from '@/lib/core/shatteredGlassDecode';
+import { useCrackedGlass, type CrackedGlass } from './useCrackedGlass';
 import type { EditableBundle } from '@/context/WorkspaceContext.types';
 import type { ParsedDeformationSpec } from '@/lib/core/deformationSpec';
 import type { DecodedRenderable, DecodeMode } from '@/lib/core/renderableDecode';
@@ -27,6 +30,9 @@ export type CrashDeform = {
 	// knocked-off parts take their pose.
 	poser: PartPoser;
 	onClick: ReturnType<typeof crashHitHandler>;
+	// Cracked panes: which drawn renderables are shattered-glass models and
+	// the per-pane materials they draw with.
+	glass: CrackedGlass;
 };
 
 export type RenderableCrash = {
@@ -42,6 +48,9 @@ export type RenderableCrash = {
 	session: CrashSession;
 	// Non-null while the crash test is on and the meshes can be posed.
 	deform: CrashDeform | null;
+	// What the view draws while the crash test is on: the car plus its panes'
+	// shattered-glass models (shown only while a pane is cracked).
+	drawn: DecodedRenderable[] | null;
 };
 
 export function useRenderableCrash(bundle: EditableBundle | null, renderables: readonly DecodedRenderable[] | null, decodeMode: DecodeMode): RenderableCrash {
@@ -53,9 +62,17 @@ export function useRenderableCrash(bundle: EditableBundle | null, renderables: r
 		[bundle, bundles, choice],
 	);
 	const session = useCrashSession(spec, specBundle?.parsedResources.get('attribSysVault'), { flat: false });
+	const decodedCtx = useRenderableDecoded();
+	const textureBundles = decodedCtx?.textureBundles, shaderNames = decodedCtx?.shaderNameMap ?? null;
+	const shattered = useMemo(
+		() => (bundle && renderables && decodeMode === 'graphics'
+			? decodeShatteredGlass(bundle.originalArrayBuffer, bundle.parsed, textureBundles ?? [], shaderNames)
+			: []),
+		[bundle, renderables, decodeMode, textureBundles, shaderNames],
+	);
 	const body = useMemo(
-		() => (renderables && decodeMode === 'graphics' ? crashBodyFromDecoded(renderables) : null),
-		[renderables, decodeMode],
+		() => (renderables && decodeMode === 'graphics' ? crashBodyFromDecoded(renderables, shattered) : null),
+		[renderables, decodeMode, shattered],
 	);
 	const poser = useMemo(() => makePartPoser(), []);
 	const [enabled, setEnabled] = useState(false);
@@ -66,9 +83,14 @@ export function useRenderableCrash(bundle: EditableBundle | null, renderables: r
 	const hitRef = useRef(session.hit);
 	hitRef.current = session.hit;
 	const onClick = useMemo(() => crashHitHandler((p, n) => hitRef.current(p, n)), []);
+	const glass = useCrackedGlass(bundles);
 	const deform = useMemo<CrashDeform | null>(
-		() => (on ? { rows, heat, flat, poser, onClick } : null),
-		[on, rows, heat, flat, poser, onClick],
+		() => (on ? { rows, heat, flat, poser, onClick, glass } : null),
+		[on, rows, heat, flat, poser, onClick, glass],
 	);
-	return { available, enabled: enabled && available, setEnabled, specBundles, specBundle, chooseSpec: (spec: string) => setChoice({ body: bundle?.id, spec }), spec, body, session, deform };
+	const drawn = useMemo(
+		() => (on && renderables && body?.glass.length ? [...renderables, ...body.glass] : null),
+		[on, renderables, body],
+	);
+	return { available, enabled: enabled && available, setEnabled, specBundles, specBundle, chooseSpec: (spec: string) => setChoice({ body: bundle?.id, spec }), spec, body, session, deform, drawn };
 }

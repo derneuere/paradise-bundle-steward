@@ -1,17 +1,18 @@
 // The crash views' fixed 60 Hz stepper: advances the simulator and its
 // particle effects (at the session's time scale), copies the rows into the
-// shared uniform, poses the hinged / knocked-off parts, hides smashed windows
-// and reports which parts came loose and which windows broke. Plus
+// shared uniform, poses the hinged / knocked-off parts, swaps broken windows
+// for their cracked models or holes and reports which parts came loose and which windows broke. Plus
 // click-to-hit.
 
 import { useRef } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-import { GlassState, partName, smashedPaneBits, stepCrashSim, type CrashSim } from '@/lib/core/deformationSim';
+import { crackedPaneConstants, damagedPaneBits, GlassState, partName, stepCrashSim, type CrashSim } from '@/lib/core/deformationSim';
 import { stepCrashEffects } from '@/lib/core/crashEffects';
 import type { Vec3 } from '@/lib/core/deformationSpec';
 import { isDragRelease } from '../selection';
 import type { CrashSession } from './useCrashSession';
+import { applyFracture } from './crackedGlassMaterial';
 
 const STEP = 1 / 60;
 
@@ -19,25 +20,35 @@ const STEP = 1 / 60;
 // Preview, every mesh of the part in the Renderable view). Each frame their
 // matrix becomes the part's pose delta (mesh frame) times its locator, so an
 // object with no pose sits exactly at its locator again. A window mesh (its
-// mesh flags carry its pane's bit) is hidden once that pane smashes, leaving
-// the hole the game leaves.
+// mesh flags carry its pane's bit) is hidden once that pane cracks or
+// smashes; a mesh of a pane's shattered-glass model (registered with `glass`)
+// shows only while the pane is cracked, with the pane's fracture constants
+// written into its material. A smashed pane leaves the hole the game leaves.
+export type CrackedGlassRef = { bodyPartType: number; glassIndex: number };
+
 export type PartPoser = {
-	ref: (key: string, gfx: number, locator: THREE.Matrix4, meshFlags?: number) => (obj: THREE.Object3D | null) => void;
+	ref: (key: string, gfx: number, locator: THREE.Matrix4, meshFlags?: number, glass?: CrackedGlassRef) => (obj: THREE.Object3D | null) => void;
 	pose: (sim: CrashSim) => void;
 };
 
+type PosedEntry = { obj: THREE.Object3D; gfx: number; locator: THREE.Matrix4; flags: number; glass?: CrackedGlassRef };
+
 export function makePartPoser(): PartPoser {
-	const entries = new Map<string, { obj: THREE.Object3D; gfx: number; locator: THREE.Matrix4; flags: number }>();
+	const entries = new Map<string, PosedEntry>();
 	const delta = new THREE.Matrix4();
 	return {
-		ref: (key, gfx, locator, meshFlags = 0) => (obj) => {
-			if (obj) entries.set(key, { obj, gfx, locator, flags: meshFlags & 0xff });
+		ref: (key, gfx, locator, meshFlags = 0, glass) => (obj) => {
+			if (obj) entries.set(key, { obj, gfx, locator, flags: meshFlags & 0xff, glass });
 			else entries.delete(key);
 		},
 		pose: (sim) => {
-			const smashed = smashedPaneBits(sim.state);
-			for (const { obj, gfx, locator, flags } of entries.values()) {
-				if (flags) obj.visible = (flags & smashed) === 0;
+			const damaged = damagedPaneBits(sim.state);
+			for (const { obj, gfx, locator, flags, glass } of entries.values()) {
+				if (glass) {
+					const constants = crackedPaneConstants(sim.state, glass.bodyPartType, glass.glassIndex);
+					obj.visible = constants !== null;
+					if (constants) applyFracture((obj as THREE.Mesh).material, constants);
+				} else if (flags) obj.visible = (flags & damaged) === 0;
 				const pose = sim.partPoses.get(gfx);
 				if (pose) delta.fromArray(pose.meshDelta);
 				else delta.identity();

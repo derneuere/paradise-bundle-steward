@@ -581,9 +581,9 @@ function RenderableMeshes({
 						<mesh
 							// Remount on crash on/off so a posed mesh returns to its locator.
 							key={deform ? `crash-${key}` : key}
-							ref={deform && mat && r.partIndex !== undefined ? deform.poser.ref(`${ri}-${mi}`, r.partIndex, mat, m.meshFlags) : undefined}
+							ref={deform && mat && r.partIndex !== undefined ? deform.poser.ref(`${ri}-${mi}`, r.partIndex, mat, m.meshFlags, deform.glass.of(r)) : undefined}
 							geometry={m.geometry}
-							material={meshMaterial}
+							material={deform ? deform.glass.material(r, meshMaterial) : meshMaterial}
 							matrixAutoUpdate={mat === null}
 							matrix={mat ?? undefined}
 							onBeforeRender={function (
@@ -871,7 +871,7 @@ export function RenderableViewport() {
 					<Suspense fallback={null}>
 						{decoded.decoded && (
 							<RenderableMeshes
-								renderables={decoded.decoded.renderables}
+								renderables={crash.drawn ?? decoded.decoded.renderables}
 								wireframe={wireframe}
 								paintColor={paintColor}
 								carPaint={carPaint}
