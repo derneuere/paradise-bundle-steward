@@ -94,7 +94,8 @@ export function createVehicle(params: VehicleParams, pos: Vec3 = [0, 0, 0]): Veh
 		hasAir: false, timeWithoutTraction: 0, timeWithTraction: 0, timeStandingStill: 0, coolDown: 0, frozen: false,
 		handBrake: false, handBrakeOnTime: 0, timeSinceLastHandBrake: 10000, brakeScale: 0,
 		steerAngle: 0, steering: 0, prevSteering: 0, maxSteerDeg: 0, steerDir: [0, 0, 1],
-		timeSinceHardLanding: 0, secondsSinceLastWallContact: 0.4, contactingWall: false,
+		// Long past any landing: the landing damping only follows a real hard landing.
+		timeSinceHardLanding: 100, secondsSinceLastWallContact: 0.4, contactingWall: false,
 		numWorldCollisions: 0, numCollisions: 0,
 		aboveGround: { valid: false, pos: v0(), normal: v0(), verticalDistance: 0 },
 		wheelPlane: { valid: false, pos: v0(), height: 0 },

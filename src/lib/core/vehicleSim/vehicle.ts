@@ -170,6 +170,5 @@ export function resetVehicle(v: VehicleState, velocity: Vec3, angular: Vec3 = [0
 	v.timeStandingStill = v.coolDown = v.timeWithoutTraction = v.timeWithTraction = 0;
 	v.handBrakeOnTime = 0; v.timeSinceLastHandBrake = 10000;
 	v.numCollisions = 0; v.allWheelsOnGround = false;
-	v.timeSinceHardLanding = 0;
 	v.aabb = { min: [...P.aabb.min] as Vec3, max: [...P.aabb.max] as Vec3 };
 }
