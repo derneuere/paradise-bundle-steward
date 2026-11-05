@@ -5,6 +5,7 @@
 import type { Vec3 } from '../deformationSpec';
 import { add, dot, normalize, scale, sub, PartState, type SimState } from './state';
 import { IK_RATES, SILL_PARTS, SKINNING_CLAMP_MARGIN } from './tables';
+import { drivenScratch, tagScratch } from './scratch';
 
 const EPS = 1.1920929e-7;
 
@@ -53,17 +54,18 @@ export function updateIK(s: SimState): void {
 }
 
 // Rows: the leading run of skinned tag points, then each IK part's driven
-// points in part order. A detached part's rows are left as they were (the
-// part is drawn by its own free-body transform); hinged parts still skin.
+// points in part order; xyz = offset from rest, w = scratch. A detached
+// part's rows are left as they were (the part is drawn by its own free-body
+// transform); hinged parts still skin.
 export function updateSkinRows(s: SimState): void {
 	const rows = s.rows;
 	let row = 0;
-	const put = (delta: Vec3) => {
-		if (row < 128) rows.set([delta[0], delta[1], delta[2], 0], row * 4);
+	const put = (delta: Vec3, scratch: number) => {
+		if (row < 128) rows.set([delta[0], delta[1], delta[2], scratch], row * 4);
 		row++;
 	};
 	for (let i = 0; i < s.tags.length && s.spec.tagPoints[i].skinnedPoint; i++) {
-		put(sub(s.tags[i], s.spec.tagPoints[i].initialPosition));
+		put(sub(s.tags[i], s.spec.tagPoints[i].initialPosition), tagScratch(s, i));
 	}
 	s.spec.ikParts.forEach((part, p) => {
 		if (s.partState[p] === PartState.Detached) { row += part.numberOfDrivenPoints; return; }
@@ -71,7 +73,7 @@ export function updateSkinRows(s: SimState): void {
 			const i = part.startIndexOfDrivenPoints + k;
 			let pos = s.driven[i];
 			if (SILL_PARTS.has(part.partType)) pos = clampToBox(pos, s);
-			put(sub(pos, s.spec.drivenPoints[i].initialPos));
+			put(sub(pos, s.spec.drivenPoints[i].initialPos), drivenScratch(s, i));
 		}
 	});
 }

@@ -112,7 +112,10 @@ export const ENGINE_CONSTANT_DEFAULTS: Record<string, [number, number, number, n
 	g_selfIlluminationMask: [0, 0, 0, 0],
 	g_policeLightsSelfIlluminationMask: [0, 0, 0, 0],
 	g_wheelConstants: [0, 0, 0, 1],
-	g_damageConstants: [0, 0, 0, 1],
+	// The game uploads zero here for every car; only a debug override fills
+	// x (crumple amount) and z (dust). Real damage comes from the per-vertex
+	// deformation rows instead.
+	g_damageConstants: [0, 0, 0, 0],
 	sampleCoverage: [1, 1, 1, 1],
 	// --- Vehicle paint (so PaintGloss `r0 *= g_paintColour` doesn't go black) ---
 	g_paintColour: [0.6, 0.1, 0.1, 1],

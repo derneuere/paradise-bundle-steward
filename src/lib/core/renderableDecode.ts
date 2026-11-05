@@ -166,6 +166,11 @@ export function decodeOneRenderable(
 			if (arrays.uv1) {
 				geometry.setAttribute('uv', new THREE.BufferAttribute(arrays.uv1, 2));
 			}
+			// The second UV set: vehicle bodies map their scratch and crumple
+			// textures with it.
+			if (arrays.uv2) {
+				geometry.setAttribute('uv1', new THREE.BufferAttribute(arrays.uv2, 2));
+			}
 			if (arrays.boneIndices && arrays.boneWeights) {
 				geometry.setAttribute('skinIndex', new THREE.BufferAttribute(arrays.boneIndices, 4));
 				geometry.setAttribute('skinWeight', new THREE.BufferAttribute(arrays.boneWeights, 4));

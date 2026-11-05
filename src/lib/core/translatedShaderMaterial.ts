@@ -17,9 +17,10 @@
 //
 // Output: THREE.ShaderMaterial with cb arrays seeded, samplers bound to
 // either real game textures or procedural placeholders, and an
-// `__updateCb0(camera, object)` callback the mesh's onBeforeRender should
-// invoke per frame to refresh world / view-projection / depth-encoder /
-// camera-position / time slots.
+// `__updateCb0(camera, object, verlet?)` callback the mesh's onBeforeRender
+// should invoke per frame to refresh world / view-projection / depth-encoder /
+// camera-position / time slots and, for vehicle shaders, the deformation rows
+// (see vehicleShaderInputs).
 
 import * as THREE from 'three';
 import type { ParsedDxbc } from './dxbc';
@@ -28,6 +29,7 @@ import { pickTextureForSampler } from './textureCatalog';
 import type { MaterialBinding } from './materialBinding';
 import type { ParsedShaderConstant } from './shader';
 import { type CbLayout, seedSkinningPalettes, engineKnobs, knobGroupForConstant, type EngineKnobs } from './shaderEngineConstants';
+import { bindVertexStreams, verletRange, writeVerletOffsets } from './vehicleShaderInputs';
 
 export type BuildOptions = {
 	vsSource: string;
@@ -59,10 +61,15 @@ export type BuildOptions = {
 	side?: THREE.Side;
 	/** Forwarded to `ShaderMaterial.transparent`. */
 	transparent?: boolean;
+	/** Attribute names the drawn geometry carries (skinIndex, tangent, uv1...);
+	 *  the vertex inputs that map to them read the real stream instead of the
+	 *  translator's constant stub. */
+	vertexAttributes?: ReadonlySet<string>;
 };
 
 export type TranslatedMaterial = THREE.ShaderMaterial & {
-	__updateCb0?: (camera: THREE.Camera, object: THREE.Object3D) => void;
+	/** `verlet`: the car's 128 x vec4 deformation rows; null or omitted = at rest. */
+	__updateCb0?: (camera: THREE.Camera, object: THREE.Object3D, verlet?: Float32Array | null) => void;
 };
 
 export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMaterial {
@@ -73,6 +80,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		heuristicDefaults, pickFallbackTexture, decodedToDataTexture,
 		applyPreviewTonemap = false,
 		side = THREE.DoubleSide, transparent = false,
+		vertexAttributes = new Set<string>(),
 	} = opts;
 
 	// cb0 size fixup — VS and PS must agree on the array dimension or GLSL
@@ -81,7 +89,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 
 	// Aliases so a_POSITION0 / a_NORMAL0 / a_TEXCOORD0 pull from three.js's
 	// standard `position` / `normal` / `uv` attributes.
-	const finalVs = attributeAliasPrefix(harmonizedVs) + harmonizedVs;
+	const finalVs = attributeAliasPrefix(harmonizedVs) + bindVertexStreams(harmonizedVs, vertexAttributes);
 
 	// Optional preview safety net + exposure-scaled Reinhard tonemap on
 	// gl_FragColor. `uExposure` is driven live by the viewport's exposure knob.
@@ -222,7 +230,8 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 			const o = col * 4;
 			cb[slot].set(e[o], e[o + 1], e[o + 2], e[o + 3]);
 		};
-		m.__updateCb0 = (camera, object) => {
+		const verlet = verletRange([vsParsed, psParsed]);
+		m.__updateCb0 = (camera, object, verletRows) => {
 			world.copy(object.matrixWorld);
 			viewMat.copy((camera as THREE.PerspectiveCamera).matrixWorldInverse);
 			viewProj.multiplyMatrices((camera as THREE.PerspectiveCamera).projectionMatrix, viewMat);
@@ -271,6 +280,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 				cb0[k.slot].set(k.base.x * s, k.base.y * s, k.base.z * s, k.base.w * s);
 			}
 			if (m.uniforms.uExposure) m.uniforms.uExposure.value = engineKnobs.exposure;
+			if (verlet) writeVerletOffsets(cb0, verlet, verletRows ?? null);
 		};
 	}
 

@@ -11,6 +11,11 @@ import type { DecodedRenderable } from '@/lib/core/renderableDecode';
 
 export type PaintColor = { r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } };
 
+// The vehicle scratch map of a built material, for the crash test's scratch
+// shading. Kept beside the material, not in userData, which clones deep-copy.
+const scratchMaps = new WeakMap<THREE.Material, THREE.DataTexture>();
+export const scratchMapOf = (mat: THREE.Material) => scratchMaps.get(mat) ?? null;
+
 function makeDataTexture(
 	decoded: DecodedTexture,
 	sampler: { addressU: number; addressV: number } | null,
@@ -176,6 +181,7 @@ export function buildTexturedMaterials(
 				mat.aoMap = tex;
 				mat.aoMapIntensity = 1.0;
 			}
+			if (rm.scratch) scratchMaps.set(mat, makeDataTexture(rm.scratch, null, false));
 
 			map.set(key, mat);
 		}

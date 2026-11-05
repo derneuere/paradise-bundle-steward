@@ -23,6 +23,8 @@ export type CrashSession = {
 	heat: HeatUniform;
 	speedKmh: number; setSpeedKmh: (v: number) => void;
 	obstacle: Obstacle; setObstacle: (v: Obstacle) => void;
+	// Degrees the car's travel is turned off the hit direction (see Impact.glance).
+	glance: number; setGlance: (v: number) => void;
 	crash: boolean; setCrash: (v: boolean) => void;
 	absorption: AbsorptionSet; setAbsorption: (v: AbsorptionSet) => void;
 	showPoints: boolean; togglePoints: () => void;
@@ -45,6 +47,7 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 
 	const [speedKmh, setSpeedKmh] = useState(80);
 	const [obstacle, setObstacle] = useState<Obstacle>('wall');
+	const [glance, setGlance] = useState(0);
 	const [crash, setCrash] = useState(true);
 	const [absorption, setAbsorption] = useState(AbsorptionSet.Normal);
 	const [showPoints, setShowPoints] = useState(false);
@@ -58,7 +61,7 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 
 	return {
 		sim, simRef, rows, heat,
-		speedKmh, setSpeedKmh, obstacle, setObstacle, crash, setCrash, absorption, setAbsorption,
+		speedKmh, setSpeedKmh, obstacle, setObstacle, glance, setGlance, crash, setCrash, absorption, setAbsorption,
 		showPoints, togglePoints: () => setShowPoints((s) => !s),
 		showHeat, toggleHeat: () => setShowHeat((s) => !s),
 		flat, toggleFlat: () => setFlat((s) => !s),
@@ -66,7 +69,7 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 		hit: (pointMesh, normalMesh) => {
 			if (!sim) return;
 			setAbsorptionSet(sim, absorption);
-			applyImpact(sim, { pointMesh, direction: [-normalMesh[0], -normalMesh[1], -normalMesh[2]], speed: speedKmh * KMH, obstacle, crash });
+			applyImpact(sim, { pointMesh, direction: [-normalMesh[0], -normalMesh[1], -normalMesh[2]], speed: speedKmh * KMH, obstacle, crash, glance });
 			setHitLog({ sim, n: hits + 1 });
 		},
 		reset: () => {

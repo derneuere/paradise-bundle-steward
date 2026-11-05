@@ -13,6 +13,7 @@ import type { CrashSession, Obstacle } from './useCrashSession';
 type Box = { min: Vec3; max: Vec3; center: Vec3 };
 type Preset = { name: string; at: (b: Box) => { point: Vec3; normal: Vec3 } };
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const GLANCES = [-60, -45, -30, -15, 0, 15, 30, 45, 60];
 const PRESETS: Preset[] = [
 	{ name: 'front', at: (b) => ({ point: [b.center[0], lerp(b.min[1], b.max[1], 0.35), b.max[2]], normal: [0, 0, 1] }) },
 	{ name: 'front-left', at: (b) => ({ point: [lerp(b.center[0], b.min[0], 0.7), lerp(b.min[1], b.max[1], 0.35), b.max[2]], normal: [0, 0, 1] }) },
@@ -52,6 +53,9 @@ export function CrashControls({ session: s, spec, box: b3, skinRows, title, chil
 					<select value={s.obstacle} onChange={(e) => s.setObstacle(e.target.value as Obstacle)} className="bg-muted rounded px-1 py-0.5">
 						<option value="wall">into a wall</option>
 						<option value="pole">into a pole</option>
+					</select>
+					<select value={s.glance} onChange={(e) => s.setGlance(Number(e.target.value))} className="bg-muted rounded px-1 py-0.5" title="Turn the car's travel off the hit direction so it slides along the obstacle: sliding is what scratches the paint">
+						{GLANCES.map((g) => <option key={g} value={g}>{g === 0 ? 'head-on' : `glancing ${g}°`}</option>)}
 					</select>
 					<select value={s.crash ? 'crash' : 'knock'} onChange={(e) => s.setCrash(e.target.value === 'crash')} className="bg-muted rounded px-1 py-0.5" title="A knock is a hit below the car's crash speed: a fifth of the crush budget, inside its drive-time limits">
 						<option value="crash">crash</option>

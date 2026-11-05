@@ -3,6 +3,12 @@
 // (g_verletOffsets in the game shaders), applied to the raw position before
 // the part's world transform. Normals are not deformed (the game doesn't
 // either), so flat shading is what makes the dents readable.
+//
+// Given the material's scratch map, the rows' w lane (the scratch amount)
+// scratches the paint as the damaged vehicle shaders do: a texel turns to the
+// map's scratched colour (R) once its threshold (G) is within reach,
+// saturate((G - (1 - scratch)) * 2.5). The shaders' sheen change (B) is not
+// reproduced on the standard material.
 
 import * as THREE from 'three';
 
@@ -17,14 +23,29 @@ export function makeRowsUniform(): RowsUniform {
 	return { value: new Float32Array(DEFORM_ROWS * 4) };
 }
 
+const SCRATCH_VERTEX = [
+	'#ifndef USE_UV1',
+	'attribute vec2 uv1;',
+	'#endif',
+	'varying float vScratch;',
+	'varying vec2 vScratchUv;',
+].join('\n');
+
+const SCRATCH_FRAGMENT = [
+	'vec3 sc = texture2D(uScratchMap, vScratchUv).rgb;',
+	'float scratched = clamp((sc.g - (1.0 - vScratch)) * 2.5, 0.0, 1.0);',
+	'diffuseColor.rgb = mix(diffuseColor.rgb, vec3(pow(sc.r, 2.2)), scratched);',
+].join('\n');
+
 // Adds the rows step (and the damage-map tint) to any MeshStandardMaterial
 // without touching its maps or colours. Only meshes with skinIndex /
 // skinWeight may use the result: on a geometry without them WebGL feeds the
 // default attribute (0,0,0,1), which would drag the mesh by row 0.
-export function patchDeformMaterial<M extends THREE.MeshStandardMaterial>(mat: M, rows: RowsUniform, heat: HeatUniform): M {
+export function patchDeformMaterial<M extends THREE.MeshStandardMaterial>(mat: M, rows: RowsUniform, heat: HeatUniform, scratchMap: THREE.Texture | null = null): M {
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.uRows = rows;
 		shader.uniforms.uHeat = heat;
+		if (scratchMap) shader.uniforms.uScratchMap = { value: scratchMap };
 		shader.vertexShader = shader.vertexShader
 			.replace('#include <common>', [
 				'#include <common>',
@@ -32,27 +53,35 @@ export function patchDeformMaterial<M extends THREE.MeshStandardMaterial>(mat: M
 				'attribute vec4 skinIndex;',
 				'attribute vec4 skinWeight;',
 				'varying float vDent;',
+				scratchMap ? SCRATCH_VERTEX : '',
 			].join('\n'))
 			.replace('#include <begin_vertex>', [
 				'#include <begin_vertex>',
-				'vec3 dent = skinWeight.x * uRows[int(skinIndex.x)].xyz',
-				'          + skinWeight.y * uRows[int(skinIndex.y)].xyz',
-				'          + skinWeight.z * uRows[int(skinIndex.z)].xyz',
-				'          + skinWeight.w * uRows[int(skinIndex.w)].xyz;',
-				'transformed += dent;',
-				'vDent = length(dent);',
+				'vec4 dent = skinWeight.x * uRows[int(skinIndex.x)]',
+				'          + skinWeight.y * uRows[int(skinIndex.y)]',
+				'          + skinWeight.z * uRows[int(skinIndex.z)]',
+				'          + skinWeight.w * uRows[int(skinIndex.w)];',
+				'transformed += dent.xyz;',
+				'vDent = length(dent.xyz);',
+				scratchMap ? 'vScratch = dent.w;\nvScratchUv = uv1;' : '',
 			].join('\n'));
 		shader.fragmentShader = shader.fragmentShader
-			.replace('#include <common>', '#include <common>\nuniform float uHeat;\nvarying float vDent;')
+			.replace('#include <common>', [
+				'#include <common>',
+				'uniform float uHeat;',
+				'varying float vDent;',
+				scratchMap ? 'uniform sampler2D uScratchMap;\nvarying float vScratch;\nvarying vec2 vScratchUv;' : '',
+			].join('\n'))
 			.replace('#include <color_fragment>', [
 				'#include <color_fragment>',
+				scratchMap ? SCRATCH_FRAGMENT : '',
 				'float h = clamp(vDent / 0.3, 0.0, 1.0);',
 				'vec3 ramp = h < 0.5 ? mix(vec3(0.12, 0.25, 0.75), vec3(0.95, 0.15, 0.1), h * 2.0)',
 				'                    : mix(vec3(0.95, 0.15, 0.1), vec3(1.0, 0.95, 0.85), h * 2.0 - 1.0);',
 				'diffuseColor.rgb = mix(diffuseColor.rgb, ramp, uHeat);',
 			].join('\n'));
 	};
-	mat.customProgramCacheKey = () => 'brn-deform';
+	mat.customProgramCacheKey = () => (scratchMap ? 'brn-deform-scratch' : 'brn-deform');
 	return mat;
 }
 
@@ -64,8 +93,8 @@ export function makeDeformMaterial(rows: RowsUniform, color: THREE.ColorRepresen
 
 // A deforming copy of a view's own material: shares its textures (dispose
 // only the copy, never its maps).
-export function deformingCopy(mat: THREE.MeshStandardMaterial, rows: RowsUniform, heat: HeatUniform, flatShading: boolean): THREE.MeshStandardMaterial {
-	const copy = patchDeformMaterial(mat.clone(), rows, heat);
+export function deformingCopy(mat: THREE.MeshStandardMaterial, rows: RowsUniform, heat: HeatUniform, flatShading: boolean, scratchMap: THREE.Texture | null = null): THREE.MeshStandardMaterial {
+	const copy = patchDeformMaterial(mat.clone(), rows, heat, scratchMap);
 	copy.flatShading = flatShading;
 	return copy;
 }

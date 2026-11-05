@@ -36,7 +36,8 @@ import {
 	type DecodedRenderable,
 	type DecodeMode,
 } from '@/lib/core/renderableDecode';
-import type { TextureSourceBundle, ShaderNameMap } from '@/lib/core/materialChain';
+import { parseShaderNameMap, type TextureSourceBundle, type ShaderNameMap } from '@/lib/core/materialChain';
+import { SHADER_TYPE_ID } from '@/lib/core/shader';
 
 // Re-exported so existing consumers (RenderableViewport, renderableExtensions)
 // keep importing decode types + helpers from the context they already use.
@@ -111,11 +112,17 @@ function RenderableDecodedProviderInner({ children }: { children: React.ReactNod
 	const { bundles, selection } = useWorkspace();
 	const [decodeMode, setDecodeMode] = useState<DecodeMode>('graphics');
 	const [includeNonLOD0, setIncludeNonLOD0] = useState(false);
-	const [shaderNameMap, setShaderNameMap] = useState<ShaderNameMap | null>(null);
+	const [exampleShaderNames, setExampleShaderNames] = useState<ShaderNameMap | null>(null);
 
-	// Auto-load SHADERS.BNDL from the example directory at mount; every
-	// consumer sees the resulting shader name map.
-	useLoadShaderNameMap(setShaderNameMap);
+	// Shader names come from a shader bundle loaded into the workspace, else
+	// from SHADERS.BNDL in the example directory (auto-loaded at mount).
+	useLoadShaderNameMap(setExampleShaderNames);
+	const workspaceShaderNames = useMemo(() => {
+		const b = bundles.find((x) => x.parsed.resources.some((r) => r.resourceTypeId === SHADER_TYPE_ID));
+		if (!b) return null;
+		try { return parseShaderNameMap(b.originalArrayBuffer); } catch { return null; }
+	}, [bundles]);
+	const shaderNameMap = workspaceShaderNames?.size ? workspaceShaderNames : exampleShaderNames;
 
 	// Decode the renderables of the SELECTED bundle (the one the user is
 	// inspecting), falling back to the first loaded bundle. Textures + shaders

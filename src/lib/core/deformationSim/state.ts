@@ -40,6 +40,7 @@ export type SimState = {
 	crashing: boolean;         // false = a knock below crash speed (drive-time budget)
 	sensors: Vec3[];         // live local sphere centres
 	latch: number[];         // biggest impulse felt this step, per sensor
+	scratch: number[];       // paint scratch per sensor, 0..0.75 (see scratch.ts)
 	tags: Vec3[];
 	driven: Vec3[];
 	drivenNormal: Vec3[];

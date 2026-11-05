@@ -48,6 +48,7 @@ import { buildMaterialIndex, pickBestMaterial } from '@/lib/core/materialBinding
 import { buildTranslatedShaderMaterial, type TranslatedMaterial } from '@/lib/core/translatedShaderMaterial';
 import { pickEngineSamplerFallback } from '@/lib/core/engineSamplerFallback';
 import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout, engineKnobs, DEFAULT_ENGINE_KNOBS, type EngineKnobs } from '@/lib/core/shaderEngineConstants';
+import { techniqueProgramOffset, VEHICLE_STREAM_ATTRIBUTES } from '@/lib/core/vehicleShaderInputs';
 import { decodeTexture } from '@/lib/core/texture';
 import { parseMaterialData } from '@/lib/core/material';
 import {
@@ -59,7 +60,7 @@ import {
 } from './renderableDecodedContext';
 import { useSchemaEditor } from '../context';
 import { isDragRelease } from './selection';
-import { buildTexturedMaterials, type PaintColor } from './renderableMaterials';
+import { buildTexturedMaterials, scratchMapOf, type PaintColor } from './renderableMaterials';
 import { RenderableCrashPanel, RenderableCrashRig } from './crashSim/RenderableCrash';
 import { useRenderableCrash, type CrashDeform } from './crashSim/useRenderableCrash';
 import { deformingCopy, isSkinned } from './crashSim/deformMaterial';
@@ -264,8 +265,10 @@ function decodedToDataTextureRV(entry: TextureCatalogEntry): THREE.DataTexture |
 
 /**
  * Translate the ShaderProgramBuffer imports of a Shader resource into
- * `{ vs, ps }` GLSL. Returns null if the bundle layout doesn't match
- * (no block 1, broken import chain, etc.).
+ * `{ vs, ps }` GLSL: the programs of its 'Damaged' technique when it has one
+ * (vehicle shaders; see vehicleShaderInputs), else the first vertex and pixel
+ * programs. Returns null if the bundle layout doesn't match (no block 1,
+ * broken import chain, etc.).
  */
 function translateShaderById(shaderId: bigint, sources: Source[]): { vs: TranslatedShader; ps: TranslatedShader; shaderName: string; constants: any[] } | null {
 	for (const s of sources) {
@@ -278,13 +281,13 @@ function translateShaderById(shaderId: bigint, sources: Source[]): { vs: Transla
 				const raw = extractResourceRaw(s.arrayBuffer, s.bundle, r);
 				parsed = parseShaderData(raw);
 			} catch { return null; }
-			const importIds = getImportIds(s.bundle.imports, s.bundle.resources, i);
-			// First two imports are typically VS / PS for the default tech.
+			const programs = getImportIds(s.bundle.imports, s.bundle.resources, i)
+				.map((id) => s.bundle.resources.find((rr) => u64ToBigInt(rr.resourceId) === id && rr.resourceTypeId === SHADER_PROGRAM_BUFFER_TYPE_ID))
+				.filter((r): r is NonNullable<typeof r> => !!r);
+			const first = techniqueProgramOffset(parsed.techniques, programs.length);
 			let vs: TranslatedShader | null = null;
 			let ps: TranslatedShader | null = null;
-			for (const id of importIds) {
-				const target = s.bundle.resources.find((rr) => u64ToBigInt(rr.resourceId) === id && rr.resourceTypeId === SHADER_PROGRAM_BUFFER_TYPE_ID);
-				if (!target) continue;
+			for (const target of [...programs.slice(first), ...programs.slice(0, first)]) {
 				const blocks = getResourceBlocks(s.arrayBuffer, s.bundle, target as ResourceEntry);
 				const bytecode = blocks[1];
 				if (!bytecode) continue;
@@ -309,6 +312,11 @@ function translateShaderById(shaderId: bigint, sources: Source[]): { vs: Transla
 // =============================================================================
 // Mesh rendering + materials
 // =============================================================================
+
+// Which vehicle vertex streams a mesh carries; part of its translated
+// material's key, since the program binds exactly those.
+const streamsOf = (m: DecodedMesh) => VEHICLE_STREAM_ATTRIBUTES.filter((a) => m.geometry.getAttribute(a));
+const translatedKey = (ri: number, m: DecodedMesh) => `${ri}:${m.materialAssemblyId?.toString(16)}:${streamsOf(m).join(',')}`;
 
 function RenderableMeshes({
 	renderables,
@@ -397,6 +405,7 @@ function RenderableMeshes({
 				mat.map?.dispose();
 				mat.normalMap?.dispose();
 				mat.roughnessMap?.dispose();
+				scratchMapOf(mat)?.dispose();
 				mat.dispose();
 			}
 		},
@@ -409,7 +418,7 @@ function RenderableMeshes({
 	const deforming = useMemo(() => {
 		if (!deformRows || !deformHeat) return null;
 		const textured = new Map<string, THREE.MeshStandardMaterial>();
-		for (const [k, m] of texturedMaterials) textured.set(k, deformingCopy(m, deformRows, deformHeat, deformFlat));
+		for (const [k, m] of texturedMaterials) textured.set(k, deformingCopy(m, deformRows, deformHeat, deformFlat, scratchMapOf(m)));
 		return { textured, base: deformingCopy(baseMaterial, deformRows, deformHeat, deformFlat) };
 	}, [deformRows, deformHeat, deformFlat, texturedMaterials, baseMaterial]);
 	useDisposeOnDepsChange(
@@ -421,7 +430,7 @@ function RenderableMeshes({
 		[deforming],
 	);
 
-	// Translated-shader materials, keyed `${renderableIndex}:${materialAssemblyId}`
+	// Translated-shader materials, keyed `${renderableIndex}:${materialAssemblyId}:${streams}`
 	// — ONE ShaderMaterial PER (renderable, material), NOT one per material.
 	//
 	// Why per-renderable: each material's cb0 holds the per-object `world`
@@ -473,7 +482,7 @@ function RenderableMeshes({
 			for (const m of renderables[ri].meshes) {
 				if (!m.materialAssemblyId) continue;
 				const matKey = m.materialAssemblyId.toString(16);
-				const key = `${ri}:${matKey}`;
+				const key = translatedKey(ri, m);
 				if (out.has(key)) continue;
 				const shaderId = shaderIdFor(m.materialAssemblyId, matKey);
 				if (shaderId == null) { out.set(key, null); continue; }
@@ -509,6 +518,7 @@ function RenderableMeshes({
 					decodedToDataTexture: decodeTexCached,
 					applyPreviewTonemap: true,  // vehicle shaders run HDR; without an engine tonemap, paint-gloss saturates to white
 					side: THREE.DoubleSide,
+					vertexAttributes: new Set(streamsOf(m)),
 				}));
 			}
 		}
@@ -551,7 +561,7 @@ function RenderableMeshes({
 					// to the PBR-approximation MeshStandardMaterial otherwise
 					// so the toggle is non-destructive.
 					const translatedMat = useTranslatedShaders && matKey
-						? translatedMaterialMap.get(`${ri}:${matKey}`) ?? null
+						? translatedMaterialMap.get(translatedKey(ri, m)) ?? null
 						: null;
 					const deformed = deforming && !translatedMat && isSkinned(m.geometry) ? deforming : null;
 					const texturedMat = !translatedMat && matKey
@@ -588,7 +598,7 @@ function RenderableMeshes({
 								// partLocator. Using `this` per-call gives the correct
 								// world matrix for every draw.
 								const upd = (material as TranslatedMaterial).__updateCb0;
-								if (upd) upd(camera, this);
+								if (upd) upd(camera, this, deform?.rows.value ?? null);
 								void _r; void _s; void _g; void _group;
 							}}
 							onClick={deform ? deform.onClick : (e) => {
@@ -818,7 +828,7 @@ export function RenderableViewport() {
 				/>
 				{useTranslatedShaders && <EngineKnobsPanel />}
 			</div>
-			<RenderableCrashPanel crash={crash} setDecodeMode={decoded.setDecodeMode} translated={useTranslatedShaders} />
+			<RenderableCrashPanel crash={crash} setDecodeMode={decoded.setDecodeMode} />
 
 			{/* 3D canvas — fills remaining space */}
 			<div className="flex-1 min-h-0" style={{ background: '#1a1d23' }}>

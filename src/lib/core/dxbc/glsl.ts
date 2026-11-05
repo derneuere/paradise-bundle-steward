@@ -249,7 +249,12 @@ function writeDest(
 	return `${lvalue}.${maskStr} = ${wrapSat(`vec4(${rhs}).${maskStr}`, o, ctx)};`;
 }
 
-function wrapSat(rhs: string, _o: DxbcOperand, _ctx: EmitCtx): string { return rhs; }
+// `_sat` instructions clamp their result to [0, 1] before the masked write.
+// The vehicle shaders lean on it (e.g. the scratch blend factor), so
+// dropping it lets factors run negative or past 1.
+function wrapSat(rhs: string, _o: DxbcOperand, ctx: EmitCtx): string {
+	return ctx.saturate ? `clamp(${rhs}, 0.0, 1.0)` : rhs;
+}
 
 // ---------------------------------------------------------------------------
 // Emitter context
@@ -272,6 +277,8 @@ type EmitCtx = {
 	tempCount: number;
 	/** Indent level for emitted lines. */
 	indent: number;
+	/** Saturate flag of the instruction being emitted. */
+	saturate: boolean;
 };
 
 function makeCtx(p: ParsedDxbc): EmitCtx {
@@ -284,6 +291,7 @@ function makeCtx(p: ParsedDxbc): EmitCtx {
 		cbuffers: {},
 		tempCount: 0,
 		indent: 0,
+		saturate: false,
 	};
 	// Seed input/output bindings from ISGN/OSGN reflection. Components is
 	// pinned to 4 for non-SV bindings because varyings are always declared
@@ -333,6 +341,7 @@ function indentStr(ctx: EmitCtx): string { return '\t' + '\t'.repeat(ctx.indent)
 
 function emitInstruction(ins: DxbcInstruction, ctx: EmitCtx, lines: string[]): void {
 	const push = (s: string) => lines.push(indentStr(ctx) + s);
+	ctx.saturate = ins.saturate;
 
 	switch (ins.name) {
 		case 'mov': {
@@ -506,7 +515,7 @@ function emitHeader(ctx: EmitCtx, p: ParsedDxbc, decoded: DecodedShader): string
 			const slot = op.indices[1];
 			let idx = 0;
 			if (slot?.kind === 'immediate') idx = slot.value;
-			else if (slot?.kind === 'relative') idx = Math.max(slot.offset, 0) + 16; // guess upper bound
+			else if (slot?.kind === 'relative') idx = relativeUpperBound(p, reg, Math.max(slot.offset, 0));
 			cbMax[reg] = Math.max(cbMax[reg] ?? 0, idx);
 		}
 	}
@@ -668,6 +677,24 @@ function emitHeader(ctx: EmitCtx, p: ParsedDxbc, decoded: DecodedShader): string
 		}
 	}
 	return lines;
+}
+
+// A dynamically indexed read (`cb0[r0.x + 48]`) can reach anywhere in the
+// array variable it starts in, so the uniform must cover that variable's
+// whole RDEF extent: the vehicle shaders index their 128-row deformation
+// array this way, and a short uniform makes the rows past its end read
+// nothing. Without a matching variable, guess 16 slots past the base.
+function relativeUpperBound(p: ParsedDxbc, reg: number, baseSlot: number): number {
+	const binding = p.reflection.resourceBindings.find((r) => r.type === 0 && r.bindPoint === reg);
+	const cbs = p.reflection.constantBuffers.filter((cb) => (binding ? cb.name === binding.name : reg === 0));
+	for (const cb of cbs) {
+		for (const v of cb.variables) {
+			const start = Math.floor(v.startOffset / 16);
+			const end = Math.ceil((v.startOffset + v.size) / 16);
+			if (baseSlot >= start && baseSlot < end) return end - 1;
+		}
+	}
+	return baseSlot + 16;
 }
 
 function padToVec4(name: string, components: number): string {

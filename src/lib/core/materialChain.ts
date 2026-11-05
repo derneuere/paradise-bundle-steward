@@ -61,6 +61,8 @@ export type ResolvedMaterial = {
 	emissive: DecodedTexture | null;
 	/** Ambient occlusion map. */
 	ao: DecodedTexture | null;
+	/** Scratch map of a damageable vehicle material (see SCRATCH_CHANNEL). */
+	scratch: DecodedTexture | null;
 	/** Sampler state from the diffuse TextureState (for wrapping/filtering). */
 	samplerState: Pick<ParsedTextureState, 'addressU' | 'addressV'> | null;
 	/** Blend/cull/alpha properties from MaterialState. */
@@ -84,6 +86,11 @@ export type ResolvedMaterial = {
 	 *  specular without the Shader resource. Keyed by sampler channel. */
 	unclassified: { channel: number; texture: DecodedTexture }[];
 };
+
+// The damaged vehicle shaders (PaintGloss, PlasticMatt) sample their scratch
+// map at channel 5: R = the scratched colour, G = the threshold at which a
+// texel turns scratched as the scratch amount grows, B = its sheen.
+export const SCRATCH_CHANNEL = 5;
 
 // =============================================================================
 // Material Sampler parser
@@ -343,6 +350,7 @@ export function resolveMaterialTextures(
 	let specular: DecodedTexture | null = null;
 	let emissive: DecodedTexture | null = null;
 	let ao: DecodedTexture | null = null;
+	let scratch: DecodedTexture | null = null;
 	let samplerState: Pick<ParsedTextureState, 'addressU' | 'addressV'> | null = null;
 	let usedSamplerClassification = false;
 	const unclassified: { channel: number; texture: DecodedTexture }[] = [];
@@ -402,6 +410,11 @@ export function resolveMaterialTextures(
 				const assigned = new Set<ResolvedSampler>();
 				if (ch0) assigned.add(ch0);
 				if (ch0 && ch1) assigned.add(ch1);
+				const ch5 = shaderName?.startsWith('Vehicle_') ? resolved.find(s => s.channel === SCRATCH_CHANNEL) : undefined;
+				if (ch5) {
+					scratch = ch5.texture;
+					assigned.add(ch5);
+				}
 
 				const unassigned = resolved.filter(s => !assigned.has(s));
 
@@ -486,6 +499,7 @@ export function resolveMaterialTextures(
 		specular,
 		emissive,
 		ao,
+		scratch,
 		samplerState,
 		properties,
 		diffuseFromSecondary: diffuse !== null && [...secondaryTexIds].some(id => {

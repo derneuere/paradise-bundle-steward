@@ -16,6 +16,7 @@ import type { ParsedDeformationSpec, Vec3 } from '../deformationSpec';
 import { checkForDetachment, hingePoint, initialPartState, jointRotation, mul3, poseMatrix, updateFreeParts, updateHinges } from './parts';
 import { applySensorImpulse, driveTimeBox, updateDeformedBox } from './sensors';
 import { drivenNormal, updateIK, updateSkinRows } from './ik';
+import { scratchSensor } from './scratch';
 import { add, cross, dot, length, normalize, scale, sub, type CarAttribs, type Obstacle, type SimState } from './state';
 import { AbsorptionSet, IMPULSE_SHAPING, STEP } from './tables';
 
@@ -28,6 +29,10 @@ export type Impact = {
 	speed: number;          // closing speed, m/s
 	obstacle?: 'wall' | 'pole';
 	crash?: boolean;        // false: a knock below the car's crash speed
+	// Degrees between the car's travel and the hit direction: 0 drives
+	// straight into the obstacle, more slides the car along it (the obstacle
+	// keeps facing the hit direction), which is what scratches the paint.
+	glance?: number;
 };
 export type PartPose = { meshDelta: number[]; state: 'hinged' | 'detached' };
 
@@ -68,6 +73,7 @@ function freshState(spec: ParsedDeformationSpec, attribs: CarAttribs, absorption
 		spec, attribs, invInertia: boxInverseInertia(spec, attribs.mass), absorptionSet, crashing: true,
 		sensors: spec.sensors.map((x) => [...x.initialOffset] as Vec3),
 		latch: spec.sensors.map(() => 0),
+		scratch: spec.sensors.map(() => 0),
 		tags: spec.tagPoints.map((t) => [...t.initialPosition] as Vec3),
 		driven: spec.drivenPoints.map((d) => [...d.initialPos] as Vec3),
 		drivenNormal: [],
@@ -124,8 +130,10 @@ export function resetCrashSim(sim: CrashSim): void {
 export function setAbsorptionSet(sim: CrashSim, set: AbsorptionSet): void { sim.state.absorptionSet = set; }
 
 // Starts a new impact: the car, in its current deformed shape, drives at
-// `speed` into an obstacle placed against the hit point. A crash also gets
-// the car's extra horizontal crash velocity, as the game adds on crash entry.
+// `speed` into an obstacle placed against the hit point, turned by `glance`
+// toward the obstacle's surface direction (the wall's horizontal, or across
+// the pole). A crash also gets the car's extra horizontal crash velocity, as
+// the game adds on crash entry.
 export function applyImpact(sim: CrashSim, impact: Impact): void {
 	const s = sim.state;
 	const out = normalize(scale(impact.direction, -1));
@@ -136,12 +144,14 @@ export function applyImpact(sim: CrashSim, impact: Impact): void {
 	s.carRot = [...IDENTITY];
 	s.carSpin = [0, 0, 0];
 	s.time = 0;
-	const v = scale(out, impact.speed);
+	const poleAxis = normalize(sub(axis, scale(out, dot(axis, out))));
+	const g = ((impact.glance ?? 0) * Math.PI) / 180;
+	const v = scale(add(scale(out, Math.cos(g)), scale(normalize(cross(poleAxis, out)), Math.sin(g))), impact.speed);
 	if (s.crashing) { v[0] *= 1 + s.attribs.crashExtraLinearVelocity; v[2] *= 1 + s.attribs.crashExtraLinearVelocity; }
 	s.carVel = v;
 	s.obstacle = {
 		kind, point: add(impact.pointMesh, meshShift(s.spec)), normal: out,
-		poleAxis: normalize(sub(axis, scale(out, dot(axis, out)))), poleRadius: POLE_RADIUS,
+		poleAxis, poleRadius: POLE_RADIUS,
 	};
 	s.carPos = scale(out, firstTouch(s));
 }
@@ -201,7 +211,8 @@ function resolveContacts(s: SimState, dt: number): void {
 	const contacts = findContacts(s, dt);
 	for (const c of contacts) {
 		const arm = sub(c.point, s.carPos);
-		const vn = dot(pointVelocity(solveVel, solveSpin, arm), c.n);
+		const relVel = pointVelocity(solveVel, solveSpin, arm);
+		const vn = dot(relVel, c.n);
 		if (vn >= 0) continue;
 		const rn = cross(arm, c.n);
 		const k = invMass + dot(c.n, cross(invI(rn), arm));
@@ -209,6 +220,7 @@ function resolveContacts(s: SimState, dt: number): void {
 		const rest = applySensorImpulse(s, {
 			sensor: c.sensor, direction: mul3(toLocal, c.n), magnitude, closingSpeed: Math.abs(vn), invMass: k, dt,
 		});
+		scratchSensor(s, c.sensor, relVel, c.n, magnitude, dt);
 		const J = scale(c.n, magnitude);
 		solveVel = add(solveVel, scale(J, invMass));
 		solveSpin = add(solveSpin, invI(cross(arm, J)));

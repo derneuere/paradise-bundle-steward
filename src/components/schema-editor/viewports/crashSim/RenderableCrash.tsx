@@ -9,7 +9,7 @@ import { useCrashStepper, type PartPoser } from './crashStepper';
 import type { CrashSession } from './useCrashSession';
 import type { RenderableCrash } from './useRenderableCrash';
 
-export function RenderableCrashPanel({ crash, setDecodeMode, translated }: { crash: RenderableCrash; setDecodeMode: (m: DecodeMode) => void; translated: boolean }) {
+export function RenderableCrashPanel({ crash, setDecodeMode }: { crash: RenderableCrash; setDecodeMode: (m: DecodeMode) => void }) {
 	if (!crash.enabled || !crash.spec) return null;
 	if (!crash.body) {
 		return (
@@ -20,19 +20,12 @@ export function RenderableCrashPanel({ crash, setDecodeMode, translated }: { cra
 		);
 	}
 	return (
-		<>
-			<CrashControls session={crash.session} spec={crash.spec} box={crash.body.box} skinRows={crash.body.skinRows} title="Crash test">
-				<span className="font-medium">spec:</span>
-				<select value={crash.specBundle?.id ?? ''} onChange={(e) => crash.chooseSpec(e.target.value)} className="bg-muted rounded px-1 py-0.5 max-w-[200px]">
-					{crash.specBundles.map((b) => <option key={b.id} value={b.id}>{b.id}</option>)}
-				</select>
-			</CrashControls>
-			{translated && (
-				<div className="shrink-0 px-3 py-1 border-b text-xs text-amber-300/90">
-					Translated shaders draw the undamaged car for now; switch them off to see the dents.
-				</div>
-			)}
-		</>
+		<CrashControls session={crash.session} spec={crash.spec} box={crash.body.box} skinRows={crash.body.skinRows} title="Crash test">
+			<span className="font-medium">spec:</span>
+			<select value={crash.specBundle?.id ?? ''} onChange={(e) => crash.chooseSpec(e.target.value)} className="bg-muted rounded px-1 py-0.5 max-w-[200px]">
+				{crash.specBundles.map((b) => <option key={b.id} value={b.id}>{b.id}</option>)}
+			</select>
+		</CrashControls>
 	);
 }
 
