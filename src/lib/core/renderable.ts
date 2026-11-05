@@ -397,6 +397,10 @@ export type DecodedVertexArrays = {
 	tangents: Float32Array | null; // xyzw × vertexCount (w = handedness)
 	uv1: Float32Array | null;
 	uv2: Float32Array | null;
+	// Vehicle bodies are skinned to the per-car deformation offsets: each
+	// vertex is pushed by its weighted rows (u8 indices, u8 weights / 255).
+	boneIndices: Uint8Array | null;  // 4 × vertexCount
+	boneWeights: Float32Array | null; // 4 × vertexCount, 0..1
 	vertexCount: number;
 };
 
@@ -405,8 +409,8 @@ export type DecodedVertexArrays = {
  * VertexDescriptor describes. Output arrays are tightly packed (not
  * interleaved), ready to hand to THREE.BufferAttribute.
  *
- * Positions / Normals / Tangents / UV1 / UV2 are decoded. BoneIndexes /
- * BoneWeights are ignored — the viewer doesn't skin.
+ * Positions / Normals / Tangents / UV1 / UV2 / BoneIndexes / BoneWeights
+ * are decoded.
  */
 export function decodeVertexArrays(
 	body: Uint8Array,
@@ -418,7 +422,10 @@ export function decodeVertexArrays(
 	}
 	const vertexCount = Math.floor(vb.byteLength / vd.stride);
 	if (vertexCount === 0) {
-		return { positions: new Float32Array(0), normals: null, tangents: null, uv1: null, uv2: null, vertexCount: 0 };
+		return {
+			positions: new Float32Array(0), normals: null, tangents: null, uv1: null, uv2: null,
+			boneIndices: null, boneWeights: null, vertexCount: 0,
+		};
 	}
 	if (vb.bodyOffset + vertexCount * vd.stride > body.byteLength) {
 		throw new BundleError(
@@ -473,7 +480,20 @@ export function decodeVertexArrays(
 	const uv2Attr = findAttr(VertexAttributeType.UV2);
 	const uv2 = uv2Attr ? readFloatAttr(uv2Attr, 2) : null;
 
-	return { positions, normals, tangents, uv1, uv2, vertexCount };
+	const readBytes = (attr: VertexAttribute): Uint8Array => {
+		const out = new Uint8Array(vertexCount * 4);
+		for (let v = 0; v < vertexCount; v++) {
+			const base = vb.bodyOffset + v * vd.stride + attr.offset;
+			for (let c = 0; c < 4; c++) out[v * 4 + c] = body[base + c];
+		}
+		return out;
+	};
+	const biAttr = findAttr(VertexAttributeType.BoneIndexes);
+	const bwAttr = findAttr(VertexAttributeType.BoneWeights);
+	const boneIndices = biAttr && bwAttr ? readBytes(biAttr) : null;
+	const boneWeights = biAttr && bwAttr ? Float32Array.from(readBytes(bwAttr), (b) => b / 255) : null;
+
+	return { positions, normals, tangents, uv1, uv2, boneIndices, boneWeights, vertexCount };
 }
 
 /**

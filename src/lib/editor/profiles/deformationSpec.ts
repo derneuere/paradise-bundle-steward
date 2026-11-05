@@ -1,6 +1,6 @@
-// DeformationSpec profile. Schema-driven inspector; no 3D overlay (the
-// resource isn't world-space geometry), so the centre pane shows the empty
-// "no viewport" state and editing happens entirely in the inspector form.
+// DeformationSpec profile. Schema-driven inspector; no WorldViewport overlay
+// (the resource isn't world-space geometry). The centre pane instead mounts
+// the crash preview (ViewportPane special-cases this key).
 
 import { defineProfile } from '../types';
 import { deformationSpecResourceSchema } from '@/lib/schema/resources/deformationSpec';
