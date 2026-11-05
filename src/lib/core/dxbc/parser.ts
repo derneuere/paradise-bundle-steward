@@ -90,7 +90,7 @@ type DxbcResourceBinding = {
 	/** D3D_RESOURCE_RETURN_TYPE: 0=none, 5=float, etc. */
 	returnType: number;
 	/** D3D_SRV_DIMENSION: 0=unknown, 2=texture1d, 4=texture2d, 5=texture2darray,
-	 *  9=texture3d, 10=texturecube, ... */
+	 *  8=texture3d, 9=texturecube, 10=texturecubearray, ... */
 	dimension: number;
 	numSamples: number;
 	bindPoint: number;

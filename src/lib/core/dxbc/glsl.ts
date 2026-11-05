@@ -14,7 +14,8 @@
 //     SV_POSITION → gl_Position. Pixel outputs o0 → gl_FragColor.
 //   - Constant buffers cbN[i] become `uniform vec4 cbN[size];` on declaration;
 //     emitted as `cbN[i].xyzw` at use sites.
-//   - Each sample t_k, s_k → texture2D(_t{k}, uv.xy). Separate-sampler state
+//   - Each sample t_k, s_k → texture2D(_t{k}, uv.xy), or textureCube(_t{k}, uv.xyz)
+//     when RDEF declares t_k a TextureCube. Separate-sampler state
 //     isn't representable in GLSL, so sampler declarations are tracked for
 //     pairing but only the texture slot is exposed.
 //   - Flow-control emits `if (a) { ... } else { ... }`, `while (true)`
@@ -269,6 +270,8 @@ type EmitCtx = {
 	outputBindings: Record<number, VaryingBinding>;
 	/** Resource (SRV) bindings: key=bindPoint, value=name. */
 	resources: Record<number, string>;
+	/** Bind points of TextureCube resources (sampled with a direction). */
+	cubeResources: Set<number>;
 	/** Sampler bindings: key=bindPoint, value=name. */
 	samplers: Record<number, string>;
 	/** Constant-buffer bindings: key=register, value={ size, variables[] }. */
@@ -281,12 +284,16 @@ type EmitCtx = {
 	saturate: boolean;
 };
 
+/** D3D_SRV_DIMENSION_TEXTURECUBE in an RDEF resource binding. */
+const SRV_DIMENSION_TEXTURECUBE = 9;
+
 function makeCtx(p: ParsedDxbc): EmitCtx {
 	const ctx: EmitCtx = {
 		programType: p.programType === 'vertex' ? 'vertex' : 'pixel',
 		inputBindings: {},
 		outputBindings: {},
 		resources: {},
+		cubeResources: new Set(),
 		samplers: {},
 		cbuffers: {},
 		tempCount: 0,
@@ -313,8 +320,10 @@ function makeCtx(p: ParsedDxbc): EmitCtx {
 		};
 	}
 	for (const b of p.reflection.resourceBindings) {
-		if (b.type === 2) ctx.resources[b.bindPoint] = b.name.replace(/[^A-Za-z0-9_]/g, '_');
-		else if (b.type === 3) ctx.samplers[b.bindPoint] = b.name.replace(/[^A-Za-z0-9_]/g, '_');
+		if (b.type === 2) {
+			ctx.resources[b.bindPoint] = b.name.replace(/[^A-Za-z0-9_]/g, '_');
+			if (b.dimension === SRV_DIMENSION_TEXTURECUBE) ctx.cubeResources.add(b.bindPoint);
+		} else if (b.type === 3) ctx.samplers[b.bindPoint] = b.name.replace(/[^A-Za-z0-9_]/g, '_');
 	}
 	// Some shaders sample from resources RDEF didn't emit a binding for (the
 	// names are in the string table but the binding record is absent). Fall
@@ -439,8 +448,9 @@ function emitInstruction(ins: DxbcInstruction, ctx: EmitCtx, lines: string[]): v
 			const tOp = ins.operands[2];
 			const reg = idxVal(tOp, 0);
 			const tex = ctx.resources[reg] ?? `_t${reg}`;
-			// 2D sample by default; cube/3D left for a future pass.
-			push(writeDest(ins.operands[0], `texture2D(${tex}, ${uv}.xy)`, ctx));
+			// 2D sample by default; 3D left for a future pass.
+			const sampled = ctx.cubeResources.has(reg) ? `textureCube(${tex}, ${uv}.xyz)` : `texture2D(${tex}, ${uv}.xy)`;
+			push(writeDest(ins.operands[0], sampled, ctx));
 			return;
 		}
 		case 'if': {
@@ -570,7 +580,7 @@ function emitHeader(ctx: EmitCtx, p: ParsedDxbc, decoded: DecodedShader): string
 	// separate sampler state, so the emitted names match the resource bindings.
 	for (const regStr of Object.keys(ctx.resources)) {
 		const reg = Number(regStr);
-		lines.push(`uniform sampler2D ${ctx.resources[reg]}; // t${reg}`);
+		lines.push(`uniform ${ctx.cubeResources.has(reg) ? 'samplerCube' : 'sampler2D'} ${ctx.resources[reg]}; // t${reg}`);
 	}
 
 	// Varyings — from ISGN for pixel shaders, OSGN for vertex shaders.

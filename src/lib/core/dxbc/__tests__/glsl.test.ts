@@ -1,5 +1,5 @@
-// Emitter behaviour on hand-built programs: saturate, and the uniform size of
-// a dynamically indexed constant buffer.
+// Emitter behaviour on hand-built programs: saturate, the uniform size of a
+// dynamically indexed constant buffer, and cube vs 2D texture sampling.
 
 import { describe, it, expect } from 'vitest';
 import { emitGlsl } from '../glsl';
@@ -18,7 +18,13 @@ function ins(name: string, operands: DxbcOperand[], saturate = false): DxbcInstr
 	return { opcode: 0, name, kind: 'alu', tokenIndex: 0, length: 0, extended: [], saturate, operands };
 }
 
-function program(body: DxbcInstruction[], variables: { name: string; slot: number; slots: number }[]): string {
+type Binding = ParsedDxbc['reflection']['resourceBindings'][number];
+const texture = (name: string, bindPoint: number, dimension: number): Binding =>
+	({ name, type: 2, returnType: 5, dimension, numSamples: 0, bindPoint, bindCount: 1, flags: 0 });
+const tex = (r: number) => operand('resource', [{ kind: 'immediate', value: r }], 1);
+const samp = (r: number) => operand('sampler', [{ kind: 'immediate', value: r }], 0);
+
+function program(body: DxbcInstruction[], variables: { name: string; slot: number; slots: number }[], bindings: Binding[] = []): string {
 	const parsed = {
 		programType: 'pixel',
 		inputs: [], outputs: [],
@@ -27,7 +33,7 @@ function program(body: DxbcInstruction[], variables: { name: string; slot: numbe
 				name: '_Globals', size: 0, flags: 0,
 				variables: variables.map((v) => ({ name: v.name, startOffset: v.slot * 16, size: v.slots * 16, type: { class: 1, type: 0x25, rows: 1, columns: 4, elements: 0 } })),
 			}],
-			resourceBindings: [{ name: '_Globals', type: 0, returnType: 0, dimension: 0, numSamples: 0, bindPoint: 0, bindCount: 1, flags: 0 }],
+			resourceBindings: [{ name: '_Globals', type: 0, returnType: 0, dimension: 0, numSamples: 0, bindPoint: 0, bindCount: 1, flags: 0 }, ...bindings],
 		},
 	} as unknown as ParsedDxbc;
 	const decoded: DecodedShader = { decls: [ins('dcl_temps', [])].map((d) => ({ ...d, decl: { kind: 'temps', count: 2 } })), body, all: body };
@@ -57,5 +63,17 @@ describe('emitGlsl', () => {
 			ins('mov', [temp(0, 0), cb({ kind: 'relative', base: temp(1), offset: 10 })]),
 		], []);
 		expect(glsl).toContain('uniform vec4 cb0[27];');
+	});
+
+	it('samples a TextureCube with the full direction and a 2D texture with uv.xy', () => {
+		// The vehicle shaders' reflection map is a cube (SRV dimension 9).
+		const glsl = program([
+			ins('sample', [temp(0), temp(1), tex(0), samp(0)]),
+			ins('sample', [temp(2), temp(3), tex(13), samp(13)]),
+		], [], [texture('DiffuseTexture', 0, 4), texture('ReflectionTexture', 13, 9)]);
+		expect(glsl).toContain('uniform sampler2D DiffuseTexture; // t0');
+		expect(glsl).toContain('uniform samplerCube ReflectionTexture; // t13');
+		expect(glsl).toMatch(/texture2D\(DiffuseTexture, r1[.\w]*\.xy\)/);
+		expect(glsl).toMatch(/textureCube\(ReflectionTexture, r3[.\w]*\.xyz\)/);
 	});
 });
