@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Vec3 } from '../../deformationSpec';
 import { dot } from '../../deformationSim/state';
-import { debrisColour, debrisFade, makeDebris, stepDebris, type Plane } from '../debris';
+import { debrisAlpha, debrisColour, debrisGrowth, makeDebris, stepDebris, type Plane } from '../debris';
 import { makePuff, puffLook } from '../puffs';
 import { dragDistance, makeRng } from '../random';
 import { makeSpark, showerSize, spawnShower, sparkPosition, type Spark } from '../sparks';
@@ -119,11 +119,29 @@ describe('debris', () => {
 		expect(d.angle).toBeGreaterThan(0);
 	});
 
-	it('fades in over the preset time and out over the last 0.8 s', () => {
+	it('grows in over the preset time and fades its alpha over the last 0.8 s', () => {
 		const d = makeDebris(DebrisKind.Coloured, [0, 1, 0], [0, 0, 0], 0.1, 0, 0, [1, 0, 0], makeRng(1));
-		expect(debrisFade(d, 0.05, 0.8)).toBeCloseTo(0.5, 9);
-		expect(debrisFade(d, 0.5, 0.8)).toBe(1);
-		expect(debrisFade(d, d.life - 0.4, 0.8)).toBeCloseTo(0.5, 9);
+		expect(debrisGrowth(d, 0.05)).toBeCloseTo(0.5, 9);
+		expect(debrisGrowth(d, 0.5)).toBe(1);
+		expect(debrisGrowth(d, -1)).toBe(0);
+		expect(debrisAlpha(d, 0.5, 0.8)).toBe(1);
+		expect(debrisAlpha(d, d.life - 0.4, 0.8)).toBeCloseTo(0.5, 9);
+		expect(debrisAlpha(d, d.life + 1, 0.8)).toBe(0);
+		// Glass appears at once.
+		const g = makeDebris(DebrisKind.Glass, [0, 1, 0], [0, 0, 0], 1, 0, 0, [1, 0, 0], makeRng(1));
+		expect(debrisGrowth(g, 0.001)).toBe(1);
+	});
+
+	it('takes its slot in a batch of 32 from the count of its kind, which picks its lifetime', () => {
+		const at = (i: number) => makeDebris(DebrisKind.Dark, [0, 1, 0], [0, 0, 0], 0.1, 0, i, [1, 0, 0], makeRng(1));
+		expect([0, 1, 31, 32, 33, 97].map((i) => at(i).slot)).toEqual([0, 1, 31, 0, 1, 1]);
+		expect([0, 1, 2, 3, 4].map((i) => at(i).life)).toEqual([1.4, 1.8, 1.6, 2.0, 1.4]);
+	});
+
+	it('starts its tumble angle at its spin rate', () => {
+		const d = makeDebris(DebrisKind.Dark, [0, 1, 0], [0, 0, 0], 0.1, 0, 0, [1, 0, 0], makeRng(3));
+		expect(d.angle).toBe(d.spinRate);
+		expect(d.spinRate).toBeGreaterThanOrEqual(0.5);
 	});
 
 	it('scales a burst by the car speed: none below 5 m/s, 0.61 at 25, full at 60', () => {

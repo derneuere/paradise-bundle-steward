@@ -3,6 +3,9 @@
 // ground and the obstacle a few times (2 - 5, fixed per piece) losing speed
 // each time, then lie still until their 1.4 - 2 s life runs out. Each piece
 // tumbles about a random axis in proportion to the distance it travels.
+//
+// The game keeps each kind's pieces in batches of 32 and draws piece i of a
+// batch with its mesh collection's slot i; the same place picks its lifetime.
 
 import type { Vec3 } from '../deformationSpec';
 import { add, dot, length, normalize, scale, sub } from '../deformationSim/state';
@@ -18,7 +21,8 @@ export type Debris = {
 	axis: Vec3;      // tumble axis
 	spinRate: number; // radians per metre travelled
 	angle: number;
-	size: number;    // metres
+	size: number;    // scale of its mesh
+	slot: number;    // place in its batch of 32: picks its mesh and lifetime
 	colour: Vec3;
 	bouncesLeft: number;
 	still: boolean;
@@ -46,6 +50,7 @@ export function randomUnit(rng: Rng): Vec3 {
 	return [r * Math.cos(a), r * Math.sin(a), z];
 }
 
+// `index` counts the pieces of this kind spawned so far.
 export function makeDebris(
 	kind: DebrisKind, p: Vec3, v: Vec3, size: number, time: number, index: number, paint: Vec3, rng: Rng,
 ): Debris {
@@ -53,8 +58,10 @@ export function makeDebris(
 	const base = preset.colour === 'paint' ? paint : preset.colour;
 	const colour = scale(debrisColour(base, rng), preset.diffuse);
 	const spinRate = rng.range(0.5, 4);
+	const slot = index & 31;
+	// The angle starts at the spin rate: the game seeds both from one value.
 	return {
-		kind, birth: time, life: DEBRIS_LIFETIMES[index & 3], p, v, axis: randomUnit(rng), spinRate, angle: 0, size, colour,
+		kind, birth: time, life: DEBRIS_LIFETIMES[slot & 3], p, v, axis: randomUnit(rng), spinRate, angle: spinRate, size, slot, colour,
 		bouncesLeft: Math.floor(frac(((spinRate + 2.468) * (size + 1.357)) ** 2) * 3 + 2.5),
 		still: false,
 	};
@@ -85,10 +92,14 @@ export function stepDebris(d: Debris, dt: number, planes: readonly Plane[], rng:
 	d.p = next;
 }
 
-// 0..1 visibility: grows in over the preset's fade-in, fades over the last 0.8 s.
-export function debrisFade(d: Debris, age: number, fadeOut: number): number {
-	const fadeIn = DEBRIS_PRESETS[d.kind].fadeIn;
-	return Math.min(1, age / fadeIn, Math.max(0, (d.life - age) / fadeOut));
+// A new piece grows from nothing to full size over its preset's fade-in.
+export function debrisGrowth(d: Debris, age: number): number {
+	return Math.min(1, Math.max(0, age / DEBRIS_PRESETS[d.kind].fadeIn));
+}
+
+// Its alpha fades to nothing over the last `fadeOut` seconds of its life.
+export function debrisAlpha(d: Debris, age: number, fadeOut: number): number {
+	return Math.min(1, Math.max(0, (d.life - age) / fadeOut));
 }
 
 // A direction inside the cone of half-angle `deg` around +Y.
