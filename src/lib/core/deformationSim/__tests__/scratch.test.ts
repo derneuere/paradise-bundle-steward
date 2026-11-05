@@ -98,8 +98,7 @@ describe('glancing hits', () => {
 		expect(y).toBeCloseTo(0, 9);
 	});
 
-	it('scratches the nose sliding along a wall but not driving straight into it', () => {
-		expect(run(0).state.scratch[0]).toBe(0);
+	it('scratches the nose sliding along a wall', () => {
 		const glancing = run(40);
 		expect(glancing.state.scratch[0]).toBeGreaterThan(0);
 		expect(glancing.rows[3]).toBeGreaterThan(0);

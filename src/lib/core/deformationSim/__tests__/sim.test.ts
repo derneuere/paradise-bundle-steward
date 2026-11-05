@@ -33,10 +33,12 @@ describe('sensor crush', () => {
 		expect(2 - sim.state.sensors[0][2]).toBeCloseTo(0.3, 6); // directionParams[-Z] = 0.3
 	});
 
-	it('returns what the sensor did not absorb as the impulse on the car body', () => {
+	it('hands what the sensor did not absorb to the car body once the chain ends there', () => {
 		const sim = createCrashSim(makeSpec());
-		const rest = applySensorImpulse(sim.state, hitFront(1000));
-		close(rest, [0, 0, -1000 * (1 - 0.98)], 6);
+		const arrivals = applySensorImpulse(sim.state, hitFront(1000));
+		expect(arrivals).toHaveLength(1);
+		expect(arrivals[0].d).toBe(5);   // -Z
+		expect(arrivals[0].rem).toBeCloseTo(1000 * (1 - 0.98), 9);
 	});
 
 	it('latches the biggest impulse each sensor felt', () => {
@@ -121,20 +123,24 @@ describe('detachment', () => {
 });
 
 describe('crash run', () => {
-	it('grinds into a wall, crushes the nose within budget, stops, and resets cleanly', () => {
+	it('grinds into a wall, crushes the nose within budget, slides to rest on the ground, and resets cleanly', () => {
 		const sim = createCrashSim(makeSpec(), { attribs: { mass: 1500 } });
 		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30 });
-		// Level-0 sensors pass only 2 % of each impulse to the body, so the car
-		// keeps grinding until the contact time runs out.
+		// The level-0 nose passes only 2 % of each impulse to the body; what
+		// stops the car is the slide friction of the corners it stands on.
 		for (let i = 0; i < 240; i++) stepCrashSim(sim);
 		const crush = 2 - sim.state.sensors[0][2];
 		expect(crush).toBeGreaterThan(0.05);
 		expect(crush).toBeLessThanOrEqual(0.3 + 1e-9);
-		expect(sim.state.carVel).toEqual([0, 0, 0]);
+		const [vx, , vz] = sim.state.carVel;
+		expect(Math.hypot(vx, vz)).toBeLessThan(0.05);
+		expect(sim.state.body.axes[1][1]).toBeGreaterThan(0.99);   // still upright
 		expect(Math.max(...Array.from(sim.rows).map(Math.abs))).toBeGreaterThan(0);
 		resetCrashSim(sim);
 		expect(Array.from(sim.rows).every((v) => v === 0)).toBe(true);
 		close(sim.state.sensors[0], [0, 0.5, 2]);
+		expect(sim.state.obstacle).toBeNull();
+		expect(sim.state.carVel).toEqual([0, 0, 0]);
 	});
 
 	it('is deterministic', () => {

@@ -25,7 +25,9 @@ function run(impact: Impact, steps = 60, spec = makeSpec()) {
 
 describe('crash effects', () => {
 	it('throws no sparks on a straight head-on hit, but debris and dust', () => {
-		const r = run(front);
+		// Slow enough that nothing slides across the wall at spark speed (a
+		// faster hit turns the car and its nose slides).
+		const r = run({ ...front, speed: 10 });
 		expect(r.sparks).toBe(0);
 		expect(r.debris).toBeGreaterThan(0);
 		expect(r.dust).toBeGreaterThan(0);

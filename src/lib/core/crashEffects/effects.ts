@@ -84,8 +84,12 @@ export function stepCrashEffects(fx: CrashEffects, sim: CrashSim, dt: number): v
 	// inherits the velocity it has once the step's contacts are resolved, so
 	// nothing is flung through the obstacle the car just stopped against.
 	const speed = length(ev.car.vel), vel = s.carVel, moving = length(vel);
+	// The simulated car rests on its body's collision spheres rather than on
+	// wheels, so its ground contacts would scrape on every hit; only the
+	// obstacle's contacts throw effects.
+	const hits = ev.contacts.filter((c) => c.surface === 'obstacle');
 	if (s.crashing) {
-		for (const c of ev.contacts) {
+		for (const c of hits) {
 			if (length(c.slide) > SPARK_MIN_SLIDE && fx.sparkCooldown <= 0) {
 				fx.counter += spawnShower({ origin: c.point, normal: c.normal, slide: c.slide, time: fx.time, groundY: fx.groundY, counter: fx.counter }, rng, (k) => fx.sparks.add(k));
 				fx.sparkCooldown = SPARK_COOLDOWN.base + rng.next() * SPARK_COOLDOWN.random;
@@ -95,7 +99,7 @@ export function stepCrashEffects(fx: CrashEffects, sim: CrashSim, dt: number): v
 				fx.burstCooldown = BURST_COOLDOWN;
 			}
 		}
-		if (ev.contacts.length && speed > DUST_MIN_SPEED) dust(fx, ev.contacts[0].point, vel, speed * dt);
+		if (hits.length && speed > DUST_MIN_SPEED) dust(fx, hits[0].point, vel, speed * dt);
 		trail(fx, sim, moving, dt);
 		for (const g of ev.glass) if (g.state === GlassState.Smashed) glassBurst(fx, g);
 	}

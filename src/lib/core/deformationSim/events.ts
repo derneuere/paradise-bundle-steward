@@ -2,25 +2,22 @@
 // crash without being part of it (particle effects, readouts). The list is
 // cleared at the start of every step, so after stepCrashSim it holds exactly
 // that step's events. Positions and velocities are in the simulator's world
-// frame (the handling frame at the moment of the hit; the car moves through
-// it by carPos), which is where the game spawns its effects too.
+// frame (ground at y = 0), which is where the game spawns its effects too.
 
 import type { Vec3 } from '../deformationSpec';
 
 export type ContactEvent = {
 	sensor: number;
-	point: Vec3;         // on the obstacle's surface
-	normal: Vec3;        // unit, out of the obstacle toward the car
+	point: Vec3;         // on the surface
+	normal: Vec3;        // unit, out of the surface toward the car
 	impulse: number;     // shaped contact impulse, N·s
 	closingSpeed: number; // m/s along the normal
-	// How fast the car slides across the surface here: the car body's
-	// velocity at this contact (after the step's earlier contacts) with the
-	// along-normal part removed. The car body only translates, so this is the
-	// contact point's own slide (the solver's mid-step spin, which the step
-	// throws away, is left out). Sparks need it; scratch and slide friction
-	// read the same slide.
+	// How fast the contact point slides across the surface: its velocity
+	// (after the step's earlier contacts) with the along-normal part removed.
+	// Sparks need it; scratch and slide friction read the same slide.
 	slide: Vec3;
 	scratch: number;     // paint scratch this contact added to its sensor
+	surface: 'ground' | 'obstacle';
 };
 
 export type PartEvent = {
@@ -45,7 +42,7 @@ export type GlassEvent = {
 };
 
 export type CrashEvents = {
-	// The car's position and velocity as the step began (before its contacts).
+	// The car's (spec origin's) position and velocity as the step began.
 	car: { pos: Vec3; vel: Vec3 };
 	contacts: ContactEvent[];
 	parts: PartEvent[];

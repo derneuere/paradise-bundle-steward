@@ -19,10 +19,10 @@ const MAX_CHAIN = 25;
 
 export type SensorImpulse = {
 	sensor: number;
-	direction: Vec3;     // unit impulse direction, into the car
+	direction: Vec3;     // unit impulse direction, into the car, body axes
 	magnitude: number;   // shaped impulse, N·s
 	closingSpeed: number; // |relative velocity along the contact normal|, m/s
-	invMass: number;     // effective inverse mass at the contact
+	invMass: number;     // 1/m + n·((I⁻¹(r×n))×r) at the contact (the inverse effective mass)
 	dt: number;
 };
 
@@ -73,25 +73,32 @@ function crushLink(s: SimState, sensor: number, d: number, passed: number, imp: 
 	s.sensors[sensor] = [c[0] + axis[0] * amount, c[1] + axis[1] * amount, c[2] + axis[2] * amount];
 }
 
-// Returns the impulse the car body still receives: whatever the hit sensor
-// did not absorb (it absorbs its share even once it has no crush room left).
-export function applySensorImpulse(s: SimState, imp: SensorImpulse): Vec3 {
+// A remainder that reached the car body: the chain of direction `d` ended at
+// the body (slot 0) carrying `rem`, the impulse the hit sensor did not absorb.
+export type BodyArrival = { d: number; rem: number };
+
+// Crushes the hit sensor and its chains; returns, per crush direction the
+// impulse pushes along, what the sensor did not absorb (it absorbs its share
+// even once it has no crush room left). Every chain passes the head's
+// absorbed half down unattenuated and hands the head's remainder to the body
+// when it ends.
+export function applySensorImpulse(s: SimState, imp: SensorImpulse): BodyArrival[] {
 	s.latch[imp.sensor] = Math.max(s.latch[imp.sensor], imp.magnitude);
 	const impulse = scale(imp.direction, imp.magnitude);
-	let toBody: Vec3 = [0, 0, 0];
+	const arrivals: BodyArrival[] = [];
 	for (let d = 0; d < 6; d++) {
 		const proj = dot(impulse, DIRECTIONS[d]);
 		if (proj <= 0) continue;
 		s.deformedThisStep = true;
 		const absorbed = crushHead(s, imp, d, proj);
-		toBody = [toBody[0] + DIRECTIONS[d][0] * (proj - absorbed), toBody[1] + DIRECTIONS[d][1] * (proj - absorbed), toBody[2] + DIRECTIONS[d][2] * (proj - absorbed)];
 		let next = s.spec.sensors[imp.sensor].nextSensor[d];
 		for (let hops = 0; next > 0 && next <= s.spec.numDeformationSensors && hops < MAX_CHAIN; hops++) {
 			crushLink(s, next - 1, d, absorbed * 0.5, imp);
 			next = s.spec.sensors[next - 1].nextSensor[d];
 		}
+		if (next === 0) arrivals.push({ d, rem: proj - absorbed });
 	}
-	return toBody;
+	return arrivals;
 }
 
 // Drive-time limits: the rest sensor box (origin included) pulled in by the
