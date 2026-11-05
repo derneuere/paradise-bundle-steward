@@ -65,5 +65,9 @@ describe('renderable -> GraphicsSpec part mapping', () => {
 		expect(a.parts.map((p) => p.gfx)).toEqual(b.parts.map((p) => p.gfx));
 		expect(a.skinRows).toBe(b.skinRows);
 		expect(a.box.equals(b.box)).toBe(true);
+		// Plus the panes' cracked models, each on a body part the car has.
+		expect(a.glass.length).toBe(8);
+		expect(b.glass).toEqual([]);
+		for (const g of a.glass) expect(a.parts.some((p) => p.gfx === g.partIndex)).toBe(true);
 	});
 });

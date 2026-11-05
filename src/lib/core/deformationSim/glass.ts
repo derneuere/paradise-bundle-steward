@@ -22,10 +22,13 @@ export const SMASH_SUM_SQ = 0.05 * 0.05 * 4;
 const CRACK_START = 0.001;
 const CRACK_SPAN = 0.049;
 
-export type PaneState = { state: GlassState; crack: number };
+// `width` (|corner2 - corner1|) and `equalisation` (|corner1 - corner0| /
+// width) are the pane's shape as of its last report: the renderer scales the
+// crack pattern across the pane with them.
+export type PaneState = { state: GlassState; crack: number; width: number; equalisation: number };
 
 export const freshPanes = (s: Pick<SimState, 'spec'>): PaneState[] =>
-	s.spec.glassPanes.map(() => ({ state: GlassState.Intact, crack: 0 }));
+	s.spec.glassPanes.map(() => ({ state: GlassState.Intact, crack: 0, width: 0, equalisation: 1 }));
 
 // Live and rest position of one pane corner (handling frame).
 function cornerPoint(s: SimState, pane: number, corner: number): { live: Vec3; rest: Vec3 } | null {
@@ -64,10 +67,13 @@ export function updateGlass(s: SimState): void {
 		const crack = pane.state === GlassState.Cracked ? crackAmount(peak) : 0;
 		// What the renderer shows only ever grows.
 		if (pane.state === GlassState.Cracked) pane.crack = Math.min(Math.max(pane.crack, crack), 1);
+		const corners = points.map((c, k) => add(c!.live, [g.matrix[k][0], g.matrix[k][1], g.matrix[k][2]]));
+		pane.width = length(sub(corners[2], corners[1]));
+		pane.equalisation = pane.width > 0 ? length(sub(corners[1], corners[0])) / pane.width : 1;
 		const toWorld = (v: Vec3) => add(s.carPos, mul3(s.carRot, v));
 		s.events.glass.push({
 			pane: p, partType: g.partType, state: pane.state as GlassEvent['state'], crack,
-			corners: points.map((c, k) => toWorld(add(c!.live, [g.matrix[k][0], g.matrix[k][1], g.matrix[k][2]]))) as GlassEvent['corners'],
+			corners: corners.map(toWorld) as GlassEvent['corners'],
 			normal: mul3(s.carRot, [g.plane[0], g.plane[1], g.plane[2]]),
 			carVel: [...s.carVel] as Vec3,
 		});

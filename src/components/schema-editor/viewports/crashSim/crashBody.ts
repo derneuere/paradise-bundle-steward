@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { GRAPHICS_SPEC_TYPE_ID } from '@/lib/core/graphicsSpec';
 import { decodeAllRenderables, locatorToMatrix4, type DecodedRenderable } from '@/lib/core/renderableDecode';
+import { decodeShatteredGlass, type ShatteredGlassRenderable } from '@/lib/core/shatteredGlassDecode';
 import type { ParsedBundle } from '@/lib/core/types';
 
 export type CrashBodyPart = {
@@ -22,6 +23,8 @@ export type CrashBody = {
 	box: THREE.Box3;
 	// Deformation rows the meshes read (highest weighted blend index + 1).
 	skinRows: number;
+	// The panes' shattered-glass models, drawn while a pane is cracked.
+	glass: readonly ShatteredGlassRenderable[];
 };
 
 export function hasGraphicsSpec(bundle: ParsedBundle): boolean {
@@ -53,7 +56,7 @@ function indexedBox(geometry: THREE.BufferGeometry, world: THREE.Matrix4, into: 
 
 // Renderables decoded in GraphicsSpec mode carry their part index; anything
 // else (the "all renderables" decode) has no part and can't be posed.
-export function crashBodyFromDecoded(renderables: readonly DecodedRenderable[]): CrashBody {
+export function crashBodyFromDecoded(renderables: readonly DecodedRenderable[], glass: readonly ShatteredGlassRenderable[] = []): CrashBody {
 	const byGfx = new Map<number, CrashBodyPart>();
 	for (const r of renderables) {
 		if (r.partIndex === undefined) continue;
@@ -71,10 +74,10 @@ export function crashBodyFromDecoded(renderables: readonly DecodedRenderable[]):
 	for (const p of parts) {
 		for (const g of p.geometries) { indexedBox(g, p.locator, box); maxIndex = Math.max(maxIndex, maxBlendIndex(g)); }
 	}
-	return { parts, box, skinRows: maxIndex + 1 };
+	return { parts, box, skinRows: maxIndex + 1, glass };
 }
 
 export function decodeCrashBody(bundle: ParsedBundle, buffer: ArrayBuffer): CrashBody {
 	if (!hasGraphicsSpec(bundle)) throw new Error('bundle has no GraphicsSpec');
-	return crashBodyFromDecoded(decodeAllRenderables(buffer, bundle, new Map(), false, 'graphics').renderables);
+	return crashBodyFromDecoded(decodeAllRenderables(buffer, bundle, new Map(), false, 'graphics').renderables, decodeShatteredGlass(buffer, bundle));
 }

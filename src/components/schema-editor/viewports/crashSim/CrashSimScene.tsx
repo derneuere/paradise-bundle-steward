@@ -1,11 +1,15 @@
 // The Crash Preview's car: the body parts in flat paint, deformed by the
-// sim's rows, posed and tinted by their hinge/detach state, plus the shared
-// obstacle, markers and crash particles.
+// sim's rows, posed and tinted by their hinge/detach state, the cracked
+// panes' shattered-glass models, plus the shared obstacle, markers and crash
+// particles.
 
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import type { CrashSim } from '@/lib/core/deformationSim';
 import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
+import { useWorkspace } from '@/context/WorkspaceContext';
+import { useCrackedGlass } from './useCrackedGlass';
+import { locatorToMatrix4 } from '@/lib/core/renderableDecode';
 import type { CrashBody } from './crashBody';
 import { isSkinned, makeDeformMaterial } from './deformMaterial';
 import { CrashMarkers, CrashObstacle } from './crashStage';
@@ -41,6 +45,7 @@ export function CrashSimScene({ body, session, textures }: { body: CrashBody; se
 		}
 	});
 	const hit = crashHitHandler(session.hit);
+	const crackedGlass = useCrackedGlass(useWorkspace().bundles);
 
 	return (
 		<group>
@@ -67,6 +72,20 @@ export function CrashSimScene({ body, session, textures }: { body: CrashBody; se
 					</group>
 				);
 			})}
+			{body.glass.map((r) => (
+				<group key={`glass-${r.glass.glassIndex}`} matrixAutoUpdate={false} ref={poser.ref(`glass-${r.glass.glassIndex}`, r.partIndex, locatorToMatrix4(r.partLocator))}>
+					{r.meshes.map((m, i) => (
+						<mesh
+							key={i}
+							geometry={m.geometry}
+							material={crackedGlass.material(r, materials.paint)}
+							onClick={hit}
+							ref={poser.ref(`glass-${r.glass.glassIndex}:${i}`, -1, IDENTITY, m.meshFlags, r.glass)}
+							matrixAutoUpdate={false}
+						/>
+					))}
+				</group>
+			))}
 			<CrashObstacle simRef={session.simRef} />
 			{session.showPoints && session.sim && <CrashMarkers sim={session.sim} />}
 			<CrashParticles session={session} paint={PAINT} textures={textures} />
