@@ -15,27 +15,21 @@
 // copy).
 
 import type { ParsedDxbc } from './dxbc';
+import { DEFAULT_ENGINE_LIGHTING } from './environmentLighting/defaults';
 
 // ---------------------------------------------------------------------------
-// Live debug knobs for the over-bright preview.
+// Live debug knobs.
 //
-// The translated vehicle shaders fold engine-RUNTIME constants (key light,
-// ambient irradiance, fog/white-level) into the output colour, and those values
-// aren't in the bundle — we stand in heuristic defaults. When the result blows
-// out to white it's hard to know which term dominates, so the viewport exposes
-// sliders that SCALE each group plus a final exposure. This object is module-
-// global and mutated in place by the sliders; a translated material's
+// The lighting constants below are what the game would upload (derived from an
+// environment keyframe, see environmentLighting/); these sliders SCALE each
+// group off that base plus a final exposure, for experimenting. This object is
+// module-global and mutated in place by the sliders; a translated material's
 // __updateCb0 reads it every frame (R3F renders continuously), so the knobs are
 // live with no material rebuild. `exposure` multiplies gl_FragColor before the
-// preview tonemap; the others scale their cb0 constant group off its seeded base.
+// preview's display transform; 1 is the game's own exposure.
 // ---------------------------------------------------------------------------
 export type EngineKnobs = { exposure: number; keyLight: number; ambient: number; fog: number };
-// Default exposure < 1: the translated vehicle shaders output HDR for the game's
-// own tonemap, and with the approximated (white) key light the relatively-dark
-// vehicle albedo lands high enough that the Reinhard preview tonemap saturates
-// toward white — flattening the diffuse texture. ~0.5 keeps the HDR in range so
-// the texture detail reads; the exposure slider fine-tunes from there.
-export const DEFAULT_ENGINE_KNOBS: EngineKnobs = { exposure: 0.5, keyLight: 1, ambient: 1, fog: 1 };
+export const DEFAULT_ENGINE_KNOBS: EngineKnobs = { exposure: 1, keyLight: 1, ambient: 1, fog: 1 };
 export const engineKnobs: EngineKnobs = { ...DEFAULT_ENGINE_KNOBS };
 
 /** Which knob group (if any) scales a given engine constant by name. */
@@ -69,34 +63,17 @@ export type CbLayout = {
 };
 
 /**
- * Static defaults for engine-supplied (runtime-bound) cb0 constants, keyed by
- * the RDEF variable name. These are values the game would fill from its
- * per-frame constant register; for a static preview we supply representative
- * stand-ins so a shader that multiplies by, say, `KeyLightColour` or adds
- * `FogColourPlusWhiteLevel` doesn't read zero and collapse to black.
- *
- * Semantics per docs/ShaderConstants_findings.md §4. Matrices (world /
- * view-projection / worldViewProj / shadow) are NOT here — they are bound
- * per-frame from the real camera in `bindEngineMatrices`.
+ * Defaults for engine-supplied (runtime-bound) cb0 constants, keyed by the RDEF
+ * variable name, as the game would fill them for a car draw. The lighting group
+ * (key light, irradiance quadrics, fog, sky reflection, HDR white level) is
+ * derived from the game's start-up daylight keyframe (see environmentLighting/);
+ * a viewport with an environment bundle in its workspace overrides that group.
+ * Values are 4 floats per cb register, so a 4x4 matrix constant has 16.
+ * Matrices bound from the live camera (world / view-projection) are NOT here:
+ * the translated material's __updateCb0 fills them per frame.
  */
-export const ENGINE_CONSTANT_DEFAULTS: Record<string, [number, number, number, number]> = {
-	// --- Lighting (key/directional light) ---
-	KeyLightColour: [1, 1, 1, 1],
-	KeyLightClampedColour: [1, 1, 1, 1],
-	KeyLightSpecularColour: [1, 1, 1, 1],
-	KeyLightDirection: [0.4, -0.7, 0.6, 0],
-	// --- Ambient irradiance (quadric coefficients). Exact encoding unconfirmed;
-	//     a small flat grey keeps surfaces from going pure-black in ambient-only
-	//     regions without overwhelming the key light. Approximate, not spec-exact. ---
-	IrradianceQuadricA: [0.18, 0.19, 0.22, 1],
-	IrradianceQuadricB: [0, 0, 0, 0],
-	// --- Sky / fog / atmosphere ---
-	FogColourPlusWhiteLevel: [0.55, 0.70, 0.85, 1],
-	SkyReflectionColour: [0.55, 0.75, 0.95, 1],
-	ScattCoeffs: [0.4, 0.4, 0.5, 1],
-	g_PerVehicleFog: [0, 0, 0, 1],
-	// --- HDR / tonemap (neutral exposure) ---
-	HDRConstants: [1, 1, 1, 1],
+export const ENGINE_CONSTANT_DEFAULTS: Record<string, readonly number[]> = {
+	...DEFAULT_ENGINE_LIGHTING.carConstants,
 	// --- Shadow map (neutral; preview binds a white shadow texture so the
 	//     compare returns "lit", making the cascade-select moot) ---
 	ShadowMap_Constants: [1, 1, 1, 1],

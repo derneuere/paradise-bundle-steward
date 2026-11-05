@@ -47,10 +47,12 @@ import { buildTextureCatalog, type TextureCatalogEntry } from '@/lib/core/textur
 import { buildMaterialIndex, pickBestMaterial } from '@/lib/core/materialBinding';
 import { buildTranslatedShaderMaterial, type TranslatedMaterial } from '@/lib/core/translatedShaderMaterial';
 import { pickEngineSamplerFallback } from '@/lib/core/engineSamplerFallback';
-import { ENGINE_CONSTANT_DEFAULTS, inferCbLayout, engineKnobs, DEFAULT_ENGINE_KNOBS, type EngineKnobs } from '@/lib/core/shaderEngineConstants';
+import { inferCbLayout, engineKnobs, DEFAULT_ENGINE_KNOBS, type EngineKnobs } from '@/lib/core/shaderEngineConstants';
+import { previewEnvironment } from '@/lib/core/environmentLighting/previewEnvironment';
 import { techniqueProgramOffset, VEHICLE_STREAM_ATTRIBUTES } from '@/lib/core/vehicleShaderInputs';
 import { decodeTexture } from '@/lib/core/texture';
 import { parseMaterialData } from '@/lib/core/material';
+import { parseMaterialShaderConstants, materialConstantsByName, type MaterialShaderConstant } from '@/lib/core/materialShaderConstants';
 import {
 	type DecodedMesh,
 	type DecodedRenderable,
@@ -178,10 +180,10 @@ function VehicleColorPicker({
 // Engine-constant debug knobs
 //
 // The translated vehicle shaders fold engine-RUNTIME constants (key light,
-// ambient irradiance, fog/white-level) into the output, and those values aren't
-// in the bundle — we stand in heuristic defaults, which tends to blow the paint
-// out to white. These sliders SCALE each group (and a final exposure) live so
-// you can see which term dominates. They mutate the module-global `engineKnobs`,
+// ambient irradiance, fog/white-level) into the output; the preview derives
+// them from an environment keyframe the way the game does. These sliders SCALE
+// each group (and a final exposure) live, for experimenting with which term
+// dominates. They mutate the module-global `engineKnobs`,
 // which a translated material's __updateCb0 reads every frame — no rebuild.
 // =============================================================================
 
@@ -243,11 +245,6 @@ function SceneEnvironment() {
 // authored TextureStates instead of the heuristic Window/Chrome/Glass
 // guesses below.
 // =============================================================================
-
-// Engine-supplied cb0 defaults are shared in @/lib/core/shaderEngineConstants
-// (ENGINE_CONSTANT_DEFAULTS) so the viewport, ShaderPage and the harness stay
-// in sync.
-const TRANSLATED_HEURISTIC_DEFAULTS = ENGINE_CONSTANT_DEFAULTS;
 
 type Source = { source: string; bundle: ParsedBundle; arrayBuffer: ArrayBuffer; debug: any[] };
 
@@ -361,7 +358,7 @@ function RenderableMeshes({
 		}
 		const textureCatalog = buildTextureCatalog(sources);
 		const materialIndex = buildMaterialIndex(sources, textureCatalog);
-		return { sources, textureCatalog, materialIndex };
+		return { sources, textureCatalog, materialIndex, environment: previewEnvironment(sources.map((s) => ({ bundle: s.bundle, arrayBuffer: s.arrayBuffer }))) };
 	}, [useTranslatedShaders, loadedBundle, originalArrayBuffer, debugResources, decoded?.textureBundles]);
 	const baseMaterial = useMemo(
 		() => {
@@ -449,9 +446,10 @@ function RenderableMeshes({
 	const translatedMaterialMap = useMemo(() => {
 		const out = new Map<string, TranslatedMaterial | null>();
 		if (!translatedSetup) return out;
-		const { sources, textureCatalog, materialIndex } = translatedSetup;
+		const { sources, textureCatalog, materialIndex, environment } = translatedSetup;
 
 		const shaderIdByMat = new Map<string, bigint | null>();
+		const constantsByMat = new Map<string, MaterialShaderConstant[]>();
 		const translationCache = new Map<string, ReturnType<typeof translateShaderById>>();
 		const texCache = new Map<string, THREE.DataTexture | null>();
 		const decodeTexCached = (entry: TextureCatalogEntry) => {
@@ -470,6 +468,7 @@ function RenderableMeshes({
 					try {
 						const block0 = getResourceBlocks(s.arrayBuffer, s.bundle, res as ResourceEntry)[0];
 						if (block0) sid = parseMaterialData(block0).shaderImport.id;
+						if (block0) constantsByMat.set(matKey, parseMaterialShaderConstants(block0));
 					} catch { /* fall through */ }
 					break outer;
 				}
@@ -513,10 +512,12 @@ function RenderableMeshes({
 					layout,
 					materialBinding: matBinding ?? null,
 					textureCatalog,
-					heuristicDefaults: TRANSLATED_HEURISTIC_DEFAULTS,
+					heuristicDefaults: environment.constants,
+					materialConstants: materialConstantsByName(constantsByMat.get(matKey) ?? [], translated.constants),
 					pickFallbackTexture: pickEngineSamplerFallback,
 					decodedToDataTexture: decodeTexCached,
-					applyPreviewTonemap: true,  // vehicle shaders run HDR; without an engine tonemap, paint-gloss saturates to white
+					displayWhiteLevel: environment.lighting.whiteLevel,
+					pickFallbackCubeTexture: () => environment.reflectionCube,
 					side: THREE.DoubleSide,
 					vertexAttributes: new Set(streamsOf(m)),
 				}));

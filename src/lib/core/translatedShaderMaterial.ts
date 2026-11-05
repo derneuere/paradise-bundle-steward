@@ -30,6 +30,7 @@ import type { MaterialBinding } from './materialBinding';
 import type { ParsedShaderConstant } from './shader';
 import { type CbLayout, seedSkinningPalettes, engineKnobs, knobGroupForConstant, type EngineKnobs } from './shaderEngineConstants';
 import { bindVertexStreams, verletRange, writeVerletOffsets } from './vehicleShaderInputs';
+import { defaultReflectionCube } from './environmentLighting/reflectionCube';
 
 export type BuildOptions = {
 	vsSource: string;
@@ -43,7 +44,10 @@ export type BuildOptions = {
 	textureCatalog: TextureCatalogEntry[];
 	/** Heuristic defaults for runtime-bound cb0 variables. Module-level so
 	 *  callers (ShaderPage / RenderableViewport) share one table. */
-	heuristicDefaults: Record<string, [number, number, number, number]>;
+	heuristicDefaults: Record<string, readonly number[]>;
+	/** The Material's own constant values by name (materialShaderConstants);
+	 *  they override the Shader's baked defaults. */
+	materialConstants?: Readonly<Record<string, readonly number[]>>;
 	/** Returns a procedural fallback `THREE.DataTexture` for a sampler whose
 	 *  name didn't match anything in the catalog (e.g. white for shadow,
 	 *  sky-blue gradient for reflection). */
@@ -57,6 +61,13 @@ export type BuildOptions = {
 	 *  HDR negatives are common; the Renderable viewport disables it so a
 	 *  vehicle paint colour shows its real albedo, not a tonemapped one. */
 	applyPreviewTonemap?: boolean;
+	/** When set, show the output the way the game's post-process does:
+	 *  colour × exposure / white level, clamped, instead of the Reinhard preview
+	 *  tonemap. The lighting constants are pre-scaled by this white level. */
+	displayWhiteLevel?: number;
+	/** Cube texture for a cube sampler the Material didn't bind (the engine's
+	 *  reflection map); defaults to the retail-daylight reflection stand-in. */
+	pickFallbackCubeTexture?: (samplerName: string) => THREE.CubeTexture | null;
 	/** Side flag passed straight through to `THREE.ShaderMaterial`. */
 	side?: THREE.Side;
 	/** Forwarded to `ShaderMaterial.transparent`. */
@@ -77,8 +88,9 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		vsSource, psSource, vsParsed, psParsed,
 		shaderName, shaderConstants, layout,
 		materialBinding, textureCatalog,
-		heuristicDefaults, pickFallbackTexture, decodedToDataTexture,
-		applyPreviewTonemap = false,
+		heuristicDefaults, pickFallbackTexture, decodedToDataTexture, materialConstants,
+		applyPreviewTonemap = false, displayWhiteLevel,
+		pickFallbackCubeTexture = defaultReflectionCube,
 		side = THREE.DoubleSide, transparent = false,
 		vertexAttributes = new Set<string>(),
 	} = opts;
@@ -91,12 +103,15 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 	// standard `position` / `normal` / `uv` attributes.
 	const finalVs = attributeAliasPrefix(harmonizedVs) + bindVertexStreams(harmonizedVs, vertexAttributes);
 
-	// Optional preview safety net + exposure-scaled Reinhard tonemap on
-	// gl_FragColor. `uExposure` is driven live by the viewport's exposure knob.
-	const finalPs = applyPreviewTonemap
+	// Optional preview safety net + exposure-scaled display transform on
+	// gl_FragColor (the game's, or a Reinhard tonemap). `uExposure` is driven
+	// live by the viewport's exposure knob.
+	const outputSuffix = displayWhiteLevel != null ? GAME_DISPLAY_SUFFIX : applyPreviewTonemap ? PREVIEW_TONEMAP_SUFFIX : null;
+	const exposureScale = displayWhiteLevel != null ? 1 / displayWhiteLevel : 1;
+	const finalPs = outputSuffix
 		? harmonizedPs
 			.replace(/(precision\s+highp\s+float;\s*)/, '$1uniform float uExposure;\n')
-			.replace(/\}\s*$/, PREVIEW_TONEMAP_SUFFIX)
+			.replace(/\}\s*$/, outputSuffix)
 		: harmonizedPs;
 
 	const m = new THREE.ShaderMaterial({
@@ -106,7 +121,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		side,
 		transparent,
 	}) as TranslatedMaterial;
-	if (applyPreviewTonemap) m.uniforms.uExposure = { value: engineKnobs.exposure };
+	if (outputSuffix) m.uniforms.uExposure = { value: engineKnobs.exposure * exposureScale };
 
 	// Allocate zeroed cb arrays for every `uniform vec4 cbN[...]` declared.
 	const cbDecls = Array.from(finalPs.matchAll(/uniform vec4 (cb\d+)\[(\d+)\];/g)).concat(
@@ -153,13 +168,24 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 				// adds a constant offset to every vertex through the skin/verlet blend,
 				// so the part renders shifted. Leave it zeroed for the rest-pose preview.
 				if (/verlet/i.test(v.name)) continue;
+				// Matrix-sized values (the irradiance quadrics) span several registers.
+				const writeRows = (src: readonly number[]) => {
+					for (let row = 0; row * 4 < Math.min(src.length, Math.ceil(v.size / 4)); row++) {
+						writeScalars(arr, slot + row, row === 0 ? comp : 0, src.slice(row * 4), row === 0 ? nFloats : 4);
+					}
+				};
+				const fromMaterial = materialConstants?.[v.name];
+				if (fromMaterial) {
+					writeRows(fromMaterial);
+					continue;
+				}
 				const baked = shaderConstants.find((c) => c.name === v.name && c.instanceData);
 				if (baked?.instanceData) {
 					writeScalars(arr, slot, comp, baked.instanceData, nFloats);
 					continue;
 				}
 				const hd = heuristicDefaults[v.name];
-				if (hd) writeScalars(arr, slot, comp, hd, nFloats);
+				if (hd) writeRows(hd);
 			}
 		}
 	};
@@ -279,7 +305,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 				const s = engineKnobs[k.group];
 				cb0[k.slot].set(k.base.x * s, k.base.y * s, k.base.z * s, k.base.w * s);
 			}
-			if (m.uniforms.uExposure) m.uniforms.uExposure.value = engineKnobs.exposure;
+			if (m.uniforms.uExposure) m.uniforms.uExposure.value = engineKnobs.exposure * exposureScale;
 			if (verlet) writeVerletOffsets(cb0, verlet, verletRows ?? null);
 		};
 	}
@@ -296,6 +322,10 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		let tex: THREE.DataTexture | null = null;
 		if (match) tex = decodedToDataTexture(match);
 		m.uniforms[name] = { value: tex ?? pickFallbackTexture(name) };
+	}
+
+	for (const [, name] of finalPs.matchAll(/uniform samplerCube ([A-Za-z0-9_]+);/g)) {
+		if (!m.uniforms[name]) m.uniforms[name] = { value: pickFallbackCubeTexture(name) };
 	}
 
 	return m;
@@ -327,6 +357,17 @@ function attributeAliasPrefix(vs: string): string {
 	if (/a_TEXCOORD0/.test(vs)) uses.push('#define a_TEXCOORD0 uv');
 	return uses.join('\n') + (uses.length ? '\n' : '');
 }
+
+// The game's post-process scales the scene by 1 / white level into an 8-bit,
+// non-sRGB target: no tonemap curve, just the clamp.
+const GAME_DISPLAY_SUFFIX = `
+	{
+		vec3 _c = gl_FragColor.rgb * uExposure;
+		bool _nan = (_c.r != _c.r) || (_c.g != _c.g) || (_c.b != _c.b);
+		if (_nan) gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+		else gl_FragColor = vec4(clamp(_c, 0.0, 1.0), 1.0);
+	}
+}`;
 
 const PREVIEW_TONEMAP_SUFFIX = `
 	{

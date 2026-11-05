@@ -56,7 +56,18 @@ describe('ENGINE_CONSTANT_DEFAULTS', () => {
 			'ShadowMap_Constants', 'ScattCoeffs', 'g_paintColour',
 		]) {
 			expect(ENGINE_CONSTANT_DEFAULTS[name], name).toBeDefined();
-			expect(ENGINE_CONSTANT_DEFAULTS[name]).toHaveLength(4);
+			// One register (4 floats) each, except the 4x4 irradiance quadrics.
+			expect(ENGINE_CONSTANT_DEFAULTS[name]).toHaveLength(name.startsWith('IrradianceQuadric') ? 16 : 4);
 		}
+	});
+
+	it('carries the derived daylight, pre-scaled by the 0.5 white level', () => {
+		expect(ENGINE_CONSTANT_DEFAULTS.HDRConstants).toEqual([0.5, 2, 0, 0]);
+		expect(ENGINE_CONSTANT_DEFAULTS.FogColourPlusWhiteLevel[3]).toBe(0.5);
+		// No vehicle fog at preview distances.
+		expect(ENGINE_CONSTANT_DEFAULTS.g_PerVehicleFog).toEqual([0, 0, 0, 1]);
+		const [x, y, z] = ENGINE_CONSTANT_DEFAULTS.KeyLightDirection;
+		expect(Math.hypot(x, y, z)).toBeCloseTo(1, 6);
+		expect(y).toBeLessThan(0);
 	});
 });
