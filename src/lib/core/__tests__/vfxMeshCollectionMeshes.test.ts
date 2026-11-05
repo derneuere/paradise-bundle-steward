@@ -1,7 +1,7 @@
 // decodeVFXMeshes: the 32 transform slots of a debris mesh collection, split
 // back into the distinct meshes the game draws one piece each with.
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -112,7 +112,10 @@ describe.skipIf(!fs.existsSync(BUNDLE))('decodeVFXMeshes (example/PARTICLES.BUND
 			return { name: findDebugResourceById(dbg, r.resourceId.low.toString(16))?.name, model, set: decodeVFXMeshes(model, body!) };
 		});
 	};
-	const all = load();
+	// Loaded in beforeAll: a skipped describe still runs its body, and the
+	// fixture is absent in checkouts without the untracked example/ files.
+	let all: ReturnType<typeof load> = [];
+	beforeAll(() => { all = load(); });
 
 	it('finds 13 / 8 / 3 distinct meshes cycling through the 32 slots, using every vertex and index', () => {
 		expect(all.map((c) => c.name)).toEqual(['highres_debris_02.rf3', 'lowres_debris.rf3', 'Glass_debris.rf3']);
