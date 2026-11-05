@@ -39,6 +39,8 @@ import { driveTimeBox, updateDeformedBox } from './sensors';
 import { sub, type SimState } from './state';
 import { AbsorptionSet, STEP } from './tables';
 import { validateWorldContacts } from './validate';
+import { initialLooseState, updateSpinningDetachment } from './parts';
+import { updateWheelTags } from './wheelDetach';
 
 export { AbsorptionSet } from './tables';
 export type { Driver } from './absorption';
@@ -91,6 +93,7 @@ function freshState(spec: ParsedDeformationSpec, opts: CrashSimOptions): SimStat
 		driveBox: { min: [0, 0, 0], max: [0, 0, 0] },
 		partState: [], hinges: new Map(), free: new Map(), physicalParts: 0,
 		attachedExhausts: spec.ikParts.filter((p) => p.partType === 84 || p.partType === 85).length,
+		...initialLooseState(),
 		wheelToSensor: [],
 		potential: [], records: [], stored: [], disp: [],
 		obstacle: null, run: null, deformedThisStep: false, rows: new Float32Array(512), time: 0,
@@ -145,10 +148,12 @@ export function contactHooks(s: SimState): StepHooks {
 		crashArmContacts: () => crashArmContacts(s),
 		updateContacts: (_v, dt) => {
 			updateContacts(s, dt);
+			updateSpinningDetachment(s, dt);
 			if (!s.deformedThisStep) return;
 			checkForDetachment(s);
 			updateIK(s);
 			updateSkinRows(s);
+			updateWheelTags(s);
 			updateGlass(s);
 			updateDeformedBox(s);
 		},

@@ -35,6 +35,12 @@ export type WheelState = {
 	massOnWheel: number;
 	bodyPointVel: Vec3;
 	spring: Spring;
+	// A wheel the crush has bent out of line is twisted: it no longer turns
+	// (its spin is held at 0) and leans by twistAmount radians. A twisted wheel
+	// pushed further at speed comes off the car (detached) and stops being a
+	// wheel: no road contact, spring or tyre forces.
+	twisted: boolean;
+	twistAmount: number;
 	detached: boolean;
 };
 
@@ -86,7 +92,7 @@ function createWheel(p: VehicleParams, i: number): WheelState {
 		onGround: false, wasOnGround: false, closeToGround: false, lineValid: false, hasTraction: false, broken: false,
 		massOnWheel: 0, bodyPointVel: v0(),
 		spring: { k: (p.mass * w.scaler * GRAVITY) / p.susp.restDisp, c: p.susp.dampening, m: w.scaler * p.mass, pos: 0, vel: 0, acc: 0, ext: 0 },
-		detached: false,
+		twisted: false, twistAmount: 0, detached: false,
 	};
 }
 

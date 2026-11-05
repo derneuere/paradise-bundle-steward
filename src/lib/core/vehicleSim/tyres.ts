@@ -39,7 +39,7 @@ export function applyFrictionReaction(w: WheelState, radius: number, torque: num
 	const roll = radius !== 0 ? roadLongSpeed / radius : 0;
 	let next = w.omega + torque * w.invInertia * dt;
 	if ((w.omega - roll >= 0) !== (next - roll >= 0)) next = roll;
-	w.omega = next;
+	w.omega = w.twisted ? 0 : next;
 }
 
 type Solve = { lng: Vec3; lat: Vec3; vl: number; fl: number; ft: number; cone: boolean; enabled: boolean };

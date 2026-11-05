@@ -75,6 +75,7 @@ function brakeFactor(v: VehicleState, ctl: Controls, dt: number): number {
 // Integrates the stored torque, then brakes (a wheel whose angular momentum
 // the brake can absorb stops dead and takes no tyre torque this step), and
 // clamps to the gear's redline. Gas released lets the wheel freewheel down.
+// A twisted wheel does not turn at all.
 export function wheelUpdateVelocity(w: WheelState, dt: number, maxOmega: number, factor: number, gasReleased: boolean, inReverse: boolean): void {
 	const cand = Math.min(Math.max(w.omega + w.torque * dt * w.invInertia, -SPIN_CLAMP), SPIN_CLAMP);
 	const sign = cand > 0 ? 1 : cand >= 0 ? 0 : -1;
@@ -83,7 +84,7 @@ export function wheelUpdateVelocity(w: WheelState, dt: number, maxOmega: number,
 	let res = keep ? sign * Math.max(Math.abs(cand) - decel * dt * w.invInertia, 0) : 0;
 	if (!inReverse && res < 0) res = 0;
 	res = maxOmega >= 0 ? Math.min(res, maxOmega) : Math.max(res, maxOmega);
-	w.omega = res;
+	w.omega = w.twisted ? 0 : res;
 	w.torque = 0;
 	if (!(keep || Math.abs(cand) < EPS)) { w.inertia = 0; w.invInertia = 0; }
 }

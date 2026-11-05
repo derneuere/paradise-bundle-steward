@@ -46,9 +46,12 @@ function updateSprings(v: VehicleState, dt: number): void {
 		else airborneMass += M * P.wheels[i].scaler;
 	});
 	const invShare = 1 / groundedShare;
+	// The game walks the mass scalers with a cursor that a detached wheel does
+	// not advance, so every wheel after one takes the previous wheel's share.
+	let scaler = 0;
 	v.wheels.forEach((w, i) => {
 		if (w.detached) return;
-		const s = w.spring, share = P.wheels[i].scaler;
+		const s = w.spring, share = P.wheels[scaler++].scaler;
 		s.k = (M * share * GRAVITY) / rest;
 		if (w.onGround) {
 			// Airborne corners' weight is spread over the grounded ones.

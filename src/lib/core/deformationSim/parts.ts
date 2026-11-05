@@ -1,22 +1,34 @@
 // Panels leaving the car: the detachment test run before every IK step, the
-// hinge joint that swings a loosened panel, and free-flying detached parts.
-// A hinged panel stays in the car's frame; a part knocked clean off leaves it
-// and flies and lands in the world.
+// joint test for panels already hanging on a hinge, and the random hinging a
+// spinning wreck causes. A hinged panel stays in the car's frame
+// (hinges.ts); a part knocked clean off is a loose body in the world
+// (freeParts.ts). At most 20 parts per car come loose, hinged ones included.
 
 import type { Vec3 } from '../deformationSpec';
-import { rotationMatrix, toBodyDir, velocityAt } from '../vehicleSim/body';
-import { meshToWorld } from './pose';
-import { add, dot, length, normalize, scale, sub, PartState, type SimState } from './state';
-import { GROUND_Y } from './world';
+import { rotationMatrix, velocityAt } from '../vehicleSim/body';
+import { launchVelocity, makeFreePart } from './freeParts';
+import { breakHinge, jointBreaks, peakImpulse } from './hinges';
+import { partBox } from './partBox';
+import { meshShift, meshToWorld } from './pose';
+import { RANDOM_SEED, randomUInt } from './random';
+import { add, sub, PartState, type SimState } from './state';
 import {
-	ANCHOR_CLAMP, GRAVITY, JOINT_BOUNCE, JOINT_RELAX, MAX_IMPULSE_FOR_DETACHMENT, MAX_IMPULSE_FOR_DETACHMENT_TOUGH,
-	MAX_PHYSICAL_PARTS, MIN_IMPULSE_FOR_DETACHMENT,
+	AbsorptionSet, MAX_IMPULSE_FOR_DETACHMENT, MAX_IMPULSE_FOR_DETACHMENT_TOUGH, MAX_PHYSICAL_PARTS,
+	MIN_IMPULSE_FOR_DETACHMENT, TOUGHENED_PARTS,
 } from './tables';
 
+export { hingePoint, updateHinges } from './hinges';
+export { updateFreeParts } from './freeParts';
+export { jointRotation, poseMatrix } from './rotation';
+
 const NEVER_DETACH_SQUARED = 9995;
-const TOUGHENED = new Set([1, 2, 26, 27, 28, 29, 108, 109, 110, 111, 112, 113, 114, 115]);
 const BANDED_TYPES = new Set([1, 2, 3]);
 const EXHAUSTS = new Set([84, 85]);
+// The spin sum (|wx| + |wy| + |wz| integrated while crashing, losing 1 % a
+// step) at which a spinning wreck hinges one more panel: about 4.9 rad/s held.
+const SPIN_SUM_FOR_DETACHMENT = 8;
+const SPIN_SUM_DECAY = 0.99;
+const SPIN_PART_DRAWS = 20;
 
 export function initialPartState(s: SimState, p: number): PartState {
 	const part = s.spec.ikParts[p];
@@ -24,36 +36,59 @@ export function initialPartState(s: SimState, p: number): PartState {
 	return tags.some((t) => t.fDetachThresholdSquared < NEVER_DETACH_SQUARED) ? PartState.AttachedIK : PartState.NonDetachable;
 }
 
+// The loose-part bookkeeping a fresh car starts with.
+export const initialLooseState = (): Pick<SimState, 'spinSum' | 'random' | 'wheelTwistLimit' | 'brokenWheels' | 'looseWheels' | 'prevCar'> => ({
+	spinSum: 0, random: RANDOM_SEED, wheelTwistLimit: [0, 0, 0, 0], brokenWheels: 0, looseWheels: [], prevCar: null,
+});
+
 // A part comes loose once one of its tag points has been pushed further than
 // its detach threshold. If it has a jointed tag it hinges on the least
 // deformed one, otherwise it flies off. Bumpers, the bonnet and parts with
 // no joint also need the impulse that hit them to sit in the detach band.
+// A hinged panel is asked whether its joint breaks (unless it is the car's
+// last exhaust). An invincible car sheds nothing.
 export function checkForDetachment(s: SimState): void {
+	if (s.physicalParts >= MAX_PHYSICAL_PARTS || s.absorptionSet === AbsorptionSet.Invincible || !s.spec.ikParts.length) return;
 	s.spec.ikParts.forEach((part, p) => {
+		if (s.partState[p] === PartState.Hinged) {
+			if (EXHAUSTS.has(part.partType) && s.attachedExhausts <= 1) return;
+			if (!jointBreaks(s, p)) return;
+			breakHinge(s, p);
+			s.spinSum = 0;
+			s.partState[p] = PartState.Detached;
+			if (EXHAUSTS.has(part.partType)) s.attachedExhausts--;
+			return;
+		}
 		if (s.partState[p] !== PartState.AttachedIK) return;
-		let largest = -Infinity, smallest = Infinity, candidate = -1, peak = 0;
+		let largest = -Infinity, smallest = Infinity, candidate = -1;
 		for (let k = 0; k < part.numberOfTagPoints; k++) {
 			const i = part.startIndexOfTagPoints + k;
 			const spec = s.spec.tagPoints[i];
-			peak = Math.max(peak, s.latch[spec.deformationSensorA] ?? 0, s.latch[spec.deformationSensorB] ?? 0);
 			const d = sub(s.tags[i], spec.initialPosition);
-			const excess = dot(d, d) - spec.fDetachThresholdSquared;
+			const excess = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - spec.fDetachThresholdSquared;
 			largest = Math.max(largest, excess);
 			if (excess < smallest && spec.jointIndex !== -1) { smallest = excess; candidate = k; }
 		}
 		if (largest <= 0) return;
 		if (candidate === -1 || BANDED_TYPES.has(part.partType)) {
-			const max = TOUGHENED.has(part.partType) ? MAX_IMPULSE_FOR_DETACHMENT_TOUGH : MAX_IMPULSE_FOR_DETACHMENT;
+			const peak = peakImpulse(s, p);
+			const max = TOUGHENED_PARTS.has(part.partType) ? MAX_IMPULSE_FOR_DETACHMENT_TOUGH : MAX_IMPULSE_FOR_DETACHMENT;
 			if (!(MIN_IMPULSE_FOR_DETACHMENT <= peak && peak <= max)) return;
 		}
 		detachPart(s, p, candidate === -1 ? -1 : part.startIndexOfTagPoints + candidate);
 	});
 }
 
-function detachPart(s: SimState, p: number, hingeTag: number): void {
+// Hinges the part on `hingeTag` (a spec tag index), or with -1 knocks it off.
+// A knocked-off part leaves with the car's velocity plus the car's spin
+// across the arm to the part's origin, and the car's spin. A new hinge starts
+// closed and still.
+export function detachPart(s: SimState, p: number, hingeTag: number): void {
 	const part = s.spec.ikParts[p];
 	const hinge = hingeTag !== -1;
-	if (part.partGraphics === -1 || s.physicalParts >= MAX_PHYSICAL_PARTS) return;
+	if (s.physicalParts >= MAX_PHYSICAL_PARTS) return;
+	s.spinSum = 0;
+	if (part.partGraphics === -1) return;
 	if (s.attachedExhausts <= 1 && EXHAUSTS.has(part.partType) && !hinge) return;
 	s.physicalParts++;
 	const origin: Vec3 = [part.graphicsTransform[3][0], part.graphicsTransform[3][1], part.graphicsTransform[3][2]];
@@ -61,84 +96,41 @@ function detachPart(s: SimState, p: number, hingeTag: number): void {
 	s.events.parts.push({ part: p, gfx: part.partGraphics, partType: part.partType, state: hinge ? 'hinged' : 'detached', pos, vel });
 	if (hinge) {
 		s.partState[p] = PartState.Hinged;
-		s.hinges.set(p, { joint: s.spec.tagPoints[hingeTag].jointIndex, tag: hingeTag, rot: 0, vel: 0, storedVel: carLocalVelocity(s) });
+		s.hinges.set(p, {
+			joint: s.spec.tagPoints[hingeTag].jointIndex, tag: hingeTag, rot: 0, vel: 0, storedVel: [0, 0, 0],
+			pen: [0, 0, 0], contact: null, limitStress: 0,
+		});
 		return;
 	}
 	s.partState[p] = PartState.Detached;
 	if (EXHAUSTS.has(part.partType)) s.attachedExhausts--;
-	s.free.set(p, { pos, origin, vel, spin: [0, 0, 0], rotation: rotationMatrix(s.body) });
+	const box = partBox(s, p);
+	const arm = sub(add(origin, meshShift(s.spec)), s.com);
+	s.free.set(p, makeFreePart(box, rotationMatrix(s.body), meshToWorld(s, box.centre), launchVelocity(s.body.v, s.body.w, arm), [...s.body.w] as Vec3));
 }
 
-// Right-handed rotation by `angle` about `axis` (row-major 3x3). Joint
-// angles run from 0 (closed) to -maxJointAngle (fully open); with this sign a
-// door on a -X hinge axis lifts its rear edge, i.e. opens upward.
-export function jointRotation(axis: Vec3, angle: number): number[] {
-	const [x, y, z] = normalize(axis);
-	const c = Math.cos(angle), s = Math.sin(angle), t = 1 - c;
-	return [
-		t * x * x + c, t * x * y - s * z, t * x * z + s * y,
-		t * x * y + s * z, t * y * y + c, t * y * z - s * x,
-		t * x * z - s * y, t * y * z + s * x, t * z * z + c,
-	];
-}
-export const mul3 = (m: number[], v: Vec3): Vec3 => [
-	m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
-];
-
-// The hinge point follows the dent of its tag point. The panel is driven by
-// the car's own motion along its lever (the defaultDirection) and by gravity,
-// bounces softly off its two stops (closed at 0, fully open at -maxAngle)
-// and loses 2.5 % of its swing speed per step.
-export function hingePoint(s: SimState, p: number): Vec3 | null {
-	const h = s.hinges.get(p);
-	const js = h && s.spec.ikParts[p].jointSpecs[h.joint];
-	if (!h || !js) return null;
-	const tag = s.spec.tagPoints[h.tag];
-	return add([js.position[0], js.position[1], js.position[2]], sub(s.tags[h.tag], tag.initialPosition));
-}
-
-const carLocalVelocity = (s: SimState): Vec3 => toBodyDir(s.body, s.body.v);
-
-export function updateHinges(s: SimState, dt: number): void {
-	const carVel = carLocalVelocity(s);
-	for (const [p, h] of s.hinges) {
-		const js = s.spec.ikParts[p].jointSpecs[h.joint];
-		if (!js) continue;
-		const dW = mul3(jointRotation([js.axis[0], js.axis[1], js.axis[2]], h.rot), [js.defaultDirection[0], js.defaultDirection[1], js.defaultDirection[2]]);
-		const along = dot(carVel, dW);
-		const anchor = Math.min(Math.max(along, -ANCHOR_CLAMP), ANCHOR_CLAMP);
-		const accel = anchor * anchor + GRAVITY * dW[1] + (along - dot(h.storedVel, dW)) / dt;
-		h.vel += accel * dt;
-		if (h.rot > 0 || h.rot < -js.maxJointAngle) h.vel *= JOINT_BOUNCE;
-		h.rot += h.vel * dt;
-		h.vel *= JOINT_RELAX;
-		h.rot = Math.min(Math.max(h.rot, -js.maxJointAngle), 0);
-		h.storedVel = carVel;
+// The (k+1)-th part still attached that has joints, or -1.
+function attachedJointedPart(s: SimState, k: number): number {
+	for (let p = 0; p < s.spec.ikParts.length; p++) {
+		if (s.partState[p] === PartState.AttachedIK && s.spec.ikParts[p].jointSpecs.length && k-- === 0) return p;
 	}
+	return -1;
 }
 
-export function updateFreeParts(s: SimState, dt: number, groundY = GROUND_Y): void {
-	for (const f of s.free.values()) {
-		if (f.pos[1] <= groundY && length(f.vel) < 1e-3) continue;
-		f.vel = add(f.vel, [0, -GRAVITY * dt, 0]);
-		f.pos = add(f.pos, scale(f.vel, dt));
-		if (length(f.spin) > 0) {
-			const r = jointRotation(f.spin, -length(f.spin) * dt);
-			f.rotation = mulMat3(r, f.rotation);
-		}
-		if (f.pos[1] < groundY) { f.pos[1] = groundY; f.vel = [0, 0, 0]; f.spin = [0, 0, 0]; }
+// While crashing, the car's spin adds up; past the threshold a random
+// attached jointed panel is hinged on a random joint, and the sum restarts.
+export function updateSpinningDetachment(s: SimState, dt: number): void {
+	if (!s.vehicle.crashing) { s.spinSum = 0; return; }
+	const w = s.body.w;
+	s.spinSum = (s.spinSum + (Math.abs(w[0]) + Math.abs(w[1]) + Math.abs(w[2])) * dt) * SPIN_SUM_DECAY ** (dt * 60);
+	if (!(s.spinSum > SPIN_SUM_FOR_DETACHMENT)) return;
+	const p = attachedJointedPart(s, randomUInt(s) % SPIN_PART_DRAWS);
+	if (p === -1) return;
+	const part = s.spec.ikParts[p];
+	const joint = randomUInt(s) % part.jointSpecs.length;
+	for (let k = 0; k < part.numberOfTagPoints; k++) {
+		const i = part.startIndexOfTagPoints + k;
+		if (s.spec.tagPoints[i].jointIndex === joint) { detachPart(s, p, i); break; }
 	}
-}
-
-function mulMat3(a: number[], b: number[]): number[] {
-	const o = new Array(9).fill(0);
-	for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) o[r * 3 + c] += a[r * 3 + k] * b[k * 3 + c];
-	return o;
-}
-
-// Column-major 4x4 (three.js order): rotate by `rot` (row-major 3x3) about
-// `pivot`, then translate by `move`.
-export function poseMatrix(rot: number[], pivot: Vec3, move: Vec3 = [0, 0, 0]): number[] {
-	const t = sub(add(pivot, move), mul3(rot, pivot));
-	return [rot[0], rot[3], rot[6], 0, rot[1], rot[4], rot[7], 0, rot[2], rot[5], rot[8], 0, t[0], t[1], t[2], 1];
+	s.spinSum = 0;
 }
