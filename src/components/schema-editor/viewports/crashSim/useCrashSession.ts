@@ -7,7 +7,7 @@
 import { useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { ParsedAttribSys } from '@/lib/core/attribSys';
 import {
-	AbsorptionSet, applyImpact, createCrashSim, resetCrashSim, setAbsorptionSet, worldDirToMesh, worldToMesh, type CrashSim,
+	applyImpact, createCrashSim, resetCrashSim, setDriver, worldDirToMesh, worldToMesh, type CrashSim, type Driver,
 } from '@/lib/core/deformationSim';
 import type { ParsedDeformationSpec, Vec3 } from '@/lib/core/deformationSpec';
 import type { CrashInput } from '@/lib/core/vehicleSim';
@@ -30,11 +30,13 @@ export type CrashSession = {
 	obstacle: Obstacle; setObstacle: (v: Obstacle) => void;
 	// Degrees the obstacle's face is turned off square to the car's travel.
 	glance: number; setGlance: (v: number) => void;
-	// Crash on the first obstacle contact, whatever the game's crash test says.
+	// The game's crash-speed thresholds lowered to 0 (its debug menu's knob).
 	forceCrash: boolean; toggleForceCrash: () => void;
 	// The pedals once the car has met the obstacle.
 	crashInput: CrashInput; setCrashInput: (v: CrashInput) => void;
-	absorption: AbsorptionSet; setAbsorption: (v: AbsorptionSet) => void;
+	// Who drives the car; the game picks the absorption table from it and the
+	// crash, step by step.
+	driver: Driver; setDriver: (v: Driver) => void;
 	showPoints: boolean; togglePoints: () => void;
 	showHeat: boolean; toggleHeat: () => void;
 	flat: boolean; toggleFlat: () => void;
@@ -73,7 +75,7 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 	const [glance, setGlance] = useState(0);
 	const [forceCrash, setForceCrash] = useState(false);
 	const [crashInput, setCrashInput] = useState<CrashInput>('release');
-	const [absorption, setAbsorption] = useState(AbsorptionSet.Normal);
+	const [driver, setDriverState] = useState<Driver>('player');
 	const [showPoints, setShowPoints] = useState(false);
 	const [showHeat, setShowHeat] = useState(false);
 	const [flat, setFlat] = useState(opts.flat);
@@ -92,7 +94,7 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 
 	const hit = (pointMesh: Vec3, normalMesh: Vec3) => {
 		if (!sim) return;
-		setAbsorptionSet(sim, absorption);
+		setDriver(sim, driver);
 		applyImpact(sim, {
 			pointMesh, direction: [-normalMesh[0], -normalMesh[1], -normalMesh[2]], speed: speedKmh * KMH,
 			obstacle, glance, forceCrash, crashInput,
@@ -104,7 +106,7 @@ export function useCrashSession(spec: ParsedDeformationSpec | null, vault: unkno
 		sim, simRef, rows, heat,
 		speedKmh, setSpeedKmh, obstacle, setObstacle, glance, setGlance,
 		forceCrash, toggleForceCrash: () => setForceCrash((f) => !f), crashInput, setCrashInput,
-		absorption, setAbsorption,
+		driver, setDriver: setDriverState,
 		showPoints, togglePoints: () => setShowPoints((s) => !s),
 		showHeat, toggleHeat: () => setShowHeat((s) => !s),
 		flat, toggleFlat: () => setFlat((s) => !s),

@@ -123,7 +123,7 @@ describe('running', () => {
 		const c = sim();
 		applyImpact(c, { pointMesh: NOSE, direction: IN_NOSE, speed: 20, forceCrash: true });
 		stepUntilHit(c);
-		expect(c.state.run!.crash).toBe('forced');
+		expect(c.state.run!.crash).toBe('headOn');
 		expect(c.state.vehicle.crashing).toBe(true);
 	});
 

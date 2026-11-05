@@ -8,8 +8,8 @@
 // car rolled past 80 degrees onto upward-facing ground. Anything less is a
 // knock: the car keeps driving and the contact impulse is quartered (see
 // applyContactImpulse). Those thresholds are high (about 91 mph straight
-// into a wall), so callers may force a crash instead, as the game's own
-// debug "force crash" does.
+// into a wall); the game's debug menu lowers them (down to 0), and even then
+// a crash still needs one of the three rules' geometry.
 //
 // Physics never ends a crash. The game's crash camera does: 4 s, extended to
 // 1 s left each time it is about to run out while the car is still moving,
@@ -22,9 +22,8 @@ import { MPS_TO_MPH, type CrashClock, type VehicleState } from './vehicleState';
 
 // A world contact as the arm sees it: `pointA` on the car, `pointB` on the
 // world, `normal` pointing out of the world into the car. World frame.
-// `ground` marks the road under the car, which a forced crash ignores.
-export type ArmContact = { pointA: Vec3; pointB: Vec3; normal: Vec3; ground?: boolean };
-export type CrashKind = 'headOn' | 'side' | 'rolled' | 'forced';
+export type ArmContact = { pointA: Vec3; pointB: Vec3; normal: Vec3 };
+export type CrashKind = 'headOn' | 'side' | 'rolled';
 export type CrashThresholds = { headOn: number; side: number };
 export const CRASH_THRESHOLDS: CrashThresholds = { headOn: 40.5, side: 50 };
 

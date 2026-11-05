@@ -1,7 +1,8 @@
 // The whole simulation as one: the race car's own frame (vehicleSim) with the
 // deformation model as its contact side. One body, one crashing flag, one set
 // of counters; a car driving on its wheels never scrapes the road; a retail
-// car driven into a wall at 180 km/h crashes head-on and comes to rest.
+// car driven into a wall at 180 km/h crashes head-on and comes to rest, and
+// one just over the head-on speed crashes the moment it touches.
 
 import { describe, expect, it } from 'vitest';
 import type { ParsedAttribSys } from '../../attribSys';
@@ -117,5 +118,45 @@ describe.skipIf(!hasFixture('PUSSC01'))('PUSSC01 into a wall at 180 km/h', () =>
 		expect(sim.state.hinges.size + sim.state.free.size).toBeGreaterThan(0);
 		// It ends on the ground, not in it.
 		expect(sim.state.body.pos[1]).toBeGreaterThan(0.1);
+	});
+});
+
+// The step of the first obstacle contact, the crash step and the deepest dent
+// of a square nose hit at `kmh`.
+function wallHit(car: string, kmh: number, forceCrash = false) {
+	const { spec, vault } = loadCar(car);
+	const sim = createCrashSim(spec, { vault });
+	applyImpact(sim, { ...noseHit(spec), speed: kmh / 3.6, forceCrash });
+	let touch = -1, crashed = -1;
+	for (let i = 0; i < 60 * 12 && !sim.state.run!.end; i++) {
+		stepCrashSim(sim);
+		if (touch < 0 && sim.events.contacts.some((c) => c.surface === 'obstacle')) touch = i;
+		if (crashed < 0 && sim.state.vehicle.crashing) crashed = i;
+	}
+	let dent = 0;
+	for (let r = 0; r < 128; r++) dent = Math.max(dent, Math.hypot(sim.rows[r * 4], sim.rows[r * 4 + 1], sim.rows[r * 4 + 2]));
+	return { run: sim.state.run!, touch, crashed, dent };
+}
+
+describe.skipIf(!hasFixture('PUSSC01'))('PUSSC01 square into a wall', () => {
+	// Driving on its wheels the car sweeps its spheres, so the road under it
+	// gives no contacts and the crash test sees the wall on the touch step.
+	it.each([149, 150])('crashes head-on the step it touches at %i km/h', (kmh) => {
+		const r = wallHit('PUSSC01', kmh);
+		expect(r.run.crash).toBe('headOn');
+		expect(r.crashed).toBe(r.touch);
+		expect(r.dent).toBeGreaterThan(0.3);
+	});
+
+	it('knocks at 100 km/h, denting within the drive-time limits', () => {
+		const r = wallHit('PUSSC01', 100);
+		expect(r.run.crash).toBe(null);
+		expect(r.dent).toBeCloseTo(0.191, 3);
+	});
+
+	it('crashes head-on at 100 km/h the step it touches when the crash speeds are forced to 0', () => {
+		const r = wallHit('PUSSC01', 100, true);
+		expect(r.run.crash).toBe('headOn');
+		expect(r.crashed).toBe(r.touch);
 	});
 });

@@ -1,5 +1,5 @@
-export { createCrashSim, applyImpact, stepCrashSim, resetCrashSim, setAbsorptionSet, AbsorptionSet, GlassState } from './sim';
-export type { ContactEvent, CrashEvents, CrashRun, CrashSim, CrashSimOptions, GlassEvent, Impact, Launch, PartEvent, PartPose, RunEnd } from './sim';
+export { createCrashSim, applyImpact, stepCrashSim, resetCrashSim, setDriver, AbsorptionSet, GlassState } from './sim';
+export type { ContactEvent, CrashEvents, CrashRun, CrashSim, CrashSimOptions, Driver, GlassEvent, Impact, Launch, PartEvent, PartPose, RunEnd } from './sim';
 export { applyContactImpulses, generateContacts, latchContacts, updateContacts } from './contacts';
 export { solvePenetration } from './penetration';
 export { crashArmContacts, orderWorldContacts } from './crashArm';

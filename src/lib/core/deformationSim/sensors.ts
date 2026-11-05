@@ -3,8 +3,12 @@
 // moves inward by it; half of what it absorbed is passed down that
 // direction's sensor chain (nextSensor), each link crushing by its own
 // absorption until the chain ends at the car body.
+//
+// A chain names its links by scene slot: slot 0 is the car body, and slot n
+// is the sensor whose sceneIndex is n (the game registers each sensor at its
+// sceneIndex, a later one taking over a slot an earlier one had).
 
-import type { Vec3 } from '../deformationSpec';
+import type { ParsedDeformationSpec, Vec3 } from '../deformationSpec';
 import { add, dot, scale, sub, type SimState } from './state';
 import {
 	ABSORPTION, COMPRESSION_LIMIT_FACTOR, CRASH_BUDGET, CRASH_LIMIT_PAD, DIRECTIONS, DIRECTION_SPEED_SCALE, DRIVE_BUDGET,
@@ -16,6 +20,13 @@ import {
 const allowance = (s: SimState) => (s.vehicle.crashing ? CRASH_BUDGET : DRIVE_BUDGET);
 
 const MAX_CHAIN = 25;
+const NO_SENSOR = -1;
+
+export function sensorAtSlot(spec: ParsedDeformationSpec, slot: number): number {
+	if (slot <= 0) return NO_SENSOR;
+	for (let i = spec.numDeformationSensors - 1; i >= 0; i--) if (spec.sensors[i].sceneIndex === slot) return i;
+	return NO_SENSOR;
+}
 
 export type SensorImpulse = {
 	sensor: number;
@@ -95,9 +106,10 @@ export function applySensorImpulse(s: SimState, imp: SensorImpulse): BodyArrival
 		s.deformedThisStep = true;
 		const absorbed = crushHead(s, imp, d, proj);
 		let next = s.spec.sensors[imp.sensor].nextSensor[d];
-		for (let hops = 0; next > 0 && next <= s.spec.numDeformationSensors && hops < MAX_CHAIN; hops++) {
-			crushLink(s, next - 1, d, absorbed * 0.5, imp);
-			next = s.spec.sensors[next - 1].nextSensor[d];
+		for (let hops = 0, link = sensorAtSlot(s.spec, next); link !== NO_SENSOR && hops < MAX_CHAIN; hops++) {
+			crushLink(s, link, d, absorbed * 0.5, imp);
+			next = s.spec.sensors[link].nextSensor[d];
+			link = sensorAtSlot(s.spec, next);
 		}
 		if (next === 0) arrivals.push({ d, rem: proj - absorbed });
 	}

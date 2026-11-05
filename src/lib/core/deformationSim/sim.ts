@@ -3,8 +3,9 @@
 // the deformation model as its contact side:
 //
 //   A  contacts generated from the start pose (sensor and wheel hub spheres
-//      against the ground and the obstacle); a car that is not crashing
-//      re-points or drops its road contacts (validate.ts)
+//      against the ground and the obstacle, swept along the step's travel for
+//      a fast car that is not crashing); a car that is not crashing re-points
+//      or drops its road contacts (validate.ts)
 //   E  the crash test on up to five of them, earliest first (crashArm.ts)
 //   G  the vehicle update: wheels, suspension, tyres, engine, crash rules
 //   H  the contact impulses, sized one after another from the car's live
@@ -24,7 +25,8 @@ import { vehicleParamsFor } from '../vehicleSim/defaultHandling';
 import type { AttribClasses } from '../vehicleSim/params';
 import type { StepHooks } from '../vehicleSim/step';
 import { createVehicle } from '../vehicleSim/vehicleState';
-import { allArmContacts, crashArmContacts } from './crashArm';
+import type { Driver } from './absorption';
+import { crashArmContacts } from './crashArm';
 import { clearContacts, generateContacts, nearestSensors, updateContacts } from './contacts';
 import { clearEvents, emptyEvents, type CrashEvents } from './events';
 import { freshPanes, updateGlass } from './glass';
@@ -39,6 +41,7 @@ import { AbsorptionSet, STEP } from './tables';
 import { validateWorldContacts } from './validate';
 
 export { AbsorptionSet } from './tables';
+export type { Driver } from './absorption';
 export { GlassState } from './events';
 export type { ContactEvent, CrashEvents, GlassEvent, PartEvent } from './events';
 export type { CrashRun, Impact, Launch, RunEnd } from './scenario';
@@ -67,7 +70,8 @@ export type CrashSimOptions = {
 	// Handling attribs over the vault's (and over the defaults, which fill
 	// whatever neither has).
 	handling?: AttribClasses;
-	absorptionSet?: AbsorptionSet;
+	// Who drives the car: picks the absorption table its crashes use.
+	driver?: Driver;
 };
 
 export { meshShift };
@@ -76,7 +80,7 @@ function freshState(spec: ParsedDeformationSpec, opts: CrashSimOptions): SimStat
 	const params = vehicleParamsFor(spec, opts.vault, opts.handling);
 	const vehicle = createVehicle(params);
 	const s = {
-		spec, absorptionSet: opts.absorptionSet ?? AbsorptionSet.Normal,
+		spec, driver: opts.driver ?? 'player', absorptionSet: AbsorptionSet.Normal,
 		vehicle, body: vehicle.body, com: params.comSpec,
 		sensors: spec.sensors.map((x) => [...x.initialOffset] as Vec3),
 		latch: spec.sensors.map(() => 0),
@@ -119,11 +123,11 @@ export function createCrashSim(spec: ParsedDeformationSpec, opts: CrashSimOption
 
 export function resetCrashSim(sim: CrashSim): void {
 	const s = sim.state;
-	Object.assign(s, freshState(s.spec, { ...sim.options, absorptionSet: s.absorptionSet }));
+	Object.assign(s, freshState(s.spec, { ...sim.options, driver: s.driver }));
 	sim.partPoses.clear();
 }
 
-export function setAbsorptionSet(sim: CrashSim, set: AbsorptionSet): void { sim.state.absorptionSet = set; }
+export function setDriver(sim: CrashSim, driver: Driver): void { sim.state.driver = driver; }
 
 // Starts a new run into an obstacle placed against the hit (see scenario.ts).
 export function applyImpact(sim: CrashSim, impact: Impact): void {
@@ -135,11 +139,10 @@ export function applyImpact(sim: CrashSim, impact: Impact): void {
 export function contactHooks(s: SimState): StepHooks {
 	return {
 		generateContacts: (_v, _world, dt) => {
-			generateContacts(s);
+			generateContacts(s, dt);
 			validateWorldContacts(s, dt);
 		},
 		crashArmContacts: () => crashArmContacts(s),
-		worldContacts: () => allArmContacts(s),
 		updateContacts: (_v, dt) => {
 			updateContacts(s, dt);
 			if (!s.deformedThisStep) return;

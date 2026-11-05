@@ -3,8 +3,9 @@
 //
 // 1. generateContacts, at the pose the step starts from: every collision
 //    sphere (the deformation sensors plus a small sphere on each wheel hub)
-//    is tested against the world; each sphere/surface pair that touches or
-//    is near gives one candidate. Last step's latches and stores are cleared.
+//    is tested against the world, swept along this step's travel or in place
+//    (world.ts); each sphere/surface pair that meets gives one candidate.
+//    Last step's latches and stores are cleared.
 // 2. latchContacts, with the velocity the car has once its own update ran:
 //    each sensor's centre motion this step is taken from that velocity, and
 //    each candidate is stored for the penetration solve and offered to its
@@ -17,17 +18,22 @@
 //    friction, at the contact point, and the body is drained after each
 //    contact, so a later contact sees what the earlier ones did.
 //
-// updateContacts runs 2 and 3. The penetration solve (penetration.ts) runs
-// after the pose has been integrated.
+// updateContacts picks the step's absorption table (absorption.ts), then runs
+// 2 and 3. The penetration solve (penetration.ts) runs after the pose has
+// been integrated.
 
 import type { Vec3 } from '../deformationSpec';
 import { drain, invEffectiveMass, toBody, toBodyDir, toWorld, toWorldDir, velocityAt } from '../vehicleSim/body';
 import { applyContactImpulse } from '../vehicleSim/crash';
+import { MPS_TO_MPH, type VehicleState } from '../vehicleSim/vehicleState';
+import { updateAbsorptionSet } from './absorption';
 import { applyContactFriction } from './friction';
 import { applySensorImpulse } from './sensors';
 import { add, cross, dot, normalize, scale, sub, DISARMED, type ImpulseRecord, type SimState } from './state';
-import { DIRECTIONS, IMPULSE_SHAPING } from './tables';
-import { sphereVsGround, sphereVsObstacle, type PotentialContact } from './world';
+import { DIRECTIONS, IMPULSE_SHAPING, STEP } from './tables';
+import {
+	sphereVsGround, sphereVsObstacle, sweptSphereVsGround, sweptSphereVsObstacle, type PotentialContact,
+} from './world';
 
 // The game stops harvesting a car's contacts at this many per step.
 export const MAX_POTENTIAL_CONTACTS = 199;
@@ -87,19 +93,35 @@ export function clearContacts(s: SimState): void {
 	s.potential = [];
 }
 
-// Candidates from the current pose. Surfaces are harvested one after another,
-// each against every sphere in order.
-export function generateContacts(s: SimState): PotentialContact[] {
-	clearContacts(s);
-	const spheres = collisionSpheres(s);
-	const surfaces: { surface: 'ground' | 'obstacle'; hit: (c: Vec3, r: number) => ReturnType<typeof sphereVsGround> }[] = [
-		{ surface: 'ground', hit: sphereVsGround },
-	];
+// The game sweeps the spheres of a car that is not crashing and is moving
+// forward faster than 6 m/s (13.4 mph), so a fast car cannot pass through a
+// wall between two steps; otherwise it tests them where they are.
+export const SWEPT_MIN_FORWARD_SPEED = 6;
+export const usesSweptSpheres = (v: VehicleState) => !v.crashing && v.speedMph / MPS_TO_MPH > SWEPT_MIN_FORWARD_SPEED;
+
+const ZERO: Vec3 = [0, 0, 0];
+
+type SurfaceTest = { surface: 'ground' | 'obstacle'; hit: (c: Vec3, r: number, travel: Vec3) => ReturnType<typeof sphereVsGround> };
+
+function surfaceTests(s: SimState, swept: boolean): SurfaceTest[] {
 	const o = s.obstacle;
-	if (o) surfaces.push({ surface: 'obstacle', hit: (c, r) => sphereVsObstacle(c, r, o) });
-	for (const { surface, hit } of surfaces) {
+	const tests: SurfaceTest[] = [{ surface: 'ground', hit: swept ? sweptSphereVsGround : (c, r) => sphereVsGround(c, r) }];
+	if (o) tests.push({ surface: 'obstacle', hit: swept ? (c, r, d) => sweptSphereVsObstacle(c, r, d, o) : (c, r) => sphereVsObstacle(c, r, o) });
+	return tests;
+}
+
+// Candidates from the current pose. Surfaces are harvested one after another,
+// each against every sphere in order (the game's order follows its triangle
+// cache, so which surface comes first is not fixed there; it only matters for
+// exact ties). A swept sphere travels this step at its centre's velocity.
+export function generateContacts(s: SimState, dt = STEP): PotentialContact[] {
+	clearContacts(s);
+	const b = s.body, swept = usesSweptSpheres(s.vehicle);
+	const spheres = collisionSpheres(s);
+	for (const { surface, hit } of surfaceTests(s, swept)) {
 		spheres.forEach(({ centre, radius }, sphere) => {
-			const h = hit(centre, radius);
+			const travel = swept ? scale(add(b.v, cross(b.w, sub(centre, b.pos))), dt) : ZERO;
+			const h = hit(centre, radius, travel);
 			if (h && s.potential.length < MAX_POTENTIAL_CONTACTS) s.potential.push({ sphere, surface, ...h });
 		});
 	}
@@ -206,6 +228,7 @@ export function applyContactImpulses(s: SimState, dt: number): void {
 }
 
 export function updateContacts(s: SimState, dt: number): void {
+	updateAbsorptionSet(s);
 	latchContacts(s, dt);
 	applyContactImpulses(s, dt);
 }

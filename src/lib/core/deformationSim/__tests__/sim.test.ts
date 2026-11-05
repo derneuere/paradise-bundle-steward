@@ -27,6 +27,19 @@ describe('sensor crush', () => {
 		expect(sim.state.sensors[1][2]).toBeCloseTo(1 - passed * 0.98 * (1 / 1000) * DT, 6);
 	});
 
+	it('follows the chain through scene slots: slot n is the sensor whose sceneIndex is n', () => {
+		const spec = makeSpec();
+		// Sensor 0's -Z chain names slot 2; give that slot to sensor 4 instead of sensor 1.
+		spec.sensors[1].sceneIndex = 9;
+		spec.sensors[4].sceneIndex = 2;
+		const sim = makeSim({ spec });
+		const before = sim.state.sensors.map((c) => [...c]);
+		const arrivals = applySensorImpulse(sim.state, hitFront(1000));
+		expect(sim.state.sensors[1]).toEqual(before[1]);
+		expect(sim.state.sensors[4][2]).toBeLessThan(before[4][2]);
+		expect(arrivals.map((a) => a.d)).toEqual([5]);   // sensor 4's chain ends at the body
+	});
+
 	it('stops at the per-direction crush budget', () => {
 		const sim = makeSim();
 		for (let i = 0; i < 50; i++) applySensorImpulse(sim.state, hitFront(1e6));
@@ -128,7 +141,7 @@ describe('crash run', () => {
 		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30, forceCrash: true });
 		for (let i = 0; i < 60 * 12 && !sim.state.run!.end; i++) stepCrashSim(sim);
 		const run = sim.state.run!;
-		expect(run.crash).toBe('forced');
+		expect(run.crash).toBe('headOn');
 		// The toy nose absorbs 98 % of every contact, so the car leans on the
 		// wall until the crash damping has bled its speed; it is all but
 		// still when the crash clock (or freezing) ends the run.

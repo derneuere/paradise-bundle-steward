@@ -2,12 +2,12 @@
 // the game's rules, and how the run ended.
 
 import { describe, expect, it } from 'vitest';
-import type { CrashRun } from '@/lib/core/deformationSim';
+import { AbsorptionSet, type CrashRun } from '@/lib/core/deformationSim';
 import { runSummary } from '../runSummary';
 
 const run = (o: Partial<CrashRun>): CrashRun => ({
 	launch: 'drive', driving: { gas: 1, brake: 0, handBrake: 0, steering: 0 }, crashInput: 'release', forceCrash: false,
-	startSpeed: 50, touched: false, impactSpeed: 0, closingSpeed: 0, crash: null, crashSpeed: 0, elapsed: 0, end: null, ...o,
+	startSpeed: 50, touched: false, impactSpeed: 0, closingSpeed: 0, crash: null, crashSpeed: 0, absorption: AbsorptionSet.Normal, elapsed: 0, end: null, ...o,
 });
 
 describe('runSummary', () => {
@@ -21,13 +21,19 @@ describe('runSummary', () => {
 		expect(runSummary(run({ touched: true, crash: 'headOn', crashSpeed: 50 }))).toContain('crashed head-on: the car closed on the face at 40.5 m/s or more (180 km/h)');
 		expect(runSummary(run({ crash: 'side', crashSpeed: 55 }))).toContain('side-on');
 		expect(runSummary(run({ launch: 'roof', crash: 'rolled', crashSpeed: 10, end: 'frozen' }))).toBe(
-			'landed on its roof from 180 km/h · crashed: rolled over onto the ground (36 km/h) · came to rest');
-		expect(runSummary(run({ crash: 'forced', crashSpeed: 28 }))).toContain('crashed: forced');
+			'landed on its roof from 180 km/h · crashed: rolled over onto the ground (36 km/h) · normal absorption · came to rest');
+		expect(runSummary(run({ forceCrash: true, crash: 'headOn', crashSpeed: 28 }))).toContain('crashed head-on (crash speeds forced to 0)');
+	});
+
+	it('names the absorption table the game used', () => {
+		expect(runSummary(run({ crash: 'headOn', crashSpeed: 50, absorption: AbsorptionSet.PlayerExtremeCrash })))
+			.toContain('extreme crash (crashed near top speed) absorption');
+		expect(runSummary(run({}))).not.toContain('absorption');
 	});
 
 	it('calls a hit below the crash speeds a knock, with its closing speed', () => {
 		expect(runSummary(run({ startSpeed: 27.8, touched: true, impactSpeed: 28.5, closingSpeed: 28.46, end: 'frozen' })))
-			.toBe('drove in from 100 km/h · knock, no crash: hit at 103 km/h, 28.5 m/s into the face · came to rest');
+			.toBe('drove in from 100 km/h · knock, no crash: hit at 103 km/h, 28.5 m/s into the face · normal absorption · came to rest');
 	});
 
 	it('says when the car never got there, and how a run ended', () => {

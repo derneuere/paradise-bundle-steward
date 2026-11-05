@@ -8,6 +8,7 @@ import type { ParsedDeformationSpec, Vec3 } from '../deformationSpec';
 import type { RigidBody } from '../vehicleSim/body';
 import type { Box } from '../vehicleSim/params';
 import type { VehicleState } from '../vehicleSim/vehicleState';
+import type { Driver } from './absorption';
 import { AbsorptionSet } from './tables';
 import type { CrashEvents } from './events';
 import type { PaneState } from './glass';
@@ -52,7 +53,8 @@ export type StoredContact = { localA: Vec3; B: Vec3; n: Vec3; projDist: number }
 
 export type SimState = {
 	spec: ParsedDeformationSpec;
-	absorptionSet: AbsorptionSet;
+	driver: Driver;
+	absorptionSet: AbsorptionSet;  // the table in use this step (absorption.ts)
 	// The car's driving and crashing state: its crashing flag decides which
 	// crush rules apply (a crash or a knock), its counters count the contact
 	// impulses, and its deformable box is the crash limit box.
