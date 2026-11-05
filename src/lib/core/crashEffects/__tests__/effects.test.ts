@@ -49,6 +49,18 @@ describe('crash effects', () => {
 		expect(a.smoke.items).toEqual(b.smoke.items);
 	});
 
+	it("numbers each kind's pieces on their own, so their batch slots run 0, 1, 2 ... per kind", () => {
+		const { fx } = run(front, 6);
+		for (const k of [DebrisKind.Coloured, DebrisKind.Dark]) {
+			const items = fx.debris[k].items;
+			expect(items.length).toBeGreaterThan(1);
+			expect(fx.debrisSpawned[k]).toBe(items.length);
+			expect(items.map((d) => d.slot)).toEqual(items.map((_, i) => i & 31));
+		}
+		resetCrashEffects(fx);
+		expect(fx.debrisSpawned.every((n) => n === 0)).toBe(true);
+	});
+
 	it('lets every particle run out its life', () => {
 		const r = run({ ...front, speed: 12, glance: 30 }, 200);
 		for (let i = 0; i < 600; i++) { stepCrashSim(r.sim); stepCrashEffects(r.fx, r.sim, 1 / 60); }

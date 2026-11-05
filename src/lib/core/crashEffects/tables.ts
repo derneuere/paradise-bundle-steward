@@ -61,33 +61,35 @@ export enum DebrisKind { Coloured = 0, Shiny = 1, Dark = 2, HighDetail = 3, Glas
 export const DEBRIS_KINDS = [DebrisKind.Coloured, DebrisKind.Shiny, DebrisKind.Dark, DebrisKind.HighDetail, DebrisKind.Glass];
 
 export type DebrisPreset = {
+	mesh: string;         // the PARTICLES.BUNDLE mesh collection the pieces are drawn with
 	budget: number;       // live pieces at most
 	diffuse: number;      // colour multiplier
 	colour: Vec3 | 'paint';
 	bounciness: Vec3;     // per world axis, on every bounce
-	fadeIn: number;
+	fadeIn: number;       // seconds a new piece takes to grow to full size
 };
 const BOUNCE: Vec3 = [0.7, 0.6, 0.7];
 const bounce = (k: number): Vec3 => [BOUNCE[0] * k, BOUNCE[1] * k, BOUNCE[2] * k];
 export const DEBRIS_PRESETS: Record<DebrisKind, DebrisPreset> = {
-	[DebrisKind.Coloured]: { budget: 400, diffuse: 1.0, colour: 'paint', bounciness: BOUNCE, fadeIn: 0.1 },
-	[DebrisKind.Shiny]: { budget: 300, diffuse: 0.7, colour: [1, 1, 1], bounciness: bounce(0.9), fadeIn: 0.1 },
-	[DebrisKind.Dark]: { budget: 400, diffuse: 0.5, colour: [0.5, 0.5, 0.5], bounciness: bounce(0.8), fadeIn: 0.1 },
-	[DebrisKind.HighDetail]: { budget: 100, diffuse: 1.0, colour: [1, 1, 1], bounciness: bounce(0.5), fadeIn: 0.1 },
-	[DebrisKind.Glass]: { budget: 400, diffuse: 1.0, colour: [1, 1, 1], bounciness: bounce(0.8), fadeIn: 0.001 },
+	[DebrisKind.Coloured]: { mesh: 'lowres_debris.rf3', budget: 400, diffuse: 1.0, colour: 'paint', bounciness: BOUNCE, fadeIn: 0.1 },
+	[DebrisKind.Shiny]: { mesh: 'lowres_debris.rf3', budget: 300, diffuse: 0.7, colour: [1, 1, 1], bounciness: bounce(0.9), fadeIn: 0.1 },
+	[DebrisKind.Dark]: { mesh: 'lowres_debris.rf3', budget: 400, diffuse: 0.5, colour: [0.5, 0.5, 0.5], bounciness: bounce(0.8), fadeIn: 0.1 },
+	[DebrisKind.HighDetail]: { mesh: 'highres_debris_02.rf3', budget: 100, diffuse: 1.0, colour: [1, 1, 1], bounciness: bounce(0.5), fadeIn: 0.1 },
+	[DebrisKind.Glass]: { mesh: 'Glass_debris.rf3', budget: 400, diffuse: 1.0, colour: [1, 1, 1], bounciness: bounce(0.8), fadeIn: 0.001 },
 };
-// A piece's size scales one of the game's debris meshes (PARTICLES.BUNDLE:
-// lowres_debris for the small chips, highres_debris_02 for the big body
-// bits, Glass_debris for glass). These are the mean bounding radii of each
-// collection's meshes, from their radius tables: the drawn radius is
-// size x this.
+// A piece's size is the scale its mesh is drawn at; the meshes are 0.2 - 1.8 m
+// across at scale 1 (glass 2 - 4 cm), so a 0.05 - 0.12 chip is 2 - 20 cm and a
+// 0.3 - 0.5 body bit 6 - 70 cm. Without the meshes a stand-in chip is drawn
+// with the collection's mean bounding radius (half the bounding-box diagonal,
+// from its radius table): radius = size x this.
 export const DEBRIS_MESH_RADIUS: Record<DebrisKind, number> = {
 	[DebrisKind.Coloured]: 0.766, [DebrisKind.Shiny]: 0.766, [DebrisKind.Dark]: 0.766,
 	[DebrisKind.HighDetail]: 0.422, [DebrisKind.Glass]: 0.0183,
 };
 export const DEBRIS_DRAG = 0.8;
 export const DEBRIS_GRAVITY = -9.8;
-// Lifetime by piece index & 3; the alpha fades over the last 0.8 s.
+// Lifetime by the piece's place in its batch & 3; a piece grows in over its
+// preset's fade-in and its alpha fades over the last 0.8 s.
 export const DEBRIS_LIFETIMES = [1.4, 1.8, 1.6, 2.0];
 export const DEBRIS_FADE_OUT = 0.8;
 

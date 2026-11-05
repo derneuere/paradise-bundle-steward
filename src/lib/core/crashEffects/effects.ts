@@ -44,6 +44,7 @@ export type CrashEffects = {
 	dust: Pool<Puff>;
 	smoke: Pool<Puff>;
 	counter: number;         // particles spawned so far (picks per-index variants)
+	debrisSpawned: number[]; // pieces spawned so far, by DebrisKind
 	sparkCooldown: number;
 	burstCooldown: number;
 	dustCarry: number;
@@ -59,7 +60,7 @@ export function createCrashEffects(seed = 1): CrashEffects {
 		sparks: new Pool(4000),
 		debris: DEBRIS_KINDS.map((k) => new Pool<Debris>(DEBRIS_PRESETS[k].budget)),
 		dust: new Pool(DUST.budget), smoke: new Pool(SMOKE.budget),
-		counter: 0, sparkCooldown: 0, burstCooldown: 0, dustCarry: 0, trailCarry: PLAYER_TRAIL.map(() => 0),
+		counter: 0, debrisSpawned: DEBRIS_KINDS.map(() => 0), sparkCooldown: 0, burstCooldown: 0, dustCarry: 0, trailCarry: PLAYER_TRAIL.map(() => 0),
 		obstacle: null, carPos: [0, 0, 0], groundY: 0,
 	};
 }
@@ -136,7 +137,7 @@ function obstaclePlanes(fx: CrashEffects, sim: CrashSim): Plane[] {
 }
 
 function addDebris(fx: CrashEffects, kind: DebrisKind, p: Vec3, v: Vec3, size: number): void {
-	fx.debris[kind].add(makeDebris(kind, p, v, size, fx.time, fx.counter++, fx.paint, fx.rng));
+	fx.debris[kind].add(makeDebris(kind, p, v, size, fx.time, fx.debrisSpawned[kind]++, fx.paint, fx.rng));
 }
 
 function burst(fx: CrashEffects, origin: Vec3, carVel: Vec3, k: number): void {

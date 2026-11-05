@@ -7,18 +7,16 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Vec3 } from '@/lib/core/deformationSpec';
-import {
-	CRASH_SPARKS, DEBRIS_FADE_OUT, DEBRIS_MESH_RADIUS, debrisFade, DebrisKind, puffLook, sparkPosition, type CrashEffects, type Puff,
-} from '@/lib/core/crashEffects';
+import { CRASH_SPARKS, puffLook, sparkPosition, type CrashEffects, type Puff } from '@/lib/core/crashEffects';
 import type { CrashSim } from '@/lib/core/deformationSim';
 import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
-import { chipGeometry, puffGeometry, puffMaterial, ribbonGeometry, setQuad, shardGeometry, sparkMaterial } from './particleMaterials';
+import { CrashDebris } from './CrashDebris';
+import { puffGeometry, puffMaterial, ribbonGeometry, setQuad, sparkMaterial } from './particleMaterials';
 import type { ParticleTextures } from './particleTextures';
 import type { CrashSession } from './useCrashSession';
 
 const SPARK_CAP = 4000;
 const PUFF_CAP = 600;
-const KINDS = [DebrisKind.Coloured, DebrisKind.Shiny, DebrisKind.Dark, DebrisKind.HighDetail, DebrisKind.Glass];
 
 // world -> mesh frame: undo the car's pose, then the handling -> mesh shift.
 function worldToMesh(sim: CrashSim, out: THREE.Matrix4): THREE.Matrix4 {
@@ -31,31 +29,15 @@ function worldToMesh(sim: CrashSim, out: THREE.Matrix4): THREE.Matrix4 {
 
 export function CrashParticles({ session, paint, textures }: { session: CrashSession; paint: Vec3; textures: ParticleTextures }) {
 	const root = useRef<THREE.Group>(null);
-	const parts = useMemo(() => {
-		const debrisMat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.3 });
-		const glassMat = new THREE.MeshStandardMaterial({ color: '#dfeef5', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.75 });
-		const chip = chipGeometry(), shard = shardGeometry();
-		const debris = KINDS.map((k) => {
-			const mesh = new THREE.InstancedMesh(k === DebrisKind.Glass ? shard : chip, k === DebrisKind.Glass ? glassMat : debrisMat, session.effects.debris[k].budget);
-			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-			mesh.setColorAt(0, new THREE.Color());
-			mesh.frustumCulled = false;
-			mesh.count = 0;
-			return mesh;
-		});
-		return {
-			sparks: new THREE.Mesh(ribbonGeometry(SPARK_CAP), sparkMaterial(textures.spark)),
-			puffs: new THREE.Mesh(puffGeometry(PUFF_CAP), puffMaterial(textures.smoke)),
-			debris, debrisMat, glassMat, chip, shard,
-		};
-	}, [session.effects, textures]);
+	const parts = useMemo(() => ({
+		sparks: new THREE.Mesh(ribbonGeometry(SPARK_CAP), sparkMaterial(textures.spark)),
+		puffs: new THREE.Mesh(puffGeometry(PUFF_CAP), puffMaterial(textures.smoke)),
+	}), [textures]);
 	useDisposeOnDepsChange(() => {
 		for (const m of [parts.sparks, parts.puffs]) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
-		for (const m of parts.debris) m.dispose();
-		parts.debrisMat.dispose(); parts.glassMat.dispose(); parts.chip.dispose(); parts.shard.dispose();
 	}, [parts]);
 
-	const tmp = useMemo(() => ({ m: new THREE.Matrix4(), q: new THREE.Quaternion(), v: new THREE.Vector3(), s: new THREE.Vector3(), axis: new THREE.Vector3(), c: new THREE.Color(), a: [0, 0, 0] as Vec3, b: [0, 0, 0] as Vec3 }), []);
+	const tmp = useMemo(() => ({ m: new THREE.Matrix4(), a: [0, 0, 0] as Vec3, b: [0, 0, 0] as Vec3 }), []);
 
 	useFrame(() => {
 		const sim = session.simRef.current, g = root.current;
@@ -71,13 +53,12 @@ export function CrashParticles({ session, paint, textures }: { session: CrashSes
 		const now = fx.time + session.clock.lead;
 		drawSparks(fx, now, sim.state.carVel, parts.sparks.geometry, tmp.a, tmp.b);
 		drawPuffs([...fx.smoke.items, ...fx.dust.items], now, parts.puffs.geometry);
-		KINDS.forEach((k, i) => drawDebris(fx, k, now, parts.debris[i], tmp));
 	});
 
 	return (
 		<group ref={root} matrixAutoUpdate={false}>
 			<primitive object={parts.sparks} />
-			{parts.debris.map((m, i) => <primitive key={i} object={m} />)}
+			<CrashDebris session={session} looks={textures.debris} />
 			<primitive object={parts.puffs} />
 		</group>
 	);
@@ -124,27 +105,4 @@ function drawPuffs(puffs: Puff[], now: number, geo: THREE.BufferGeometry): void 
 	}
 	for (const x of [P, C, S, R]) x.needsUpdate = true;
 	geo.setDrawRange(0, n * 6);
-}
-
-type Tmp = { m: THREE.Matrix4; q: THREE.Quaternion; v: THREE.Vector3; s: THREE.Vector3; axis: THREE.Vector3; c: THREE.Color };
-
-function drawDebris(fx: CrashEffects, kind: DebrisKind, now: number, mesh: THREE.InstancedMesh, tmp: Tmp): void {
-	const items = fx.debris[kind].items;
-	let n = 0;
-	const lead = now - fx.time;
-	for (const d of items) {
-		const age = now - d.birth;
-		// Fades by shrinking: the instanced material has one opacity. The
-		// chip / shard meshes have radius 0.5.
-		const k = 2 * DEBRIS_MESH_RADIUS[kind] * d.size * debrisFade(d, age, DEBRIS_FADE_OUT);
-		if (k <= 0) continue;
-		tmp.v.set(d.p[0] + d.v[0] * lead, d.p[1] + d.v[1] * lead, d.p[2] + d.v[2] * lead);
-		tmp.q.setFromAxisAngle(tmp.axis.set(...d.axis), d.angle);
-		mesh.setMatrixAt(n, tmp.m.compose(tmp.v, tmp.q, tmp.s.setScalar(k)));
-		mesh.setColorAt(n, tmp.c.setRGB(d.colour[0], d.colour[1], d.colour[2]));
-		n++;
-	}
-	mesh.count = n;
-	mesh.instanceMatrix.needsUpdate = true;
-	if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 }
