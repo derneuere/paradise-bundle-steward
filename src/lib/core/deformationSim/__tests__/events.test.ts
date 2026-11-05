@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GlassPane, Vec3 } from '../../deformationSpec';
-import { applyImpact, createCrashSim, GlassState, stepCrashSim } from '../sim';
+import { applyImpact, createCrashSim, GlassState, resetCrashSim, stepCrashSim } from '../sim';
 import { checkForDetachment } from '../parts';
 import { updateIK } from '../ik';
 import { CRACK_SUM_SQ, crackAmount, smashedPaneBits, SMASH_SUM_SQ, updateGlass } from '../glass';
@@ -23,7 +23,7 @@ describe('contact events', () => {
 		// Head-on: nothing slides, so nothing scratches.
 		expect(len(c[0].slide)).toBeLessThan(1e-6);
 		expect(c[0].scratch).toBe(0);
-		for (let i = 0; i < 400 && sim.state.carVel.some((v) => v !== 0); i++) stepCrashSim(sim);
+		resetCrashSim(sim);
 		stepCrashSim(sim);
 		expect(sim.events.contacts).toEqual([]);
 	});
@@ -42,12 +42,13 @@ describe('contact events', () => {
 describe('part events', () => {
 	it('reports a part that came loose with its state, origin and the car velocity', () => {
 		const sim = createCrashSim(makeSpec());
-		sim.state.carVel = [0, 0, 5];
+		sim.state.body.v = [0, 0, 5];
 		sim.state.sensors[0] = [0, 0.5, 1.9];
 		updateIK(sim.state);
 		checkForDetachment(sim.state);
+		// The door's origin is the spec origin, which stands above the ground.
 		expect(sim.events.parts).toEqual([
-			{ part: 1, gfx: 1, partType: 8, state: 'hinged', pos: [0, 0, 0], vel: [0, 0, 5] },
+			{ part: 1, gfx: 1, partType: 8, state: 'hinged', pos: sim.state.carPos, vel: [0, 0, 5] },
 		]);
 	});
 });
@@ -128,12 +129,13 @@ describe('glass', () => {
 	it('places the event corners at live point + corner offset in the world, and flags the pane slot', () => {
 		const sim = glassSim();
 		const s = sim.state;
-		s.carPos = [10, 0, 0];
+		s.body.pos = [s.body.pos[0] + 10, s.body.pos[1], s.body.pos[2]];
 		s.tags[3] = [1, 0.5, 2.0];
 		updateGlass(s);
 		const e = sim.events.glass[0];
-		expect(e.corners[0]).toEqual([10 + 0.01, 0.5, 2.3]);
-		expect(e.corners[1]).toEqual([11, 0.5 + 0.02, 2.0]);
+		const [x, y, z] = s.carPos;
+		expect(e.corners[0]).toEqual([x + 0.01, y + 0.5, z + 2.3]);
+		expect(e.corners[1]).toEqual([x + 1, y + 0.5 + 0.02, z + 2.0]);
 		expect(e.normal).toEqual([0, 0, 1]);
 		expect(smashedPaneBits(s)).toBe(1 << 4);
 	});
