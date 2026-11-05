@@ -1,5 +1,5 @@
 // The crash controls both crash views share: speed, obstacle, glance, force
-// crash, the pedals after the hit, absorption table, presets, reset, markers /
+// crash, the pedals after the hit, who drives, presets, reset, markers /
 // damage map / flat shading, particles, slow motion / pause, the skin-row
 // mismatch warning, the run's outcome (crash or knock, and why) and the
 // hinged / knocked-off / broken-glass readout.
@@ -7,7 +7,7 @@
 import type { ReactNode } from 'react';
 import type * as THREE from 'three';
 import { Button } from '@/components/ui/button';
-import { AbsorptionSet } from '@/lib/core/deformationSim';
+import type { Driver } from '@/lib/core/deformationSim';
 import type { ParsedDeformationSpec, Vec3 } from '@/lib/core/deformationSpec';
 import { specRows } from './crashSetup';
 import type { CrashInput } from '@/lib/core/vehicleSim';
@@ -61,15 +61,15 @@ export function CrashControls({ session: s, spec, box: b3, skinRows, title, chil
 					<select value={s.glance} onChange={(e) => s.setGlance(Number(e.target.value))} className="bg-muted rounded px-1 py-0.5" title="Turn the obstacle's face off square to the car's travel so the car slides along it: sliding is what scratches the paint">
 						{GLANCES.map((g) => <option key={g} value={g}>{g === 0 ? 'head-on' : `glancing ${g}°`}</option>)}
 					</select>
-					<Button variant={s.forceCrash ? 'default' : 'outline'} size="sm" onClick={s.toggleForceCrash} title="The game crashes a car hitting the world head-on at 40.5 m/s (146 km/h) of closing speed, side-on at 50 m/s at the hit point, or rolled onto its roof; anything less is a knock (a fifth of the crush budget, inside the drive-time limits) and the car drives on. Force crash crashes it on the first obstacle contact, as the game's own debug option does; real crashes also happen at lower speeds through car-on-car hits the preview has no part in.">force crash</Button>
+					<Button variant={s.forceCrash ? 'default' : 'outline'} size="sm" onClick={s.toggleForceCrash} title="The game crashes a car hitting the world head-on at 40.5 m/s (146 km/h) of closing speed, side-on at 50 m/s at the hit point, or rolled onto its roof; anything less is a knock (a fifth of the crush budget, inside the drive-time limits) and the car drives on. Force crash lowers both speeds to 0, as the game's debug menu can: a hit on the front inside the head-on cone, or anywhere else above the centre of mass, then crashes at any speed. Real crashes also happen at lower speeds through car-on-car hits the preview has no part in.">force crash</Button>
 					<select value={s.crashInput} onChange={(e) => s.setCrashInput(e.target.value as CrashInput)} className="bg-muted rounded px-1 py-0.5" title="The pedals once the car has hit: released, the wreck freezes a second after it goes quiet; held, it keeps driving and only the game's crash clock (4 to 11.5 s) ends the crash">
 						<option value="release">pedals released</option>
 						<option value="hold">throttle held</option>
 					</select>
-					<select value={s.absorption} onChange={(e) => s.setAbsorption(Number(e.target.value))} className="bg-muted rounded px-1 py-0.5" title="Which absorption table the crash uses">
-						<option value={AbsorptionSet.Normal}>player crash</option>
-						<option value={AbsorptionSet.PlayerExtremeCrash}>player, near top speed</option>
-						<option value={AbsorptionSet.AiCrashing}>rival / AI crash</option>
+					<select value={s.driver} onChange={(e) => s.setDriver(e.target.value as Driver)} className="bg-muted rounded px-1 py-0.5" title="Who drives the car. The game picks the absorption table every step: normal while the car is not crashing; for the player's crash, the extreme-crash table when it began within 5 mph of the car's top speed; for a rival's crash, the rival table in an event and the shut-down table in free roam. The outcome line names the table used">
+						<option value="player">player's car</option>
+						<option value="rival">rival, in an event</option>
+						<option value="rivalFreeRoam">rival, in free roam</option>
 					</select>
 					<Button variant="outline" size="sm" onClick={s.reset}>reset</Button>
 					<Button variant={s.showPoints ? 'default' : 'outline'} size="sm" onClick={s.togglePoints}>points</Button>

@@ -2,11 +2,12 @@
 // in what order. Before the car's own update it takes up to five of them,
 // ordered by when each would close at the car's velocity, and asks the crash
 // arm (vehicleSim/crash.ts worldCrashArm) of each in turn whether it crashes
-// the car. The road under a driving car is in the list too, re-pointed to a
-// hub's height along the car's up (validate.ts); while the car rises even
-// slightly those contacts "close" at a large negative time, sort first and can
-// take all five slots, so the obstacle is not looked at on that step. The game
-// does the same.
+// the car. A car driving fast on its wheels has no road contacts here (its
+// spheres are swept, world.ts). Below that speed the road under the car is
+// in the list, re-pointed to a hub's height along the car's up
+// (validate.ts); while the car rises even slightly those contacts "close"
+// at a large negative time, sort first and can take all five slots, so the
+// obstacle is not looked at on that step. The game does the same.
 
 import type { ArmContact } from '../vehicleSim/crash';
 import { dot, scale, sub, type SimState } from './state';
@@ -44,10 +45,7 @@ export function orderWorldContacts(s: SimState, potential: PotentialContact[] = 
 	return entries.filter((_, i) => valid[i]).map((e) => e.c);
 }
 
-const armContact = (c: PotentialContact): ArmContact => ({ pointA: c.pA, pointB: c.pB, normal: c.n, ground: c.surface === 'ground' });
-
 // The ordered contacts in the shape the crash arm reads.
-export const crashArmContacts = (s: SimState): ArmContact[] => orderWorldContacts(s).map(armContact);
+export const crashArmContacts = (s: SimState): ArmContact[] =>
+	orderWorldContacts(s).map((c) => ({ pointA: c.pA, pointB: c.pB, normal: c.n }));
 
-// Every contact of the step in that shape (what a forced crash looks at).
-export const allArmContacts = (s: SimState): ArmContact[] => s.potential.map(armContact);

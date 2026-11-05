@@ -19,8 +19,11 @@
 // The game decides the rest. Its crash test runs on each step's contacts: a
 // head-on hit at 40.5 m/s or more of closing, a side hit at 50 m/s at the
 // point, or a car rolled over onto upward-facing ground crashes; anything less
-// is a knock, and the car keeps driving. A forced run crashes on the first
-// obstacle contact instead, as the game's debug "force crash" does. Once the
+// is a knock, and the car keeps driving. A forced run lowers both speed
+// thresholds to 0, as the game's debug menu can: the car then crashes on the
+// first contact that closes and meets the head-on or side rule's geometry
+// (a front-face hit inside the head-on cone, or any other hit above the centre
+// of mass), still among the five the crash test reads. Once the
 // car has met the obstacle (or crashed), the pedals do what `crashInput` says:
 // released (the default), the wreck freezes a second after it goes quiet;
 // held, it keeps driving and only the crash clock (4 to 11.5 s) ends it. The
@@ -28,7 +31,7 @@
 
 import type { Vec3 } from '../deformationSpec';
 import { toWorld, toWorldDir, updateWorldInertia } from '../vehicleSim/body';
-import type { CrashKind } from '../vehicleSim/crash';
+import type { CrashKind, CrashThresholds } from '../vehicleSim/crash';
 import { crashControls, FULL_THROTTLE, pitchedAxes, restPose, startAtSpeed, type CrashInput } from '../vehicleSim/driver';
 import { flatGround } from '../vehicleSim/ground';
 import { stepVehicle, type StepHooks } from '../vehicleSim/step';
@@ -38,6 +41,7 @@ import { clearContacts, collisionSpheres } from './contacts';
 import { meshShift } from './pose';
 import { updateDeformedBox } from './sensors';
 import { add, dot, length, normalize, scale, sub, type Obstacle, type SimState } from './state';
+import type { AbsorptionSet } from './tables';
 import { GROUND_Y } from './world';
 
 export type Launch = 'drive' | 'slide' | 'roof';
@@ -50,6 +54,7 @@ export type Impact = {
 	obstacle?: 'wall' | 'pole';
 	// Degrees the obstacle's face is turned off square to the car's travel.
 	glance?: number;
+	// Crash at any closing speed (both crash-speed thresholds at 0).
 	forceCrash?: boolean;
 	crashInput?: CrashInput;
 };
@@ -65,6 +70,7 @@ export type CrashRun = {
 	closingSpeed: number;       // the car's speed into the obstacle's face then
 	crash: CrashKind | null;    // why the game crashed the car, null for a knock
 	crashSpeed: number;         // the car's speed when it crashed
+	absorption: AbsorptionSet;  // the absorption table of the run's last step
 	elapsed: number;
 	end: RunEnd | null;
 };
@@ -79,6 +85,7 @@ const CLEARANCE = 0.1;
 const ROOF_DROP = 0.2;
 const POLE_RADIUS = 0.15;
 const MAX_RUN_TIME = 20;
+const FORCED_THRESHOLDS: CrashThresholds = { headOn: 0, side: 0 };
 
 const rotateY = (v: Vec3, deg: number): Vec3 => {
 	const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
@@ -171,7 +178,8 @@ export function startRun(s: SimState, impact: Impact): CrashRun {
 	s.run = {
 		launch, driving: launch === 'drive' ? FULL_THROTTLE : NO_INPUT,
 		crashInput: impact.crashInput ?? 'release', forceCrash: impact.forceCrash ?? false, startSpeed: impact.speed,
-		touched: false, impactSpeed: 0, closingSpeed: 0, crash: null, crashSpeed: 0, elapsed: 0, end: null,
+		touched: false, impactSpeed: 0, closingSpeed: 0, crash: null, crashSpeed: 0, absorption: s.absorptionSet,
+		elapsed: 0, end: null,
 	};
 	return s.run;
 }
@@ -185,8 +193,9 @@ export function stepRun(s: SimState, run: CrashRun, hooks: StepHooks, dt: number
 	const v = s.vehicle;
 	const ctl = v.crashing || run.touched ? crashControls(run.driving, run.crashInput) : run.driving;
 	const startVel = v.body.v;
-	const r = stepVehicle(v, WORLD, dt, ctl, hooks, { forceCrash: run.forceCrash });
+	const r = stepVehicle(v, WORLD, dt, ctl, hooks, { thresholds: run.forceCrash ? FORCED_THRESHOLDS : undefined });
 	run.elapsed += dt;
+	run.absorption = s.absorptionSet;
 	if (r.crashed) {
 		run.crash = r.crashed;
 		run.crashSpeed = v.speedOnLastCrashMph / MPS_TO_MPH;

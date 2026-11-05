@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { cross, dot } from '../../deformationSim/state';
 import { drain, toBodyDir, toWorld, toWorldDir } from '../body';
 import {
-	applyContactImpulse, createCrashClock, setCrashing, tickCrashClock, worldCrashArm, type ArmContact,
+	applyContactImpulse, createCrashClock, setCrashing, tickCrashClock, worldCrashArm, type ArmContact, type CrashThresholds,
 } from '../crash';
 import { flatGround } from '../ground';
 import { stepVehicle, DT } from '../step';
@@ -57,6 +57,10 @@ describe('world crash arm', () => {
 		};
 		expect(worldCrashArm(v, side(0.2), DT).kind).toBe('side');
 		expect(worldCrashArm(v, side(-0.2), DT).kind).toBe(null);
+		// The debug menu's thresholds at 0 still need the rule's geometry.
+		v.body.v = [-5, 0, 0];
+		expect(worldCrashArm(v, side(0.2), DT, { headOn: 0, side: 0 }).kind).toBe('side');
+		expect(worldCrashArm(v, side(-0.2), DT, { headOn: 0, side: 0 }).kind).toBe(null);
 	});
 
 	it('crashes a car rolled past 80 degrees onto the ground', () => {
@@ -83,29 +87,20 @@ describe('crash entry', () => {
 	});
 
 	it('enters on the arm inside the step, before the vehicle update', () => {
-		const hit = (speed: number, forceCrash = false) => {
+		const hit = (speed: number, thresholds?: CrashThresholds) => {
 			const v = carAt(speed);
-			const r = stepVehicle(v, world, DT, NO_INPUT, { crashArmContacts: () => [noseOnWall(v)] }, { forceCrash });
+			const r = stepVehicle(v, world, DT, NO_INPUT, { crashArmContacts: () => [noseOnWall(v)] }, { thresholds });
 			return { r, v };
 		};
 		expect(hit(30).r.crashed).toBe(null);
 		expect(hit(30).v.crashing).toBe(false);
-		expect(hit(30, true).r.crashed).toBe('forced');
+		// The debug menu's thresholds at 0 crash the same contact.
+		expect(hit(30, { headOn: 0, side: 0 }).r.crashed).toBe('headOn');
 		const { r, v } = hit(45);
 		expect(r.crashed).toBe('headOn');
 		expect(v.crashing).toBe(true);
 		// Entry x1.3, then one step of crash damping and road forces.
 		expect(v.body.v[2]).toBeGreaterThan(45 * 1.3 * 0.99);
-		// The game's own rule wins over a forced crash.
-		expect(hit(45, true).r.crashed).toBe('headOn');
-	});
-
-	it('forces a crash on any contact of the step, not only the five the arm reads, and never on the road', () => {
-		const v = carAt(30);
-		const wall = noseOnWall(v), road: ArmContact = { ...wall, ground: true };
-		const step = (all: ArmContact[]) => stepVehicle(carAt(30), world, DT, NO_INPUT, { crashArmContacts: () => [], worldContacts: () => all }, { forceCrash: true });
-		expect(step([road]).crashed).toBe(null);
-		expect(step([road, wall]).crashed).toBe('forced');
 	});
 });
 

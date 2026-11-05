@@ -53,6 +53,8 @@ export function makeSpec(): ParsedDeformationSpec {
 	});
 	const sensors = [sensor(2, 2), sensor(1, 0), corner(-0.8, 1.3), corner(0.8, 1.3), corner(-0.8, -1.3), corner(0.8, -1.3)];
 	while (sensors.length < 20) sensors.push({ ...sensor(0, 0), initialOffset: [0, 0, 0] });
+	// Each sensor sits at scene slot i + 1, as in the retail cars.
+	sensors.forEach((x, i) => { x.sceneIndex = i + 1; });
 	const DOOR = { detachThreshold: 0.05, fDetachThresholdSquared: 0.0025 };
 	const tagPoints: TagPointSpec[] = [
 		tag([0, 0.5, 2.3], 0),                                  // 0 shell nose

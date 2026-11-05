@@ -4,14 +4,25 @@
 // endless wall or a pole. The pole is a smooth cylinder here, where the game
 // would only ever meet a faceted one.
 //
-// The sphere test is one-sided: a sphere whose centre is not at least 1 mm in
-// front of a surface touches nothing (so a car driven through a wall stays
-// through it), and a surface more than 2 m beyond the sphere's skin is
-// ignored. Within that padding a separated sphere still yields a contact; the
-// latch (contacts.ts) decides whether it closes this step.
+// Two sphere tests, both one-sided (a sphere whose centre starts behind a
+// surface touches nothing, so a car driven through a wall stays through it):
+//
+// - in place: a sphere whose centre is at least 1 mm in front of a surface
+//   and whose skin is within 2 m of it yields a contact even when it is still
+//   separated; the latch (contacts.ts) decides whether it closes this step.
+// - swept: the sphere is moved along this step's travel D (its centre's
+//   velocity times the step) and yields a contact only if it overlaps the
+//   surface at some point of that travel. The contact is taken where the
+//   sphere first reaches the surface: the surface point P under the centre
+//   at that moment, the car point on the start sphere toward P, and the
+//   surface's own normal. A car on its wheels has no sphere within its own
+//   radius of the road, so a swept test finds no road contacts at all.
+//
+// The game runs the swept test for a car that is not crashing and is moving
+// forward faster than 6 m/s, and the in-place test otherwise.
 
 import type { Vec3 } from '../deformationSpec';
-import { add, dot, length, scale, sub, type Obstacle } from './state';
+import { add, dot, length, normalize, scale, sub, type Obstacle } from './state';
 
 // A candidate contact between one collision sphere and the world.
 export type PotentialContact = {
@@ -58,4 +69,62 @@ export function sphereVsGround(c: Vec3, r: number): Hit | null {
 export function sphereVsObstacle(c: Vec3, r: number, o: Obstacle): Hit | null {
 	if (o.kind === 'wall') return sphereVsPlane(c, r, o.point, scale(o.normal, -1));
 	return sphereVsPole(c, r, add(o.point, scale(o.normal, o.poleRadius)), o.poleAxis, o.poleRadius);
+}
+
+// Swept sphere against the plane through `point` with unit normal `normal`:
+// the slab of half-thickness r around the plane is entered at tEnter (0 when
+// the sphere starts in it). A sweep exactly along the plane counts only while
+// it is already inside the slab.
+export function sweptSphereVsPlane(c: Vec3, r: number, travel: Vec3, point: Vec3, normal: Vec3): Hit | null {
+	const h0 = dot(sub(c, point), normal);
+	const dn = dot(travel, normal);
+	let tEnter = 0;
+	if (dn === 0) {
+		if (Math.abs(h0) >= r) return null;
+	} else {
+		const ta = (h0 - r) / -dn, tb = (h0 + r) / -dn;
+		tEnter = Math.max(Math.min(ta, tb), 0);
+		if (Math.min(Math.max(ta, tb), 1) <= 0 || tEnter >= 1) return null;
+	}
+	const P = sub(add(c, scale(travel, tEnter)), scale(normal, h0 + dn * tEnter));
+	return sweptHit(c, r, P, normal);
+}
+
+// The same against an endless round pole: the sweep meets the pole when its
+// centre comes within r + poleRadius of the axis; the normal is the pole's
+// outward one there.
+export function sweptSphereVsPole(c: Vec3, r: number, travel: Vec3, axisPoint: Vec3, axis: Vec3, poleRadius: number): Hit | null {
+	const perp = (v: Vec3) => sub(v, scale(axis, dot(v, axis)));
+	const q = perp(sub(c, axisPoint)), d = perp(travel), reach = r + poleRadius;
+	const c0 = dot(q, q) - reach * reach;
+	let tEnter = 0;
+	if (c0 > 0) {
+		const a = dot(d, d), b = 2 * dot(q, d), disc = b * b - 4 * a * c0;
+		if (a === 0 || disc < 0) return null;
+		tEnter = (-b - Math.sqrt(disc)) / (2 * a);
+		if (tEnter < 0 || tEnter >= 1) return null;
+	}
+	const at = add(c, scale(travel, tEnter));
+	const radial = perp(sub(at, axisPoint));
+	const dist = length(radial);
+	if (dist < 1e-9) return null;
+	const n = scale(radial, 1 / dist);
+	const P = add(add(axisPoint, scale(axis, dot(sub(at, axisPoint), axis))), scale(n, poleRadius));
+	return sweptHit(c, r, P, n);
+}
+
+// P is ahead of the start centre only if the centre started in front of the
+// surface; the contact direction perpendicular to the surface is rejected too.
+function sweptHit(c: Vec3, r: number, P: Vec3, normal: Vec3): Hit | null {
+	const f = normalize(sub(P, c));
+	if (!(dot(f, normal) < 0)) return null;
+	return { pA: add(c, scale(f, r)), pB: P, n: normal };
+}
+
+export const sweptSphereVsGround = (c: Vec3, r: number, travel: Vec3) =>
+	sweptSphereVsPlane(c, r, travel, [0, GROUND_Y, 0], [0, 1, 0]);
+
+export function sweptSphereVsObstacle(c: Vec3, r: number, travel: Vec3, o: Obstacle): Hit | null {
+	if (o.kind === 'wall') return sweptSphereVsPlane(c, r, travel, o.point, scale(o.normal, -1));
+	return sweptSphereVsPole(c, r, travel, add(o.point, scale(o.normal, o.poleRadius)), o.poleAxis, o.poleRadius);
 }

@@ -8,9 +8,10 @@
 // obstacle):
 // - a spark shower from a contact sliding faster than 15 mph across the
 //   surface (head-on hits throw none), at most one per 0.02 - 0.15 s;
-// - a debris burst from any contact, at most every 0.18 s, sized by the car's
-//   speed (nothing below 5 m/s);
-// - dust from the contact point, 2.5 puffs per metre the car travels while
+// - a debris burst from the step's hardest contact, at most every 0.18 s,
+//   sized by the car's speed (nothing below 5 m/s), so a wreck that also
+//   drags a sill along the road bursts at the wall it hit;
+// - dust from that contact, 2.5 puffs per metre the car travels while
 //   touching something above 5 m/s;
 // - a trail of debris, glass bits and smoke shed along the car's path above
 //   8 m/s;
@@ -24,7 +25,6 @@ import { GlassState } from '../deformationSim';
 import { add, cross, length, scale, sub } from '../deformationSim/state';
 import { GROUND_Y } from '../deformationSim/world';
 import { toWorld } from '../vehicleSim/body';
-import { AbsorptionSet } from '../deformationSim/tables';
 import { makeDebris, stepDebris, upCone, type Debris, type Plane } from './debris';
 import { makePuff, type Puff } from './puffs';
 import { Pool } from './pool';
@@ -92,12 +92,15 @@ export function stepCrashEffects(fx: CrashEffects, sim: CrashSim, dt: number): v
 				fx.counter += spawnShower({ origin: c.point, normal: c.normal, slide: c.slide, time: fx.time, groundY: fx.groundY, counter: fx.counter }, rng, (k) => fx.sparks.add(k));
 				fx.sparkCooldown = SPARK_COOLDOWN.base + rng.next() * SPARK_COOLDOWN.random;
 			}
+		}
+		if (hits.length) {
+			const hardest = hits.reduce((a, c) => (c.impulse > a.impulse ? c : a));
 			if (fx.burstCooldown <= 0 && burstScale(speed) > 0.01) {
-				burst(fx, add(c.point, scale(c.normal, BURST_ORIGIN_LIFT)), vel, burstScale(speed));
+				burst(fx, add(hardest.point, scale(hardest.normal, BURST_ORIGIN_LIFT)), vel, burstScale(speed));
 				fx.burstCooldown = BURST_COOLDOWN;
 			}
+			if (speed > DUST_MIN_SPEED) dust(fx, hardest.point, vel, speed * dt);
 		}
-		if (hits.length && speed > DUST_MIN_SPEED) dust(fx, hits[0].point, vel, speed * dt);
 		trail(fx, sim, moving, dt);
 		for (const g of ev.glass) if (g.state === GlassState.Smashed) glassBurst(fx, g);
 	}
@@ -161,7 +164,7 @@ function trail(fx: CrashEffects, sim: CrashSim, speed: number, dt: number): void
 	const s = sim.state, rng = fx.rng;
 	const f = Math.min(Math.max((speed - TRAIL_SPEED[0]) / (TRAIL_SPEED[1] - TRAIL_SPEED[0]), 0), 1);
 	if (f <= 0) return;
-	const rows = s.absorptionSet === AbsorptionSet.AiCrashing ? AI_TRAIL : PLAYER_TRAIL;
+	const rows = s.driver === 'player' ? PLAYER_TRAIL : AI_TRAIL;
 	const box = s.vehicle.aabb, b = s.body;
 	const centre = toWorld(b, scale(add(box.min, box.max), 0.5));
 	const step = scale(b.v, dt);
