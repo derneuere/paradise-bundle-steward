@@ -24,11 +24,40 @@ export const normalize = (a: Vec3): Vec3 => { const l = length(a); return l > 1e
 
 export enum PartState { Unused = 0, NonDetachable = 1, AttachedIK = 2, Hinged = 3, Detached = 4 }
 
-export type Hinge = { joint: number; tag: number; rot: number; vel: number; storedVel: Vec3 };
-// A part knocked clean off flies on its own in the world: `pos` is where its
-// pivot (`origin`, the part's mesh-frame locator origin) is, `rotation` its
-// world orientation (row-major 3x3).
-export type FreePart = { pos: Vec3; vel: Vec3; spin: Vec3; rotation: number[]; origin: Vec3 };
+// A hinged panel: its joint and the tag point it hangs from, its swing angle
+// and speed, the hinge anchor's velocity last step (car axes), and what its
+// box met in the world since the last step: the deepest penetration (world),
+// the contact point farthest from the panel (null: none) and the joint
+// stress that penetration puts on the hinge.
+export type Hinge = {
+	joint: number; tag: number; rot: number; vel: number; storedVel: Vec3;
+	pen: Vec3; contact: Vec3 | null; limitStress: number;
+};
+
+// A rigid body loose in the world (a knocked-off panel or a shed wheel).
+// `pos` is its centre of mass (world), `rotation` takes its body frame to the
+// world (row-major 3x3), `points` are where it can touch the world (body
+// frame, about the centre of mass).
+export type LooseBody = {
+	pos: Vec3; vel: Vec3; spin: Vec3; rotation: number[];
+	invMass: number;
+	invInertia: number[];    // body frame, row-major 3x3
+	inertiaRatio: number;    // largest principal moment / mass, for the sleep test
+	points: Vec3[];
+	pad: number;             // contacts are made this far ahead of a surface
+	props: LooseBodyProps;
+	sleepEnergy: number; sleepSteps: number; frozen: boolean;
+};
+export type LooseBodyProps = {
+	restitution: number; staticFriction: number; dynamicFriction: number;
+	maxSpeed: number; maxSpin: number; drag: number;
+	limitVelocities: boolean;  // the part rule that throttles a part spinning or flying too fast
+};
+// A part knocked clean off. Its body frame is the car's mesh frame (so
+// `rotation` is mesh to world), and `origin` is its centre of mass in that
+// frame: a mesh point m is drawn at pos + rotation (m - origin).
+export type FreePart = LooseBody & { origin: Vec3 };
+export type LooseWheel = LooseBody & { wheel: number; radius: number; halfWidth: number };
 
 export type Obstacle = {
 	kind: 'wall' | 'pole';
@@ -71,6 +100,16 @@ export type SimState = {
 	free: Map<number, FreePart>;
 	physicalParts: number;
 	attachedExhausts: number;
+	// How much the wreck has spun while crashing (decaying); enough of it
+	// shakes a jointed panel loose.
+	spinSum: number;
+	random: number;          // the run's random generator state (random.ts)
+	wheelTwistLimit: number[];   // per wheel: the twist that takes it off
+	brokenWheels: number;
+	looseWheels: LooseWheel[];
+	// The car's pose at the end of the last step: a hinged panel's contacts
+	// are found there and then carried along with the car's motion.
+	prevCar: { pos: Vec3; axes: [Vec3, Vec3, Vec3] } | null;
 	// A wheel hub's contacts are the contacts of its nearest sensor.
 	wheelToSensor: number[];
 	potential: PotentialContact[];  // this step's candidate contacts, in harvest order

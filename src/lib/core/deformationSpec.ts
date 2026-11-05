@@ -182,6 +182,12 @@ export type JointSpec = {
  *  chain, and range of tag / driven points. */
 export type IKPart = {
 	graphicsTransform: Mat4;
+	/** The part's bounding box (+0x40..+0x1C0): `orientation` takes part-local
+	 *  points into the box's frame (row-vector affine; its translation row is
+	 *  zero on every retail car), and the ten skin bindings are the box's eight
+	 *  corners, its centre and its joint point, part-local and skinned to the
+	 *  part's tag / driven points like its vertices. The game builds a loose
+	 *  part's collision box from them. */
 	orientation: Mat4;
 	cornerSkin: [SkinBinding, SkinBinding, SkinBinding, SkinBinding,
 	              SkinBinding, SkinBinding, SkinBinding, SkinBinding];

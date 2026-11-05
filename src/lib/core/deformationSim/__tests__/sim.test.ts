@@ -111,7 +111,7 @@ describe('detachment', () => {
 
 	it('lets gravity close a hinge whose lever points up and swing open one that hangs down', () => {
 		const sim = makeSim();
-		sim.state.hinges.set(1, { joint: 0, tag: 2, rot: -0.5, vel: 0, storedVel: [0, 0, 0] });
+		sim.state.hinges.set(1, { joint: 0, tag: 2, rot: -0.5, vel: 0, storedVel: [0, 0, 0], pen: [0, 0, 0], contact: null, limitStress: 0 });
 		const joint = sim.state.spec.ikParts[1].jointSpecs[0];
 		joint.defaultDirection = [0, 1, 0, 0];
 		for (let i = 0; i < 120; i++) updateHinges(sim.state, DT);
