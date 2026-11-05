@@ -1,8 +1,13 @@
 // Panels leaving the car: the detachment test run before every IK step, the
 // hinge joint that swings a loosened panel, and free-flying detached parts.
+// A hinged panel stays in the car's frame; a part knocked clean off leaves it
+// and flies and lands in the world.
 
 import type { Vec3 } from '../deformationSpec';
+import { rotationMatrix, toBodyDir, velocityAt } from '../vehicleSim/body';
+import { meshToWorld } from './pose';
 import { add, dot, length, normalize, scale, sub, PartState, type SimState } from './state';
+import { GROUND_Y } from './world';
 import {
 	ANCHOR_CLAMP, GRAVITY, JOINT_BOUNCE, JOINT_RELAX, MAX_IMPULSE_FOR_DETACHMENT, MAX_IMPULSE_FOR_DETACHMENT_TOUGH,
 	MAX_PHYSICAL_PARTS, MIN_IMPULSE_FOR_DETACHMENT,
@@ -52,10 +57,8 @@ function detachPart(s: SimState, p: number, hingeTag: number): void {
 	if (s.attachedExhausts <= 1 && EXHAUSTS.has(part.partType) && !hinge) return;
 	s.physicalParts++;
 	const origin: Vec3 = [part.graphicsTransform[3][0], part.graphicsTransform[3][1], part.graphicsTransform[3][2]];
-	s.events.parts.push({
-		part: p, gfx: part.partGraphics, partType: part.partType, state: hinge ? 'hinged' : 'detached',
-		pos: add(s.carPos, mul3(s.carRot, origin)), vel: [...s.carVel] as Vec3,
-	});
+	const pos = meshToWorld(s, origin), vel = velocityAt(s.body, pos);
+	s.events.parts.push({ part: p, gfx: part.partGraphics, partType: part.partType, state: hinge ? 'hinged' : 'detached', pos, vel });
 	if (hinge) {
 		s.partState[p] = PartState.Hinged;
 		s.hinges.set(p, { joint: s.spec.tagPoints[hingeTag].jointIndex, tag: hingeTag, rot: 0, vel: 0, storedVel: carLocalVelocity(s) });
@@ -63,7 +66,7 @@ function detachPart(s: SimState, p: number, hingeTag: number): void {
 	}
 	s.partState[p] = PartState.Detached;
 	if (EXHAUSTS.has(part.partType)) s.attachedExhausts--;
-	s.free.set(p, { pos: [...origin], origin, vel: carLocalVelocity(s), spin: [0, 0, 0], rotation: identity3() });
+	s.free.set(p, { pos, origin, vel, spin: [0, 0, 0], rotation: rotationMatrix(s.body) });
 }
 
 // Right-handed rotation by `angle` about `axis` (row-major 3x3). Joint
@@ -81,7 +84,6 @@ export function jointRotation(axis: Vec3, angle: number): number[] {
 export const mul3 = (m: number[], v: Vec3): Vec3 => [
 	m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
 ];
-const identity3 = () => [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
 // The hinge point follows the dent of its tag point. The panel is driven by
 // the car's own motion along its lever (the defaultDirection) and by gravity,
@@ -95,12 +97,7 @@ export function hingePoint(s: SimState, p: number): Vec3 | null {
 	return add([js.position[0], js.position[1], js.position[2]], sub(s.tags[h.tag], tag.initialPosition));
 }
 
-const carLocalVelocity = (s: SimState): Vec3 => {
-	const m = s.carRot;
-	return [m[0] * s.carVel[0] + m[3] * s.carVel[1] + m[6] * s.carVel[2],
-		m[1] * s.carVel[0] + m[4] * s.carVel[1] + m[7] * s.carVel[2],
-		m[2] * s.carVel[0] + m[5] * s.carVel[1] + m[8] * s.carVel[2]];
-};
+const carLocalVelocity = (s: SimState): Vec3 => toBodyDir(s.body, s.body.v);
 
 export function updateHinges(s: SimState, dt: number): void {
 	const carVel = carLocalVelocity(s);
@@ -120,7 +117,7 @@ export function updateHinges(s: SimState, dt: number): void {
 	}
 }
 
-export function updateFreeParts(s: SimState, dt: number, groundY: number): void {
+export function updateFreeParts(s: SimState, dt: number, groundY = GROUND_Y): void {
 	for (const f of s.free.values()) {
 		if (f.pos[1] <= groundY && length(f.vel) < 1e-3) continue;
 		f.vel = add(f.vel, [0, -GRAVITY * dt, 0]);

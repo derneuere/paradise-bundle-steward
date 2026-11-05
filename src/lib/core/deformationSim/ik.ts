@@ -78,6 +78,8 @@ export function updateSkinRows(s: SimState): void {
 	});
 }
 
+// The car's deformable box is body frame; driven points are spec frame.
 function clampToBox(p: Vec3, s: SimState): Vec3 {
-	return [0, 1, 2].map((k) => Math.min(Math.max(p[k], s.aabb.min[k] - SKINNING_CLAMP_MARGIN[k]), s.aabb.max[k] + SKINNING_CLAMP_MARGIN[k])) as Vec3;
+	const { min, max } = s.vehicle.aabb, c = s.com;
+	return [0, 1, 2].map((k) => Math.min(Math.max(p[k], min[k] + c[k] - SKINNING_CLAMP_MARGIN[k]), max[k] + c[k] + SKINNING_CLAMP_MARGIN[k])) as Vec3;
 }

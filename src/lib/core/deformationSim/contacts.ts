@@ -22,7 +22,7 @@
 
 import type { Vec3 } from '../deformationSpec';
 import { drain, invEffectiveMass, toBody, toBodyDir, toWorld, toWorldDir, velocityAt } from '../vehicleSim/body';
-import { bankWorldImpulse } from './bodyImpulse';
+import { applyContactImpulse } from '../vehicleSim/crash';
 import { applyContactFriction } from './friction';
 import { applySensorImpulse } from './sensors';
 import { add, cross, dot, normalize, scale, sub, DISARMED, type ImpulseRecord, type SimState } from './state';
@@ -36,13 +36,14 @@ const STORE_SLOTS = 3;
 // A sensor's centre in the body (centre-of-mass) frame.
 export const sensorLocal = (s: SimState, i: number): Vec3 => sub(s.sensors[i], s.com);
 
-// The wheel hub sphere: the wheel's x/z, its streamed (suspension-neutral)
-// height lifted by a quarter of the wheel scale, radius half the scale. The
-// scale is the x of the spec wheel's second vector (parsed as `direction`).
+// The wheel hub sphere: the live wheel's x/z, its streamed (suspension-
+// neutral) height lifted by a quarter of the wheel scale, radius half the
+// scale. The scale is the x of the spec wheel's second vector (parsed as
+// `direction`). Body frame.
 export function hubSphere(s: SimState, w: number): { local: Vec3; radius: number } {
 	const sc = s.spec.wheels[w].direction[0];
-	const p = s.wheelPos[w];
-	return { local: [p[0], s.wheelStreamedY[w] + sc * 0.25, p[2]], radius: sc * 0.5 };
+	const p = s.vehicle.wheels[w].pos;
+	return { local: [p[0], s.vehicle.params.wheels[w].streamed[1] + sc * 0.25, p[2]], radius: sc * 0.5 };
 }
 
 // Every collision sphere in the world, sensors first, then the four hubs.
@@ -65,7 +66,7 @@ export const owningSensor = (s: SimState, sphere: number) =>
 // Each wheel hub reports through the sensor nearest the wheel (the first one
 // on a tie).
 export function nearestSensors(s: SimState): number[] {
-	return s.wheelPos.map((p) => {
+	return s.vehicle.wheels.map(({ pos: p }) => {
 		let best = Infinity, index = 0;
 		for (let i = 0; i < s.spec.numDeformationSensors; i++) {
 			const d = sub(sensorLocal(s, i), p);
@@ -183,7 +184,7 @@ export function applyCarWorldImpulse(s: SimState, rec: ImpulseRecord, sensor: nu
 	const arrivals = applySensorImpulse(s, {
 		sensor, direction: toBodyDir(b, rec.n), magnitude, closingSpeed: Math.abs(vn), invMass: k, dt,
 	});
-	for (const { d, rem } of arrivals) bankWorldImpulse(b, s.crashing, s.counters, scale(DIRECTIONS[d], rem), rec.pA, rec.n);
+	for (const { d, rem } of arrivals) applyContactImpulse(s.vehicle, scale(DIRECTIONS[d], rem), rec.pA, true, rec.n);
 	const { slide, scratch } = applyContactFriction(s, b, sensor, relVel, rec.n, magnitude, rec.pA, dt);
 	s.events.contacts.push({
 		sensor, point: rec.pB, normal: rec.n, impulse: magnitude, closingSpeed: Math.abs(vn), slide, scratch, surface: rec.surface,
@@ -196,7 +197,7 @@ export function applyContactImpulses(s: SimState, dt: number): void {
 	const rows: ContactRow[] = [];
 	s.records.forEach((rec, sensor) => { if (!(rec.t > 1)) rows.push({ key: dot(dir, rec.n), t: rec.t, sensor }); });
 	sortContactRows(rows);
-	s.counters.numWorldCollisions = 0;
+	s.vehicle.numWorldCollisions = 0;
 	for (const { sensor } of rows) {
 		const rec = s.records[sensor];
 		if (rec.t > 1) continue;

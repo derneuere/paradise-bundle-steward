@@ -13,13 +13,16 @@ import type { Vec3 } from '@/lib/core/deformationSpec';
 import { isDragRelease } from '../selection';
 import type { CrashSession } from './useCrashSession';
 import { applyFracture } from './crackedGlassMaterial';
+import { runSummary } from './runSummary';
 
 const STEP = 1 / 60;
 
 // Objects drawn for a GraphicsSpec part (a group per part in the Crash
 // Preview, every mesh of the part in the Renderable view). Each frame their
-// matrix becomes the part's pose delta (mesh frame) times its locator, so an
-// object with no pose sits exactly at its locator again. A window mesh (its
+// matrix becomes the part's world pose (the car's, or the part's own once it
+// hinges or comes off) times its locator. An object registered without a
+// part (gfx -1, a mesh inside an already posed group) keeps its locator and
+// only has its visibility managed. A window mesh (its
 // mesh flags carry its pane's bit) is hidden once that pane cracks or
 // smashes; a mesh of a pane's shattered-glass model (registered with `glass`)
 // shows only while the pane is cracked, with the pane's fracture constants
@@ -35,7 +38,7 @@ type PosedEntry = { obj: THREE.Object3D; gfx: number; locator: THREE.Matrix4; fl
 
 export function makePartPoser(): PartPoser {
 	const entries = new Map<string, PosedEntry>();
-	const delta = new THREE.Matrix4();
+	const world = new THREE.Matrix4(), car = new THREE.Matrix4();
 	return {
 		ref: (key, gfx, locator, meshFlags = 0, glass) => (obj) => {
 			if (obj) entries.set(key, { obj, gfx, locator, flags: meshFlags & 0xff, glass });
@@ -43,6 +46,7 @@ export function makePartPoser(): PartPoser {
 		},
 		pose: (sim) => {
 			const damaged = damagedPaneBits(sim.state);
+			car.fromArray(sim.carMatrix());
 			for (const { obj, gfx, locator, flags, glass } of entries.values()) {
 				if (glass) {
 					const constants = crackedPaneConstants(sim.state, glass.bodyPartType, glass.glassIndex);
@@ -50,9 +54,10 @@ export function makePartPoser(): PartPoser {
 					if (constants) applyFracture((obj as THREE.Mesh).material, constants);
 				} else if (flags) obj.visible = (flags & damaged) === 0;
 				const pose = sim.partPoses.get(gfx);
-				if (pose) delta.fromArray(pose.meshDelta);
-				else delta.identity();
-				obj.matrix.multiplyMatrices(delta, locator);
+				if (gfx < 0) world.identity();
+				else if (pose) world.fromArray(pose.world);
+				else world.copy(car);
+				obj.matrix.multiplyMatrices(world, locator);
 				obj.matrixWorldNeedsUpdate = true;
 			}
 		},
@@ -72,6 +77,7 @@ export function advanceClock(clock: { lead: number; pendingSteps: number }, dt: 
 
 export function useCrashStepper(session: CrashSession, poser: PartPoser, afterStep?: (sim: CrashSim) => void) {
 	const lastSummary = useRef('');
+	const lastOutcome = useRef('');
 	useFrame((_, dt) => {
 		const sim = session.simRef.current;
 		if (!sim) return;
@@ -85,10 +91,13 @@ export function useCrashStepper(session: CrashSession, poser: PartPoser, afterSt
 		afterStep?.(sim);
 		const summary = partSummary(sim);
 		if (summary !== lastSummary.current) { lastSummary.current = summary; session.setParts(summary); }
+		const outcome = runSummary(sim.state.run);
+		if (outcome !== lastOutcome.current) { lastOutcome.current = outcome; session.setOutcome(outcome); }
 	});
 }
 
-export function crashHitHandler(onHit: (pointMesh: Vec3, normalMesh: Vec3) => void) {
+// Calls back with the clicked point and its outward surface normal, world frame.
+export function crashHitHandler(onHit: (pointWorld: Vec3, normalWorld: Vec3) => void) {
 	return (e: ThreeEvent<MouseEvent>) => {
 		e.stopPropagation();
 		if (!e.face || isDragRelease(e.nativeEvent.clientX, e.nativeEvent.clientY)) return;

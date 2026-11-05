@@ -3,9 +3,8 @@ import type { Vec3 } from '../../deformationSpec';
 import { translate } from '../../vehicleSim/body';
 import { generateContacts, latchContacts } from '../contacts';
 import { cullStoredContacts, solvePenetration } from '../penetration';
-import { createCrashSim } from '../sim';
 import type { StoredContact } from '../state';
-import { makeSpec } from './fixture';
+import { makeSim, makeSpec } from './fixture';
 
 const stored = (B: Vec3, n: Vec3, projDist: number): StoredContact => ({ localA: [0, 0, 0], B, n, projDist });
 
@@ -15,7 +14,7 @@ describe('penetration solve', () => {
 	function nearWall() {
 		const spec = makeSpec();
 		spec.sensors[1] = { ...spec.sensors[1], initialOffset: [0, 0.5, 1.8] };
-		const s = createCrashSim(spec).state;
+		const s = makeSim({ spec }).state;
 		translate(s.body, [0, 10, 0]);
 		s.obstacle = { kind: 'wall', point: [0, 10, 3], normal: [0, 0, 1], poleAxis: [0, 1, 0], poleRadius: 0.15 };
 		generateContacts(s);

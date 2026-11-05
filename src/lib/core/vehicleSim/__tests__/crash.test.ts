@@ -96,6 +96,16 @@ describe('crash entry', () => {
 		expect(v.crashing).toBe(true);
 		// Entry x1.3, then one step of crash damping and road forces.
 		expect(v.body.v[2]).toBeGreaterThan(45 * 1.3 * 0.99);
+		// The game's own rule wins over a forced crash.
+		expect(hit(45, true).r.crashed).toBe('headOn');
+	});
+
+	it('forces a crash on any contact of the step, not only the five the arm reads, and never on the road', () => {
+		const v = carAt(30);
+		const wall = noseOnWall(v), road: ArmContact = { ...wall, ground: true };
+		const step = (all: ArmContact[]) => stepVehicle(carAt(30), world, DT, NO_INPUT, { crashArmContacts: () => [], worldContacts: () => all }, { forceCrash: true });
+		expect(step([road]).crashed).toBe(null);
+		expect(step([road, wall]).crashed).toBe('forced');
 	});
 });
 

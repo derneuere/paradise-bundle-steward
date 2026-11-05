@@ -7,7 +7,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { Button } from '@/components/ui/button';
 import type { DecodeMode } from '@/lib/core/renderableDecode';
 import { CrashControls } from './CrashControls';
-import { CrashMarkers, CrashObstacle } from './crashStage';
+import { CrashCameraFollow, CrashMarkers, CrashObstacle } from './crashStage';
 import { CrashParticles } from './CrashParticles';
 import { particleTextures } from './particleTextures';
 import type { Vec3 } from '@/lib/core/deformationSpec';
@@ -35,8 +35,8 @@ export function RenderableCrashPanel({ crash, setDecodeMode }: { crash: Renderab
 	);
 }
 
-// Inside the Canvas: steps the simulator, poses the registered meshes and
-// draws the obstacle and markers.
+// Inside the Canvas: steps the simulator, poses the registered meshes in the
+// world, draws the obstacle and markers and keeps the camera on the car.
 const GREY_PAINT: Vec3 = [0.6, 0.62, 0.65];
 
 // `paint` is the car's colour (paint-coloured debris), when the view has one.
@@ -53,6 +53,7 @@ function CrashRigInner({ session, poser, paint }: { session: CrashSession; poser
 	return (
 		<>
 			<CrashObstacle simRef={session.simRef} />
+			<CrashCameraFollow simRef={session.simRef} />
 			{session.showPoints && session.sim && <CrashMarkers sim={session.sim} />}
 			<CrashParticles session={session} paint={paint} textures={textures} />
 		</>

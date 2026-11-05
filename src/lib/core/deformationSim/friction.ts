@@ -44,7 +44,7 @@ export function applyContactFriction(
 ): { slide: Vec3; scratch: number } {
 	const { slide, speed } = slideAcross(relVel, n);
 	if (speed * speed < MIN_SLIDE_SQ) return { slide, scratch: 0 };
-	if (s.crashing) {
+	if (s.vehicle.crashing) {
 		const against = scale(slide, -1 / speed);
 		const felt = magnitude * Math.min(speed, 1);
 		addImpulseAt(body, scale(against, felt * WORLD_CRASH_IMPULSE_ROW * dt), 'world', pA, 'world');

@@ -80,8 +80,8 @@ export function useRenderableCrash(bundle: EditableBundle | null, renderables: r
 	const on = enabled && available && !!body;
 	const { rows, heat, flat } = session;
 	// Stable click handler that always hits with the current speed / obstacle.
-	const hitRef = useRef(session.hit);
-	hitRef.current = session.hit;
+	const hitRef = useRef(session.hitAt);
+	hitRef.current = session.hitAt;
 	const onClick = useMemo(() => crashHitHandler((p, n) => hitRef.current(p, n)), []);
 	const glass = useCrackedGlass(bundles);
 	const deform = useMemo<CrashDeform | null>(

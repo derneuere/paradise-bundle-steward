@@ -13,9 +13,10 @@
 // reports once.
 
 import type { Vec3 } from '../deformationSpec';
+import { toWorldDir } from '../vehicleSim/body';
 import { add, dot, length, sub, type SimState } from './state';
 import { GlassState, type GlassEvent } from './events';
-import { mul3 } from './parts';
+import { specToWorld } from './pose';
 
 export const CRACK_SUM_SQ = 0.001 * 0.001 * 4;
 export const SMASH_SUM_SQ = 0.05 * 0.05 * 4;
@@ -70,12 +71,11 @@ export function updateGlass(s: SimState): void {
 		const corners = points.map((c, k) => add(c!.live, [g.matrix[k][0], g.matrix[k][1], g.matrix[k][2]]));
 		pane.width = length(sub(corners[2], corners[1]));
 		pane.equalisation = pane.width > 0 ? length(sub(corners[1], corners[0])) / pane.width : 1;
-		const toWorld = (v: Vec3) => add(s.carPos, mul3(s.carRot, v));
 		s.events.glass.push({
 			pane: p, partType: g.partType, state: pane.state as GlassEvent['state'], crack,
-			corners: corners.map(toWorld) as GlassEvent['corners'],
-			normal: mul3(s.carRot, [g.plane[0], g.plane[1], g.plane[2]]),
-			carVel: [...s.carVel] as Vec3,
+			corners: corners.map((c) => specToWorld(s, c)) as GlassEvent['corners'],
+			normal: toWorldDir(s.body, [g.plane[0], g.plane[1], g.plane[2]]),
+			carVel: [...s.body.v] as Vec3,
 		});
 	});
 }

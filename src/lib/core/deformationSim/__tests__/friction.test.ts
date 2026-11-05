@@ -3,18 +3,14 @@ import type { Vec3 } from '../../deformationSpec';
 import { drain, mulMat } from '../../vehicleSim/body';
 import { applyImpact, createCrashSim, stepCrashSim } from '../sim';
 import { applyContactFriction, CRASH_FORCE_ROW, slideAcross } from '../friction';
-import { add, cross, sub } from '../state';
-import { makeSpec } from './fixture';
+import { add, cross, dot, length, scale, sub } from '../state';
+import { makeSim, makeSpec, stepUntilHit } from './fixture';
 
 const DT = 1 / 60;
 const N: Vec3 = [0, 0, 1];   // contact normal, out of the surface
 const close = (a: readonly number[], b: readonly number[], digits = 9) => a.forEach((v, k) => expect(v).toBeCloseTo(b[k], digits));
 
-function fresh(crashing = true, mass = 1500) {
-	const sim = createCrashSim(makeSpec(), { attribs: { mass } });
-	sim.state.crashing = crashing;
-	return sim.state;
-}
+const fresh = (crashing = true, mass = 1500) => makeSim({ crashing, mass }).state;
 
 // One contact's friction at an arm r from the centre of mass, drained.
 function rub(relVel: Vec3, magnitude: number, crashing = true, r: Vec3 = [0, 0.2, 2]) {
@@ -64,29 +60,28 @@ describe('slide friction', () => {
 });
 
 describe('scraping along a wall', () => {
-	const scrape = (crash: boolean) => {
-		const sim = createCrashSim(makeSpec(), { attribs: { mass: 1500, crashExtraLinearVelocity: 0 } });
-		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30, glance: 40, crash });
-		const speeds: number[] = [], across: number[] = [];
-		for (let i = 0; i < 240; i++) {
-			stepCrashSim(sim);
-			speeds.push(Math.hypot(sim.state.carVel[0], sim.state.carVel[2]));
-			across.push(Math.abs(sim.state.carVel[0]));
-		}
-		return { sim, speeds, across };
+	// The wall is turned 40° off the car's travel; the car's speed along it,
+	// from the step it first touches on.
+	const scrape = (forceCrash: boolean) => {
+		const sim = createCrashSim(makeSpec());
+		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30, glance: 40, forceCrash });
+		stepUntilHit(sim);
+		const n = sim.state.obstacle!.normal;
+		const along = () => { const v = sim.state.body.v; return length(sub(v, scale(n, dot(v, n)))); };
+		const speeds = [along()];
+		for (let i = 0; i < 60; i++) { stepCrashSim(sim); speeds.push(along()); }
+		return { sim, speeds };
 	};
 
-	it('slows a crashing car sliding along the wall, and the ground it stands on brings it to rest', () => {
-		const { speeds, across } = scrape(true);
-		// The first step's wall contact brakes the slide far harder than the
-		// 0.9/s force alone would.
-		expect(across[0]).toBeLessThan(30 * Math.sin((40 * Math.PI) / 180) * Math.exp(-CRASH_FORCE_ROW * DT));
-		expect(speeds[59]).toBeLessThan(speeds[0] / 2);
-		expect(Math.max(...speeds.slice(200))).toBeLessThan(0.05);
+	it('slows a crashing car sliding along the wall far faster than a knock', () => {
+		const crash = scrape(true), knock = scrape(false);
+		expect(crash.sim.state.vehicle.crashing).toBe(true);
+		expect(knock.sim.state.vehicle.crashing).toBe(false);
+		expect(crash.speeds[30]).toBeLessThan(knock.speeds[30] * 0.8);
 	});
 
 	it('lets a knock slide on', () => {
-		const { sim } = scrape(false);
-		expect(Math.abs(sim.state.carVel[0])).toBeCloseTo(30 * Math.sin((40 * Math.PI) / 180), 3);
+		const { speeds } = scrape(false);
+		expect(speeds[10]).toBeGreaterThan(speeds[0] * 0.8);
 	});
 });

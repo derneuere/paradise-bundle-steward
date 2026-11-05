@@ -51,6 +51,9 @@ export type VehicleParams = {
 		// Crash entry multipliers on w (world x, y, z components) and horizontal v.
 		crashExtraAngular: Vec3; crashExtraLinear: number;
 		minSpeedForDriftMph: number;
+		// How far a knock (a hit outside a crash) may crush the sensors:
+		// side, -Y, +Z, -Z.
+		driveTimeLimits: [number, number, number, number];
 	};
 	front: TyreParams;
 	rear: TyreParams;
@@ -169,6 +172,10 @@ export function paramsFromClasses(classes: AttribClasses, spec: ParsedDeformatio
 			crashExtraAngular: [0, base.num('CrashExtraYawVelocityFactor'), base.num('CrashExtraRollVelocityFactor')],
 			crashExtraLinear: base.num('CrashExtraLinearVelocityFactor'),
 			minSpeedForDriftMph: drift.num('MinSpeedForDrift'),
+			driveTimeLimits: [
+				base.num('DriveTimeDeformLimitX'), base.num('DriveTimeDeformLimitNegY'),
+				base.num('DriveTimeDeformLimitPosZ'), base.num('DriveTimeDeformLimitNegZ'),
+			],
 		},
 		front: tyre('Front'), rear: tyre('Rear'),
 		susp: {

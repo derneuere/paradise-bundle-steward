@@ -31,6 +31,9 @@
 //   The ordered world contacts the crash arm reads (the game keeps at most 5,
 //   earliest first): pointA on the car, pointB on the world, normal out of
 //   the world into the car, all world frame. Read-only.
+// worldContacts(v) -> ArmContact[]      step E, only for a forced crash.
+//   Every contact of the step, in the same shape (crashArmContacts' when
+//   absent). Read-only.
 // updateContacts(v, dt)                 step H, after the vehicle update.
 //   The body's accumulators are empty and v.numWorldCollisions has just been
 //   reset to 0 (so during G it still held last frame's count, as in the
@@ -58,13 +61,15 @@ export const DT = 1 / 60;
 export type StepHooks = {
 	generateContacts?: (v: VehicleState, world: World, dt: number) => void;
 	crashArmContacts?: (v: VehicleState) => readonly ArmContact[];
+	worldContacts?: (v: VehicleState) => readonly ArmContact[];
 	updateContacts?: (v: VehicleState, dt: number) => void;
 	penetration?: (v: VehicleState, dt: number) => void;
 };
 
 export type StepOptions = {
 	thresholds?: CrashThresholds;
-	// Crash on the first approaching world contact whatever its speed.
+	// Crash on the first approaching contact with anything but the road,
+	// whatever its speed, when the game's own rules don't.
 	forceCrash?: boolean;
 	shortCrash?: boolean;
 };
@@ -78,13 +83,21 @@ export function stepVehicle(v: VehicleState, world: World, dt: number, ctl: Cont
 
 	let crashed: CrashKind | null = null;
 	if (!v.crashing) {
-		for (const c of hooks.crashArmContacts?.(v) ?? []) {
-			const r = worldCrashArm(v, c, dt, opts.thresholds ?? CRASH_THRESHOLDS);
-			const kind = r.kind ?? (opts.forceCrash && r.approaching ? 'forced' : null);
-			if (!kind) continue;
+		const crash = (c: ArmContact, kind: CrashKind) => {
 			setCrashing(v, scale(c.normal, -1), toBody(b, c.pointA), opts.shortCrash);
 			crashed = kind;
-			break;
+		};
+		const ordered = hooks.crashArmContacts?.(v) ?? [];
+		for (const c of ordered) {
+			const kind = worldCrashArm(v, c, dt, opts.thresholds ?? CRASH_THRESHOLDS).kind;
+			if (kind) { crash(c, kind); break; }
+		}
+		// A forced crash is not one of the game's rules, so it looks past the
+		// five slots (which the road under a car can fill) at every contact.
+		if (!crashed && opts.forceCrash) {
+			for (const c of hooks.worldContacts?.(v) ?? ordered) {
+				if (!c.ground && worldCrashArm(v, c, dt).approaching) { crash(c, 'forced'); break; }
+			}
 		}
 	}
 

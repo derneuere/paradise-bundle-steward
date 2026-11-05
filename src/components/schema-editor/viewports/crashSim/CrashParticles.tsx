@@ -1,14 +1,11 @@
 // Draws the crash effects (sparks, debris, glass, dust, smoke) both crash
-// views share. The effects live in the simulator's world frame while the
-// views keep the car still, so the whole batch is drawn through the
-// world -> car-mesh transform, like the obstacle.
+// views share, in the simulator's world frame like everything else.
 
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Vec3 } from '@/lib/core/deformationSpec';
 import { CRASH_SPARKS, puffLook, sparkPosition, type CrashEffects, type Puff } from '@/lib/core/crashEffects';
-import type { CrashSim } from '@/lib/core/deformationSim';
 import { useDisposeOnDepsChange } from '@/hooks/useDisposeOnDepsChange';
 import { CrashDebris } from './CrashDebris';
 import { puffGeometry, puffMaterial, ribbonGeometry, setQuad, sparkMaterial } from './particleMaterials';
@@ -17,15 +14,6 @@ import type { CrashSession } from './useCrashSession';
 
 const SPARK_CAP = 4000;
 const PUFF_CAP = 600;
-
-// world -> mesh frame: undo the car's pose, then the handling -> mesh shift.
-function worldToMesh(sim: CrashSim, out: THREE.Matrix4): THREE.Matrix4 {
-	const r = sim.state.carRot, p = sim.state.carPos, sh = sim.meshShift;
-	out.set(r[0], r[3], r[6], 0, r[1], r[4], r[7], 0, r[2], r[5], r[8], 0, 0, 0, 0, 1);
-	const t = new THREE.Vector3(...p).applyMatrix4(out);
-	out.setPosition(-t.x - sh[0], -t.y - sh[1], -t.z - sh[2]);
-	return out;
-}
 
 export function CrashParticles({ session, paint, textures }: { session: CrashSession; paint: Vec3; textures: ParticleTextures }) {
 	const root = useRef<THREE.Group>(null);
@@ -37,7 +25,7 @@ export function CrashParticles({ session, paint, textures }: { session: CrashSes
 		for (const m of [parts.sparks, parts.puffs]) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
 	}, [parts]);
 
-	const tmp = useMemo(() => ({ m: new THREE.Matrix4(), a: [0, 0, 0] as Vec3, b: [0, 0, 0] as Vec3 }), []);
+	const tmp = useMemo(() => ({ a: [0, 0, 0] as Vec3, b: [0, 0, 0] as Vec3 }), []);
 
 	useFrame(() => {
 		const sim = session.simRef.current, g = root.current;
@@ -46,17 +34,15 @@ export function CrashParticles({ session, paint, textures }: { session: CrashSes
 		if (!session.showParticles) return;
 		const fx = session.effects;
 		fx.paint = paint;
-		g.matrix.copy(worldToMesh(sim, tmp.m));
-		g.matrixWorldNeedsUpdate = true;
 		// Analytic particles are drawn between simulator steps too, so slow
 		// motion stays smooth.
 		const now = fx.time + session.clock.lead;
-		drawSparks(fx, now, sim.state.carVel, parts.sparks.geometry, tmp.a, tmp.b);
+		drawSparks(fx, now, sim.state.body.v, parts.sparks.geometry, tmp.a, tmp.b);
 		drawPuffs([...fx.smoke.items, ...fx.dust.items], now, parts.puffs.geometry);
 	});
 
 	return (
-		<group ref={root} matrixAutoUpdate={false}>
+		<group ref={root}>
 			<primitive object={parts.sparks} />
 			<CrashDebris session={session} looks={textures.debris} />
 			<primitive object={parts.puffs} />
@@ -65,8 +51,8 @@ export function CrashParticles({ session, paint, textures }: { session: CrashSes
 }
 
 // The game blurs each spark over the camera's last 25 ms, and its camera
-// rides with the car; here the view rides with the car, so the streak's tail
-// is where the spark was relative to the car back then.
+// rides with the car; so does the preview's, so the streak's tail is where the
+// spark was relative to the car back then.
 function drawSparks(fx: CrashEffects, now: number, carVel: Vec3, geo: THREE.BufferGeometry, a: Vec3, b: Vec3): void {
 	const A = geo.getAttribute('position') as THREE.BufferAttribute, B = geo.getAttribute('b') as THREE.BufferAttribute;
 	const C = geo.getAttribute('rgba') as THREE.BufferAttribute, W = geo.getAttribute('width') as THREE.BufferAttribute;

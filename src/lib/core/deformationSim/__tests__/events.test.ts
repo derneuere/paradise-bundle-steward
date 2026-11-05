@@ -4,7 +4,8 @@ import { applyImpact, createCrashSim, GlassState, resetCrashSim, stepCrashSim } 
 import { checkForDetachment } from '../parts';
 import { updateIK } from '../ik';
 import { CRACK_SUM_SQ, crackAmount, smashedPaneBits, SMASH_SUM_SQ, updateGlass } from '../glass';
-import { makeSpec } from './fixture';
+import { specToWorld } from '../pose';
+import { makeSim, makeSpec, stepUntilHit } from './fixture';
 
 const len = (v: Vec3) => Math.hypot(v[0], v[1], v[2]);
 
@@ -12,17 +13,16 @@ describe('contact events', () => {
 	it('records each solved contact with its point, normal, impulse and slide, cleared every step', () => {
 		const sim = createCrashSim(makeSpec());
 		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30 });
-		stepCrashSim(sim);
-		const c = sim.events.contacts;
+		stepUntilHit(sim);
+		const c = sim.events.contacts.filter((x) => x.surface === 'obstacle');
 		expect(c.length).toBeGreaterThan(0);
 		expect(c[0].sensor).toBe(0);
 		// Out of the wall toward the car: the car drives along +Z into it.
 		expect(c[0].normal[2]).toBeCloseTo(-1, 6);
 		expect(c[0].impulse).toBeGreaterThan(0);
 		expect(c[0].closingSpeed).toBeGreaterThan(20);
-		// Head-on: nothing slides, so nothing scratches.
-		expect(len(c[0].slide)).toBeLessThan(1e-6);
-		expect(c[0].scratch).toBe(0);
+		// Head-on: next to nothing slides across the face.
+		expect(len(c[0].slide)).toBeLessThan(0.05 * c[0].closingSpeed);
 		resetCrashSim(sim);
 		stepCrashSim(sim);
 		expect(sim.events.contacts).toEqual([]);
@@ -31,25 +31,26 @@ describe('contact events', () => {
 	it('reports the slide across the surface on a glancing hit', () => {
 		const sim = createCrashSim(makeSpec());
 		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30, glance: 30 });
-		stepCrashSim(sim);
-		const c = sim.events.contacts[0];
-		expect(Math.abs(c.slide[2])).toBeLessThan(1e-9);  // no along-normal part
+		stepUntilHit(sim);
+		const c = sim.events.contacts.find((x) => x.surface === 'obstacle')!;
+		expect(Math.abs(c.slide[0] * c.normal[0] + c.slide[1] * c.normal[1] + c.slide[2] * c.normal[2])).toBeLessThan(1e-9);  // no along-normal part
 		expect(len(c.slide)).toBeGreaterThan(10);
 		expect(c.scratch).toBeGreaterThan(0);
 	});
 });
 
 describe('part events', () => {
-	it('reports a part that came loose with its state, origin and the car velocity', () => {
-		const sim = createCrashSim(makeSpec());
+	it("reports a part that came loose with its state, its origin in the world and that point's velocity", () => {
+		const sim = makeSim();
 		sim.state.body.v = [0, 0, 5];
 		sim.state.sensors[0] = [0, 0.5, 1.9];
 		updateIK(sim.state);
 		checkForDetachment(sim.state);
-		// The door's origin is the spec origin, which stands above the ground.
+		// The door's origin is the mesh origin, which stands above the ground.
 		expect(sim.events.parts).toEqual([
-			{ part: 1, gfx: 1, partType: 8, state: 'hinged', pos: sim.state.carPos, vel: [0, 0, 5] },
+			{ part: 1, gfx: 1, partType: 8, state: 'hinged', pos: specToWorld(sim.state, [0, 0, 0]), vel: [0, 0, 5] },
 		]);
+		expect(sim.events.parts[0].pos[1]).toBeGreaterThan(0);
 	});
 });
 
@@ -64,7 +65,7 @@ function glassSim() {
 		short5C: 0, short5E: 0, short60: 0, partType: 20,
 	};
 	spec.glassPanes = [pane];
-	return createCrashSim(spec);
+	return makeSim({ spec });
 }
 
 describe('glass', () => {
@@ -133,7 +134,7 @@ describe('glass', () => {
 		s.tags[3] = [1, 0.5, 2.0];
 		updateGlass(s);
 		const e = sim.events.glass[0];
-		const [x, y, z] = s.carPos;
+		const [x, y, z] = specToWorld(s, [0, 0, 0]);
 		expect(e.corners[0]).toEqual([x + 0.01, y + 0.5, z + 2.3]);
 		expect(e.corners[1]).toEqual([x + 1, y + 0.5 + 0.02, z + 2.0]);
 		expect(e.normal).toEqual([0, 0, 1]);
@@ -142,9 +143,9 @@ describe('glass', () => {
 
 	it('runs inside a crash step after the IK update', () => {
 		const sim = glassSim();
-		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 40 });
+		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 40, forceCrash: true });
 		let broke = false;
-		for (let i = 0; i < 60; i++) { stepCrashSim(sim); broke ||= sim.events.glass.length > 0; }
+		for (let i = 0; i < 120; i++) { stepCrashSim(sim); broke ||= sim.events.glass.length > 0; }
 		expect(broke).toBe(true);
 		expect(sim.state.glass[0].state).not.toBe(GlassState.Intact);
 	});

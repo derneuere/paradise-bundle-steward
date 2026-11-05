@@ -5,14 +5,19 @@ import { makeSpec } from '../../deformationSim/__tests__/fixture';
 import { createCrashEffects, glassBurst, paneArea, resetCrashEffects, stepCrashEffects } from '../effects';
 import { DebrisKind, GLASS_PER_SQ_M } from '../tables';
 
-const front: Impact = { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30 };
+const front: Impact = { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30, forceCrash: true };
 
+// `steps` steps from the one the car first meets the obstacle in.
 function run(impact: Impact, steps = 60, spec = makeSpec()) {
 	const sim = createCrashSim(spec);
 	const fx = createCrashEffects(7);
 	applyImpact(sim, impact);
 	let sparks = 0, debris = 0, dust = 0, smoke = 0;
-	for (let i = 0; i < steps; i++) {
+	for (let i = 0; i < 600 && !(sim.state.run?.touched || sim.state.run?.crash); i++) {
+		stepCrashSim(sim);
+		stepCrashEffects(fx, sim, 1 / 60);
+	}
+	for (let i = 1; i < steps; i++) {
 		stepCrashSim(sim);
 		stepCrashEffects(fx, sim, 1 / 60);
 		sparks = Math.max(sparks, fx.sparks.items.length);
@@ -40,7 +45,7 @@ describe('crash effects', () => {
 	});
 
 	it('fires nothing on a knock below crash speed', () => {
-		const r = run({ ...front, glance: 30, crash: false });
+		const r = run({ ...front, glance: 30, forceCrash: false });
 		expect(r.sparks + r.debris + r.dust + r.smoke).toBe(0);
 	});
 
@@ -69,16 +74,15 @@ describe('crash effects', () => {
 		expect(r.fx.sparks.items.length + r.fx.dust.items.length).toBe(0);
 	});
 
-	it('keeps flying particles where they were relative to the car when the next hit re-places it', () => {
+	it('leaves flying particles where they are in the world when the next hit re-places the car', () => {
 		const { sim, fx } = run(front, 20);
 		const piece = fx.debris[DebrisKind.Dark].items[0];
-		const rel = piece.p.map((v, k) => v - sim.state.carPos[k]);
+		const was = [...piece.p];
 		applyImpact(sim, { ...front, pointMesh: [0, 0.5, 2.6] });
 		stepCrashSim(sim);
-		const before = sim.events.car.pos;
 		stepCrashEffects(fx, sim, 1 / 60);
 		// One step of its own motion apart.
-		const moved = piece.p.map((v, k) => v - before[k] - rel[k]);
+		const moved = piece.p.map((v, k) => v - was[k]);
 		expect(Math.hypot(...moved)).toBeLessThan(0.5);
 	});
 

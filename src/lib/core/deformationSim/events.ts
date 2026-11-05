@@ -42,7 +42,7 @@ export type GlassEvent = {
 };
 
 export type CrashEvents = {
-	// The car's (spec origin's) position and velocity as the step began.
+	// The car's centre of mass and its velocity as the step began.
 	car: { pos: Vec3; vel: Vec3 };
 	contacts: ContactEvent[];
 	parts: PartEvent[];

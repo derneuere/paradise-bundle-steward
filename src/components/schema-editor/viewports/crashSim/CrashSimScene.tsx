@@ -1,6 +1,7 @@
 // The Crash Preview's car: the body parts in flat paint, deformed by the
-// sim's rows, posed and tinted by their hinge/detach state, the cracked
-// panes' shattered-glass models, plus the shared obstacle, markers and crash
+// sim's rows, posed in the world by the car's body (and by their own hinge or
+// flight once they come loose) and tinted by that state, the cracked panes'
+// shattered-glass models, plus the shared obstacle, markers and crash
 // particles.
 
 import { useMemo } from 'react';
@@ -44,7 +45,7 @@ export function CrashSimScene({ body, session, textures }: { body: CrashBody; se
 			}
 		}
 	});
-	const hit = crashHitHandler(session.hit);
+	const hit = crashHitHandler(session.hitAt);
 	const crackedGlass = useCrackedGlass(useWorkspace().bundles);
 
 	return (

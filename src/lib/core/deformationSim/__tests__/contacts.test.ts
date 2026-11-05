@@ -7,14 +7,14 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Vec3 } from '../../deformationSpec';
-import { mulMat } from '../../vehicleSim/body';
+import { drain, mulMat } from '../../vehicleSim/body';
 import { createCrashSim } from '../sim';
 import {
 	applyContactImpulses, clearContacts, generateContacts, latchContacts, nearestSensors, rowBefore, sortContactRows,
-	validateAndAddContact, type ContactRow,
+	hubSphere, validateAndAddContact, type ContactRow,
 } from '../contacts';
-import { add, cross, normalize, sub, type ImpulseRecord, type SimState } from '../state';
-import { makeSpec } from './fixture';
+import { add, cross, dot, normalize, sub, type ImpulseRecord, type SimState } from '../state';
+import { makeSim, makeSpec } from './fixture';
 
 const DT = 1 / 60;
 const NOSE_IN: Vec3 = [0, 0, -1];   // out of the wall, toward a car driving +Z
@@ -25,9 +25,7 @@ function nose(levels: number[]) {
 	levels.forEach((absorbtionLevel, i) => {
 		spec.sensors[i] = { ...spec.sensors[0], initialOffset: [0, 0.5, 2], nextSensor: [0, 0, 0, 0, 0, 0], absorbtionLevel };
 	});
-	const sim = createCrashSim(spec, { attribs: { mass: 1500 } });
-	const s = sim.state;
-	s.crashing = true;
+	const s = makeSim({ spec, mass: 1500 }).state;
 	s.body.v = [0, 0, 30];
 	clearContacts(s);
 	return s;
@@ -58,7 +56,7 @@ describe('one contact', () => {
 	});
 
 	it('turns the car by the remainder at the contact point, and sizes the impulse with the full effective mass', () => {
-		const s = createCrashSim(makeSpec(), { attribs: { mass: 1500 } }).state;
+		const s = makeSim({ mass: 1500 }).state;
 		s.body.v = [0, 0, 30];
 		clearContacts(s);
 		const r: Vec3 = [0, 0.2, 2];
@@ -72,7 +70,7 @@ describe('one contact', () => {
 		expect(s.body.v[2]).toBeCloseTo(30 + J[2] / 1500, 9);
 		const w = mulMat(s.body.invIWorld, cross(r, J));
 		s.body.w.forEach((x, i) => expect(x).toBeCloseTo(w[i], 12));
-		expect(s.counters.numWorldCollisions).toBe(1);
+		expect(s.vehicle.numWorldCollisions).toBe(1);
 	});
 });
 
@@ -113,7 +111,7 @@ describe('two contacts in one step', () => {
 		expect(s.events.contacts.map((c) => c.sensor)).toEqual([0]);
 		expect(s.latch[1]).toBe(0);
 		expect(s.sensors[1]).toEqual([0, 0.5, 2]);
-		expect(s.counters.numWorldCollisions).toBe(1);
+		expect(s.vehicle.numWorldCollisions).toBe(1);
 	});
 });
 
@@ -155,8 +153,17 @@ describe('generating and latching contacts', () => {
 		const c = generateContacts(s);
 		expect(c.map((x) => x.sphere)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 		expect(c.every((x) => x.surface === 'ground' && x.n[1] === 1)).toBe(true);
-		// The corners carry the car: their lowest point is on the ground.
-		expect(c[2].pA[1]).toBeCloseTo(0, 12);
+		// The wheels carry the car: its spheres clear the ground.
+		expect(Math.min(...c.map((x) => x.pA[1]))).toBeGreaterThan(0);
+	});
+
+	it("puts each hub sphere at the live wheel's x/z and its streamed height plus a quarter of the wheel scale", () => {
+		const s = createCrashSim(makeSpec()).state;
+		const w = s.vehicle.wheels[1];
+		w.pos = [w.pos[0], w.pos[1] + 0.05, w.pos[2]];
+		const h = hubSphere(s, 1);
+		expect(h.radius).toBeCloseTo(0.15, 12);
+		expect(h.local).toEqual([w.pos[0], s.vehicle.params.wheels[1].streamed[1] + 0.075, w.pos[2]]);
 	});
 
 	it('latches the earliest contact that closes within the step and stores the three closest', () => {
@@ -187,7 +194,7 @@ describe('generating and latching contacts', () => {
 	});
 
 	it('takes each sensor centre\'s motion from the body velocity, spin included', () => {
-		const s = createCrashSim(makeSpec()).state;
+		const s = makeSim().state;
 		s.body.v = [0, -1, 6];
 		s.body.w = [0, 2, 0];
 		generateContacts(s);
@@ -195,7 +202,32 @@ describe('generating and latching contacts', () => {
 		const arm = sub(s.sensors[0], s.com);
 		const want = add(s.body.v, cross(s.body.w, arm)).map((x) => x * DT);
 		s.disp[0].forEach((x, i) => expect(x).toBeCloseTo(want[i], 12));
-		// A wheel hub's ground contact competes for its sensor's latch.
-		expect(s.records[2].t).toBe(0);
+		// A wheel hub's ground contact is stored with its sensor's own.
+		expect(s.stored[2]).toHaveLength(2);
+	});
+});
+
+describe('a knock (not crashing)', () => {
+	it('crushes within a fifth of the budget and moves the car by a quarter of the rest, flat and without friction', () => {
+		const s = makeSim({ mass: 1500, crashing: false }).state;
+		s.body.v = [0, 0, 30];
+		clearContacts(s);
+		const n = normalize([0, 0.3, -1]);
+		const arm: Vec3 = [0, 0, 2];
+		s.records[0] = record(s, arm, n);
+		applyContactImpulses(s, DT);
+		const c = s.events.contacts[0];
+		const k = 1 / 1500 + dot(n, cross(mulMat(s.body.invIWorld, cross(arm, n)), arm));
+		expect(c.impulse).toBeCloseTo(0.5 * 30 * -n[2] / k, 6);
+		// Level 0 would absorb 98 %; a knock absorbs at most 20 %. The +Y share
+		// is dropped, the -Z share arrives at a quarter, on a lever along -Z.
+		const rest = 0.8 * c.impulse * -n[2];
+		s.body.v.forEach((x, i) => expect(x).toBeCloseTo([0, 0, 30 - 0.25 * rest / 1500][i], 9));
+		s.body.w.forEach((x) => expect(x).toBeCloseTo(0, 9));
+		expect(s.vehicle.numWorldCollisions).toBe(2);   // one arrival per crush direction
+		expect(s.vehicle.secondsSinceLastWallContact).toBe(0);
+		expect(c.scratch).toBeGreaterThan(0);            // it still slides up the wall
+		drain(s.body, DT);
+		expect(s.body.v[2]).toBeCloseTo(30 - 0.25 * rest / 1500, 9);
 	});
 });

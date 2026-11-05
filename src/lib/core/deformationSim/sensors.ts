@@ -5,7 +5,7 @@
 // absorption until the chain ends at the car body.
 
 import type { Vec3 } from '../deformationSpec';
-import { dot, scale, sub, type SimState } from './state';
+import { add, dot, scale, sub, type SimState } from './state';
 import {
 	ABSORPTION, COMPRESSION_LIMIT_FACTOR, CRASH_BUDGET, CRASH_LIMIT_PAD, DIRECTIONS, DIRECTION_SPEED_SCALE, DRIVE_BUDGET,
 } from './tables';
@@ -13,7 +13,7 @@ import {
 // A crashing car may use its whole crush budget and absorption, measured
 // from its current deformed shape; a knock below crash speed gets a fifth of
 // both, inside the car's fixed drive-time limits.
-const allowance = (s: SimState) => (s.crashing ? CRASH_BUDGET : DRIVE_BUDGET);
+const allowance = (s: SimState) => (s.vehicle.crashing ? CRASH_BUDGET : DRIVE_BUDGET);
 
 const MAX_CHAIN = 25;
 
@@ -27,14 +27,17 @@ export type SensorImpulse = {
 };
 
 // Per-direction crush limit: a sensor may only be pushed along +X while it
-// sits within (radius + pad) of the limit box's -X face, and so on.
+// sits within (radius + pad) of the limit box's -X face, and so on. A crash
+// is limited by the car's deformable box, a knock by its drive-time box (both
+// body frame; the sensors live in the spec frame).
 function limitRow(s: SimState, d: number, radius: number): Vec3 {
-	const box = s.crashing ? s.aabb : s.driveBox;
-	const inset = radius + (s.crashing ? CRASH_LIMIT_PAD : 0);
-	const positive = d % 2 === 0;
-	return positive
+	const crashing = s.vehicle.crashing;
+	const box = crashing ? s.vehicle.aabb : s.driveBox;
+	const inset = radius + (crashing ? CRASH_LIMIT_PAD : 0);
+	const row: Vec3 = d % 2 === 0
 		? [box.min[0] + inset, box.min[1] + inset, box.min[2] + inset]
 		: [box.max[0] - inset, box.max[1] - inset, box.max[2] - inset];
+	return add(row, s.com);
 }
 
 const budget = (s: SimState, sensor: number, d: number) =>
@@ -101,24 +104,27 @@ export function applySensorImpulse(s: SimState, imp: SensorImpulse): BodyArrival
 	return arrivals;
 }
 
-// Drive-time limits: the rest sensor box (origin included) pulled in by the
-// car's DriveTimeDeformLimit attribs (side, -Y, +Z, -Z).
-export function driveTimeBox(s: SimState): { min: Vec3; max: Vec3 } {
+// The box over the sensor spheres in the body frame (centre-of-mass origin),
+// grown from that origin, so it always contains the centre of mass.
+function sensorSphereBox(s: SimState, centre: (i: number) => Vec3): { min: Vec3; max: Vec3 } {
 	const min: Vec3 = [0, 0, 0], max: Vec3 = [0, 0, 0];
 	for (let i = 0; i < s.spec.numDeformationSensors; i++) {
-		const c = s.spec.sensors[i].initialOffset, r = s.spec.sensors[i].radius;
+		const c = sub(centre(i), s.com), r = s.spec.sensors[i].radius;
 		for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], c[k] - r); max[k] = Math.max(max[k], c[k] + r); }
 	}
-	const [side, negY, posZ, negZ] = s.attribs.driveTimeLimits;
+	return { min, max };
+}
+
+// Drive-time limits: the rest sensor box pulled in by the car's
+// DriveTimeDeformLimit attribs (side, -Y, +Z, -Z).
+export function driveTimeBox(s: SimState): { min: Vec3; max: Vec3 } {
+	const { min, max } = sensorSphereBox(s, (i) => s.spec.sensors[i].initialOffset);
+	const [side, negY, posZ, negZ] = s.vehicle.params.base.driveTimeLimits;
 	return { min: [min[0] + side, min[1], min[2] + posZ], max: [max[0] - side, max[1] - negY, max[2] - negZ] };
 }
 
-// Deformed box over the sensor spheres; both corners start at the origin.
+// The deformed box over the live sensor spheres becomes the car's deformable
+// box (what the crash rules and the crash limit rows read).
 export function updateDeformedBox(s: SimState): void {
-	const min: Vec3 = [0, 0, 0], max: Vec3 = [0, 0, 0];
-	for (let i = 0; i < s.spec.numDeformationSensors; i++) {
-		const c = s.sensors[i], r = s.spec.sensors[i].radius;
-		for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], c[k] - r); max[k] = Math.max(max[k], c[k] + r); }
-	}
-	s.aabb = { min, max };
+	s.vehicle.aabb = sensorSphereBox(s, (i) => s.sensors[i]);
 }

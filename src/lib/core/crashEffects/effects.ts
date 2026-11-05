@@ -3,13 +3,15 @@
 // stepCrashSim. Everything lives in the simulator's world frame and draws
 // only from one seeded random stream, so a crash replays identically.
 //
-// What fires when (all only while the car is crashing, not on a knock):
+// What fires when (all only while the car is crashing, not on a knock; any
+// world contact counts, the road under a tumbling wreck as much as the
+// obstacle):
 // - a spark shower from a contact sliding faster than 15 mph across the
 //   surface (head-on hits throw none), at most one per 0.02 - 0.15 s;
 // - a debris burst from any contact, at most every 0.18 s, sized by the car's
 //   speed (nothing below 5 m/s);
 // - dust from the contact point, 2.5 puffs per metre the car travels while
-//   touching the obstacle above 5 m/s;
+//   touching something above 5 m/s;
 // - a trail of debris, glass bits and smoke shed along the car's path above
 //   8 m/s;
 // - a shower of glass pieces from each window that smashes (a crack throws
@@ -20,7 +22,8 @@ import type { Vec3 } from '../deformationSpec';
 import type { CrashSim, GlassEvent } from '../deformationSim';
 import { GlassState } from '../deformationSim';
 import { add, cross, length, scale, sub } from '../deformationSim/state';
-import { mul3 } from '../deformationSim/parts';
+import { GROUND_Y } from '../deformationSim/world';
+import { toWorld } from '../vehicleSim/body';
 import { AbsorptionSet } from '../deformationSim/tables';
 import { makeDebris, stepDebris, upCone, type Debris, type Plane } from './debris';
 import { makePuff, type Puff } from './puffs';
@@ -50,7 +53,6 @@ export type CrashEffects = {
 	dustCarry: number;
 	trailCarry: number[];
 	obstacle: unknown;       // the impact the particles belong to
-	carPos: Vec3;
 	groundY: number;
 };
 
@@ -61,7 +63,7 @@ export function createCrashEffects(seed = 1): CrashEffects {
 		debris: DEBRIS_KINDS.map((k) => new Pool<Debris>(DEBRIS_PRESETS[k].budget)),
 		dust: new Pool(DUST.budget), smoke: new Pool(SMOKE.budget),
 		counter: 0, debrisSpawned: DEBRIS_KINDS.map(() => 0), sparkCooldown: 0, burstCooldown: 0, dustCarry: 0, trailCarry: PLAYER_TRAIL.map(() => 0),
-		obstacle: null, carPos: [0, 0, 0], groundY: 0,
+		obstacle: null, groundY: GROUND_Y,
 	};
 }
 
@@ -77,18 +79,14 @@ export function stepCrashEffects(fx: CrashEffects, sim: CrashSim, dt: number): v
 	fx.time += dt;
 	fx.sparkCooldown = Math.max(fx.sparkCooldown - dt, 0);
 	fx.burstCooldown = Math.max(fx.burstCooldown - dt, 0);
-	fx.groundY = s.carPos[1] + sim.groundMesh + sim.meshShift[1];
-	if (s.obstacle !== fx.obstacle) startImpact(fx, sim);
+	if ((s.run ?? s.obstacle) !== fx.obstacle) startImpact(fx, sim);
 
 	// Contacts are sized by the speed the car hit with; anything thrown off
 	// inherits the velocity it has once the step's contacts are resolved, so
 	// nothing is flung through the obstacle the car just stopped against.
-	const speed = length(ev.car.vel), vel = s.carVel, moving = length(vel);
-	// The simulated car rests on its body's collision spheres rather than on
-	// wheels, so its ground contacts would scrape on every hit; only the
-	// obstacle's contacts throw effects.
-	const hits = ev.contacts.filter((c) => c.surface === 'obstacle');
-	if (s.crashing) {
+	const speed = length(ev.car.vel), vel = s.body.v, moving = length(vel);
+	const hits = ev.contacts;
+	if (s.vehicle.crashing) {
 		for (const c of hits) {
 			if (length(c.slide) > SPARK_MIN_SLIDE && fx.sparkCooldown <= 0) {
 				fx.counter += spawnShower({ origin: c.point, normal: c.normal, slide: c.slide, time: fx.time, groundY: fx.groundY, counter: fx.counter }, rng, (k) => fx.sparks.add(k));
@@ -112,25 +110,18 @@ export function stepCrashEffects(fx: CrashEffects, sim: CrashSim, dt: number): v
 	fx.sparks.keep((k) => fx.time - k.birth < k.life);
 	fx.dust.keep((p) => fx.time - p.birth < p.life);
 	fx.smoke.keep((p) => fx.time - p.birth < p.life);
-	fx.carPos = [...s.carPos] as Vec3;
 }
 
-// A new hit restarts the car's crash state; the particles already flying
-// stay where they are relative to the car (the simulator re-places the car
-// for every hit, so its world frame jumps).
+// A new hit restarts the car's crash state; the particles already flying stay
+// where they are in the world. A reset (no obstacle) clears them.
 function startImpact(fx: CrashEffects, sim: CrashSim): void {
 	const s = sim.state;
-	fx.obstacle = s.obstacle;
-	if (!s.obstacle) { resetCrashEffects(fx); return; }
-	const d = sub(sim.events.car.pos, fx.carPos);
+	fx.obstacle = s.run ?? s.obstacle;
+	if (!s.obstacle && !s.run) { resetCrashEffects(fx); return; }
 	fx.sparkCooldown = 0;
 	fx.burstCooldown = 0;
 	fx.dustCarry = 0;
 	fx.trailCarry.fill(0);
-	if (d[0] === 0 && d[1] === 0 && d[2] === 0) return;
-	for (const k of fx.sparks.items) { k.p0 = add(k.p0, d); k.bounceY += d[1]; }
-	for (const pool of fx.debris) for (const p of pool.items) p.p = add(p.p, d);
-	for (const p of [...fx.dust.items, ...fx.smoke.items]) p.p0 = add(p.p0, d);
 }
 
 function obstaclePlanes(fx: CrashEffects, sim: CrashSim): Plane[] {
@@ -171,15 +162,15 @@ function trail(fx: CrashEffects, sim: CrashSim, speed: number, dt: number): void
 	const f = Math.min(Math.max((speed - TRAIL_SPEED[0]) / (TRAIL_SPEED[1] - TRAIL_SPEED[0]), 0), 1);
 	if (f <= 0) return;
 	const rows = s.absorptionSet === AbsorptionSet.AiCrashing ? AI_TRAIL : PLAYER_TRAIL;
-	const toWorld = (v: Vec3) => add(s.carPos, mul3(s.carRot, v));
-	const centre = toWorld(scale(add(s.aabb.min, s.aabb.max), 0.5));
-	const step = scale(s.carVel, dt);
+	const box = s.vehicle.aabb, b = s.body;
+	const centre = toWorld(b, scale(add(box.min, box.max), 0.5));
+	const step = scale(b.v, dt);
 	rows.forEach((row, i) => {
 		fx.trailCarry[i] += speed * dt * row.rate * f;
 		for (; fx.trailCarry[i] >= 1; fx.trailCarry[i]--) {
 			// Somewhere in the car's box, spread back along this step's travel.
-			const spot = sub(toWorld(inBox(rng, s.aabb.min, s.aabb.max)), scale(step, rng.next()));
-			const v = add(scale(sub(spot, centre), U(rng, TRAIL_SPREAD)), scale(s.carVel, U(rng, TRAIL_INHERIT)));
+			const spot = sub(toWorld(b, inBox(rng, box.min, box.max)), scale(step, rng.next()));
+			const v = add(scale(sub(spot, centre), U(rng, TRAIL_SPREAD)), scale(b.v, U(rng, TRAIL_INHERIT)));
 			const size = U(rng, row.size);
 			if (row.kind === 'smoke') {
 				fx.smoke.add(makePuff(SMOKE, spot, v, size, fx.time, fx.counter++, rng.range(-SMOKE.spin, SMOKE.spin), rng.range(0, 2 * Math.PI)));

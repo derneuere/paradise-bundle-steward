@@ -22,7 +22,8 @@ import { MPS_TO_MPH, type CrashClock, type VehicleState } from './vehicleState';
 
 // A world contact as the arm sees it: `pointA` on the car, `pointB` on the
 // world, `normal` pointing out of the world into the car. World frame.
-export type ArmContact = { pointA: Vec3; pointB: Vec3; normal: Vec3 };
+// `ground` marks the road under the car, which a forced crash ignores.
+export type ArmContact = { pointA: Vec3; pointB: Vec3; normal: Vec3; ground?: boolean };
 export type CrashKind = 'headOn' | 'side' | 'rolled' | 'forced';
 export type CrashThresholds = { headOn: number; side: number };
 export const CRASH_THRESHOLDS: CrashThresholds = { headOn: 40.5, side: 50 };

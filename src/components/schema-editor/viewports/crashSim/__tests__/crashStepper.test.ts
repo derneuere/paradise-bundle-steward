@@ -1,6 +1,7 @@
-// Spec for how the crash views move hinged / knocked-off parts: every object
-// registered for a GraphicsSpec part is drawn at (pose delta x locator), and
-// an un-posed part sits exactly on its locator. Window meshes disappear once
+// Spec for how the crash views place the car's parts in the world: every
+// object registered for a GraphicsSpec part is drawn at (world pose x
+// locator), the world pose being the car's own until the part hinges or comes
+// off, and an object registered without a part keeps its locator. Window meshes disappear once
 // their pane cracks or smashes, a cracked pane shows its shattered-glass model
 // with the pane's fracture constants, and the clock turns real time into simulator steps at
 // the chosen slow-motion factor.
@@ -11,8 +12,10 @@ import { GLASS_FRACTURE_UV_OFFSETS, GlassState, type CrashSim, type PartPose } f
 import { advanceClock, makePartPoser } from '../crashStepper';
 import { applyFracture, crackedGlassCopy } from '../crackedGlassMaterial';
 
+const CAR = new THREE.Matrix4().makeRotationY(0.3).setPosition(4, 0.3, 12);
 const simWith = (poses: [number, PartPose][], brokenPartType?: number, state = GlassState.Smashed) => ({
 	partPoses: new Map(poses),
+	carMatrix: () => CAR.toArray(),
 	state: {
 		spec: { glassPanes: brokenPartType === undefined ? [] : [{ partType: brokenPartType }] },
 		glass: [{ state, crack: 0.5, width: 1.2, equalisation: 0.5 }],
@@ -23,23 +26,31 @@ describe('makePartPoser', () => {
 	const locator = new THREE.Matrix4().makeTranslation(0.5, 0.2, 1.4);
 	const delta = new THREE.Matrix4().makeRotationY(0.6).setPosition(0, 0.1, 0);
 
-	it('poses every object of a hinged part by its mesh-frame delta', () => {
+	it('poses every object of a loose part by its world pose', () => {
 		const poser = makePartPoser();
 		const a = new THREE.Object3D(), b = new THREE.Object3D();
 		poser.ref('0-0', 7, locator)(a);
 		poser.ref('0-1', 7, locator)(b);
-		poser.pose(simWith([[7, { meshDelta: delta.toArray(), state: 'hinged' }]]));
+		poser.pose(simWith([[7, { world: delta.toArray(), state: 'hinged' }]]));
 		const want = delta.clone().multiply(locator);
 		expect(a.matrix.equals(want)).toBe(true);
 		expect(b.matrix.equals(want)).toBe(true);
 		expect(a.matrixWorldNeedsUpdate).toBe(true);
 	});
 
-	it('puts parts without a pose back on their locator', () => {
+	it('carries parts without a pose with the car', () => {
 		const poser = makePartPoser();
 		const a = new THREE.Object3D();
 		poser.ref('k', 3, locator)(a);
-		poser.pose(simWith([[3, { meshDelta: delta.toArray(), state: 'detached' }]]));
+		poser.pose(simWith([[3, { world: delta.toArray(), state: 'detached' }]]));
+		poser.pose(simWith([]));
+		expect(a.matrix.equals(CAR.clone().multiply(locator))).toBe(true);
+	});
+
+	it('leaves an object registered without a part on its locator', () => {
+		const poser = makePartPoser();
+		const a = new THREE.Object3D();
+		poser.ref('k', -1, locator)(a);
 		poser.pose(simWith([]));
 		expect(a.matrix.equals(locator)).toBe(true);
 	});
@@ -50,7 +61,7 @@ describe('makePartPoser', () => {
 		const ref = poser.ref('k', 3, locator);
 		ref(a);
 		ref(null);
-		poser.pose(simWith([[3, { meshDelta: delta.toArray(), state: 'hinged' }]]));
+		poser.pose(simWith([[3, { world: delta.toArray(), state: 'hinged' }]]));
 		expect(a.matrix.equals(new THREE.Matrix4())).toBe(true);
 	});
 });

@@ -1,14 +1,15 @@
 // A hand-checkable car: two sensors in a front/back chain, a body shell, a
 // door with a jointed hinge tag, a joint-less trim piece, and the root with
 // its four wheel tags (unskinned and last, as on every retail car). Four more
-// sensors under the corners carry the car on the ground; like a retail car's
-// underside they may not be crushed upward. The wheels, and so the centre of
-// mass, sit 0.25 m off the ground, about as high as a retail car's, so the
-// slide friction under a crashing car does not tip it over.
+// sensors under the corners, like a retail car's underside, may not be
+// crushed upward. The wheels (radius 0.3) put the centre of mass about as
+// high off the ground as a retail car's.
 
 import type {
 	IKPart, JointSpec, Mat4, ParsedDeformationSpec, SkinBinding, TagPointSpec, Vec3,
 } from '../../deformationSpec';
+import { updateWorldInertia } from '../../vehicleSim/body';
+import { createCrashSim, stepCrashSim, type CrashSim } from '../sim';
 
 const IDENTITY: Mat4 = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
 const skin = (): SkinBinding => ({ vertex: [0, 0, 0, 0], weights: [0, 0, 0], boneIndices: [0, 0, 0] });
@@ -90,4 +91,27 @@ export function makeSpec(): ParsedDeformationSpec {
 		],
 		glassPanes: [], totalSize: 0,
 	};
+}
+
+// A simulator on the hand-checkable spec, the car level (not pitched on its
+// springs, so its inertia is axis-aligned) at its rest height, crashing
+// unless told otherwise, with the given mass.
+export function makeSim(opts: { spec?: ParsedDeformationSpec; mass?: number; crashing?: boolean } = {}): CrashSim {
+	const handling = opts.mass ? { physicsvehiclebaseattribs: { DrivingMass: opts.mass } } : {};
+	const sim = createCrashSim(opts.spec ?? makeSpec(), { handling });
+	const b = sim.state.body;
+	b.axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+	updateWorldInertia(b);
+	sim.state.vehicle.crashing = opts.crashing ?? true;
+	return sim;
+}
+
+// Steps a run until the car first meets the obstacle (or crashes); returns
+// the steps taken.
+export function stepUntilHit(sim: CrashSim, max = 600): number {
+	for (let i = 1; i <= max; i++) {
+		stepCrashSim(sim);
+		if (sim.state.run?.touched || sim.state.run?.crash) return i;
+	}
+	throw new Error('the car never reached the obstacle');
 }

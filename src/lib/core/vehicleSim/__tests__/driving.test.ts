@@ -4,6 +4,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dot } from '../../deformationSim/state';
+import { restPose as driverRestPose } from '../driver';
 import { flatGround } from '../ground';
 import type { VehicleParams } from '../params';
 import { stepVehicle, DT } from '../step';
@@ -17,18 +18,11 @@ const pitchDeg = (v: VehicleState) => Math.asin(v.body.axes[2][1]) * (180 / Math
 const headingDeg = (v: VehicleState) => Math.atan2(v.body.axes[2][0], v.body.axes[2][2]) * (180 / Math.PI);
 const run = (v: VehicleState, steps: number, ctl: Controls = NO_INPUT) => { for (let i = 0; i < steps; i++) stepVehicle(v, world, DT, ctl); };
 
-// Where the springs hold the car at rest: every hub at its streamed height,
-// one tyre radius above the road, solved for height and pitch.
-function restPose(p: VehicleParams) {
-	const [f, , r] = [p.wheels[0], p.wheels[1], p.wheels[2]];
-	let th = 0;
-	for (let i = 0; i < 20; i++) {
-		const g = (f.streamed[1] - r.streamed[1]) * Math.cos(th) + (f.streamed[2] - r.streamed[2]) * Math.sin(th) - (f.radius - r.radius);
-		const dg = -(f.streamed[1] - r.streamed[1]) * Math.sin(th) + (f.streamed[2] - r.streamed[2]) * Math.cos(th);
-		th -= g / dg;
-	}
-	return { y: f.radius - f.streamed[1] * Math.cos(th) - f.streamed[2] * Math.sin(th), pitchDeg: th * (180 / Math.PI) };
-}
+// Where the springs hold the car at rest (the driver's start pose).
+const restPose = (p: VehicleParams) => {
+	const r = driverRestPose(p);
+	return { y: r.height, pitchDeg: r.pitch * (180 / Math.PI) };
+};
 
 // A car settled on its springs and frozen, as a start line would leave it.
 function parked(p: VehicleParams): VehicleState {

@@ -1,12 +1,14 @@
-// Crash preview for a vehicle DeformationSpec (_AT): runs the game's
-// deformation pipeline on the matching body (_GR) loaded in the workspace, so
-// a rig can be judged without starting the game. Click the car to hit it, or
-// use a preset; the speed slider sets the closing speed. The Renderable view
-// of the body offers the same crash on the textured car.
+// Crash preview for a vehicle DeformationSpec (_AT): drives the car, with its
+// own handling, into an obstacle and runs the game's crash and deformation
+// physics on the matching body (_GR) loaded in the workspace, so a rig can be
+// judged without starting the game. Click the car where it should hit, or use
+// a preset; the speed slider sets the start speed. The camera follows the car.
+// The Renderable view of the body offers the same crash on the textured car.
 
 import { useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
+import { GROUND_Y } from '@/lib/core/deformationSim/world';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useSchemaEditor } from '../../context';
 import type { ParsedDeformationSpec } from '@/lib/core/deformationSpec';
@@ -14,6 +16,7 @@ import { decodeCrashBody, hasGraphicsSpec } from './crashBody';
 import { pickTwin } from './crashSetup';
 import { CrashControls } from './CrashControls';
 import { CrashSimScene } from './CrashSimScene';
+import { CrashCameraFollow } from './crashStage';
 import { useCrashSession } from './useCrashSession';
 import { particleTextures } from './particleTextures';
 
@@ -60,9 +63,11 @@ export function CrashSimViewport() {
 					<hemisphereLight args={['#c8d8f0', '#3a3228', 0.5]} />
 					<directionalLight position={[6, 10, 4]} intensity={1.2} />
 					<directionalLight position={[-6, 6, -8]} intensity={0.5} />
-					<Grid args={[40, 40]} position={[0, session.sim?.groundMesh ?? 0, 0]} cellSize={0.5} sectionSize={2.5} fadeDistance={30} infiniteGrid />
+					<Grid args={[40, 40]} position={[0, GROUND_Y, 0]} cellSize={0.5} sectionSize={2.5} fadeDistance={40} infiniteGrid />
 					<CrashSimScene body={body} session={session} textures={textures} />
-					<OrbitControls target={center} enableDamping dampingFactor={0.1} makeDefault />
+					{/* An array prop compares by value, so a re-render does not pull the target back off the followed car. */}
+					<OrbitControls target={[center.x, center.y, center.z]} enableDamping dampingFactor={0.1} makeDefault />
+					<CrashCameraFollow simRef={session.simRef} />
 				</Canvas>
 			</div>
 		</div>

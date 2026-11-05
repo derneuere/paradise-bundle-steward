@@ -3,16 +3,12 @@ import type { Vec3 } from '../../deformationSpec';
 import { applyImpact, createCrashSim, resetCrashSim, stepCrashSim } from '../sim';
 import { drivenScratch, scratchSensor, tagScratch } from '../scratch';
 import { updateSkinRows } from '../ik';
-import { makeSpec } from './fixture';
+import { makeSim, makeSpec } from './fixture';
 
 const DT = 1 / 60;
 const N: Vec3 = [0, 0, 1];   // contact normal, out of the obstacle
 
-function fresh(crashing = true) {
-	const sim = createCrashSim(makeSpec());
-	sim.state.crashing = crashing;
-	return sim.state;
-}
+const fresh = (crashing = true) => makeSim({ crashing }).state;
 
 describe('sensor scratch', () => {
 	it('leaves none for a head-on contact', () => {
@@ -82,20 +78,22 @@ describe('scratch on points and rows', () => {
 
 describe('glancing hits', () => {
 	const run = (glance: number) => {
-		const sim = createCrashSim(makeSpec(), { attribs: { mass: 1500 } });
+		const sim = createCrashSim(makeSpec());
 		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 30, glance });
 		for (let i = 0; i < 120; i++) stepCrashSim(sim);
 		return sim;
 	};
 
-	it('turns the travel by the glance angle across the hit direction', () => {
-		const sim = createCrashSim(makeSpec(), { attribs: { crashExtraLinearVelocity: 0 } });
+	it('turns the obstacle by the glance angle off square to the travel', () => {
+		const sim = createCrashSim(makeSpec());
 		applyImpact(sim, { pointMesh: [0, 0.5, 2.4], direction: [0, 0, -1], speed: 10, glance: 30 });
-		const [x, y, z] = sim.state.carVel;
-		expect(Math.hypot(x, y, z)).toBeCloseTo(10, 9);
-		expect(z).toBeCloseTo(10 * Math.cos(Math.PI / 6), 9);
-		expect(Math.abs(x)).toBeCloseTo(5, 9);
-		expect(y).toBeCloseTo(0, 9);
+		const o = sim.state.obstacle!;
+		expect(o.normal[0]).toBeCloseTo(0.5, 9);
+		expect(o.normal[2]).toBeCloseTo(Math.cos(Math.PI / 6), 9);
+		const [x, y, z] = sim.state.body.v;
+		expect(x).toBe(0);
+		expect(y).toBe(0);
+		expect(z).toBeCloseTo(10, 9);
 	});
 
 	it('scratches the nose sliding along a wall', () => {

@@ -4,6 +4,7 @@
 
 export * from './body';
 export * from './params';
+export * from './defaultHandling';
 export * from './vehicleState';
 export * from './ground';
 export * from './engine';

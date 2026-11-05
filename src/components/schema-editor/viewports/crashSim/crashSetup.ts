@@ -1,11 +1,8 @@
 // What a crash needs besides the meshes: which loaded bundle is the other half
-// of the car, how many deformation rows the spec fills, and the car's own
-// physics attribs. A vehicle ships as a body bundle (VEH_<name>_GR: the
+// of the car and how many deformation rows the spec fills. A vehicle ships as a body bundle (VEH_<name>_GR: the
 // GraphicsSpec, its models and meshes) and an attribute bundle
 // (VEH_<name>_AT: the DeformationSpec plus the AttribSys vault).
 
-import type { CarAttribs } from '@/lib/core/deformationSim';
-import type { ParsedAttribSys } from '@/lib/core/attribSys';
 import type { ParsedDeformationSpec } from '@/lib/core/deformationSpec';
 import type { ParsedBundle } from '@/lib/core/types';
 import { hasGraphicsSpec, type CrashBody } from './crashBody';
@@ -55,21 +52,4 @@ export function specRows(spec: ParsedDeformationSpec): number {
 	let run = 0;
 	while (run < spec.tagPoints.length && spec.tagPoints[run].skinnedPoint) run++;
 	return run + spec.ikParts.reduce((n, p) => n + p.numberOfDrivenPoints, 0);
-}
-
-// Mass, crash-entry velocity boost and drive-time crush limits come from the
-// car's own attribs (the _AT's AttribSys vault); anything missing keeps the
-// simulator's defaults.
-export function carAttribs(vault: unknown): Partial<CarAttribs> {
-	const fields: Record<string, unknown> = {};
-	for (const a of (vault as ParsedAttribSys | undefined)?.attributes ?? []) Object.assign(fields, a.fields);
-	const num = (k: string) => (typeof fields[k] === 'number' ? (fields[k] as number) : undefined);
-	const out: Partial<CarAttribs> = {};
-	const mass = num('DrivingMass');
-	if (mass && mass > 0) out.mass = mass;
-	const extra = num('CrashExtraLinearVelocityFactor');
-	if (extra !== undefined) out.crashExtraLinearVelocity = extra;
-	const lim = ['DriveTimeDeformLimitX', 'DriveTimeDeformLimitNegY', 'DriveTimeDeformLimitPosZ', 'DriveTimeDeformLimitNegZ'].map(num);
-	if (lim.every((v) => v !== undefined)) out.driveTimeLimits = lim as [number, number, number, number];
-	return out;
 }

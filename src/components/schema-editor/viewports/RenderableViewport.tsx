@@ -65,6 +65,7 @@ import { useSchemaEditor } from '../context';
 import { isDragRelease } from './selection';
 import { buildTexturedMaterials, scratchMapOf, type PaintColor } from './renderableMaterials';
 import { RenderableCrashPanel, RenderableCrashRig } from './crashSim/RenderableCrash';
+import { GROUND_Y } from '@/lib/core/deformationSim/world';
 import { useRenderableCrash, type CrashDeform } from './crashSim/useRenderableCrash';
 import { deformingCopy, isSkinned } from './crashSim/deformMaterial';
 import { carryGamePaint } from './paintMaterial';
@@ -867,7 +868,7 @@ export function RenderableViewport() {
 					<directionalLight position={[-8, 5, -10]} intensity={0.6} />
 					<directionalLight position={[0, -5, 8]} intensity={0.3} />
 					<Grid
-						position={[center.x, crash.deform && crash.session.sim ? crash.session.sim.groundMesh : center.y - radius, center.z]}
+						position={[center.x, crash.deform ? GROUND_Y : center.y - radius, center.z]}
 						args={[Math.max(radius * 4, 4), Math.max(radius * 4, 4)]}
 						cellSize={0.5}
 						cellThickness={0.5}

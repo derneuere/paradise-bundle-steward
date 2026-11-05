@@ -1,15 +1,14 @@
-// Which loaded bundle a crash pairs with, and what it reads from the car's
-// attribs. A vehicle is two bundles: VEH_<name>_GR (GraphicsSpec + meshes)
+// Which loaded bundle a crash pairs with, and how many deformation rows the
+// spec fills. A vehicle is two bundles: VEH_<name>_GR (GraphicsSpec + meshes)
 // and VEH_<name>_AT (DeformationSpec + AttribSys vault).
 
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseBundle } from '@/lib/core/bundle';
-import { extractResourceRaw, getHandlerByKey, resourceCtxFromBundle } from '@/lib/core/registry';
 import type { ParsedBundle } from '@/lib/core/types';
 import { makeSpec } from '@/lib/core/deformationSim/__tests__/fixture';
-import { carAttribs, crashSpecFor, crashTestAvailable, pickTwin, specRows, twinBundleId, type CrashBundle } from '../crashSetup';
+import { crashSpecFor, crashTestAvailable, pickTwin, specRows, twinBundleId, type CrashBundle } from '../crashSetup';
 import type { CrashBody } from '../crashBody';
 
 const EXAMPLE = path.resolve(__dirname, '../../../../../../example');
@@ -108,33 +107,5 @@ describe('specRows', () => {
 		const spec = makeSpec();
 		spec.tagPoints[2].skinnedPoint = false;
 		expect(specRows(spec)).toBe(2 + 1);
-	});
-});
-
-describe('carAttribs', () => {
-	const vault = (fields: Record<string, unknown>, more: Record<string, unknown> = {}) => ({ attributes: [{ fields }, { fields: more }] });
-
-	it('reads mass, crash velocity boost and drive-time limits across attribute collections', () => {
-		expect(carAttribs(vault(
-			{ DrivingMass: 1620, CrashExtraLinearVelocityFactor: 0.4 },
-			{ DriveTimeDeformLimitX: 0.1, DriveTimeDeformLimitNegY: 0.2, DriveTimeDeformLimitPosZ: 0.3, DriveTimeDeformLimitNegZ: 0.4 },
-		))).toEqual({ mass: 1620, crashExtraLinearVelocity: 0.4, driveTimeLimits: [0.1, 0.2, 0.3, 0.4] });
-	});
-
-	it('leaves out what is missing or unusable', () => {
-		expect(carAttribs(vault({ DrivingMass: 0, DriveTimeDeformLimitX: 0.1 }))).toEqual({});
-		expect(carAttribs(undefined)).toEqual({});
-	});
-
-	it('reads a real car vault', () => {
-		const { buffer, parsed } = load('VEH_CARBRWDS_AT.BIN');
-		const handler = getHandlerByKey('attribSysVault');
-		const res = parsed.resources.find((r) => r.resourceTypeId === handler?.typeId);
-		expect(handler && res).toBeTruthy();
-		const ctx = resourceCtxFromBundle(parsed);
-		const vaultModel = handler!.parseRaw(extractResourceRaw(buffer, parsed, res!), ctx);
-		const a = carAttribs(vaultModel);
-		expect(a.mass).toBeGreaterThan(500);
-		expect(a.driveTimeLimits).toHaveLength(4);
 	});
 });

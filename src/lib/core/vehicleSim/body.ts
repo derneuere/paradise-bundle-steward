@@ -55,8 +55,7 @@ export const toBodyDir = (b: RigidBody, d: Vec3): Vec3 => [dot(d, b.axes[0]), do
 export const toWorld = (b: RigidBody, p: Vec3): Vec3 => add(b.pos, toWorldDir(b, p));
 export const toBody = (b: RigidBody, p: Vec3): Vec3 => toBodyDir(b, sub(p, b.pos));
 
-// Row-major local->world rotation (the axes as columns), the layout the
-// deformation sim's `carRot` uses.
+// Row-major local->world rotation (the axes as columns).
 export const rotationMatrix = (b: RigidBody): number[] => {
 	const [r, u, a] = b.axes;
 	return [r[0], u[0], a[0], r[1], u[1], a[1], r[2], u[2], a[2]];

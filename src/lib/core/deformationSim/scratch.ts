@@ -30,7 +30,7 @@ export function scratchSensor(s: SimState, sensor: number, relVel: Vec3, n: Vec3
 	const speed = Math.sqrt(slideSq);
 	const felt = magnitude * Math.min(speed, 1);
 	let add = speed * dt * SCRATCH_RATE * Math.min(felt, SCRATCH_IMPULSE_CAP);
-	if (s.crashing) add *= CRASH_SCRATCH_SCALE;
+	if (s.vehicle.crashing) add *= CRASH_SCRATCH_SCALE;
 	const before = s.scratch[sensor];
 	s.scratch[sensor] = Math.min(Math.max(0, before + add), Math.max(MAX_SCRATCH, before));
 	return s.scratch[sensor] - before;
