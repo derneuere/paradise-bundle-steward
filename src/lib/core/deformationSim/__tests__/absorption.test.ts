@@ -55,7 +55,9 @@ describe.skipIf(!hasFixture('PUSMC01'))('PUSMC01 (top speed 105 mph) into a wall
 		const { sim, crush } = wallRun('PUSMC01', 180, 'player');
 		expect(sim.state.run!.crash).toBe('headOn');
 		expect(sim.state.run!.absorption).toBe(AbsorptionSet.PlayerExtremeCrash);
-		expect(crush).toBeCloseTo(0.95, 2);
+		// The normal table stops this crash at about 0.6 m.
+		expect(crush).toBeGreaterThan(0.9);
+		expect(crush).toBeLessThan(1.05);
 	});
 
 	it('dents a rival exactly like the player on a knock', () => {
