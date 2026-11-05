@@ -7,16 +7,18 @@
 // world: its collision shape is the sensor spheres, contacts are solved one
 // after another, only the part of each impulse the sensor did not absorb
 // reaches the car body, and penetration is corrected by position alone. Each
-// contact is sized with the car's full effective mass (box inertia included).
-// What the editor leaves out of the full vehicle physics: gravity, tyres and
-// ground, so the car body only translates (it would otherwise spin freely
-// with nothing to stop it).
+// contact is sized with the car's full effective mass (box inertia included),
+// and a crashing car's slide along the obstacle is braked by every contact
+// (friction.ts). What the editor leaves out of the full vehicle physics:
+// gravity, tyres and ground, so the car body only translates (it would
+// otherwise spin freely with nothing to stop it).
 
 import type { ParsedDeformationSpec, Vec3 } from '../deformationSpec';
 import { checkForDetachment, hingePoint, initialPartState, jointRotation, mul3, poseMatrix, updateFreeParts, updateHinges } from './parts';
 import { applySensorImpulse, driveTimeBox, updateDeformedBox } from './sensors';
 import { drivenNormal, updateIK, updateSkinRows } from './ik';
 import { scratchSensor } from './scratch';
+import { slideAcross, slideFriction } from './friction';
 import { clearEvents, emptyEvents, type CrashEvents } from './events';
 import { freshPanes, updateGlass } from './glass';
 import { add, cross, dot, length, normalize, scale, sub, type CarAttribs, type Obstacle, type SimState } from './state';
@@ -59,6 +61,9 @@ export type CrashSim = {
 
 const POLE_RADIUS = 0.15;
 const STOP_SPEED = 0.05;
+// Slide friction alone leaves a long scrape still creeping after seconds; in the game
+// the ground, the tyres and the end of the crash stop it. This cap stands in
+// for them.
 const MAX_CONTACT_TIME = 3;
 export const DEFAULT_ATTRIBS: CarAttribs = { mass: 1500, crashExtraLinearVelocity: 0.3, driveTimeLimits: [0.05, 0.2, 0.15, 0.4] };
 const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -233,15 +238,20 @@ function resolveContacts(s: SimState, dt: number): void {
 		const rest = applySensorImpulse(s, {
 			sensor: c.sensor, direction: mul3(toLocal, c.n), magnitude, closingSpeed: Math.abs(vn), invMass: k, dt,
 		});
-		const scratch = scratchSensor(s, c.sensor, relVel, c.n, magnitude, dt);
+		// Slide, scratch and friction read the car body's own velocity as it
+		// stands after the contacts before this one (the solver's mid-step
+		// spin is not the body's), so a straight hit neither scratches nor brakes.
+		const slide = slideAcross(bodyVel, c.n);
+		const scratch = scratchSensor(s, c.sensor, bodyVel, c.n, magnitude, dt);
 		s.events.contacts.push({
 			sensor: c.sensor, point: c.point, normal: c.n, impulse: magnitude, closingSpeed: Math.abs(vn),
-			slide: sub(s.carVel, scale(c.n, dot(s.carVel, c.n))), scratch,
+			slide: slide.slide, scratch,
 		});
 		const J = scale(c.n, magnitude);
-		solveVel = add(solveVel, scale(J, invMass));
+		const friction = slideFriction(s, slide, magnitude, dt);
+		solveVel = add(add(solveVel, scale(J, invMass)), friction);
 		solveSpin = add(solveSpin, invI(cross(arm, J)));
-		bodyVel = add(bodyVel, scale(mul3(s.carRot, rest), invMass));
+		bodyVel = add(add(bodyVel, scale(mul3(s.carRot, rest), invMass)), friction);
 	}
 	s.carVel = bodyVel;
 	s.carPos = add(s.carPos, scale(s.carVel, dt));

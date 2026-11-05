@@ -13,10 +13,12 @@ export type ContactEvent = {
 	normal: Vec3;        // unit, out of the obstacle toward the car
 	impulse: number;     // shaped contact impulse, N·s
 	closingSpeed: number; // m/s along the normal
-	// How fast the car slides across the surface here: its velocity with the
+	// How fast the car slides across the surface here: the car body's
+	// velocity at this contact (after the step's earlier contacts) with the
 	// along-normal part removed. The car body only translates, so this is the
 	// contact point's own slide (the solver's mid-step spin, which the step
-	// throws away, is left out). Sparks need it.
+	// throws away, is left out). Sparks need it; scratch and slide friction
+	// read the same slide.
 	slide: Vec3;
 	scratch: number;     // paint scratch this contact added to its sensor
 };
