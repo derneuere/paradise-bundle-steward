@@ -8,6 +8,8 @@ import * as THREE from 'three';
 import type { DecodedTexture } from '@/lib/core/texture';
 import { D3DTextureAddress } from '@/lib/core/textureState';
 import type { DecodedRenderable } from '@/lib/core/renderableDecode';
+import { paintShading, RETAIL_DEFAULT_PAINT } from '@/lib/core/vehiclePaint';
+import { applyGamePaint } from './paintMaterial';
 
 export type PaintColor = { r: number; g: number; b: number; pearl?: { r: number; g: number; b: number } };
 
@@ -52,11 +54,14 @@ function applyWrapping(
 	tex.wrapT = map[sampler?.addressV ?? D3DTextureAddress.WRAP] ?? THREE.RepeatWrapping;
 }
 
-// Keyed by Material resource id (hex).
+// Keyed by Material resource id (hex). `paintColor` is the picked paint (null =
+// none) for the heuristic body materials; `carPaint` what the vehicle shaders
+// that read the paint get, which the game always has.
 export function buildTexturedMaterials(
 	renderables: readonly DecodedRenderable[],
 	wireframe: boolean,
 	paintColor: PaintColor | null,
+	carPaint: PaintColor = paintColor ?? RETAIL_DEFAULT_PAINT,
 ): Map<string, THREE.MeshStandardMaterial> {
 	const map = new Map<string, THREE.MeshStandardMaterial>();
 	for (const r of renderables) {
@@ -104,18 +109,6 @@ export function buildTexturedMaterials(
 				mat.roughness = 0.08;
 				mat.envMapIntensity = 2.5;
 			} else if (sn.includes('PaintGloss')) {
-				if (paintColor) {
-					mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
-					const pearl = paintColor.pearl;
-					if (pearl) {
-						mat.emissive.setRGB(pearl.r * 0.25, pearl.g * 0.25, pearl.b * 0.25);
-					} else {
-						mat.emissive.setRGB(paintColor.r * 0.3, paintColor.g * 0.3, paintColor.b * 0.3);
-					}
-					mat.emissiveIntensity = 1.0;
-				} else {
-					mat.color.setRGB(0.18, 0.18, 0.20);
-				}
 				mat.metalness = 0.6;
 				mat.roughness = 0.2;
 				mat.envMapIntensity = 1.5;
@@ -153,7 +146,8 @@ export function buildTexturedMaterials(
 					mat.depthWrite = false;
 				}
 				const isBodyMaterial = !isGlass && (rm.diffuseFromSecondary || rm.anyFromSecondary || !rm.diffuse);
-				if (paintColor && isBodyMaterial) {
+				// Vehicle shaders say themselves whether they read the paint (below).
+				if (paintColor && isBodyMaterial && !sn.startsWith('Vehicle_')) {
 					mat.color.setRGB(paintColor.r, paintColor.g, paintColor.b);
 					mat.metalness = 0.6;
 					mat.roughness = 0.25;
@@ -182,6 +176,8 @@ export function buildTexturedMaterials(
 				mat.aoMapIntensity = 1.0;
 			}
 			if (rm.scratch) scratchMaps.set(mat, makeDataTexture(rm.scratch, null, false));
+			const shading = paintShading(sn);
+			if (shading) applyGamePaint(mat, shading, carPaint);
 
 			map.set(key, mat);
 		}

@@ -30,6 +30,7 @@ import type { MaterialBinding } from './materialBinding';
 import type { ParsedShaderConstant } from './shader';
 import { type CbLayout, seedSkinningPalettes, engineKnobs, knobGroupForConstant, type EngineKnobs } from './shaderEngineConstants';
 import { bindVertexStreams, verletRange, writeVerletOffsets } from './vehicleShaderInputs';
+import { paintSlots, writePaint, type CarPaint } from './vehiclePaint';
 
 export type BuildOptions = {
 	vsSource: string;
@@ -70,6 +71,8 @@ export type BuildOptions = {
 export type TranslatedMaterial = THREE.ShaderMaterial & {
 	/** `verlet`: the car's 128 x vec4 deformation rows; null or omitted = at rest. */
 	__updateCb0?: (camera: THREE.Camera, object: THREE.Object3D, verlet?: Float32Array | null) => void;
+	/** Vehicle shaders that read the car paint (see vehiclePaint). */
+	__setPaint?: (paint: CarPaint) => void;
 };
 
 export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMaterial {
@@ -165,6 +168,8 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 	};
 	seedDefaults(vsParsed);
 	seedDefaults(psParsed);
+	const paint = paintSlots([vsParsed, psParsed]);
+	if (paint && m.uniforms.cb0) m.__setPaint = (p) => writePaint(m.uniforms.cb0.value as THREE.Vector4[], paint, p);
 
 	// Identity-fill the bone-matrix palette so skinned vehicle meshes render at
 	// rest pose instead of collapsing to the origin (see shaderEngineConstants).

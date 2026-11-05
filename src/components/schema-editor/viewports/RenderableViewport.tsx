@@ -64,6 +64,8 @@ import { buildTexturedMaterials, scratchMapOf, type PaintColor } from './rendera
 import { RenderableCrashPanel, RenderableCrashRig } from './crashSim/RenderableCrash';
 import { useRenderableCrash, type CrashDeform } from './crashSim/useRenderableCrash';
 import { deformingCopy, isSkinned } from './crashSim/deformMaterial';
+import { carryGamePaint } from './paintMaterial';
+import { defaultCarPaint, type CarPaint } from '@/lib/core/vehiclePaint';
 
 // =============================================================================
 // Colour picker — uses PlayerCarColours from the loaded bundle if available,
@@ -127,9 +129,10 @@ function VehicleColorPicker({
 				</div>
 				<div className="flex flex-wrap gap-1">
 					{palette.paintColours.map((c, i) => {
-						const rgb = { r: Math.max(0, Math.min(1, c.red)), g: Math.max(0, Math.min(1, c.green)), b: Math.max(0, Math.min(1, c.blue)) };
+						// Unclamped: the game uploads out-of-range (neon) entries as they are.
+						const rgb = { r: c.red, g: c.green, b: c.blue };
 						const pearlC = palette.pearlColours[i];
-						const pearl = pearlC ? { r: Math.max(0, Math.min(1, pearlC.red)), g: Math.max(0, Math.min(1, pearlC.green)), b: Math.max(0, Math.min(1, pearlC.blue)) } : undefined;
+						const pearl = pearlC ? { r: pearlC.red, g: pearlC.green, b: pearlC.blue } : undefined;
 						const isActive = paintColor && Math.abs(paintColor.r - rgb.r) < 0.01 && Math.abs(paintColor.g - rgb.g) < 0.01 && Math.abs(paintColor.b - rgb.b) < 0.01;
 						return (
 							<button
@@ -322,6 +325,7 @@ function RenderableMeshes({
 	renderables,
 	wireframe,
 	paintColor,
+	carPaint,
 	selected,
 	hovered,
 	onSelect,
@@ -332,6 +336,8 @@ function RenderableMeshes({
 	renderables: DecodedRenderable[];
 	wireframe: boolean;
 	paintColor: PaintColor | null;
+	/** The paint the vehicle shaders read: the pick, else the game's fallback. */
+	carPaint: CarPaint;
 	selected: { ri: number; mi: number } | null;
 	hovered: { ri: number; mi: number } | null;
 	onSelect: (sel: { ri: number; mi: number } | null) => void;
@@ -392,8 +398,8 @@ function RenderableMeshes({
 	);
 
 	const texturedMaterials = useMemo(
-		() => buildTexturedMaterials(renderables, wireframe, paintColor),
-		[renderables, wireframe, paintColor],
+		() => buildTexturedMaterials(renderables, wireframe, paintColor, carPaint),
+		[renderables, wireframe, paintColor, carPaint],
 	);
 
 	useDisposeOnDepsChange(
@@ -418,7 +424,7 @@ function RenderableMeshes({
 	const deforming = useMemo(() => {
 		if (!deformRows || !deformHeat) return null;
 		const textured = new Map<string, THREE.MeshStandardMaterial>();
-		for (const [k, m] of texturedMaterials) textured.set(k, deformingCopy(m, deformRows, deformHeat, deformFlat, scratchMapOf(m)));
+		for (const [k, m] of texturedMaterials) textured.set(k, carryGamePaint(m, deformingCopy(m, deformRows, deformHeat, deformFlat, scratchMapOf(m))));
 		return { textured, base: deformingCopy(baseMaterial, deformRows, deformHeat, deformFlat) };
 	}, [deformRows, deformHeat, deformFlat, texturedMaterials, baseMaterial]);
 	useDisposeOnDepsChange(
@@ -599,6 +605,7 @@ function RenderableMeshes({
 								// world matrix for every draw.
 								const upd = (material as TranslatedMaterial).__updateCb0;
 								if (upd) upd(camera, this, deform?.rows.value ?? null);
+								(material as TranslatedMaterial).__setPaint?.(carPaint);
 								void _r; void _s; void _g; void _group;
 							}}
 							onClick={deform ? deform.onClick : (e) => {
@@ -667,6 +674,8 @@ export function RenderableViewport() {
 		}
 		return null;
 	}, [loadedBundle, originalArrayBuffer, decoded]);
+	// The game never draws a car unpainted: no pick = its fallback colour.
+	const carPaint = useMemo(() => paintColor ?? defaultCarPaint(carColours), [paintColor, carColours]);
 
 	// Clear hover when the decoded set changes (different mode / LOD).
 	useResetOnChange(decoded?.decoded, () => setHovered(null));
@@ -865,6 +874,7 @@ export function RenderableViewport() {
 								renderables={decoded.decoded.renderables}
 								wireframe={wireframe}
 								paintColor={paintColor}
+								carPaint={carPaint}
 								selected={selected}
 								hovered={hovered}
 								onSelect={handleSelect}
@@ -873,7 +883,7 @@ export function RenderableViewport() {
 								deform={crash.deform}
 							/>
 						)}
-						<RenderableCrashRig crash={crash} paint={paintColor ? [paintColor.r, paintColor.g, paintColor.b] : null} />
+						<RenderableCrashRig crash={crash} paint={[carPaint.r, carPaint.g, carPaint.b]} />
 					</Suspense>
 					<OrbitControls
 						target={[center.x, center.y, center.z]}
