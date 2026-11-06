@@ -66,7 +66,9 @@ const recordList = (type: string, itemLabel?: ListFieldSchema['itemLabel'], fixe
 // Records
 // ---------------------------------------------------------------------------
 
-const WHEEL_LABELS = ['FR', 'FL', 'RR', 'RL'];
+// Car model space has +x = right and +z = forward; wheel 0 sits at -x, +z in
+// all but a handful of retail cars.
+const WHEEL_LABELS = ['FL', 'FR', 'RL', 'RR'];
 
 const registry: SchemaRegistry = {
 	WheelSpec: {
