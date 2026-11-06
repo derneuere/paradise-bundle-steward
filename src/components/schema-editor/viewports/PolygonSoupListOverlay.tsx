@@ -3,10 +3,11 @@
 //
 // Structurally distinct from the other World-viewport overlays: a bundle
 // holds 0..N PolygonSoupList resources (one per track unit), and this
-// overlay renders ALL of them as a single batched mesh. The currently-
-// edited resource is read from `PolygonSoupListContext` — provided by
-// `PolygonSoupListPage` — and click events on the 3D scene can switch the
-// active resource (via the page's `handleViewportSelect`).
+// overlay renders ALL of them, one memoised mesh per resource (see
+// `polygonSoupChunk.ts` for why per-resource rather than one merged mesh).
+// The currently-edited resource is read from `PolygonSoupListContext` —
+// provided by `PolygonSoupListPage` — and click events on the 3D scene can
+// switch the active resource (via the page's `handleViewportSelect`).
 //
 // Why this overlay reads the active Bundle directly (deviating from ADR-0002):
 // see docs/adr/0004-polygon-soup-list-overlay-reads-bundle-context.md.
@@ -14,22 +15,21 @@
 // DOM siblings (marquee, status badge) ride the WorldViewport HTML slot.
 
 import { useCallback, useMemo, useRef } from 'react';
-import { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { unpackSoupVertex, type ParsedPolygonSoupList } from '@/lib/core/polygonSoupList';
 import { usePolygonSoupListContext, encodeSoupPoly } from './polygonSoupListContext';
 import { CameraBridge, type CameraBridgeData } from '@/components/common/three/CameraBridge';
 import { MarqueeSelector } from '@/components/common/three/MarqueeSelector';
 import { useLineSegmentsGeometry } from '@/lib/three/scene/useLineSegmentsGeometry';
-import { useCachedColorAttribute } from '@/hooks/useCachedColorAttribute';
-import { useApplyPolygonSoupHighlight } from '@/hooks/useApplyPolygonSoupHighlight';
-import { useDisposeOnUnmount } from '@/hooks/useDisposeOnUnmount';
+import { useLatestRef } from '@/hooks/useLatestRef';
 import { useWorkspaceAISectionsBulk } from '@/components/workspace/AISectionsBulkProvider';
 import type { Edge } from '@/components/common/three/SelectionOutline';
 import type { NodePath } from '@/lib/schema/walk';
 import type { WorldOverlayProps } from './WorldViewport.types';
 import { useWorldViewportHtmlSlot } from './WorldViewport';
-import { defineSelectionCodec, useBatchedSelection, type Selection } from './selection';
+import { defineSelectionCodec, type Selection } from './selection';
+import { getSoupChunk, pickChunkPolysInFrustum } from './polygonSoupChunk';
+import { PolygonSoupChunkMesh, type SoupPickHandler } from './PolygonSoupChunkMesh';
 
 // ---------------------------------------------------------------------------
 // Path ↔ Selection codec (exported for tests)
@@ -75,201 +75,8 @@ export function soupPolyAddressPath(addr: SoupPolyAddress): NodePath {
 }
 
 // ---------------------------------------------------------------------------
-// Collision-tag → RGB color
+// Selection outline
 // ---------------------------------------------------------------------------
-
-function tagToColor(tag: number, out: [number, number, number]): void {
-	const group    = tag & 0xFFFF;
-	const material = (tag >>> 16) & 0xFFFF;
-	const h = ((material * 2654435761) >>> 0) / 0xFFFFFFFF;
-	const l = 0.45 + (((group * 2246822519) >>> 0) / 0xFFFFFFFF) * 0.2;
-	hslToRgb(h, 0.6, l, out);
-}
-
-function hslToRgb(h: number, s: number, l: number, out: [number, number, number]): void {
-	const hue2rgb = (p: number, q: number, t: number) => {
-		if (t < 0) t += 1;
-		if (t > 1) t -= 1;
-		if (t < 1 / 6) return p + (q - p) * 6 * t;
-		if (t < 1 / 2) return q;
-		if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-		return p;
-	};
-	let r: number, g: number, b: number;
-	if (s === 0) {
-		r = g = b = l;
-	} else {
-		const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-		const p = 2 * l - q;
-		r = hue2rgb(p, q, h + 1 / 3);
-		g = hue2rgb(p, q, h);
-		b = hue2rgb(p, q, h - 1 / 3);
-	}
-	out[0] = r;
-	out[1] = g;
-	out[2] = b;
-}
-
-// ---------------------------------------------------------------------------
-// Batched geometry builder
-// ---------------------------------------------------------------------------
-
-type BatchedGeometry = {
-	geometry: THREE.BufferGeometry;
-	center: THREE.Vector3;
-	radius: number;
-	triangleCount: number;
-	soupCount: number;
-	modelCount: number;
-	/** Per-triangle mapping for raycast hit-testing. [modelIndex, soupIndex, polyIndex] per triangle. */
-	faceToLocation: Int32Array;
-	/** Triangle ranges per model — used to cheaply re-tint per-resource highlights. */
-	triangleRangesByModel: { start: number; count: number }[];
-};
-
-function buildGeometry(models: (ParsedPolygonSoupList | null)[]): BatchedGeometry {
-	let triangleCount = 0;
-	let soupCount = 0;
-	let modelCount = 0;
-	const triangleRangesByModel: { start: number; count: number }[] = [];
-
-	for (const model of models) {
-		const startTri = triangleCount;
-		if (model == null) {
-			triangleRangesByModel.push({ start: startTri, count: 0 });
-			continue;
-		}
-		if (model.soups.length > 0) modelCount++;
-		for (const soup of model.soups) {
-			soupCount++;
-			for (const p of soup.polygons) {
-				triangleCount += p.vertexIndices[3] === 0xFF ? 1 : 2;
-			}
-		}
-		triangleRangesByModel.push({ start: startTri, count: triangleCount - startTri });
-	}
-
-	if (triangleCount === 0) {
-		const empty = new THREE.BufferGeometry();
-		return {
-			geometry: empty,
-			center: new THREE.Vector3(),
-			radius: 100,
-			triangleCount: 0,
-			soupCount: 0,
-			modelCount: 0,
-			faceToLocation: new Int32Array(0),
-			triangleRangesByModel,
-		};
-	}
-
-	const positions = new Float32Array(triangleCount * 9);
-	const colors = new Float32Array(triangleCount * 9);
-	const faceToLocation = new Int32Array(triangleCount * 3);
-
-	let minX = Infinity, minY = Infinity, minZ = Infinity;
-	let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-	let writeIdx = 0;
-	let triIdx = 0;
-	const tagColor: [number, number, number] = [0, 0, 0];
-
-	for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
-		const model = models[modelIndex];
-		if (model == null) continue;
-		for (let soupIndex = 0; soupIndex < model.soups.length; soupIndex++) {
-			const soup = model.soups[soupIndex];
-			const vOff = soup.vertexOffsets;
-			const scale = soup.comprGranularity;
-
-			const unpacked = new Float32Array(soup.vertices.length * 3);
-			for (let i = 0; i < soup.vertices.length; i++) {
-				const [wx, wy, wz] = unpackSoupVertex(soup.vertices[i], vOff, scale);
-				unpacked[i * 3 + 0] = wx;
-				unpacked[i * 3 + 1] = wy;
-				unpacked[i * 3 + 2] = wz;
-				if (wx < minX) minX = wx; if (wx > maxX) maxX = wx;
-				if (wy < minY) minY = wy; if (wy > maxY) maxY = wy;
-				if (wz < minZ) minZ = wz; if (wz > maxZ) maxZ = wz;
-			}
-
-			for (let polyIndex = 0; polyIndex < soup.polygons.length; polyIndex++) {
-				const poly = soup.polygons[polyIndex];
-				const [a, b, c, d] = poly.vertexIndices;
-				const isTri = d === 0xFF;
-				const len = soup.vertices.length;
-				const ia = a < len ? a : 0;
-				const ib = b < len ? b : 0;
-				const ic = c < len ? c : 0;
-
-				tagToColor(poly.collisionTag, tagColor);
-
-				positions[writeIdx + 0] = unpacked[ia * 3 + 0];
-				positions[writeIdx + 1] = unpacked[ia * 3 + 1];
-				positions[writeIdx + 2] = unpacked[ia * 3 + 2];
-				positions[writeIdx + 3] = unpacked[ib * 3 + 0];
-				positions[writeIdx + 4] = unpacked[ib * 3 + 1];
-				positions[writeIdx + 5] = unpacked[ib * 3 + 2];
-				positions[writeIdx + 6] = unpacked[ic * 3 + 0];
-				positions[writeIdx + 7] = unpacked[ic * 3 + 1];
-				positions[writeIdx + 8] = unpacked[ic * 3 + 2];
-				for (let k = 0; k < 9; k += 3) {
-					colors[writeIdx + k + 0] = tagColor[0];
-					colors[writeIdx + k + 1] = tagColor[1];
-					colors[writeIdx + k + 2] = tagColor[2];
-				}
-				writeIdx += 9;
-				faceToLocation[triIdx * 3 + 0] = modelIndex;
-				faceToLocation[triIdx * 3 + 1] = soupIndex;
-				faceToLocation[triIdx * 3 + 2] = polyIndex;
-				triIdx++;
-
-				if (!isTri) {
-					const id = d < len ? d : 0;
-					// Triangle 2: d, c, b (matches C# reference winding).
-					positions[writeIdx + 0] = unpacked[id * 3 + 0];
-					positions[writeIdx + 1] = unpacked[id * 3 + 1];
-					positions[writeIdx + 2] = unpacked[id * 3 + 2];
-					positions[writeIdx + 3] = unpacked[ic * 3 + 0];
-					positions[writeIdx + 4] = unpacked[ic * 3 + 1];
-					positions[writeIdx + 5] = unpacked[ic * 3 + 2];
-					positions[writeIdx + 6] = unpacked[ib * 3 + 0];
-					positions[writeIdx + 7] = unpacked[ib * 3 + 1];
-					positions[writeIdx + 8] = unpacked[ib * 3 + 2];
-					for (let k = 0; k < 9; k += 3) {
-						colors[writeIdx + k + 0] = tagColor[0];
-						colors[writeIdx + k + 1] = tagColor[1];
-						colors[writeIdx + k + 2] = tagColor[2];
-					}
-					writeIdx += 9;
-					faceToLocation[triIdx * 3 + 0] = modelIndex;
-					faceToLocation[triIdx * 3 + 1] = soupIndex;
-					faceToLocation[triIdx * 3 + 2] = polyIndex;
-					triIdx++;
-				}
-			}
-		}
-	}
-
-	const geometry = new THREE.BufferGeometry();
-	geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-	geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-	geometry.computeVertexNormals();
-
-	const center = new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-	const dx = maxX - minX, dy = maxY - minY, dz = maxZ - minZ;
-	const radius = Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz) / 2, 50);
-
-	return {
-		geometry,
-		center,
-		radius,
-		triangleCount,
-		soupCount,
-		modelCount,
-		faceToLocation,
-		triangleRangesByModel,
-	};
-}
 
 // Yield boundary edges for every polygon in the bulk + tree selection within
 // `selectedModelIndex`'s model. Each polygon contributes its full boundary —
@@ -331,134 +138,35 @@ function* iterateSelectionOutlineEdges(
 	}
 }
 
-function pickPolysInFrustum(
-	batched: BatchedGeometry,
-	frustum: THREE.Frustum,
-	selectedModelIndex: number,
-): { soup: number; poly: number }[] {
-	const range = batched.triangleRangesByModel[selectedModelIndex];
-	if (!range || range.count === 0) return [];
-
-	const positions = batched.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
-	if (!positions) return [];
-	const arr = positions.array as Float32Array;
-	const map = batched.faceToLocation;
-	const seen = new Set<number>();
-	const out: { soup: number; poly: number }[] = [];
-	const pt = new THREE.Vector3();
-
-	const triEnd = range.start + range.count;
-	for (let tri = range.start; tri < triEnd; tri++) {
-		const o = tri * 9;
-		pt.set(
-			(arr[o + 0] + arr[o + 3] + arr[o + 6]) / 3,
-			(arr[o + 1] + arr[o + 4] + arr[o + 7]) / 3,
-			(arr[o + 2] + arr[o + 5] + arr[o + 8]) / 3,
-		);
-		if (!frustum.containsPoint(pt)) continue;
-		const s = map[tri * 3 + 1];
-		const p = map[tri * 3 + 2];
-		const key = encodeSoupPoly(s, p);
-		if (seen.has(key)) continue;
-		seen.add(key);
-		out.push({ soup: s, poly: p });
-	}
-	return out;
-}
-
-// Amber (regular bulk paint) → red-tinted dim (Selection contains 1+
-// transformable entities, so these soup-polys are SKIPPED by the bulk
-// transform per CONTEXT.md / "Pivot" and issue #82). The two RGB triples
-// are kept side-by-side as constants so a future palette change (theme
-// override, accessibility pass) touches one place. Distinct hue + lowered
-// luma so the user reads "different state", not "different selection".
-//
-// Exported so the per-overlay test suite can pin the paint a user actually
-// sees in each Selection regime without re-creating a full WebGL harness.
-export const SOUP_PAINT_AMBER: readonly [number, number, number] = [1.0, 0.72, 0.2];
-export const SOUP_PAINT_SKIPPED: readonly [number, number, number] = [0.85, 0.32, 0.32];
-
-export function applyHighlight(
-	geometry: THREE.BufferGeometry,
-	ranges: { start: number; count: number }[],
-	baseColors: Float32Array,
-	faceToLocation: Int32Array,
-	selectedModelIndex: number,
-	selectedPolysInCurrentModel: ReadonlySet<number>,
-	skippedByBulkTransform: boolean = false,
-): void {
-	const attr = geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
-	if (!attr) return;
-	const colors = attr.array as Float32Array;
-	colors.set(baseColors);
-	const sel = ranges[selectedModelIndex];
-	if (sel && sel.count > 0) {
-		const from = sel.start * 9;
-		const to = from + sel.count * 9;
-		for (let i = from; i < to; i++) {
-			colors[i] = Math.min(1, colors[i] * 1.6 + 0.15);
-		}
-	}
-	if (selectedPolysInCurrentModel.size > 0 && sel && sel.count > 0) {
-		const paint = skippedByBulkTransform ? SOUP_PAINT_SKIPPED : SOUP_PAINT_AMBER;
-		const from = sel.start;
-		const to = from + sel.count;
-		for (let tri = from; tri < to; tri++) {
-			const s = faceToLocation[tri * 3 + 1];
-			const p = faceToLocation[tri * 3 + 2];
-			if (!selectedPolysInCurrentModel.has(encodeSoupPoly(s, p))) continue;
-			const base = tri * 9;
-			colors[base + 0] = paint[0];
-			colors[base + 1] = paint[1];
-			colors[base + 2] = paint[2];
-			colors[base + 3] = paint[0];
-			colors[base + 4] = paint[1];
-			colors[base + 5] = paint[2];
-			colors[base + 6] = paint[0];
-			colors[base + 7] = paint[1];
-			colors[base + 8] = paint[2];
-		}
-	}
-	attr.needsUpdate = true;
-}
-
 // ---------------------------------------------------------------------------
 // Overlay
 // ---------------------------------------------------------------------------
 
 const EMPTY_POLY_SELECTION: ReadonlySet<number> = new Set();
 const EMPTY_BUNDLE_SOUPS: (ParsedPolygonSoupList | null)[] = [];
-const EMPTY_BULK_KEYS: ReadonlySet<string> = new Set();
 
 type Props = WorldOverlayProps<ParsedPolygonSoupList> & {
-	/** The full per-Bundle list of PSL instances the overlay should render
-	 *  as a single batched mesh — same reference for every overlay descriptor
-	 *  inside the same Bundle (entries are `null` where parsing failed *or*
-	 *  where the instance was filtered out by per-instance visibility).
-	 *  Supplied by `WorldViewportComposition` so the overlay no longer needs
-	 *  to read `useFirstLoadedBundle()` to fish them out itself (closes the
-	 *  multi-Bundle leak in ADR-0004's deviation). When a
-	 *  `PolygonSoupListContext` is provided (the legacy `PolygonSoupListPage`
-	 *  flow) the context's `models` wins. */
+	/** The full per-Bundle list of PSL instances the overlay should render —
+	 *  same reference for every overlay descriptor inside the same Bundle
+	 *  (entries are `null` where parsing failed *or* where the instance was
+	 *  filtered out by per-instance visibility). Supplied by
+	 *  `WorldViewportComposition` so the overlay never reads the workspace to
+	 *  find its siblings (ADR-0004). When a `PolygonSoupListContext` is
+	 *  provided (the legacy `PolygonSoupListPage` flow) the context's
+	 *  `models` wins. */
 	bundleSoups?: (ParsedPolygonSoupList | null)[];
-	/** Bundle-relative resource index of the currently-selected PSL instance,
-	 *  used to drive per-instance highlighting in the batched mesh. The
-	 *  composition path supplies this from the workspace selection so a
-	 *  selection on instance 7 still highlights the right slice of the
-	 *  union, even though only one (lead) overlay is mounted per Bundle.
-	 *  When a `PolygonSoupListContext` is provided the context's
+	/** Bundle-relative resource index of the currently-selected PSL instance.
+	 *  Only one (lead) overlay is mounted per Bundle, so a selection on
+	 *  instance 7 must still highlight instance 7's mesh. When a
+	 *  `PolygonSoupListContext` is provided the context's
 	 *  `selectedModelIndex` wins; when neither is supplied this falls back
-	 *  to 0 to preserve the legacy single-Bundle shape. */
+	 *  to 0. */
 	activeSoupIndex?: number;
 	/** 3D-pick callback for the composition path (no `PolygonSoupListContext`).
-	 *  Receives the clicked instance index — which can differ from the lead
-	 *  overlay's own index when N descriptors collapsed to one — so the
-	 *  composition can route the selection to the correct PSL resource via
-	 *  `select(...)`. The standard `onSelect(NodePath)` prop is unsuitable
-	 *  for PSL because a NodePath alone can't carry the multi-instance
-	 *  index (the workspace selection's `(bundleId, resourceKey, index,
-	 *  path)` tuple is what actually addresses a polygon). The legacy page
-	 *  flow's `PolygonSoupListContext.onSelect` takes priority when present. */
+	 *  Receives the clicked instance index, which can differ from the lead
+	 *  overlay's own index — a NodePath alone can't carry it, so the standard
+	 *  `onSelect(NodePath)` prop is unsuitable here. The legacy page flow's
+	 *  `PolygonSoupListContext.onSelect` takes priority when present. */
 	onPickInstancePoly?: (
 		modelIndex: number,
 		soupIndex: number,
@@ -476,13 +184,10 @@ export const PolygonSoupListOverlay = ({
 	activeSoupIndex,
 	onPickInstancePoly,
 	isActive = true,
-	// `data` (the active resource) is accepted for contract symmetry but not
-	// directly used — the multi-resource state below covers it.
-	// `onSelect` is unused: the page provides a richer click API via
-	// `PolygonSoupListContext.onSelect(modelIndex, soupIndex, polyIndex,
-	// modifiers)` which can switch the active resource and toggle bulk.
-	// In the composition path (no context) the equivalent richer API comes
-	// in via `onPickInstancePoly` instead — see Props doc.
+	// `data` is accepted for contract symmetry but unused — the overlay draws
+	// every sibling. `onSelect` is unused: picking goes through
+	// `PolygonSoupListContext.onSelect` or `onPickInstancePoly`, which carry
+	// the instance index (see Props doc).
 }: Props) => {
 	const ctx = usePolygonSoupListContext();
 	const models = ctx?.models ?? bundleSoups ?? EMPTY_BUNDLE_SOUPS;
@@ -494,14 +199,12 @@ export const PolygonSoupListOverlay = ({
 	const cameraBridge = useRef<CameraBridgeData | null>(null);
 
 	// Tree-selected polygon — derived from `selectedPath`, the standard
-	// World-overlay selection input. The page used to thread this through
-	// the context; reading it from the prop here keeps the overlay aligned
-	// with sibling overlays (selection comes from the schema editor's path).
+	// World-overlay selection input.
 	const treeSelectedPoly = useMemo(() => soupPolyPathAddress(selectedPath), [selectedPath]);
 
 	// Union of bulk selection + the tree-selected polygon. The bulk set
-	// drives the amber fill (unchanged); this merged set drives the white
-	// outline so tree navigation alone is enough to get a visible cue.
+	// drives the amber fill; this merged set drives the white outline so tree
+	// navigation alone is enough to get a visible cue.
 	const outlinedPolys = useMemo(() => {
 		if (!treeSelectedPoly) return selectedPolysInCurrentModel;
 		const extra = encodeSoupPoly(treeSelectedPoly.soup, treeSelectedPoly.poly);
@@ -511,8 +214,6 @@ export const PolygonSoupListOverlay = ({
 		return merged;
 	}, [selectedPolysInCurrentModel, treeSelectedPoly]);
 
-	// Nullify hidden models before geometry build — `buildGeometry` already
-	// handles null entries by emitting an empty range at that index.
 	const effectiveModels = useMemo(() => {
 		if (visibleModelIndexes == null) return models;
 		const out: (ParsedPolygonSoupList | null)[] = new Array(models.length);
@@ -522,28 +223,41 @@ export const PolygonSoupListOverlay = ({
 		return out;
 	}, [models, visibleModelIndexes]);
 
-	const batched = useMemo(() => buildGeometry(effectiveModels), [effectiveModels]);
+	// Cache hits for every model whose identity survived the last edit, so an
+	// edit rebuilds only the track unit(s) it touched.
+	const chunks = useMemo(
+		() => effectiveModels.map((m) => (m ? getSoupChunk(m) : null)),
+		[effectiveModels],
+	);
+
+	const stats = useMemo(() => {
+		let triangleCount = 0;
+		let soupCount = 0;
+		let modelCount = 0;
+		const bounds = new THREE.Box3();
+		for (const c of chunks) {
+			if (!c) continue;
+			triangleCount += c.triangleCount;
+			soupCount += c.soupCount;
+			if (c.soupCount > 0) modelCount++;
+			bounds.union(c.bounds);
+		}
+		const radius = bounds.isEmpty()
+			? 100
+			: Math.max(bounds.getSize(new THREE.Vector3()).length() / 2, 50);
+		return { triangleCount, soupCount, modelCount, radius };
+	}, [chunks]);
 
 	const outlineGeometry = useLineSegmentsGeometry(
 		() => iterateSelectionOutlineEdges(effectiveModels, selectedModelIndex, outlinedPolys),
 		[effectiveModels, selectedModelIndex, outlinedPolys],
 	);
 
-	const baseColorsRef = useRef<Float32Array | null>(null);
-	useCachedColorAttribute(batched.geometry, baseColorsRef);
-
 	// Cross-resource mixed-Selection detector (issue #82). If any workspace
-	// AI-section bulk has entries we know the user is curating a mixed
-	// Selection — the AI-sections side is what the Bulk transform gizmo
-	// will act on, and the PSL polys here are the SKIPPED side. Swap the
-	// amber bulk paint for a red-tinted dim variant so the user can see
-	// which polys are being skipped at a glance.
-	//
-	// Reading from `useWorkspaceAISectionsBulk()` (not `useAISectionsBulk()`)
-	// because the overlay-side bulk is per-(bundleId, index) while the
-	// workspace-side surface gives us the global "any AI bulk has entries?"
-	// signal we need. Returns null when no provider is mounted (legacy page
-	// route) — fall through to "not skipped" so the existing UX is unchanged.
+	// AI-section bulk has entries the user is curating a mixed Selection —
+	// the AI-sections side is what the Bulk transform gizmo will act on, and
+	// the PSL polys here are the SKIPPED side, so they get the red-tinted
+	// paint. Null when no provider is mounted (legacy page route).
 	const aiBulkWorkspace = useWorkspaceAISectionsBulk();
 	const isMixedWithTransformables = useMemo(() => {
 		if (!aiBulkWorkspace) return false;
@@ -553,61 +267,19 @@ export const PolygonSoupListOverlay = ({
 		return false;
 	}, [aiBulkWorkspace]);
 
-	useApplyPolygonSoupHighlight(
-		applyHighlight,
-		batched.geometry,
-		batched.triangleRangesByModel,
-		baseColorsRef,
-		batched.faceToLocation,
-		selectedModelIndex,
-		selectedPolysInCurrentModel,
-		isMixedWithTransformables,
-	);
+	// The composition hands down a fresh `onPickInstancePoly` closure on every
+	// selection change; routing through a ref keeps `onPick` stable so the
+	// memoised chunk meshes don't all re-render on each click.
+	const sinkRef = useLatestRef(onPickFromCtx ?? onPickInstancePoly);
+	const onPick = useCallback<SoupPickHandler>((modelIndex, soupIndex, polyIndex, modifiers) => {
+		sinkRef.current?.(modelIndex, soupIndex, polyIndex, modifiers);
+	}, [sinkRef]);
 
-	// Dispose GPU memory when the geometry changes or the overlay unmounts.
-	useDisposeOnUnmount(batched.geometry);
-
-	// `useBatchedSelection` hosts the click decoder so PSL speaks the same
-	// dispatch dialect as ZoneList and StreetData. Paint is NOT migrated:
-	// PSL's `applyHighlight` runs a vectorized whole-attribute reset +
-	// brighten + amber-stamp pass that doesn't decompose into a per-entity
-	// callback without a perf cliff. `applyColor` is a no-op and the
-	// existing `useApplyPolygonSoupHighlight` pipeline still drives colors.
-	const sink = onPickFromCtx ?? onPickInstancePoly;
-	const map = batched.faceToLocation;
-
-	const handlers = useBatchedSelection({
-		kind: 'polygon',
-		count: batched.triangleCount,
-		primary: useMemo(() => treeSelectedPoly
-			? { kind: 'polygon', indices: [treeSelectedPoly.soup, treeSelectedPoly.poly] }
-			: null, [treeSelectedPoly]),
-		bulk: EMPTY_BULK_KEYS,
-		hovered: null,
-		faceToEntity: useCallback(
-			(face: number) => face >= 0 && face * 3 + 2 < map.length ? face : -1, [map]),
-		mapEntityToSelection: useCallback(
-			(face: number): Selection => ({
-				kind: 'polygon',
-				indices: [map[face * 3 + 1], map[face * 3 + 2]],
-			}), [map]),
-		applyColor: useCallback(() => {}, []),
-		onPick: useCallback((sel: Selection, e: ThreeEvent<MouseEvent>) => {
-			if (!sink || e.faceIndex == null) return;
-			// modelIndex isn't in the Selection (the kind+indices shape is 2-deep).
-			// Pull it from faceToLocation at the same face the hook just resolved.
-			const modelIndex = map[e.faceIndex * 3 + 0];
-			const ne = e.nativeEvent as PointerEvent | undefined;
-			sink(modelIndex, sel.indices[0], sel.indices[1], {
-				shift: ne?.shiftKey ?? false,
-				ctrl: (ne?.ctrlKey || ne?.metaKey) ?? false,
-			});
-		}, [sink, map]),
-	});
+	const selectedChunk = chunks[selectedModelIndex] ?? null;
 
 	// HTML siblings — marquee + status badge.
 	const htmlNode = useMemo(() => {
-		const showMarquee = onMarqueeApply != null && batched.triangleCount > 0;
+		const showMarquee = onMarqueeApply != null && stats.triangleCount > 0;
 		const status = (
 			<div
 				style={{
@@ -617,7 +289,7 @@ export const PolygonSoupListOverlay = ({
 					pointerEvents: 'none',
 				}}
 			>
-				{batched.modelCount} resources · {batched.soupCount} soups · {batched.triangleCount.toLocaleString()} triangles
+				{stats.modelCount} resources · {stats.soupCount} soups · {stats.triangleCount.toLocaleString()} triangles
 				{onPickFromCtx && (
 					<div style={{ opacity: 0.7 }}>selected resource #{selectedModelIndex}</div>
 				)}
@@ -634,10 +306,10 @@ export const PolygonSoupListOverlay = ({
 				{showMarquee && (
 					<MarqueeSelector
 						bridge={cameraBridge}
-						far={Math.max(batched.radius * 10, 5000)}
+						far={Math.max(stats.radius * 10, 5000)}
 						onMarquee={(frustum, mode) => {
-							if (!onMarqueeApply || selectedModelIndex < 0) return;
-							const polys = pickPolysInFrustum(batched, frustum, selectedModelIndex);
+							if (!onMarqueeApply || !selectedChunk) return;
+							const polys = pickChunkPolysInFrustum(selectedChunk, frustum);
 							if (polys.length === 0) return;
 							onMarqueeApply(selectedModelIndex, polys, mode);
 						}}
@@ -646,21 +318,33 @@ export const PolygonSoupListOverlay = ({
 				)}
 			</>
 		);
-	}, [batched, onMarqueeApply, onPickFromCtx, selectedModelIndex, selectedPolysInCurrentModel]);
+	}, [stats, selectedChunk, onMarqueeApply, onPickFromCtx, selectedModelIndex, selectedPolysInCurrentModel]);
 	// Drop our marquee + status badge when this overlay isn't the focused
 	// resource; a sibling Bundle's overlay would otherwise stack tools on
 	// top (issue #24 follow-up).
 	useWorldViewportHtmlSlot(isActive ? htmlNode : null);
 
-	if (batched.triangleCount === 0) {
+	if (stats.triangleCount === 0) {
 		return null;
 	}
 
 	return (
 		<>
-			<mesh geometry={batched.geometry} onClick={handlers.onClick}>
-				<meshLambertMaterial vertexColors side={THREE.DoubleSide} flatShading />
-			</mesh>
+			{chunks.map((chunk, i) => {
+				if (!chunk || chunk.triangleCount === 0) return null;
+				const isSelectedModel = i === selectedModelIndex;
+				return (
+					<PolygonSoupChunkMesh
+						key={i}
+						chunk={chunk}
+						modelIndex={i}
+						isSelectedModel={isSelectedModel}
+						selectedPolys={isSelectedModel ? selectedPolysInCurrentModel : EMPTY_POLY_SELECTION}
+						skippedByBulkTransform={isSelectedModel && isMixedWithTransformables}
+						onPick={onPick}
+					/>
+				);
+			})}
 			{/* Bulk-selection outline. depthTest=false + high renderOrder so
 			    the outline is always visible, even when the selected polygon
 			    is tucked inside dense geometry or behind a wall. */}
