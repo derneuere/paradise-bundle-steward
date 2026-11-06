@@ -1,18 +1,19 @@
-// Decodes a vehicle _GR bundle into the pieces the crash simulator draws:
-// one entry per GraphicsSpec part (the index IK parts' partGraphics refer to)
-// with its locator and LOD0 meshes. Mesh geometry carries skinIndex /
-// skinWeight: every vertex is pushed by its weighted deformation rows.
+// A vehicle body as the crash simulator sees it: one entry per GraphicsSpec
+// part (the index IK parts' partGraphics refer to) with its locator and LOD0
+// meshes. Mesh geometry carries skinIndex / skinWeight: every vertex is pushed
+// by its weighted deformation rows.
 
 import * as THREE from 'three';
-import { extractResourceRaw } from '@/lib/core/registry';
-import { parseGraphicsSpecData, resolveGraphicsSpecParts, GRAPHICS_SPEC_TYPE_ID } from '@/lib/core/graphicsSpec';
-import { decodeAllRenderables, locatorToMatrix4 } from '@/lib/core/renderableDecode';
+import { GRAPHICS_SPEC_TYPE_ID } from '@/lib/core/graphicsSpec';
+import { decodeAllRenderables, locatorToMatrix4, type DecodedRenderable } from '@/lib/core/renderableDecode';
+import { decodeShatteredGlass, type ShatteredGlassRenderable } from '@/lib/core/shatteredGlassDecode';
 import type { ParsedBundle } from '@/lib/core/types';
 
 export type CrashBodyPart = {
 	gfx: number;
 	locator: THREE.Matrix4;
 	geometries: THREE.BufferGeometry[];
+	meshFlags: number[];   // per geometry (window meshes carry their pane bit)
 };
 
 export type CrashBody = {
@@ -22,6 +23,8 @@ export type CrashBody = {
 	box: THREE.Box3;
 	// Deformation rows the meshes read (highest weighted blend index + 1).
 	skinRows: number;
+	// The panes' shattered-glass models, drawn while a pane is cracked.
+	glass: readonly ShatteredGlassRenderable[];
 };
 
 export function hasGraphicsSpec(bundle: ParsedBundle): boolean {
@@ -51,22 +54,30 @@ function indexedBox(geometry: THREE.BufferGeometry, world: THREE.Matrix4, into: 
 	}
 }
 
-export function decodeCrashBody(bundle: ParsedBundle, buffer: ArrayBuffer): CrashBody {
-	const gsRes = bundle.resources.find((r) => r.resourceTypeId === GRAPHICS_SPEC_TYPE_ID);
-	if (!gsRes) throw new Error('bundle has no GraphicsSpec');
-	const gs = parseGraphicsSpecData(extractResourceRaw(buffer, bundle, gsRes));
-	const resolved = resolveGraphicsSpecParts(buffer, bundle, gs);
-	const { renderables } = decodeAllRenderables(buffer, bundle, new Map(), false, 'graphics');
-	const byId = new Map(renderables.map((r) => [r.resourceId, r]));
-
+// Renderables decoded in GraphicsSpec mode carry their part index; anything
+// else (the "all renderables" decode) has no part and can't be posed.
+export function crashBodyFromDecoded(renderables: readonly DecodedRenderable[], glass: readonly ShatteredGlassRenderable[] = []): CrashBody {
+	const byGfx = new Map<number, CrashBodyPart>();
+	for (const r of renderables) {
+		if (r.partIndex === undefined) continue;
+		let part = byGfx.get(r.partIndex);
+		if (!part) {
+			part = { gfx: r.partIndex, locator: locatorToMatrix4(r.partLocator), geometries: [], meshFlags: [] };
+			byGfx.set(r.partIndex, part);
+		}
+		part.geometries.push(...r.meshes.map((m) => m.geometry));
+		part.meshFlags.push(...r.meshes.map((m) => m.meshFlags ?? 0));
+	}
+	const parts = [...byGfx.values()].sort((a, b) => a.gfx - b.gfx);
 	const box = new THREE.Box3();
 	let maxIndex = -1;
-	const parts = resolved.map((p, gfx) => {
-		const locator = locatorToMatrix4(p.locator);
-		const decoded = p.renderableId != null ? byId.get(p.renderableId) : undefined;
-		const geometries = decoded?.meshes.map((m) => m.geometry) ?? [];
-		for (const g of geometries) { indexedBox(g, locator, box); maxIndex = Math.max(maxIndex, maxBlendIndex(g)); }
-		return { gfx, locator, geometries };
-	});
-	return { parts, box, skinRows: maxIndex + 1 };
+	for (const p of parts) {
+		for (const g of p.geometries) { indexedBox(g, p.locator, box); maxIndex = Math.max(maxIndex, maxBlendIndex(g)); }
+	}
+	return { parts, box, skinRows: maxIndex + 1, glass };
+}
+
+export function decodeCrashBody(bundle: ParsedBundle, buffer: ArrayBuffer): CrashBody {
+	if (!hasGraphicsSpec(bundle)) throw new Error('bundle has no GraphicsSpec');
+	return crashBodyFromDecoded(decodeAllRenderables(buffer, bundle, new Map(), false, 'graphics').renderables, decodeShatteredGlass(buffer, bundle));
 }

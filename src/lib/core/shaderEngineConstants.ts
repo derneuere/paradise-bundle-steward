@@ -15,32 +15,27 @@
 // copy).
 
 import type { ParsedDxbc } from './dxbc';
+import { DEFAULT_ENGINE_LIGHTING } from './environmentLighting/defaults';
 
 // ---------------------------------------------------------------------------
-// Live debug knobs for the over-bright preview.
+// Live debug knobs.
 //
-// The translated vehicle shaders fold engine-RUNTIME constants (key light,
-// ambient irradiance, fog/white-level) into the output colour, and those values
-// aren't in the bundle — we stand in heuristic defaults. When the result blows
-// out to white it's hard to know which term dominates, so the viewport exposes
-// sliders that SCALE each group plus a final exposure. This object is module-
-// global and mutated in place by the sliders; a translated material's
+// The lighting constants below are what the game would upload (derived from an
+// environment keyframe, see environmentLighting/); these sliders SCALE each
+// group off that base plus a final exposure, for experimenting. This object is
+// module-global and mutated in place by the sliders; a translated material's
 // __updateCb0 reads it every frame (R3F renders continuously), so the knobs are
 // live with no material rebuild. `exposure` multiplies gl_FragColor before the
-// preview tonemap; the others scale their cb0 constant group off its seeded base.
+// preview's display transform; 1 is the game's own exposure.
 // ---------------------------------------------------------------------------
 export type EngineKnobs = { exposure: number; keyLight: number; ambient: number; fog: number };
-// Default exposure < 1: the translated vehicle shaders output HDR for the game's
-// own tonemap, and with the approximated (white) key light the relatively-dark
-// vehicle albedo lands high enough that the Reinhard preview tonemap saturates
-// toward white — flattening the diffuse texture. ~0.5 keeps the HDR in range so
-// the texture detail reads; the exposure slider fine-tunes from there.
-export const DEFAULT_ENGINE_KNOBS: EngineKnobs = { exposure: 0.5, keyLight: 1, ambient: 1, fog: 1 };
+export const DEFAULT_ENGINE_KNOBS: EngineKnobs = { exposure: 1, keyLight: 1, ambient: 1, fog: 1 };
 export const engineKnobs: EngineKnobs = { ...DEFAULT_ENGINE_KNOBS };
 
 /** Which knob group (if any) scales a given engine constant by name. */
 export function knobGroupForConstant(name: string): Exclude<keyof EngineKnobs, 'exposure'> | null {
-	if (/^KeyLight/.test(name)) return 'keyLight';
+	// The key light's colours, not its direction.
+	if (/^KeyLight/.test(name) && !/Direction/.test(name)) return 'keyLight';
 	if (/^Irradiance/.test(name)) return 'ambient';
 	if (/^FogColour/.test(name)) return 'fog';
 	return null;
@@ -69,34 +64,17 @@ export type CbLayout = {
 };
 
 /**
- * Static defaults for engine-supplied (runtime-bound) cb0 constants, keyed by
- * the RDEF variable name. These are values the game would fill from its
- * per-frame constant register; for a static preview we supply representative
- * stand-ins so a shader that multiplies by, say, `KeyLightColour` or adds
- * `FogColourPlusWhiteLevel` doesn't read zero and collapse to black.
- *
- * Semantics per docs/ShaderConstants_findings.md §4. Matrices (world /
- * view-projection / worldViewProj / shadow) are NOT here — they are bound
- * per-frame from the real camera in `bindEngineMatrices`.
+ * Defaults for engine-supplied (runtime-bound) cb0 constants, keyed by the RDEF
+ * variable name, as the game would fill them for a car draw. The lighting group
+ * (key light, irradiance quadrics, fog, sky reflection, HDR white level) is
+ * derived from the game's start-up daylight keyframe (see environmentLighting/);
+ * a viewport with an environment bundle in its workspace overrides that group.
+ * Values are 4 floats per cb register, so a 4x4 matrix constant has 16.
+ * Matrices bound from the live camera (world / view-projection) are NOT here:
+ * the translated material's __updateCb0 fills them per frame.
  */
-export const ENGINE_CONSTANT_DEFAULTS: Record<string, [number, number, number, number]> = {
-	// --- Lighting (key/directional light) ---
-	KeyLightColour: [1, 1, 1, 1],
-	KeyLightClampedColour: [1, 1, 1, 1],
-	KeyLightSpecularColour: [1, 1, 1, 1],
-	KeyLightDirection: [0.4, -0.7, 0.6, 0],
-	// --- Ambient irradiance (quadric coefficients). Exact encoding unconfirmed;
-	//     a small flat grey keeps surfaces from going pure-black in ambient-only
-	//     regions without overwhelming the key light. Approximate, not spec-exact. ---
-	IrradianceQuadricA: [0.18, 0.19, 0.22, 1],
-	IrradianceQuadricB: [0, 0, 0, 0],
-	// --- Sky / fog / atmosphere ---
-	FogColourPlusWhiteLevel: [0.55, 0.70, 0.85, 1],
-	SkyReflectionColour: [0.55, 0.75, 0.95, 1],
-	ScattCoeffs: [0.4, 0.4, 0.5, 1],
-	g_PerVehicleFog: [0, 0, 0, 1],
-	// --- HDR / tonemap (neutral exposure) ---
-	HDRConstants: [1, 1, 1, 1],
+export const ENGINE_CONSTANT_DEFAULTS: Record<string, readonly number[]> = {
+	...DEFAULT_ENGINE_LIGHTING.carConstants,
 	// --- Shadow map (neutral; preview binds a white shadow texture so the
 	//     compare returns "lit", making the cascade-select moot) ---
 	ShadowMap_Constants: [1, 1, 1, 1],
@@ -112,7 +90,10 @@ export const ENGINE_CONSTANT_DEFAULTS: Record<string, [number, number, number, n
 	g_selfIlluminationMask: [0, 0, 0, 0],
 	g_policeLightsSelfIlluminationMask: [0, 0, 0, 0],
 	g_wheelConstants: [0, 0, 0, 1],
-	g_damageConstants: [0, 0, 0, 1],
+	// The game uploads zero here for every car; only a debug override fills
+	// x (crumple amount) and z (dust). Real damage comes from the per-vertex
+	// deformation rows instead.
+	g_damageConstants: [0, 0, 0, 0],
 	sampleCoverage: [1, 1, 1, 1],
 	// --- Vehicle paint (so PaintGloss `r0 *= g_paintColour` doesn't go black) ---
 	g_paintColour: [0.6, 0.1, 0.1, 1],
@@ -140,13 +121,16 @@ export function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
 	const worldMatch = vs.match(/position, 0\.0\)\.xxxx \* cb0\[(\d+)\]/);
 	const worldRow0 = slotByName('world') ?? (worldMatch ? Number(worldMatch[1]) : 44);
 
-	// viewRow2: first dp4 after the world transform feeding the o0.zw depth pair.
+	// ViewProjectionModified is a 4-row block: clip x/y rows, then view row 2
+	// (view-space z), then the depth-encode row. Its slot varies by shader
+	// (5 for vehicles, 6 or 7 for many world shaders), so when RDEF names it
+	// the whole block follows it; the regexes only cover shaders without it.
+	const vpNamed = slotByName('ViewProjectionModified');
 	const viewMatch = vs.match(/r1\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
-	const viewRow2 = viewMatch ? Number(viewMatch[1]) : 7;
-
-	// vpRow0: the ViewProjectionModified slot, or the first o0.x dp4.
 	const vpMatch = vs.match(/o0\.x = vec4\(vec4\(dot\(r0\.xyzw, cb0\[(\d+)\]\.xyzw\)\)\)/);
-	const vpRow0 = slotByName('ViewProjectionModified') ?? (vpMatch ? Number(vpMatch[1]) : 5);
+	const vpRow0 = vpNamed ?? (vpMatch ? Number(vpMatch[1]) : 5);
+	const viewRow2 = vpNamed != null ? vpNamed + 2 : viewMatch ? Number(viewMatch[1]) : 7;
+	const depthEncode = vpNamed != null ? vpNamed + 3 : 8;
 
 	const camMatch = vs.match(/-\(r0\.xyzx\) \+ cb0\[(\d+)\]\.xyzx/);
 	const cameraPos = slotByName('ViewPosition') ?? (camMatch ? Number(camMatch[1]) : null);
@@ -155,7 +139,7 @@ export function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
 		worldRow0,
 		vpRow0,
 		viewRow2,
-		depthEncode: 8,
+		depthEncode,
 		cameraPos,
 		// Full 4-row engine matrices many shaders transform with directly.
 		worldViewProjRow0: slotByName('worldViewProj'),
@@ -169,7 +153,7 @@ export function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
 //
 // Skinned vehicle meshes (those whose VertexDescriptor carries
 // BoneIndexes/BoneWeights) transform each vertex by a bone-matrix palette
-// (`boneMatrices`, a cb0 array of 4-row matrices) blended by the per-vertex
+// (`boneMatrices`, a cb0 array of 3-row matrices) blended by the per-vertex
 // weights, then add per-vertex deformation offsets (`g_verletOffsets`). Both
 // are supplied by the runtime: the bone matrices are IDENTITY at rest (this is
 // relative/deformation skinning — vertices are stored in rest position and the
@@ -179,8 +163,8 @@ export function inferCbLayout(vs: string, parsed?: ParsedDxbc): CbLayout {
 // vanishes. Seeding the palette to identity — together with the BLENDWEIGHT=1
 // stub the GLSL emitter now uses — makes skinned meshes render at rest pose.
 
-/** cb0 array constants that are palettes of 4-row matrices whose rest value is
- *  the identity matrix. */
+/** cb0 array constants that are palettes of matrices whose rest value is the
+ *  identity matrix. */
 export const SKIN_IDENTITY_MATRIX_PALETTES = new Set(['boneMatrices']);
 
 /**
@@ -197,13 +181,21 @@ export function seedSkinningPalettes(
 		for (const v of cb.variables) {
 			if (!SKIN_IDENTITY_MATRIX_PALETTES.has(v.name)) continue;
 			const slot = Math.floor(v.startOffset / 16);
-			const nVec4 = Math.max(4, Math.floor(v.size / 16));
-			for (let m = 0; m + 4 <= nVec4; m += 4) {
-				writeVec4(slot + m + 0, 1, 0, 0, 0);
-				writeVec4(slot + m + 1, 0, 1, 0, 0);
-				writeVec4(slot + m + 2, 0, 0, 1, 0);
-				writeVec4(slot + m + 3, 0, 0, 0, 1);
+			const stride = matrixRegisters(v.type);
+			const nVec4 = Math.max(stride, Math.floor(v.size / 16));
+			for (let m = 0; m + stride <= nVec4; m += stride) {
+				for (let r = 0; r < stride; r++) writeVec4(slot + m + r, r === 0 ? 1 : 0, r === 1 ? 1 : 0, r === 2 ? 1 : 0, r === 3 ? 1 : 0);
 			}
 		}
 	}
+}
+
+// vec4 registers one matrix of a palette occupies: its rows when row-major
+// (RDEF class 2), its columns when column-major (class 3). The game's
+// `boneMatrices` is 60 x row-major float3x4, three registers per bone (the
+// skinned vertex shaders index it with `bone * 3`); identity rows or columns
+// are the unit vectors either way. Without type info, assume 4x4.
+function matrixRegisters(type: { class: number; rows: number; columns: number } | undefined): number {
+	const n = type?.class === 3 ? type.columns : type?.rows;
+	return n && n >= 1 && n <= 4 ? n : 4;
 }

@@ -17,9 +17,10 @@
 //
 // Output: THREE.ShaderMaterial with cb arrays seeded, samplers bound to
 // either real game textures or procedural placeholders, and an
-// `__updateCb0(camera, object)` callback the mesh's onBeforeRender should
-// invoke per frame to refresh world / view-projection / depth-encoder /
-// camera-position / time slots.
+// `__updateCb0(camera, object, verlet?)` callback the mesh's onBeforeRender
+// should invoke per frame to refresh world / view-projection / depth-encoder /
+// camera-position / time slots and, for vehicle shaders, the deformation rows
+// (see vehicleShaderInputs).
 
 import * as THREE from 'three';
 import type { ParsedDxbc } from './dxbc';
@@ -28,6 +29,9 @@ import { pickTextureForSampler } from './textureCatalog';
 import type { MaterialBinding } from './materialBinding';
 import type { ParsedShaderConstant } from './shader';
 import { type CbLayout, seedSkinningPalettes, engineKnobs, knobGroupForConstant, type EngineKnobs } from './shaderEngineConstants';
+import { bindVertexStreams, verletRange, writeVerletOffsets } from './vehicleShaderInputs';
+import { paintSlots, writePaint, type CarPaint } from './vehiclePaint';
+import { defaultReflectionCube } from './environmentLighting/reflectionCube';
 
 export type BuildOptions = {
 	vsSource: string;
@@ -41,7 +45,10 @@ export type BuildOptions = {
 	textureCatalog: TextureCatalogEntry[];
 	/** Heuristic defaults for runtime-bound cb0 variables. Module-level so
 	 *  callers (ShaderPage / RenderableViewport) share one table. */
-	heuristicDefaults: Record<string, [number, number, number, number]>;
+	heuristicDefaults: Record<string, readonly number[]>;
+	/** The Material's own constant values by name (materialShaderConstants);
+	 *  they override the Shader's baked defaults. */
+	materialConstants?: Readonly<Record<string, readonly number[]>>;
 	/** Returns a procedural fallback `THREE.DataTexture` for a sampler whose
 	 *  name didn't match anything in the catalog (e.g. white for shadow,
 	 *  sky-blue gradient for reflection). */
@@ -55,14 +62,32 @@ export type BuildOptions = {
 	 *  HDR negatives are common; the Renderable viewport disables it so a
 	 *  vehicle paint colour shows its real albedo, not a tonemapped one. */
 	applyPreviewTonemap?: boolean;
+	/** When set, show the output the way the game's post-process does:
+	 *  colour × exposure / white level, clamped, instead of the Reinhard preview
+	 *  tonemap. The lighting constants are pre-scaled by this white level. */
+	displayWhiteLevel?: number;
+	/** Cube texture for a cube sampler the Material didn't bind (the engine's
+	 *  reflection map); defaults to the retail-daylight reflection stand-in. */
+	pickFallbackCubeTexture?: (samplerName: string) => THREE.CubeTexture | null;
 	/** Side flag passed straight through to `THREE.ShaderMaterial`. */
 	side?: THREE.Side;
 	/** Forwarded to `ShaderMaterial.transparent`. */
 	transparent?: boolean;
+	/** Keep the shader's own alpha through the output transform (blended or
+	 *  alpha-to-coverage draws); otherwise alpha is forced to 1 so a stray
+	 *  alpha from an opaque shader can't punch through the canvas. */
+	keepAlpha?: boolean;
+	/** Attribute names the drawn geometry carries (skinIndex, tangent, uv1...);
+	 *  the vertex inputs that map to them read the real stream instead of the
+	 *  translator's constant stub. */
+	vertexAttributes?: ReadonlySet<string>;
 };
 
 export type TranslatedMaterial = THREE.ShaderMaterial & {
-	__updateCb0?: (camera: THREE.Camera, object: THREE.Object3D) => void;
+	/** `verlet`: the car's 128 x vec4 deformation rows; null or omitted = at rest. */
+	__updateCb0?: (camera: THREE.Camera, object: THREE.Object3D, verlet?: Float32Array | null) => void;
+	/** Vehicle shaders that read the car paint (see vehiclePaint). */
+	__setPaint?: (paint: CarPaint) => void;
 };
 
 export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMaterial {
@@ -70,9 +95,11 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		vsSource, psSource, vsParsed, psParsed,
 		shaderName, shaderConstants, layout,
 		materialBinding, textureCatalog,
-		heuristicDefaults, pickFallbackTexture, decodedToDataTexture,
-		applyPreviewTonemap = false,
-		side = THREE.DoubleSide, transparent = false,
+		heuristicDefaults, pickFallbackTexture, decodedToDataTexture, materialConstants,
+		applyPreviewTonemap = false, displayWhiteLevel,
+		pickFallbackCubeTexture = defaultReflectionCube,
+		side = THREE.DoubleSide, transparent = false, keepAlpha = false,
+		vertexAttributes = new Set<string>(),
 	} = opts;
 
 	// cb0 size fixup — VS and PS must agree on the array dimension or GLSL
@@ -81,14 +108,18 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 
 	// Aliases so a_POSITION0 / a_NORMAL0 / a_TEXCOORD0 pull from three.js's
 	// standard `position` / `normal` / `uv` attributes.
-	const finalVs = attributeAliasPrefix(harmonizedVs) + harmonizedVs;
+	const finalVs = attributeAliasPrefix(harmonizedVs) + bindVertexStreams(harmonizedVs, vertexAttributes);
 
-	// Optional preview safety net + exposure-scaled Reinhard tonemap on
-	// gl_FragColor. `uExposure` is driven live by the viewport's exposure knob.
-	const finalPs = applyPreviewTonemap
+	// Optional preview safety net + exposure-scaled display transform on
+	// gl_FragColor (the game's, or a Reinhard tonemap). `uExposure` is driven
+	// live by the viewport's exposure knob.
+	const outputAlpha = keepAlpha ? 'clamp(gl_FragColor.a, 0.0, 1.0)' : '1.0';
+	const outputSuffix = displayWhiteLevel != null ? gameDisplaySuffix(outputAlpha) : applyPreviewTonemap ? previewTonemapSuffix(outputAlpha) : null;
+	const exposureScale = displayWhiteLevel != null ? 1 / displayWhiteLevel : 1;
+	const finalPs = outputSuffix
 		? harmonizedPs
 			.replace(/(precision\s+highp\s+float;\s*)/, '$1uniform float uExposure;\n')
-			.replace(/\}\s*$/, PREVIEW_TONEMAP_SUFFIX)
+			.replace(/\}\s*$/, outputSuffix)
 		: harmonizedPs;
 
 	const m = new THREE.ShaderMaterial({
@@ -98,7 +129,7 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		side,
 		transparent,
 	}) as TranslatedMaterial;
-	if (applyPreviewTonemap) m.uniforms.uExposure = { value: engineKnobs.exposure };
+	if (outputSuffix) m.uniforms.uExposure = { value: engineKnobs.exposure * exposureScale };
 
 	// Allocate zeroed cb arrays for every `uniform vec4 cbN[...]` declared.
 	const cbDecls = Array.from(finalPs.matchAll(/uniform vec4 (cb\d+)\[(\d+)\];/g)).concat(
@@ -119,6 +150,10 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 	// shadow constants etc.). Tracks any "Time"-named slots so __updateCb0
 	// can refresh them per-frame.
 	const timeSlots = new Set<number>();
+	// cb0 slot of every named constant, for callers that feed per-draw engine
+	// values the material doesn't know about (e.g. glass fracture).
+	const cbSlots = new Map<string, number>();
+	m.userData.cbSlots = cbSlots;
 	const writeScalars = (arr: THREE.Vector4[], slot: number, comp: number, src: ArrayLike<number>, n: number) => {
 		const v = arr[slot]; if (!v) return;
 		const c: [number, number, number, number] = [v.x, v.y, v.z, v.w];
@@ -139,24 +174,38 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 				const comp = (v.startOffset % 16) / 4;
 				const nFloats = Math.max(1, Math.min(4 - comp, Math.floor(v.size / 4)));
 				if (/time/i.test(v.name)) timeSlots.add(slot);
+				cbSlots.set(v.name, slot);
 				// g_verletOffsets is the per-vertex deformation array — zero at rest
 				// (the engine fills it per-vehicle at draw time). Its baked default can
 				// be a non-zero placeholder (e.g. (1,1,1,0) on PaintGloss); seeding that
 				// adds a constant offset to every vertex through the skin/verlet blend,
 				// so the part renders shifted. Leave it zeroed for the rest-pose preview.
 				if (/verlet/i.test(v.name)) continue;
+				// Matrix-sized values (the irradiance quadrics) span several registers.
+				const writeRows = (src: readonly number[]) => {
+					for (let row = 0; row * 4 < Math.min(src.length, Math.ceil(v.size / 4)); row++) {
+						writeScalars(arr, slot + row, row === 0 ? comp : 0, src.slice(row * 4), row === 0 ? nFloats : 4);
+					}
+				};
+				const fromMaterial = materialConstants?.[v.name];
+				if (fromMaterial) {
+					writeRows(fromMaterial);
+					continue;
+				}
 				const baked = shaderConstants.find((c) => c.name === v.name && c.instanceData);
 				if (baked?.instanceData) {
 					writeScalars(arr, slot, comp, baked.instanceData, nFloats);
 					continue;
 				}
 				const hd = heuristicDefaults[v.name];
-				if (hd) writeScalars(arr, slot, comp, hd, nFloats);
+				if (hd) writeRows(hd);
 			}
 		}
 	};
 	seedDefaults(vsParsed);
 	seedDefaults(psParsed);
+	const paint = paintSlots([vsParsed, psParsed]);
+	if (paint && m.uniforms.cb0) m.__setPaint = (p) => writePaint(m.uniforms.cb0.value as THREE.Vector4[], paint, p);
 
 	// Identity-fill the bone-matrix palette so skinned vehicle meshes render at
 	// rest pose instead of collapsing to the origin (see shaderEngineConstants).
@@ -222,7 +271,8 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 			const o = col * 4;
 			cb[slot].set(e[o], e[o + 1], e[o + 2], e[o + 3]);
 		};
-		m.__updateCb0 = (camera, object) => {
+		const verlet = verletRange([vsParsed, psParsed]);
+		m.__updateCb0 = (camera, object, verletRows) => {
 			world.copy(object.matrixWorld);
 			viewMat.copy((camera as THREE.PerspectiveCamera).matrixWorldInverse);
 			viewProj.multiplyMatrices((camera as THREE.PerspectiveCamera).projectionMatrix, viewMat);
@@ -270,7 +320,8 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 				const s = engineKnobs[k.group];
 				cb0[k.slot].set(k.base.x * s, k.base.y * s, k.base.z * s, k.base.w * s);
 			}
-			if (m.uniforms.uExposure) m.uniforms.uExposure.value = engineKnobs.exposure;
+			if (m.uniforms.uExposure) m.uniforms.uExposure.value = engineKnobs.exposure * exposureScale;
+			if (verlet) writeVerletOffsets(cb0, verlet, verletRows ?? null);
 		};
 	}
 
@@ -286,6 +337,10 @@ export function buildTranslatedShaderMaterial(opts: BuildOptions): TranslatedMat
 		let tex: THREE.DataTexture | null = null;
 		if (match) tex = decodedToDataTexture(match);
 		m.uniforms[name] = { value: tex ?? pickFallbackTexture(name) };
+	}
+
+	for (const [, name] of finalPs.matchAll(/uniform samplerCube ([A-Za-z0-9_]+);/g)) {
+		if (!m.uniforms[name]) m.uniforms[name] = { value: pickFallbackCubeTexture(name) };
 	}
 
 	return m;
@@ -318,13 +373,26 @@ function attributeAliasPrefix(vs: string): string {
 	return uses.join('\n') + (uses.length ? '\n' : '');
 }
 
-const PREVIEW_TONEMAP_SUFFIX = `
+// The game's post-process scales the scene by 1 / white level into an 8-bit,
+// non-sRGB target: no tonemap curve, just the clamp.
+const gameDisplaySuffix = (alpha: string) => `
 	{
 		vec3 _c = gl_FragColor.rgb * uExposure;
+		float _a = ${alpha};
+		bool _nan = (_c.r != _c.r) || (_c.g != _c.g) || (_c.b != _c.b);
+		if (_nan) gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+		else gl_FragColor = vec4(clamp(_c, 0.0, 1.0), _a);
+	}
+}`;
+
+const previewTonemapSuffix = (alpha: string) => `
+	{
+		vec3 _c = gl_FragColor.rgb * uExposure;
+		float _a = ${alpha};
 		bool _nan = (_c.r != _c.r) || (_c.g != _c.g) || (_c.b != _c.b);
 		bool _inf = (abs(_c.r) > 1e10) || (abs(_c.g) > 1e10) || (abs(_c.b) > 1e10);
 		if (_nan) gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
 		else if (_inf) gl_FragColor = vec4(0.0, 1.0, 1.0, 1.0);
-		else { vec3 a = abs(_c); gl_FragColor = vec4(a / (a + vec3(1.0)), 1.0); }
+		else { vec3 a = abs(_c); gl_FragColor = vec4(a / (a + vec3(1.0)), _a); }
 	}
 }`;

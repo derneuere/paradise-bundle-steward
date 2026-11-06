@@ -24,30 +24,18 @@
 // falls back to the flat placeholder material. Multi-bundle loading is needed
 // to fully resolve textures for most assets.
 
-import type { ParsedBundle, ResourceEntry } from './types';
+import type { ParsedBundle } from './types';
 import { findResourceById } from './renderable';
 import { getImportsByPtrOffset } from './bundle/index';
 import { getResourceBlocks } from './resourceManager';
 import { TEXTURE_STATE_TYPE_ID, decodeTextureState, type ParsedTextureState } from './textureState';
 import { TEXTURE_TYPE_ID, decodeTexture, type DecodedTexture } from './texture';
-
-const MATERIAL_STATE_TYPE_ID = 0xF;
+import { MATERIAL_STATE_TYPE_ID, parseMaterialState, type MaterialState } from './materialState';
+import { parseMaterialShaderConstants, type MaterialShaderConstant } from './materialShaderConstants';
 
 // =============================================================================
 // Types
 // =============================================================================
-
-/** Parsed blend/cull/alpha properties from the first MaterialState import. */
-type MaterialProperties = {
-	/** Alpha blending enabled (glass, decals). */
-	alphaBlendEnable: boolean;
-	/** Alpha test enabled (cutout foliage etc.). */
-	alphaTestEnable: boolean;
-	/** Alpha test reference value 0–255 (compare threshold). */
-	alphaRef: number;
-	/** D3DCULL: 1=none, 2=CW, 3=CCW. */
-	cullMode: number;
-};
 
 export type ResolvedMaterial = {
 	materialId: bigint;
@@ -61,10 +49,15 @@ export type ResolvedMaterial = {
 	emissive: DecodedTexture | null;
 	/** Ambient occlusion map. */
 	ao: DecodedTexture | null;
+	/** Scratch map of a damageable vehicle material (see SCRATCH_CHANNEL). */
+	scratch: DecodedTexture | null;
 	/** Sampler state from the diffuse TextureState (for wrapping/filtering). */
 	samplerState: Pick<ParsedTextureState, 'addressU' | 'addressV'> | null;
-	/** Blend/cull/alpha properties from MaterialState. */
-	properties: MaterialProperties | null;
+	/** Render state of each of the Material's techniques, in the Shader's
+	 *  technique order (null where the MaterialState didn't resolve). */
+	materialStates: (MaterialState | null)[];
+	/** The Material's own shader-constant values (see materialShaderConstants). */
+	shaderConstants: MaterialShaderConstant[];
 	/** Whether the diffuse texture was resolved from a secondary bundle
 	 *  (e.g. VEHICLETEX) rather than the primary bundle. Materials with
 	 *  secondary-source diffuse are typically body/paint and should receive
@@ -84,6 +77,11 @@ export type ResolvedMaterial = {
 	 *  specular without the Shader resource. Keyed by sampler channel. */
 	unclassified: { channel: number; texture: DecodedTexture }[];
 };
+
+// The damaged vehicle shaders (PaintGloss, PlasticMatt) sample their scratch
+// map at channel 5: R = the scratched colour, G = the threshold at which a
+// texel turns scratched as the scratch amount grows, B = its sheen.
+export const SCRATCH_CHANNEL = 5;
 
 // =============================================================================
 // Material Sampler parser
@@ -275,16 +273,19 @@ export function resolveMaterialTextures(
 	if (resourceIndex < 0) return null;
 	const imports = getImportsByPtrOffset(bundle.imports, bundle.resources, resourceIndex);
 
-	// Parse MaterialState for blend/cull properties.
-	let properties: MaterialProperties | null = null;
-	for (const [, targetId] of imports) {
-		const targetResource = findResourceById(bundle, targetId);
-		if (targetResource?.resourceTypeId === MATERIAL_STATE_TYPE_ID && !properties) {
+	// One MaterialState per technique: the Material's technique records are
+	// 0x20 bytes apart and each points at its state, so the import pointer
+	// offsets give the Shader's technique order.
+	const materialStates = [...imports.entries()]
+		.map(([at, id]) => [at, findResourceById(bundle, id)] as const)
+		.filter(([, res]) => res?.resourceTypeId === MATERIAL_STATE_TYPE_ID)
+		.sort(([a], [b]) => a - b)
+		.map(([, res]) => {
 			try {
-				properties = parseMaterialStateProperties(buffer, bundle, targetResource);
-			} catch { /* skip */ }
-		}
-	}
+				const block = getResourceBlocks(buffer, bundle, res!)[0];
+				return block ? parseMaterialState(block) : null;
+			} catch { return null; }
+		});
 
 	// Resolve shader name via the Material's Shader import (at offset 0x10
 	// in the MaterialAssembly struct for PC). The import's resource ID is
@@ -343,6 +344,7 @@ export function resolveMaterialTextures(
 	let specular: DecodedTexture | null = null;
 	let emissive: DecodedTexture | null = null;
 	let ao: DecodedTexture | null = null;
+	let scratch: DecodedTexture | null = null;
 	let samplerState: Pick<ParsedTextureState, 'addressU' | 'addressV'> | null = null;
 	let usedSamplerClassification = false;
 	const unclassified: { channel: number; texture: DecodedTexture }[] = [];
@@ -402,6 +404,11 @@ export function resolveMaterialTextures(
 				const assigned = new Set<ResolvedSampler>();
 				if (ch0) assigned.add(ch0);
 				if (ch0 && ch1) assigned.add(ch1);
+				const ch5 = shaderName?.startsWith('Vehicle_') ? resolved.find(s => s.channel === SCRATCH_CHANNEL) : undefined;
+				if (ch5) {
+					scratch = ch5.texture;
+					assigned.add(ch5);
+				}
 
 				const unassigned = resolved.filter(s => !assigned.has(s));
 
@@ -486,8 +493,10 @@ export function resolveMaterialTextures(
 		specular,
 		emissive,
 		ao,
+		scratch,
 		samplerState,
-		properties,
+		materialStates,
+		shaderConstants: block0 ? parseMaterialShaderConstants(block0) : [],
 		diffuseFromSecondary: diffuse !== null && [...secondaryTexIds].some(id => {
 			const cached = textureCache.get(id);
 			return cached === diffuse;
@@ -497,19 +506,4 @@ export function resolveMaterialTextures(
 		shaderName,
 		unclassified,
 	};
-}
-
-// =============================================================================
-// MaterialState parser
-// =============================================================================
-
-/**
- * Parse a MaterialState resource (type 0xF) for rendering-relevant properties.
- */
-function parseMaterialStateProperties(
-	_buffer: ArrayBuffer,
-	_bundle: ParsedBundle,
-	_resource: ResourceEntry,
-): MaterialProperties {
-	return { alphaBlendEnable: false, alphaTestEnable: false, alphaRef: 0, cullMode: 1 };
 }

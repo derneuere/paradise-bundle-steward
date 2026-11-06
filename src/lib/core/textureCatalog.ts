@@ -29,10 +29,10 @@ export type TextureCatalogEntry = {
 	 *  target, otherwise the secondary bundle's filename. */
 	source: string;
 	/** True when the debug name suggests a cube map (path contains
-	 *  Cube_Maps/ or the name ends in TextureConfigCube). The DXBC
-	 *  translator emits everything as `sampler2D`, so binding a cube to
-	 *  a 2D sampler smears the 6-face data badly — the matcher uses this
-	 *  flag to skip cubes when looking for 2D-sampler matches. */
+	 *  Cube_Maps/ or the name ends in TextureConfigCube). Catalog
+	 *  entries decode to 2D textures, so binding a cube's 6-face data to a
+	 *  2D sampler smears badly — the matcher uses this flag to skip cubes
+	 *  when looking for 2D-sampler matches. */
 	isCube: boolean;
 	/** Lazy decoder. Throws on malformed pixel data. Memoize at the call
 	 *  site — every invocation re-runs DXT decompression. */
@@ -85,10 +85,10 @@ export function buildTextureCatalog(sources: Source[]): TextureCatalogEntry[] {
  * arbitrary first match. Sampler tokens still dominate — context only
  * tie-breaks among same-role candidates.
  *
- * Cube maps are filtered out: the DXBC translator emits every sampler as
- * `sampler2D`, so binding a 6-face cube to a 2D sampler produces obvious
- * smearing. Cubes appear in the catalog (the inputs tab still lists them)
- * but never win an auto-pick.
+ * Cube maps are filtered out: catalog entries decode to 2D textures, so
+ * binding a 6-face cube to a 2D sampler produces obvious smearing. Cubes
+ * appear in the catalog (the inputs tab still lists them) but never win an
+ * auto-pick.
  *
  * Score = sum of matched-token character length, so longer/more specific
  * matches outrank generic ones. Returns null on no overlap so the caller
@@ -96,8 +96,8 @@ export function buildTextureCatalog(sources: Source[]): TextureCatalogEntry[] {
  */
 /** Samplers whose role is so engine-specific that any real game texture is
  *  the wrong choice — the procedural fallback always wins. Shadow maps
- *  encode depth (not colour), and Reflection probes are cube maps the
- *  translator can't sample correctly through `sampler2D`. */
+ *  encode depth (not colour), and Reflection probes are cube maps that
+ *  take the fallback reflection cube. */
 const PROCEDURAL_ONLY_SAMPLERS = /shadow|reflect|envmap|cube|depth|fracture/i;
 
 export function pickTextureForSampler(

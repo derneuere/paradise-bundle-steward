@@ -51,6 +51,8 @@ export const MIN_IMPULSE_FOR_DETACHMENT = 500;
 export const MAX_IMPULSE_FOR_DETACHMENT = 5000;
 export const MAX_IMPULSE_FOR_DETACHMENT_TOUGH = 1200;
 export const MAX_PHYSICAL_PARTS = 20;
+// Bumpers, wings and the rear quarters, held to the narrow impulse band.
+export const TOUGHENED_PARTS = new Set([1, 2, 26, 27, 28, 29, 108, 109, 110, 111, 112, 113, 114, 115]);
 export const JOINT_NEVER_BREAKS = -0.9;
 export const JOINT_ROTATION_GATE = 0.3;
 export const SILL_PARTS = new Set([24, 25]);           // driven points clamped into the deformed box

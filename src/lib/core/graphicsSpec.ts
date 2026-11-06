@@ -2,8 +2,8 @@
 //
 // Top-level entry point for a vehicle graphics bundle. Tells you which Model
 // resources make up which body parts and where each part sits in the car's
-// local space (mpPartLocators). Also enumerates the shattered-glass parts
-// that hot-swap in on collision.
+// local space (mpPartLocators). Also decodes the shattered-glass table: the
+// cracked-window models that hot-swap in when a pane cracks.
 //
 // Layout source: docs/GraphicsSpec.md (wiki dump) plus empirical fixes from
 // scripts/probe-graphicsspec.ts run against example/VEH_CARBRWDS_GR.BIN. The
@@ -60,15 +60,31 @@ type GraphicsSpecPart = {
 	locator: RawLocator;
 };
 
+/**
+ * One window pane's cracked-glass model. When the pane cracks the game stops
+ * drawing the pane's own window meshes and draws this model in their place,
+ * at the locator of `bodyPartIndex` (several panes can share one body part,
+ * e.g. the cabin), with the glass shader's fracture constants set for the
+ * pane. A smashed pane draws neither: it is a hole.
+ */
+export type ShatteredGlassPart = {
+	/** Import-table index of the Model (`partsCount + i` in every retail car). */
+	modelImportIndex: number;
+	/** GraphicsSpec part whose locator places the model. */
+	bodyPartIndex: number;
+	/** The pane's body-part type (16 + pane slot), as in DeformationSpec glass panes. */
+	bodyPartType: number;
+};
+
+const SHATTERED_GLASS_STRIDE = 12; // 3 x u32 on the 32-bit PC layout
+
 export type ParsedGraphicsSpec = {
 	version: number;          // muVersion, == 3 in known samples
 	partsCount: number;       // muPartsCount
 	parts: GraphicsSpecPart[];
 	shatteredGlassPartsCount: number; // muShatteredGlassPartsCount
-	// We don't decode the shattered-glass table yet — the viewer doesn't need
-	// it for the first pass and the layout differs between 32/64-bit builds.
-	// Stored only as the raw header offsets so a future expansion is mechanical.
 	mpShatteredGlassParts: number;
+	shatteredGlassParts: ShatteredGlassPart[];
 	mpPartVolumeIDs: number;
 	mpNumRigidBodiesForPart: number;
 	mppRigidBodyToSkinMatrixTransforms: number;
@@ -117,7 +133,7 @@ export function getGraphicsSpecHeader(
  *   0x04 u32 muPartsCount
  *   0x08 u32 mppPartsModels         (offset to u32[muPartsCount] import indices)
  *   0x0C u32 muShatteredGlassPartsCount
- *   0x10 u32 mpShatteredGlassParts  (offset to ShatteredGlassPart[count])
+ *   0x10 u32 mpShatteredGlassParts  (offset to ShatteredGlassPart[count], 12 bytes each)
  *   0x14 u32 mpPartLocators         (offset to Matrix44Affine[muPartsCount], stride 48)
  *   0x18 u32 mpPartVolumeIDs
  *   0x1C u32 mpNumRigidBodiesForPart
@@ -231,12 +247,29 @@ export function parseGraphicsSpec(
 		});
 	}
 
+	if (mpShatteredGlassParts + shatteredGlassPartsCount * SHATTERED_GLASS_STRIDE > header.byteLength) {
+		throw new BundleError(
+			`mpShatteredGlassParts at 0x${mpShatteredGlassParts.toString(16)} + ${shatteredGlassPartsCount}×${SHATTERED_GLASS_STRIDE} runs past header (${header.byteLength})`,
+			'PARSE_ERROR',
+		);
+	}
+	const shatteredGlassParts: ShatteredGlassPart[] = [];
+	for (let i = 0; i < shatteredGlassPartsCount; i++) {
+		const o = mpShatteredGlassParts + i * SHATTERED_GLASS_STRIDE;
+		shatteredGlassParts.push({
+			modelImportIndex: dv.getUint32(o, true),
+			bodyPartIndex: dv.getUint32(o + 4, true),
+			bodyPartType: dv.getUint32(o + 8, true),
+		});
+	}
+
 	return {
 		version,
 		partsCount,
 		parts,
 		shatteredGlassPartsCount,
 		mpShatteredGlassParts,
+		shatteredGlassParts,
 		mpPartVolumeIDs,
 		mpNumRigidBodiesForPart,
 		mppRigidBodyToSkinMatrixTransforms,
@@ -355,30 +388,59 @@ export function resolveGraphicsSpecParts(
 ): ResolvedPart[] {
 	const out: ResolvedPart[] = [];
 	for (const part of gs.parts) {
-		const modelId = gs.imports[part.modelImportIndex];
-		if (modelId === undefined) {
-			console.warn(`GraphicsSpec part references missing import index ${part.modelImportIndex}`);
-			continue;
-		}
-		// Find the Model resource entry in the bundle.
-		let modelEntry: ResourceEntry | null = null;
-		for (const r of bundle.resources) {
-			if (u64ToBigInt(r.resourceId) === modelId) { modelEntry = r; break; }
-		}
-		if (!modelEntry || modelEntry.resourceTypeId !== MODEL_TYPE_ID) {
-			out.push({ modelId, renderableId: null, locator: part.locator });
-			continue;
-		}
-		try {
-			const modelHeader = getModelHeader(buffer, bundle, modelEntry);
-			const modelIndex = bundle.resources.indexOf(modelEntry);
-			const modelImportIds = getImportIds(bundle.imports, bundle.resources, modelIndex);
-			const model = parseModel(modelHeader, modelImportIds);
-			out.push({ modelId, renderableId: lod0RenderableId(model), locator: part.locator });
-		} catch (err) {
-			console.warn(`Failed to parse Model ${modelId.toString(16)}:`, err);
-			out.push({ modelId, renderableId: null, locator: part.locator });
-		}
+		const resolved = resolveModel(buffer, bundle, gs, part.modelImportIndex);
+		if (resolved) out.push({ ...resolved, locator: part.locator });
 	}
 	return out;
+}
+
+export type ResolvedShatteredGlassPart = ShatteredGlassPart & {
+	/** Position in the spec's table: the game picks the pane's crack-pattern
+	 *  UV offsets by it. */
+	glassIndex: number;
+	modelId: bigint;
+	renderableId: bigint | null;
+	/** The locator of `bodyPartIndex`. */
+	locator: RawLocator;
+};
+
+/** The shattered-glass table with each entry's Model resolved to its LOD0
+ *  Renderable (the game always draws the cracked model's first state). */
+export function resolveShatteredGlassParts(
+	buffer: ArrayBuffer,
+	bundle: ParsedBundle,
+	gs: ParsedGraphicsSpec,
+): ResolvedShatteredGlassPart[] {
+	const out: ResolvedShatteredGlassPart[] = [];
+	gs.shatteredGlassParts.forEach((g, glassIndex) => {
+		const locator = gs.parts[g.bodyPartIndex]?.locator;
+		const resolved = locator ? resolveModel(buffer, bundle, gs, g.modelImportIndex) : null;
+		if (resolved) out.push({ ...g, glassIndex, ...resolved, locator: locator! });
+	});
+	return out;
+}
+
+function resolveModel(
+	buffer: ArrayBuffer,
+	bundle: ParsedBundle,
+	gs: ParsedGraphicsSpec,
+	modelImportIndex: number,
+): { modelId: bigint; renderableId: bigint | null } | null {
+	const modelId = gs.imports[modelImportIndex];
+	if (modelId === undefined) {
+		console.warn(`GraphicsSpec references missing import index ${modelImportIndex}`);
+		return null;
+	}
+	const modelEntry = bundle.resources.find((r) => u64ToBigInt(r.resourceId) === modelId) ?? null;
+	if (!modelEntry || modelEntry.resourceTypeId !== MODEL_TYPE_ID) return { modelId, renderableId: null };
+	try {
+		const modelHeader = getModelHeader(buffer, bundle, modelEntry);
+		const modelIndex = bundle.resources.indexOf(modelEntry);
+		const modelImportIds = getImportIds(bundle.imports, bundle.resources, modelIndex);
+		const model = parseModel(modelHeader, modelImportIds);
+		return { modelId, renderableId: lod0RenderableId(model) };
+	} catch (err) {
+		console.warn(`Failed to parse Model ${modelId.toString(16)}:`, err);
+		return { modelId, renderableId: null };
+	}
 }

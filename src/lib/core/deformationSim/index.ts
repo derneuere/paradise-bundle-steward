@@ -1,3 +1,14 @@
-export { createCrashSim, applyImpact, stepCrashSim, resetCrashSim, setAbsorptionSet, AbsorptionSet } from './sim';
-export type { CarAttribs, CrashSim, Impact, PartPose } from './sim';
+export { createCrashSim, applyImpact, stepCrashSim, resetCrashSim, setDriver, AbsorptionSet, GlassState } from './sim';
+export type { ContactEvent, CrashEvents, CrashRun, CrashSim, CrashSimOptions, Driver, GlassEvent, Impact, Launch, PartEvent, PartPose, RunEnd } from './sim';
+export { applyContactImpulses, generateContacts, latchContacts, updateContacts } from './contacts';
+export { solvePenetration } from './penetration';
+export { crashArmContacts, orderWorldContacts } from './crashArm';
+export { validateWorldContact, validateWorldContacts } from './validate';
+export { launchFor, startRun } from './scenario';
+export { carMatrix, meshShift, meshToWorld, worldDirToMesh, worldToMesh } from './pose';
+export type { PotentialContact } from './world';
+export type { ImpulseRecord, SimState, StoredContact } from './state';
 export { partName } from './partNames';
+export { smashedPaneBits } from './glass';
+export { crackedPaneConstants, damagedPaneBits, glassFractureConstants, GLASS_FRACTURE_UV_OFFSETS, NO_FRACTURE } from './crackedGlass';
+export type { FractureConstants } from './crackedGlass';
