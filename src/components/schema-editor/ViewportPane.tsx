@@ -14,6 +14,7 @@ import { RenderableViewport } from './viewports/RenderableViewport';
 import { ShaderViewport } from './viewports/ShaderViewport';
 import { TextureViewport } from './viewports/TextureViewport';
 import { IceTakePreviewViewport } from './viewports/IceTakePreviewViewport';
+import { CrashSimViewport } from './viewports/crashSim/CrashSimViewport';
 import { WorldViewport } from './viewports/WorldViewport';
 import type { ResourceSchema } from '@/lib/schema/types';
 import { pickRenderBinding } from '@/lib/editor/bindings';
@@ -80,6 +81,11 @@ function ViewportPaneInner({
 		// TextureViewport pulls decoded RGBA pixels from TextureContext
 		// (provided by TexturePage) so the center pane can show the image.
 		return <TextureViewport />;
+	}
+	if (resourceKey === 'deformationSpec') {
+		// The spec is data in the car's handling frame, not geometry: preview
+		// it by crashing the matching body (_GR) loaded elsewhere in the workspace.
+		return <CrashSimViewport />;
 	}
 	if (resourceKey === 'iceTakeDictionary' || resourceKey === 'iceData') {
 		// ICE takes are camera paths, not level-space data — preview them by

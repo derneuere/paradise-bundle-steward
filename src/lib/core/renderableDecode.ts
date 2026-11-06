@@ -163,6 +163,10 @@ export function decodeOneRenderable(
 			if (arrays.uv1) {
 				geometry.setAttribute('uv', new THREE.BufferAttribute(arrays.uv1, 2));
 			}
+			if (arrays.boneIndices && arrays.boneWeights) {
+				geometry.setAttribute('skinIndex', new THREE.BufferAttribute(arrays.boneIndices, 4));
+				geometry.setAttribute('skinWeight', new THREE.BufferAttribute(arrays.boneWeights, 4));
+			}
 			geometry.setIndex(new THREE.BufferAttribute(indicesCopy, 1));
 			if (!arrays.normals) geometry.computeVertexNormals();
 			geometry.computeBoundingBox();

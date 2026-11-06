@@ -1,0 +1,117 @@
+// How one contact impulse crushes the sensors. The hit sensor absorbs part of
+// the impulse along each crush direction the impulse has a component on and
+// moves inward by it; half of what it absorbed is passed down that
+// direction's sensor chain (nextSensor), each link crushing by its own
+// absorption until the chain ends at the car body.
+
+import type { Vec3 } from '../deformationSpec';
+import { dot, scale, sub, type SimState } from './state';
+import {
+	ABSORPTION, COMPRESSION_LIMIT_FACTOR, CRASH_BUDGET, CRASH_LIMIT_PAD, DIRECTIONS, DIRECTION_SPEED_SCALE, DRIVE_BUDGET,
+} from './tables';
+
+// A crashing car may use its whole crush budget and absorption, measured
+// from its current deformed shape; a knock below crash speed gets a fifth of
+// both, inside the car's fixed drive-time limits.
+const allowance = (s: SimState) => (s.crashing ? CRASH_BUDGET : DRIVE_BUDGET);
+
+const MAX_CHAIN = 25;
+
+export type SensorImpulse = {
+	sensor: number;
+	direction: Vec3;     // unit impulse direction, into the car
+	magnitude: number;   // shaped impulse, N·s
+	closingSpeed: number; // |relative velocity along the contact normal|, m/s
+	invMass: number;     // effective inverse mass at the contact
+	dt: number;
+};
+
+// Per-direction crush limit: a sensor may only be pushed along +X while it
+// sits within (radius + pad) of the limit box's -X face, and so on.
+function limitRow(s: SimState, d: number, radius: number): Vec3 {
+	const box = s.crashing ? s.aabb : s.driveBox;
+	const inset = radius + (s.crashing ? CRASH_LIMIT_PAD : 0);
+	const positive = d % 2 === 0;
+	return positive
+		? [box.min[0] + inset, box.min[1] + inset, box.min[2] + inset]
+		: [box.max[0] - inset, box.max[1] - inset, box.max[2] - inset];
+}
+
+const budget = (s: SimState, sensor: number, d: number) =>
+	Math.max(s.spec.sensors[sensor].directionParams[d], 0.01) * COMPRESSION_LIMIT_FACTOR[s.absorptionSet] * allowance(s);
+
+const used = (s: SimState, sensor: number, axis: Vec3) =>
+	Math.max(dot(axis, sub(s.sensors[sensor], s.spec.sensors[sensor].initialOffset)), 0);
+
+function crushHead(s: SimState, imp: SensorImpulse, d: number, magnitude: number): number {
+	const spec = s.spec.sensors[imp.sensor];
+	const row = ABSORPTION[s.absorptionSet][spec.absorbtionLevel] ?? ABSORPTION[s.absorptionSet][0];
+	const axis = DIRECTIONS[d];
+	const c = s.sensors[imp.sensor];
+	const toLimit = dot(sub(limitRow(s, d, spec.radius), c), axis);
+	const room = Math.max(Math.min(budget(s, imp.sensor, d) - used(s, imp.sensor, axis), toLimit), 0);
+	const ratio = Math.min(imp.closingSpeed / (row.speedForMax * DIRECTION_SPEED_SCALE[d]), 1);
+	const base = Math.min(allowance(s), row.absorption * (1 - row.proportion) + row.absorption * row.proportion * ratio);
+	const absorbed = magnitude * Math.pow(base, 60 * imp.dt);
+	const move = Math.min(absorbed * imp.invMass * imp.dt, room);
+	s.sensors[imp.sensor] = [c[0] + axis[0] * move, c[1] + axis[1] * move, c[2] + axis[2] * move];
+	return absorbed;
+}
+
+// Chain links take the passed impulse at full strength (it is not attenuated
+// down the chain) and have no limit-row or floor: a link already past its
+// budget is pulled back to it.
+function crushLink(s: SimState, sensor: number, d: number, passed: number, imp: SensorImpulse): void {
+	const spec = s.spec.sensors[sensor];
+	const row = ABSORPTION[s.absorptionSet][spec.absorbtionLevel] ?? ABSORPTION[s.absorptionSet][0];
+	const axis = DIRECTIONS[d];
+	const amount = Math.min(
+		passed * Math.min(row.absorption, allowance(s)) * imp.invMass * imp.dt,
+		budget(s, sensor, d) - used(s, sensor, axis),
+	);
+	const c = s.sensors[sensor];
+	s.sensors[sensor] = [c[0] + axis[0] * amount, c[1] + axis[1] * amount, c[2] + axis[2] * amount];
+}
+
+// Returns the impulse the car body still receives: whatever the hit sensor
+// did not absorb (it absorbs its share even once it has no crush room left).
+export function applySensorImpulse(s: SimState, imp: SensorImpulse): Vec3 {
+	s.latch[imp.sensor] = Math.max(s.latch[imp.sensor], imp.magnitude);
+	const impulse = scale(imp.direction, imp.magnitude);
+	let toBody: Vec3 = [0, 0, 0];
+	for (let d = 0; d < 6; d++) {
+		const proj = dot(impulse, DIRECTIONS[d]);
+		if (proj <= 0) continue;
+		s.deformedThisStep = true;
+		const absorbed = crushHead(s, imp, d, proj);
+		toBody = [toBody[0] + DIRECTIONS[d][0] * (proj - absorbed), toBody[1] + DIRECTIONS[d][1] * (proj - absorbed), toBody[2] + DIRECTIONS[d][2] * (proj - absorbed)];
+		let next = s.spec.sensors[imp.sensor].nextSensor[d];
+		for (let hops = 0; next > 0 && next <= s.spec.numDeformationSensors && hops < MAX_CHAIN; hops++) {
+			crushLink(s, next - 1, d, absorbed * 0.5, imp);
+			next = s.spec.sensors[next - 1].nextSensor[d];
+		}
+	}
+	return toBody;
+}
+
+// Drive-time limits: the rest sensor box (origin included) pulled in by the
+// car's DriveTimeDeformLimit attribs (side, -Y, +Z, -Z).
+export function driveTimeBox(s: SimState): { min: Vec3; max: Vec3 } {
+	const min: Vec3 = [0, 0, 0], max: Vec3 = [0, 0, 0];
+	for (let i = 0; i < s.spec.numDeformationSensors; i++) {
+		const c = s.spec.sensors[i].initialOffset, r = s.spec.sensors[i].radius;
+		for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], c[k] - r); max[k] = Math.max(max[k], c[k] + r); }
+	}
+	const [side, negY, posZ, negZ] = s.attribs.driveTimeLimits;
+	return { min: [min[0] + side, min[1], min[2] + posZ], max: [max[0] - side, max[1] - negY, max[2] - negZ] };
+}
+
+// Deformed box over the sensor spheres; both corners start at the origin.
+export function updateDeformedBox(s: SimState): void {
+	const min: Vec3 = [0, 0, 0], max: Vec3 = [0, 0, 0];
+	for (let i = 0; i < s.spec.numDeformationSensors; i++) {
+		const c = s.sensors[i], r = s.spec.sensors[i].radius;
+		for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], c[k] - r); max[k] = Math.max(max[k], c[k] + r); }
+	}
+	s.aabb = { min, max };
+}
